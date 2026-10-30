@@ -19,8 +19,20 @@ changelog:
     notifications and History titles, accessibility and tests. The app
     never says secret, counted before the check, or verified. The hourly
     fetch of votes.vettid.org (no session) runs only while the app is
-    open and unlocked. Draft texts for the owner; open points: screen
-    privacy and the Votes entry. Vault: staging release 25
+    open and unlocked. Texts approved by the owner, 2026-10-30 (with decisions
+    A to E). Vault: staging release 25
+  - 0.1.101: owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0, §15
+    item 47; vettid.org #465). New §4 "Withdrawn requests (0.1.101)":
+    when the challenger withdraws a sign-in or approval challenge, the
+    vault sends `sync.event{connection.authenticate.decided,
+    approved: false, withdrawn: true}`. The app removes the ask from the
+    Approvals list and its notification; if its screen is showing it
+    replaces the buttons with a plain notice that the request was
+    withdrawn (never an error, never "declined"); History labels
+    `connection.authenticate.withdrawn` "Request withdrawn". An app that sees
+    `approved: false` without the flag closes the ask as for a decision
+    elsewhere. Texts approved by the owner (2026-10-30). Vault: a staging
+    release after 24.
   - 0.1.100: owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0, §15
     item 46). New §4 "Sign-in match code (0.1.100)": a sign-in challenge
     with a valid `match_code` shows it in large digits near the top of
@@ -2437,7 +2449,9 @@ gets its own indicator, apart from the bell.
     `setChronometerCountDown(true)` and `setTimeoutAfter(time left)`, so
     it shows the time left and goes in every mode, with the app closed
     too; the app also cancels it at the same moment by its timer and
-    on resume.
+    on resume. (A batch's notification is the exception: it goes only
+    when no ask of the batch is open, not at the earliest ask's
+    deadline.)
     - *Where the time comes from.* The service or the app looks the
       entry up by `ref` in the kind's pending event or list: the
       challenge's `connection.authenticate.pending.exp`, the request's
@@ -2448,7 +2462,9 @@ gets its own indicator, apart from the bell.
       is posted again with them and `setOnlyAlertOnce(true)` (no second
       sound).
     - *A batch.* A later ask of a batch re-posts its notification and
-      recomputes the deadline (the earliest of the batch).
+      recomputes the deadline (the earliest `exp` among the batch's asks
+      still open); an ask that expires or is withdrawn leaves the batch,
+      and the notification is removed only when no ask of it is open.
 11. **Texts (DRAFT; string resources, plurals through Android
     `plurals` and `MeasureFormat`, never built from pieces).**
 
@@ -4924,9 +4940,76 @@ today's screen; a JSON number (42) or `null` shows today's screen; "07" is shown
 "match code 42" without a field shows no block; font scale 200%;
 the notification text carries no code; the block has no check mark or success styling.
 
+### Withdrawn requests (0.1.101)
+
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0 §10.4
+"Withdrawing a challenge", §15 item 47; vettid.org #465). Texts approved by
+the owner, 2026-10-30. Not built; needs the vault release.* A service that no longer
+accepts a sign-in or approval challenge (a sign-in superseded by a newer
+one, an approval decided or cancelled) tells the member's vault, which
+closes the ask. The member must see that it closed, not a request that
+silently vanishes or fails.
+
+- **On `sync.event{kind: "connection.authenticate.decided", request_id,
+  approved: false, withdrawn: true}`** the app treats the ask as closed,
+  as for a decision on another device, and in addition:
+  - removes the row from Approvals and lowers the approvals indicator's
+    count (§4 "The approvals indicator"). **A batch** (VAULT-MESSAGING
+    §10.4.1) loses only that ask: the notification is cancelled, and the
+    feed item marked read with `feed.update`, only when no ask of the
+    batch is still open; otherwise the app keeps the entry and re-posts
+    the notification with the remaining count and deadline;
+  - **if the ask's screen is showing**, keeps the screen, replaces
+    Approve / Not me (or Approve / Deny) with the notice below and a
+    **Close** button, and stops the countdown; it does not close the
+    screen under the member's finger. A `credential.unlock` or
+    `connection.authenticate.approve` already in flight ends as the vault
+    answers `not_found` (unknown, decided, expired or withdrawn, no
+    difference on the wire): the app shows the withdrawn notice only if
+    a withdrawn flag for that id has been seen (it waits about 2 seconds
+    for the sync event, showing progress meanwhile), and otherwise the
+    existing "This request is no longer waiting."; if the flag arrives
+    after that while the screen is still open, the screen switches to
+    the withdrawn notice;
+  - shows nothing else: no snackbar, no error colour, and never
+    "declined" or "denied" (the member declined nothing).
+- **Without the flag** (`approved: false` only, from a vault or sync
+  that does not send it) the app closes the ask as it does today.
+- **History.** The vault audits `connection.authenticate.withdrawn`
+  (`ref` = `request_id`, with the connection); History shows it as
+  **"Request withdrawn"** under the connection's "First Last", with the detail
+  below. The kind is in the connection category's prefixes.
+- **After a lock, hold or restart** the ask is simply not in
+  `pending.list` (VAULT-MESSAGING §10.4.2): nothing to show.
+- **Never** presented as a failed sign-in or a warning: a service
+  withdraws a sign-in routinely (a reload or a second tab).
+
+**Texts** (approved by the owner, 2026-10-30)
+
+| Key | Text | Note |
+|---|---|---|
+| `authn_withdrawn_notice` | %s withdrew this request. You don't need to answer it. | on the open ask's screen; %s = "First Last"; a newer request may be waiting |
+| `authn_withdrawn_mute` | Mute requests from %s | a secondary text action on the notice and the History detail (not an equal choice beside Close): the existing mute (`connection.asks.mute`); owner decision 2026-10-30 |
+| `authn_withdrawn_mute_confirm_service` | You won't be asked to sign in or approve anything for %s until you unmute. | confirmation on a **service** connection only (superseded sign-ins are routine); buttons below |
+| `authn_withdrawn_mute_confirm_button` | Mute | |
+| `authn_withdrawn_mute_cancel_button` | Cancel | |
+| `authn_withdrawn_close` | Close | |
+| `history_authn_withdrawn_title` | Request withdrawn | History row title; the row names the connection as for every entry |
+| `history_authn_withdrawn_detail` | %s withdrew this request before it was answered. | History detail |
+
+**Tests.** The flagged event removes the Approvals row, count and
+notification; with the screen showing, the notice and Close replace the
+buttons and the countdown stops; an approve in flight answered
+`not_found` shows the notice only after the flag was seen, else "This
+request is no longer waiting."; one withdrawn ask of a batch leaves the
+others and their notification; the notice offers the mute; the unflagged `approved: false` closes
+the ask as before; a flag for an unknown `request_id` does nothing;
+History shows "Request withdrawn" and nothing about declined; the notice has no
+error colour.
+
 ### Votes (0.1.102)
 
-*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §6.4 "Votes", §10.19, §15 item 48; BALLOT-PROTOCOL 0.11.1). Every member-facing text below is a **draft for owner approval**. Not built. Vault: staging release 25 (`features/vote`); until the vault answers `vote.list`, nothing here shows.*
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §6.4 "Votes", §10.19, §15 item 48; BALLOT-PROTOCOL 0.11.1). Every member-facing text below was **approved by the owner on 2026-10-30**. Not built. Vault: staging release 25 (`features/vote`); until the vault answers `vote.list`, nothing here shows.*
 
 A service (VAULT-MESSAGING §1.1) can put a **proposal** to its members. The member chooses once; the vault signs and sends the vote; the service records it and later publishes the results; the vault checks them. The vault does every check and signature (§10.19.4 to §10.19.6); the app shows, asks and hands over public documents.
 
@@ -4997,7 +5080,7 @@ Tapping one opens that vote after the unlock, as the other notifications open th
 
 The History category is "Connections" (with the service's name); no entry shows a choice.
 
-**Draft texts** (all English; **draft for owner approval**; `%s` is the service's name unless noted):
+**Texts (approved by the owner, 2026-10-30)** (all English; `%s` is the service's name unless noted):
 
 | Key | Text | Note |
 |---|---|---|
