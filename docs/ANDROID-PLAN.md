@@ -1,9 +1,12 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.102
+version: 0.1.103
 date: 2026-10-30
 changelog:
+  - 0.1.103: owner decision of 2026-10-30: the "Their note" heading over
+    `context` stays on every sign-in and approval screen, as both apps
+    show it today, not only with a match code (§4 "Sign-in match code").
   - 0.1.102: owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0, §15
     item 48; BALLOT-PROTOCOL 0.11.1). New §4 "Votes (0.1.102)": a Votes
     drawer entry (shown only when the vault answers `vote.list` and holds
@@ -4901,8 +4904,8 @@ A sign-in challenge (`purpose: "signin"`) may carry `match_code`, 2 or
   each digit reads alone; never truncated, scaling with the system font
   size), and under it **"Check that the sign-in screen shows the same
   number: 42"**. Then "Their note" with `context` (still the challenger's
-  words; the heading "Their note" appears only on this screen, with a
-  code, and without a code `context` is shown as it is today), "Only approve if you are signing in right now.", **Approve**
+  words; the heading "Their note" stays over every note, with or
+  without a code, as today: owner decision 2026-10-30, 0.1.103), "Only approve if you are signing in right now.", **Approve**
   and **Not me**. The notification text does not carry the number (a
   notification can be read on a locked phone; the number is for the
   member who opened the prompt).
@@ -4932,11 +4935,11 @@ A sign-in challenge (`purpose: "signin"`) may carry `match_code`, 2 or
 | `match_code_label` | Match code | |
 | `match_code_instruction` | Check that the sign-in screen shows the same number: %s | |
 | `match_code_a11y` | Match code %s | the digits are spoken one by one |
-| `signin_their_note` | Their note | only with a code |
+| `signin_their_note` | Their note | over every note, with or without a code (0.1.103) |
 
 **Tests.** A code shows large above the note; no code shows today's
 screen; a 1-digit, 4-digit, non-digit, spaced or empty code shows
-today's screen; a JSON number (42) or `null` shows today's screen; "07" is shown as 07; no "Their note" heading without a code; a code on an approval is not shown; a note that says
+today's screen; a JSON number (42) or `null` shows today's screen; "07" is shown as 07; "Their note" heading shown with and without a code; a code on an approval is not shown; a note that says
 "match code 42" without a field shows no block; font scale 200%;
 the notification text carries no code; the block has no check mark or success styling.
 
