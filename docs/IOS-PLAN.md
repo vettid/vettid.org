@@ -1605,7 +1605,7 @@ answer it." and a **Close** button in place of the actions, in a
 neutral style (no error colour, never "declined"); History shows
 `connection.authenticate.withdrawn` as "Request withdrawn" with "%@ withdrew
 this request before it was answered." Without the flag, the ask closes
-as today. Batches, the `not_found` rule and the "Mute requests from %@" offer are as ANDROID-PLAN's. Draft texts as ANDROID-PLAN's table.
+as today. Batches, the `not_found` rule and the "Mute requests from %@" offer (a secondary action, confirmed on a service connection), the late-flag switch and the progress wait are as ANDROID-PLAN's. Draft texts as ANDROID-PLAN's table.
 
 ## 5. Architecture
 

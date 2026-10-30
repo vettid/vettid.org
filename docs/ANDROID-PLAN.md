@@ -2429,7 +2429,9 @@ gets its own indicator, apart from the bell.
     `setChronometerCountDown(true)` and `setTimeoutAfter(time left)`, so
     it shows the time left and goes in every mode, with the app closed
     too; the app also cancels it at the same moment by its timer and
-    on resume.
+    on resume. (A batch's notification is the exception: it goes only
+    when no ask of the batch is open, not at the earliest ask's
+    deadline.)
     - *Where the time comes from.* The service or the app looks the
       entry up by `ref` in the kind's pending event or list: the
       challenge's `connection.authenticate.pending.exp`, the request's
@@ -2440,7 +2442,9 @@ gets its own indicator, apart from the bell.
       is posted again with them and `setOnlyAlertOnce(true)` (no second
       sound).
     - *A batch.* A later ask of a batch re-posts its notification and
-      recomputes the deadline (the earliest of the batch).
+      recomputes the deadline (the earliest `exp` among the batch's asks
+      still open); an ask that expires or is withdrawn leaves the batch,
+      and the notification is removed only when no ask of it is open.
 11. **Texts (DRAFT; string resources, plurals through Android
     `plurals` and `MeasureFormat`, never built from pieces).**
 
@@ -4941,8 +4945,10 @@ silently vanishes or fails.
     answers `not_found` (unknown, decided, expired or withdrawn, no
     difference on the wire): the app shows the withdrawn notice only if
     a withdrawn flag for that id has been seen (it waits about 2 seconds
-    for the sync event), and otherwise the existing "This request is no
-    longer waiting.";
+    for the sync event, showing progress meanwhile), and otherwise the
+    existing "This request is no longer waiting."; if the flag arrives
+    after that while the screen is still open, the screen switches to
+    the withdrawn notice;
   - shows nothing else: no snackbar, no error colour, and never
     "declined" or "denied" (the member declined nothing).
 - **Without the flag** (`approved: false` only, from a vault or sync
@@ -4961,7 +4967,10 @@ silently vanishes or fails.
 | Key | Text | Note |
 |---|---|---|
 | `authn_withdrawn_notice` | %s withdrew this request. You don't need to answer it. | on the open ask's screen; %s = "First Last"; a newer request may be waiting |
-| `authn_withdrawn_mute` | Mute requests from %s | on the notice and the History detail: the existing mute (`connection.asks.mute`); owner decision 2026-10-30 |
+| `authn_withdrawn_mute` | Mute requests from %s | a secondary text action on the notice and the History detail (not an equal choice beside Close): the existing mute (`connection.asks.mute`); owner decision 2026-10-30 |
+| `authn_withdrawn_mute_confirm_service` | You won't be asked to sign in or approve anything for %s until you unmute. | confirmation on a **service** connection only (superseded sign-ins are routine); buttons below |
+| `authn_withdrawn_mute_confirm_button` | Mute | |
+| `authn_withdrawn_mute_cancel_button` | Cancel | |
 | `authn_withdrawn_close` | Close | |
 | `history_authn_withdrawn_title` | Request withdrawn | History row title; the row names the connection as for every entry |
 | `history_authn_withdrawn_detail` | %s withdrew this request before it was answered. | History detail |

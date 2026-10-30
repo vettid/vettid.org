@@ -7478,7 +7478,7 @@ vault signs a fresh challenge with the member's **credential key**
       marks the feed item read with `feed.update`, removes the row and
       cancels the notification only when **no ask of the batch is
       still open**; otherwise it keeps the entry and re-posts the
-      notification with the remaining count and deadline (as for
+      notification with the remaining count and the earliest `exp` among the asks still open (as for
       `location.request.closed`, §10.16);
     - a `connection.authenticate.approve` or `.deny` that arrives
       afterwards, from any device, is answered `not_found`, as for an
@@ -7663,7 +7663,7 @@ is no longer waiting for the member, so:
 | Rate (point 5) | **Still counts** in its bucket's window (10 `signin`, 5 `approval`, 5 general), which neither restarts nor shrinks: it reached the member |
 | Cooldown (point 3) | Starts none: it is not a decline |
 | Pause (3 declines in 30 days) | Not counted |
-| Batch | Only that ask leaves the batch's entry; the item and notification stay while any ask of the batch is open (§10.4) |
+| Batch | Only that ask leaves the batch's entry; the item and notification stay while any ask of the batch is open (§10.4). The vault's feed-item `count` is **unchanged** by a withdraw; the app derives the remaining count from the per-type lists. The re-posted deadline is the earliest `exp` among the batch's asks still open |
 
 So a service that supersedes a sign-in can always get the next one to the
 member, within the bucket's 10 a day, and cannot use withdrawal to send
@@ -7753,7 +7753,9 @@ person's. Exactly (0.23.1): the answer is due at min(now + d, `exp` − 1
 minute), d the random delay, and never earlier than now (an ask whose
 `exp` is less than a minute away is answered at the vault's next send).
 Held answers are kept in DEK state (State, above); one that falls due
-while the vault is locked is sent after it is unlocked. A location
+while the vault is locked is sent after it is unlocked, **after the first
+mailbox drain that follows the unlock**, so a `withdraw` collected in
+that drain still drops it (0.81.0). A location
 request gets no answer, as when the member does not share. The vault
 holds at most 16 such answers per connection; asks beyond that are
 dropped without an answer, as an unanswered ask. So a connection cannot
@@ -23699,29 +23701,31 @@ Follow-ups:
     - *Settled with the decision:* the vault ignores a withdrawal of an
       unknown, decided or expired id with silence; the member-facing
       text is a draft for the owner (ANDROID-PLAN 0.1.101).
-    - *Owner decision 2026-10-30 (after review):* **(d)** a withdraw
+    - *Owner decision 2026-10-30 (after review):* **(a)** a withdraw
       whose `request_id` matches a held neutral answer of a suppressed
       challenge on the same connection drops that answer silently, so a
       challenge followed by a withdrawal cannot tell open from
-      suppressed; **(e)** withdrawn asks are not declines, and the
+      suppressed; **(b)** withdrawn asks are not declines, and the
       withdrawn notice and History row offer "Mute requests from
       <name>", because a connection can send and withdraw prompts that
       vanish before the member can deny them.
-    - *Recommendations, not yet decided:* **(a)** silence on a matched
-      withdrawal too (the challenger knows what it withdrew); **(b)** a
-      late `approve` or `deny` is answered `not_found`, as for an
-      expired request, and the app shows the withdrawn notice only if
-      it has seen the flag for that id; **(c)** a withdrawal that
+    - *Owner decision 2026-10-30:* **(c)** a late `approve` or `deny`
+      is answered as for an expired request.
+    - *Recommendations, not yet decided:* **(d)** silence on a matched
+      withdrawal too (the challenger knows what it withdrew); **(e)**
+      the name `not_found` for that answer, and the rule that the app
+      shows the withdrawn notice only if it has seen the flag for that
+      id; **(f)** a withdrawal that
       arrives before its challenge is ignored and the challenge stays
       until `exp` (the vault keeps no state for ids it never saw);
-      **(f)** the challenger MAY send `withdraw` once more after about
+      **(g)** the challenger MAY send `withdraw` once more after about
       a minute (a repeat is harmless).
-    - *Open, with the recommendations:* **(g)** an owner device that
+    - *Open, with the recommendations:* **(h)** an owner device that
       started a challenge with `connection.authenticate.request` has no
       way to withdraw it (no `connection.authenticate.cancel` D→V
       request). Only a service vault, which makes its own challenges,
       is a known challenger; recommended: add the device request when
-      a member-to-member use needs it. **(h)** A challenger's own vault
+      a member-to-member use needs it. **(i)** A challenger's own vault
       is not told that a challenge it withdrew was open (nothing is
       sent back); a service that wants to know shows the member the
       newest request by its match code, as before.
