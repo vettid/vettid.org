@@ -1,9 +1,21 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.103
+version: 0.1.104
 date: 2026-10-30
 changelog:
+  - 0.1.104: owner decision of 2026-10-30: no exception to "memory only".
+    The three event-only kinds (`connection.authenticate.pending`,
+    `device.session.pending`, `approval.pending`) are no longer kept
+    encrypted in `pending-asks.bin` until their `exp`; the exception is
+    dropped because `pending.list` (VAULT-MESSAGING §10.4.2) is in
+    staging release 24, so the app reads open asks from the vault after
+    an unlock and after a passed check. A vault that answers
+    `unsupported_type` loses those asks at a lock or a process death, as
+    for any ask the app no longer holds. The "Some requests from before
+    the app restarted could not be kept" banner is gone with the file; a
+    leftover `pending-asks.bin` is deleted at the next start (§5 "What
+    the phone keeps").
   - 0.1.103: owner decision of 2026-10-30: the "Their note" heading over
     `context` stays on every sign-in and approval screen, as both apps
     show it today, not only with a match code (§4 "Sign-in match code").
@@ -6592,8 +6604,14 @@ attachments") and the History export (Storage Access Framework); both
 leave VettID by design. This includes pending approval
 events and the names on recent connection requests: they are shown while
 the vault is open and read again from the vault after the next unlock.
-(The app persisted these two, encrypted, across a lock; that is being
-removed.) The app lock (D6) is a UI gate only and protects no data at
+(0.1.104) There is no exception: the three event-only kinds
+(`connection.authenticate.pending`, `device.session.pending`,
+`approval.pending`) are memory only too, and come back from the vault
+with `pending.list` (VAULT-MESSAGING §10.4.2) after an unlock and after
+a passed daily check. A vault that answers `unsupported_type` loses them
+at a lock or a process death, like any ask the app no longer holds. A
+`pending-asks.bin` left by a build that kept them is deleted at the next
+start; if the delete fails, the lock's clears fail closed and retry. The app lock (D6) is a UI gate only and protects no data at
 rest, because there is none to protect.
 
 What the phone does keep, and why:
