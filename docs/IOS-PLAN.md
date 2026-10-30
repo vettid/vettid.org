@@ -1,9 +1,17 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.50
+version: 0.1.51
 date: 2026-10-30
 changelog:
+  - 0.1.51: owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0, §15
+    item 47; ANDROID-PLAN 0.1.101). New §4.15 "Withdrawn requests": the
+    same as ANDROID-PLAN §4 "Withdrawn requests (0.1.101)" (a
+    `connection.authenticate.decided` with `withdrawn: true` removes the
+    ask from Approvals and its notification, replaces the buttons of a
+    showing screen with a plain notice, and History labels
+    `connection.authenticate.withdrawn` "Request withdrawn"; never "declined" or
+    an error). Texts the same, approved by the owner (2026-10-30). Vault: a staging release after 24.
   - 0.1.50: owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0, §15
     item 46; ANDROID-PLAN 0.1.100). New §4.14 "Sign-in match code": the
     same as ANDROID-PLAN §4 "Sign-in match code (0.1.100)" (a valid
@@ -450,8 +458,8 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.100) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.79.0) — the app's contract with the vault
+  - ANDROID-PLAN.md (0.1.101) — the Android app; this plan mirrors it
+  - VAULT-MESSAGING.md (0.80.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -1582,6 +1590,22 @@ the real service (ANDROID-PLAN, "No 'verified' look"). A challenge without a val
 `context`. Draft texts as ANDROID-PLAN's table: "Match code", "Check
 that the sign-in screen shows the same number: %@", "Match code %@"
 (spoken digit by digit), "Their note".
+
+### 4.15 Withdrawn requests (0.1.51)
+
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0 §10.4, §15 item
+47). Texts approved by the owner, 2026-10-30. Not built.* The same as ANDROID-PLAN §4
+"Withdrawn requests (0.1.101)", carried here by reference and not to be
+changed on one platform alone. On iOS: a
+`sync.event{connection.authenticate.decided, approved: false,
+withdrawn: true}` removes the ask from Approvals, updates the approvals
+indicator and removes the delivered notification; a showing screen keeps
+its place, with the notice "%@ withdrew this request. You don't need to
+answer it." and a **Close** button in place of the actions, in a
+neutral style (no error colour, never "declined"); History shows
+`connection.authenticate.withdrawn` as "Request withdrawn" with "%@ withdrew
+this request before it was answered." Without the flag, the ask closes
+as today. Batches, the `not_found` rule and the "Mute requests from %@" offer (a secondary action, confirmed on a service connection), the late-flag switch and the progress wait are as ANDROID-PLAN's. Texts as ANDROID-PLAN's table (approved by the owner, 2026-10-30).
 
 ## 5. Architecture
 
