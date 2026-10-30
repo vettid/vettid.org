@@ -5058,7 +5058,10 @@ The History category is "Connections" (with the service's name); no entry shows 
 | `vote_not_published` | This vote is not on the public site yet. You can still vote: VettID will compare it with the public copy when it appears. | warning only, `site` `not_listed` |
 | `vote_site_unreachable` | VettID could not reach the votes site to compare this vote with the public copy. You can still vote: VettID will compare it later. | warning only, `site` `unreachable`; shown above **Cast your vote** |
 | `vote_dropped` | %1$s has more votes under way than your vault can keep, so %2$d were not kept. | `dropped` in `vote.list`; also a feed item |
-| `vote_site_mismatch` | The vote you received differs from the one published on the public site, so you can't vote in it. You can save the proof. | `site_mismatch`; also a feed item |
+| `vote_site_mismatch` | The vote you received differs from the one published on the public site, so you can't vote in it. You can save the proof. | `site_mismatch`, **before a cast** only; also a feed item |
+| `vote_site_mismatch_after` | The vote you voted on differs from the one published on the public site, so your vote may not count. Save the proof and show it to the organisation. | a `mismatch` found after a cast |
+| `vote_unpublished` | This vote was never published on the public site. Your vote may not count. Save the proof. | `site` `unpublished`; also a feed item |
+| `vote_not_listed_late` | This vote is still not on the public site, which is unusual. You can vote, but keep the proof. | `not_listed` after 10 minutes; also a feed item |
 | `vote_restore_title` | Is this your vote? | |
 | `vote_restore_body` | %1$s says it recorded this vote for you: “%2$s” on “%3$s”. | |
 | `vote_restore_yes` / `vote_restore_no` | Yes, it's mine / No, it isn't mine | |
