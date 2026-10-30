@@ -421,7 +421,7 @@ marked; nothing here was measured again in AWS.
   the first use of that level on either channel (the key attestation
   chain fix; it affects S3–S9), which is what the notice job's urgent
   mail is for.
-- **In S10**: the feature allowlist (staging lists all seven, so no
+- **In S10**: the feature allowlist (staging lists all eight from release 25 (seven before), so no
   behaviour changes there), `android_package`
   `com.vettid.app.staging`, per-vault signer binding, the key
   attestation chain rules (VAULT-MESSAGING 0.26.0, 0.27.0, 0.27.1).

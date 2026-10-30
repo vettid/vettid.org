@@ -4950,15 +4950,15 @@ The app **never** says: that the vote is "secret" or "anonymous" without "the pu
    - title, the service's name with "Service" and "Name given by the service" (as in "Service connections"), and the proposal `text` as **plain text in the service's words** (control and bidirectional-override characters removed; no links, no markup; the whole text scrolls; never truncated), captioned "Written by <service>";
    - the quorum as the service states it, and whether it says the vote is binding (both as the service's claim); the closing time (and "The closing time was extended to …" after an extension);
    - **Choose one:** the choices in the order sent, each with its label as sent (the reserved `abstain` too, whatever its label says), as a radio group. **Cast your vote** is enabled once a choice is selected and `can_cast` is true; otherwise the reason is written where the button would be (`cannot_cast`, the table below), never only a disabled button.
-3. **Confirm sheet** ("Vote “<label>”?"): the fixed disclosure sentence, "Your vote can't be changed after you cast it.", **Cast vote** and **Back**. Then, unless the credential's unlock window is open, the existing **unlock window prompt** (§4 "The unlock window prompt", also used before `vote.cast`): "Confirm with your credential password", "Your vote is signed with your credential, so only you can cast it. Enter your credential password."; then `vote.cast`.
+3. **Confirm sheet** ("Vote “<label>”?"): the fixed disclosure sentence, "Your vote can't be changed after you cast it.", **Cast vote** and **Back**. Then, unless the credential's unlock window is open, the existing **unlock window prompt** (§4 "The unlock window prompt", also used before `vote.cast`): "Confirm with your credential password", "Your vote is signed with your credential. Enter your credential password."; then `vote.cast`.
 4. **After the cast:** the vote screen shows the state in words: *Sending your vote to <service>…* (`sending`), *Waiting for <service> to confirm* with the line "Your vote is saved on your vault and is sent again until <service> answers" (`waiting` or a slow `sending`; never "failed"), *<service> recorded your vote. It can't be changed.* (`recorded`), and after the results check *The published results include your vote.* The member's own choice is shown (from `vote.get`, which alone carries it) beside the state. A `Check with the service` text button (`vote.check`) appears while the ballot is not recorded.
 5. **Results** (after `closed` and a passed check): "Results", each choice with its count, "<ballots> of <eligible> eligible members voted", the quorum line computed from the published numbers, and, if `counts.unhandled` is above 0, the line about messages that could not be read. Every number is from the verified results; before then, none is shown.
-6. **A problem:** `failed`, `conflict`, `disputed`, `refused` (except a plain `closed`/`late`) and a signed `not_eligible` show their text and **Save the proof**: the app calls `vote.evidence` and offers the JSON through "Save to…" as History's export does. Nothing is sent anywhere by the app.
+6. **A problem:** `failed`, `conflict`, `disputed`, `rejected`, `refused` (except a plain final `closed`/`late`) and a signed `not_eligible` show their text and **Save the proof**: after the warning `vote_save_proof_warning`, the app calls `vote.evidence` and offers the JSON through "Save to…" as History's export does. Nothing is sent anywhere by the app.
 7. **After a restore** (`vote.confirm`): a dialog names the service, the recorded choice and the title, and asks whether it is the member's vote.
-8. **Connect again to vote** (the `reconnect` list): a card on Votes, and on that person connection's detail: "<name> runs votes. This connection was made before votes existed, so it can't take part. Remove it and connect again from a new invitation from <name>." with **Open the connection**. The app does not change the connection's kind or call it a service on its own (§6.4); the card says only what VettID's service list says.
+8. **Connect again to vote** (the `reconnect` list): a card on Votes, and on that person connection's detail: "<name> is registered with VettID as a service. This connection was made before it said it was a service, so it can't take part in votes. Remove it and connect again from a new invitation from <name>." with **Open the connection**. The app does not change the connection's kind or call it a service on its own (§6.4); the card says only what VettID's service list says.
 9. **Removing a service connection** that has an open vote or an unrecorded ballot first asks: "You have a vote with <name> that isn't finished. If you remove this connection you can't vote in it."
 
-**The app's work with the public site.** At unlock, whenever it opens, and then **every hour while it is open and unlocked** (the vault can be reached only then), the app fetches `services.json`, `services.json.sig` and the site's proposal index from votes.vettid.org with no session, no cookies and no identifier, and sends them in `vote.site.sync` (§10.19.8); a pending results check is fetched the same way and sent in `vote.results.submit` after the app's own observer check (BALLOT-PROTOCOL §8.4). There is no background job: a locked vault cannot be handed anything, and the vault checks all of it again. The site sees the phone's address and the hour. If the site cannot be reached, the app says nothing unless a vote is waiting on it (`checking`, or a pending check), and then says so on that vote (below).
+**The app's work with the public site.** At unlock, whenever it opens, and then **every hour while it is open and unlocked** (the vault can be reached only then), the app fetches `services.json`, `services.json.sig` and the site's proposal index from votes.vettid.org with no session, no cookies and no identifier, and sends them in `vote.site.sync` (§10.19.8); a pending results check is fetched the same way and sent in `vote.results.submit` after the app's own observer check (BALLOT-PROTOCOL §8.4). The app also fetches the vote's own documents (`p/<proposal_id>/…`) and the index when the member opens a vote screen, because the vault allows a cast only once the public site lists the proposal and its bytes equal the vault's (VAULT-MESSAGING §10.19.4). There is no background job: a locked vault cannot be handed anything, and the vault checks all of it again. The site sees the phone's address and the hour. If the site cannot be reached, the app says nothing unless a vote is waiting on it (`checking`, or a pending check), and then says so on that vote (below).
 
 **Notifications** (the member's mode, D7; the text shows names only where names and text are shown). The vault makes the feed items (§10.19.7); a held vault makes them and wakes nobody. A held or locked phone shows them after the unlock or check, with the Notifications badge. The notification never contains the member's choice (the vault never has it in a feed item).
 
@@ -5017,7 +5017,7 @@ The History category is "Connections" (with the service's name); no entry shows 
 | `vote_final` | Your vote can't be changed after you cast it. | |
 | `vote_confirm_title` | Vote “%s”? | the choice's label |
 | `vote_confirm_yes` / `vote_confirm_back` | Cast vote / Back | |
-| `vote_password_title` / `vote_password_body` | Confirm with your credential password / Your vote is signed with your credential, so only you can cast it. Enter your credential password. | the existing sheet |
+| `vote_password_title` / `vote_password_body` | Confirm with your credential password / Your vote is signed with your credential. Enter your credential password. | the existing sheet |
 | `vote_state_sending` | Sending your vote to %s… | |
 | `vote_state_waiting` | Waiting for %s to confirm. Your vote is saved on your vault and is sent again until %s answers. | never "failed" |
 | `vote_state_recorded` | %s recorded your vote. It can't be changed. | |
@@ -5026,12 +5026,14 @@ The History category is "Connections" (with the service's name); no entry shows 
 | `vote_state_didnt_vote` | You didn't vote in this one. | verified: no ballot under your code |
 | `vote_check_with_service` | Check with the service | |
 | `vote_check_pending` | VettID will check the published results against your vote. | |
-| `vote_check_gave_up` | VettID could not reach the published results for 7 days, so your vote has not been checked. | with **Check again** |
+| `vote_check_gave_up_site` | VettID could not reach the votes site for 7 days, so your vote has not been checked. | the app's last attempt failed to connect; with **Check again** |
+| `vote_check_gave_up_unpublished` | The results of this vote were not published within 7 days, so your vote has not been checked. | the site answered but had no results; with **Check again** |
 | `vote_check_again` | Check again | |
 | `vote_failed_title` | The published results don't match your vote | |
 | `vote_failed_body` | You can save the proof and show it to the organisation. | |
 | `vote_conflict_body` | %s holds a different vote under your code than the one you cast. Save the proof and show it to the organisation. | |
-| `vote_refused_late` | The vote had closed when your vote arrived, so it was not counted. | `closed`, `late` |
+| `vote_state_late_pending` | %s says the vote had closed. VettID is asking whether an earlier send arrived in time. | `closed`/`late` while not final; never "not counted" yet |
+| `vote_refused_late` | The vote had closed when your vote arrived, so it was not counted. | only when final: a signed status answer holds no ballot |
 | `vote_refused_not_active` | %s says you are no longer a member for this vote, so your vote was not counted. | |
 | `vote_refused_not_eligible` | %s says you were not on the list for this vote. You can save the proof and show it to the organisation. | also a signed `not_eligible` from `vote.status` |
 | `vote_refused_bad_ballot` | %s did not accept your vote. You can save the proof and show it to the organisation. | |
@@ -5046,14 +5048,21 @@ The History category is "Connections" (with the service's name); no entry shows 
 | `vote_results_title` | Results | |
 | `vote_results_turnout` | %1$d of %2$d eligible members voted. | |
 | `vote_results_row` | %1$s: %2$d | label, count |
-| `vote_results_unhandled` | %1$d messages sent to %2$s during the vote could not be read, so they are not counted. | only if above 0 |
+| `vote_results_unhandled` | %1$d messages sent to %2$s during the vote were not handled; any vote among them was not counted. | only if above 0 |
 | `vote_quorum_met` / `vote_quorum_not_met` | Enough votes were cast: %1$d, and the service asked for at least %2$d. / Not enough votes were cast: %1$d, and the service asked for at least %2$d. | computed from the published numbers; abstentions count |
 | `vote_save_proof` | Save the proof | |
+| `vote_save_proof_warning` | The file shows how you voted. Keep it private, and share it only with the organisation. | a confirmation before saving |
+| `vote_rejected_title` | VettID set this vote aside | `rejected`; the reason follows (signature, anchor, record) and **Save the proof** |
+| `vote_checking_trust` | VettID can't finish checking this vote yet: its list of trusted logs may be out of date. Update VettID if this lasts. | `checking`, `trust_root` |
+| `vote_checking_restore` | VettID is asking %s what it recorded for you before you can vote. | `checking`, `restore` |
+| `vote_not_published` | This vote is not on the public site yet. You can vote once it is. | `not_published` |
+| `vote_site_mismatch` | The vote you received differs from the one published on the public site, so you can't vote in it. You can save the proof. | `site_mismatch`; also a feed item |
+| `vote_rotation_pending` | Your credential was changed recently and %s has not been told yet. Try again in a moment. | `rotation_pending` |
 | `vote_restore_title` | Is this your vote? | |
 | `vote_restore_body` | %1$s says it recorded this vote for you: “%2$s” on “%3$s”. | |
 | `vote_restore_yes` / `vote_restore_no` | Yes, it's mine / No, it isn't mine | |
 | `vote_reconnect_title` | Connect again to vote | |
-| `vote_reconnect_body` | %s runs votes. This connection was made before votes existed, so it can't take part. Remove it and connect again from a new invitation from %s. | |
+| `vote_reconnect_body` | %s is registered with VettID as a service. This connection was made before it said it was a service, so it can't take part in votes. Remove it and connect again from a new invitation from %s. | |
 | `vote_reconnect_open` | Open the connection | |
 | `vote_connection_row` | Votes from %s | connection detail |
 | `vote_remove_warning` | You have a vote with %s that isn't finished. If you remove this connection you can't vote in it. | |
