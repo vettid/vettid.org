@@ -1,9 +1,21 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.100
+version: 0.1.101
 date: 2026-10-30
 changelog:
+  - 0.1.101: owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0, §15
+    item 48; vettid.org #465). New §4 "Withdrawn requests (0.1.101)":
+    when the challenger withdraws a sign-in or approval challenge, the
+    vault sends `sync.event{connection.authenticate.decided,
+    approved: false, withdrawn: true}`. The app removes the ask from the
+    Approvals list and its notification; if its screen is showing it
+    replaces the buttons with a plain notice that the request was
+    withdrawn (never an error, never "declined"); History labels
+    `connection.authenticate.withdrawn` "Withdrawn". An app that sees
+    `approved: false` without the flag closes the ask as for a decision
+    elsewhere. Draft texts for the owner. Vault: a staging release after
+    24.
   - 0.1.100: owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0, §15
     item 46). New §4 "Sign-in match code (0.1.100)": a sign-in challenge
     with a valid `match_code` shows it in large digits near the top of
@@ -1194,14 +1206,14 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.79.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.81.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
   - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
   - AGENT-PLAN.md (0.1.7) — the agent connector; §7.2 AA1–AA5 (§4
     "Devices & agents", 0.1.53)
-  - IOS-PLAN.md (0.1.50) — the iPhone app; §4.12 carries the approvals
+  - IOS-PLAN.md (0.1.51) — the iPhone app; §4.12 carries the approvals
     indicator (0.1.89)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -4901,6 +4913,59 @@ screen; a 1-digit, 4-digit, non-digit, spaced or empty code shows
 today's screen; a JSON number (42) or `null` shows today's screen; "07" is shown as 07; no "Their note" heading without a code; a code on an approval is not shown; a note that says
 "match code 42" without a field shows no block; font scale 200%;
 the notification text carries no code; the block has no check mark or success styling.
+
+### Withdrawn requests (0.1.101)
+
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §10.4
+"Withdrawing a challenge", §15 item 48; vettid.org #465). Draft texts for
+the owner. Not built; needs the vault release.* A service that no longer
+accepts a sign-in or approval challenge (a sign-in superseded by a newer
+one, an approval decided or cancelled) tells the member's vault, which
+closes the ask. The member must see that it closed, not a request that
+silently vanishes or fails.
+
+- **On `sync.event{kind: "connection.authenticate.decided", request_id,
+  approved: false, withdrawn: true}`** the app treats the ask as closed,
+  as for a decision on another device, and in addition:
+  - removes the row from Approvals, lowers the approvals indicator's
+    count (§4 "The approvals indicator") and cancels the request's
+    notification;
+  - **if the ask's screen is showing**, keeps the screen, replaces
+    Approve / Not me (or Approve / Deny) with the notice below and a
+    **Close** button, and stops the countdown; it does not close the
+    screen under the member's finger. A `credential.unlock` or
+    `connection.authenticate.approve` already in flight ends as the vault
+    answers (an expired-request answer shows the same notice, never a
+    different error);
+  - shows nothing else: no snackbar, no error colour, and never
+    "declined" or "denied" (the member declined nothing).
+- **Without the flag** (`approved: false` only, from a vault or sync
+  that does not send it) the app closes the ask as it does today.
+- **History.** The vault audits `connection.authenticate.withdrawn`
+  (`ref` = `request_id`, with the connection); History shows it as
+  **"Withdrawn"** under the connection's "First Last", with the detail
+  below. The kind is in the connection category's prefixes.
+- **After a lock, hold or restart** the ask is simply not in
+  `pending.list` (VAULT-MESSAGING §10.4.2): nothing to show.
+- **Never** presented as a failed sign-in or a warning: a service
+  withdraws a sign-in routinely (a reload or a second tab).
+
+**Draft texts** (draft for owner approval)
+
+| Key | Text | Note |
+|---|---|---|
+| `authn_withdrawn_notice` | %s withdrew this request. You don't need to do anything. | on the open ask's screen; %s = "First Last" |
+| `authn_withdrawn_close` | Close | |
+| `history_authn_withdrawn_title` | Withdrawn | History row title; the row names the connection as for every entry |
+| `history_authn_withdrawn_detail` | %s withdrew this request before it was answered. | History detail |
+
+**Tests.** The flagged event removes the Approvals row, count and
+notification; with the screen showing, the notice and Close replace the
+buttons and the countdown stops; an approve in flight answered as
+expired shows the same notice; the unflagged `approved: false` closes
+the ask as before; a flag for an unknown `request_id` does nothing;
+History shows "Withdrawn" and nothing about declined; the notice has no
+error colour.
 
 ### Devices & agents (0.1.53)
 

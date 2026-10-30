@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.79.0
+version: 0.81.0
 date: 2026-10-30
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.100)
-  - IOS-PLAN.md (0.1.50; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.101)
+  - IOS-PLAN.md (0.1.51; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,44 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.81.0: **owner decision 2026-10-30** (vettid.org #465; ANDROID-PLAN
+    0.1.101, IOS-PLAN 0.1.51; §15 item 48; wire-additive and backward
+    compatible). A challenger can withdraw a challenge it sent. New V↔V
+    message `connection.authenticate.withdraw` `{request_id}`, from the
+    challenger to the responder, for `signin` and `approval` challenges
+    alike (and any other). §10.4 "Withdrawing a challenge": the
+    responder matches `request_id` only against open challenges
+    received **on that same connection**; an unknown, decided, expired
+    or already withdrawn id is ignored silently, nothing is sent back,
+    and the vault never reveals whether a request was open. A match
+    closes the ask as **withdrawn**: it leaves `pending.list`
+    (§10.4.2, now consistent with "not withdrawn"); every owner device
+    gets `sync.event{kind: "connection.authenticate.decided",
+    request_id, approved: false, withdrawn: true}` (§10.1: the flag on
+    the existing event, not a new one, so an app that does not know the
+    flag still closes the ask); an `approve` or `deny` that arrives
+    later is answered as for an expired request. §10.4.1: a withdrawn
+    challenge frees its pending slot (the 2 `signin`, the 4 received,
+    the 8) but still counts toward its ask rate and bucket (10 `signin`
+    per 24 hours, 5 `approval`); it is not a decline and starts no
+    cooldown. §10.9: new audit kind `connection.authenticate.withdrawn`
+    (`ref` = `request_id`). §6.4 "Service connections": a service may
+    send it, whatever challenge it names (it is added to what a
+    `peer_kind: "service"` connection may send, and needs no `purpose`).
+    The challenger SHOULD send it for a challenge it will no longer accept
+    (a superseded or cancelled sign-in; an approval decided or
+    cancelled) and still ignores any later answer (§8.1). A vault
+    before this release drops the unknown type (for a service
+    connection, `drop.service_type`), so nothing breaks: the challenge
+    stays until `exp` as before. Before, a superseded sign-in held one
+    of the 2 `signin` slots until `exp`, so a third sign-in within the
+    challenge's lifetime was dropped by the member's own vault while the
+    service's website waited, and the phone showed stale requests. Apps:
+    label a withdrawn ask "Withdrawn" in History and remove it from the
+    screen. **Needs a staging vault release after 24** (vettid-vault:
+    receive, close, sync, audit), a service vault change
+    (vettid/service-vault: send it from `CancelChallenge` and the
+    supersede path) and app work
   - 0.79.0: **owner decision 2026-10-28** (ANDROID-PLAN 0.1.100, IOS-PLAN
     0.1.50; §15 item 46; wire-additive and backward compatible). The
     sign-in match code is shown prominently on the phone. §10.4:
@@ -5306,7 +5344,7 @@ unnoticed. Apps word it as a claim by the other side, not a fact
 |---|---|---|
 | Upkeep, both ways | `hs.*` for `rekey` and `reconnect`, `relay.token.issued`, `relay.token.refresh`, `relay.address.update`, `identity.rotate`, `connection.approved`, `.declined`, `.removed` | |
 | Profile | `profile.update` both ways, reduced (§10.8) | |
-| From the service | `connection.authenticate.challenge` **with a known `purpose`** (`signin` or `approval`, §10.4, with all of §10.4.1's limits): a challenge from a service without a `purpose`, or with an unknown one, is dropped like any other type | **Dropped and audited** `drop.service_type` (`ref` = the `connection_id`, with the type); nothing is sent back (§9.2), and no ask is created |
+| From the service | `connection.authenticate.challenge` **with a known `purpose`** (`signin` or `approval`, §10.4, with all of §10.4.1's limits): a challenge from a service without a `purpose`, or with an unknown one, is dropped like any other type. **`connection.authenticate.withdraw`** (0.81.0, §10.4 "Withdrawing a challenge"): it names a challenge by `request_id` and needs no `purpose` | **Dropped and audited** `drop.service_type` (`ref` = the `connection_id`, with the type); nothing is sent back (§9.2), and no ask is created |
 | To the service | `connection.authenticate.response`, `.rotated`, and the upkeep and profile rows above. **The vault itself sends a service nothing else, whatever triggers it** (for example `action.offered` after `action.configure` or at activation, §10.14, `presence.ping`, `message.receipt`, `location.*`, `data.*`, `intro.*`) | A request of a device that names the connection for `message.send`, `message.attachment.*`, `call.start`, `call.permission.set`, `location.share.start`, `location.request`, `presence.query`, `grant.request`, `grant.fetch`, `grant.catalog`, `share.rule.set`, `critical-secret-use.request`, `action.invoke`, `intro.create` or `connection.authenticate.request` is answered `forbidden`, and nothing is sent. `action.configure` naming a service connection is `forbidden`, and the vault sends it no `action.offered` |
 
 In words:
@@ -6614,7 +6652,7 @@ an answer to an unknown or expired id is dropped.
 | | `block.add`, `.remove`, `.list` | D→V | req | Block list (§7.4) |
 | | `connection.authenticate.request`, `.approve`, `.deny`, `.list` | D→V | req | Member authentication (§10.4) |
 | | `connection.asks.mute`, `connection.asks.resume` | D→V | req | Mute or resume a connection's asks (§10.4.1, 0.23.0) |
-| | `connection.authenticate.challenge`, `.response`, `.rotated` | V↔V | | Challenge; the member's signature or refusal; credential-key rotation statements |
+| | `connection.authenticate.challenge`, `.response`, `.withdraw`, `.rotated` | V↔V | | Challenge; the member's signature or refusal; the challenger withdraws a challenge (0.81.0); credential-key rotation statements |
 | | `connection.authenticate.pending` / `.result` / `.key` | V→D | | Asked to authenticate; the verdict; the pinned key followed a rotation |
 | | `pending.list` | D→V | req | (0.70.0) The open asks that otherwise arrive only as events (§10.4.2) |
 | Messaging | `message.send` | D→V | req | Send to a connection |
@@ -6912,7 +6950,7 @@ an answer to an unknown or expired id is dropped.
   | `connection.changed` | `connection_id`, `version` (`connection.update`, §10.4; since 0.23.0 also a change of the connection's ask state, §10.4.1) |
   | `connection.request` | `pending_id` (incoming) or `connection_id` (outgoing), `state` (`approved`, `peer_approved`, `declined`, `peer_declined`, `expired`) (§6.4); `peer_approved`: the peer's `connection.approved` arrived (0.10.3); `declined`: the member declined; `peer_declined`: the peer's `connection.declined` arrived and ended the request (0.10.5) |
   | `block.added`, `block.removed` | `block_id` (§10.4) |
-  | `connection.authenticate.decided` | `request_id`, `approved` (§10.4) |
+  | `connection.authenticate.decided` | `request_id`, `approved`, `withdrawn?` (`true` when the challenger withdrew the challenge, always with `approved: false`; absent otherwise; 0.81.0) (§10.4) |
   | `device.session` | `device_id`, `expires_at` (absent when the device has no session) (§6.8) |
   | `approval.decided` | `approval_id`, `approved` (§6.8) |
   | `leash.grant.changed` | `grant_id`, `agent_id`, `version` (§10.11) |
@@ -7174,6 +7212,7 @@ vault signs a fresh challenge with the member's **credential key**
 | `connection.authenticate.approve` (app) | `{request_id}` | `{}`; `credential_locked` outside the unlock window |
 | `connection.authenticate.deny` (app, desktop) | `{request_id}` | `{}` |
 | `connection.authenticate.response` (V↔V) | — | `{request_id, status: "signed", key, sig, signed_at, purpose?, rotations?}` or `{request_id, status: "denied"}` |
+| `connection.authenticate.withdraw` (V↔V, challenger → responder; 0.81.0) | — | `{request_id}`: the challenger will no longer accept the challenge (below); nothing is sent back |
 | `connection.authenticate.rotated` (V↔V) | — | `{rotations: [<statement>, ...]}` (1–32 credential-key rotation statements, §3.5.5) |
 | `connection.authenticate.key` (V→D, every owner app and desktop) | — | `{connection_id, key}`: the pinned key followed a rotation |
 | `connection.authenticate.result` (V→D, every owner app and desktop) | — | `{connection_id, request_id, authenticated, key?, key_changed?, purpose?, reason?}` |
@@ -7182,7 +7221,8 @@ vault signs a fresh challenge with the member's **credential key**
 - `nonce` is 32 random bytes; `context` is at most 256 bytes and shown to
   the member. A challenge lives 10 minutes (`exp`). A vault keeps at most
   8 outstanding challenges it sent per connection (`limit`) and 4 it
-  received (more are dropped and audited). Since 0.23.0 a received
+  received (more are dropped and audited; a challenge the challenger
+  withdrew no longer counts toward either, 0.81.0, below). Since 0.23.0 a received
   challenge is an ask (§10.4.1), gated by its `purpose` since 0.65.0
   (below).
 - To approve, the app opens the credential's unlock window
@@ -7359,11 +7399,111 @@ vault signs a fresh challenge with the member's **credential key**
   before. A desktop's deny of a `signin` challenge is labelled "Not me"
   too. On the requesting side, apps show a refusal neutrally, as
   §10.4.1 says, whatever the purpose.
+- **Withdrawing a challenge** (0.81.0; owner decision 2026-10-30,
+  vettid.org #465, §15 item 48). Until 0.81.0 a challenge stayed an open
+  ask in the member's vault until the member decided it or its `exp`
+  passed. A service vault supersedes sign-ins: a member who starts a new
+  sign-in on the website before answering the last one (a reload, a
+  second tab) makes the service forget the earlier challenge, and
+  approving it then does nothing. Superseded challenges still held the
+  2 `signin` slots of §10.4.1, so a third sign-in within the challenge's
+  lifetime was dropped by the member's own vault while the website
+  showed a sign-in waiting for a phone that never asked, with an error
+  on neither side; and the phone showed requests that could not
+  succeed. An approval that was decided or cancelled kept asking the
+  other admins' phones in the same way. The challenger now says that it
+  will not accept a challenge:
+
+  | Type | Body |
+  |---|---|
+  | `connection.authenticate.withdraw` (V↔V, challenger → responder) | `{request_id}` |
+
+  - **Challenger.** It SHOULD send `withdraw` for a challenge it will no
+    longer accept: a superseded or cancelled sign-in, an approval that
+    is decided or cancelled. It applies to every challenge, whatever
+    its `purpose`. It still ignores any answer that arrives for that
+    challenge, signed or denied (§8.1: an answer to an unknown id is
+    dropped), so a challenge it withdrew can never be accepted, whether
+    or not the withdrawal reached the member's vault. It stops counting
+    the challenge among the 8 outstanding ones it sent on the
+    connection. It sends nothing for a challenge that is answered or
+    has expired. This specification adds no request for an owner device
+    to withdraw a challenge it started with
+    `connection.authenticate.request`: the message is the challenger
+    vault's to send (§15 item 48).
+  - **Matching.** The responder (the member's vault) matches
+    `request_id` only against the open challenges **received on that
+    same connection**, the one the message arrived on. A challenge of
+    another connection with that id is not touched. An id that is
+    unknown, already decided, expired, already withdrawn or never
+    opened (a suppressed challenge, §10.4.1) is **ignored silently**:
+    nothing is sent back and nothing is audited, and the vault never
+    reveals whether a request was open. A body without a `request_id`
+    that is a string is ignored the same way. A suppressed challenge's
+    held neutral answer (§10.4.1) is not affected and is still sent.
+  - **Closing.** On a match the ask is closed as **withdrawn**, once:
+    - it leaves `pending.list` (§10.4.2) and is no longer an ask the
+      vault accepts a decision on;
+    - every owner device (apps, and desktops within their access
+      session, §9.1) gets
+      `sync.event{kind: "connection.authenticate.decided", request_id,
+      approved: false, withdrawn: true}` (§10.1), so that an app removes
+      the ask from its screens and notifications. It is the existing
+      event with one added flag, not a new event: an app that does not
+      know `withdrawn` reads `approved: false` and closes the ask as
+      before; a newer app shows it as withdrawn rather than declined.
+      The vault sends no `connection.authenticate.pending` update;
+    - it is audited `connection.authenticate.withdrawn` (`ref` =
+      `request_id`, with the `connection_id`; §10.9);
+    - the vault sends the challenger nothing, neither a `.response` nor
+      an acknowledgement (the challenger knows what it withdrew);
+    - the ask's feed item is not changed by the vault (a batched item
+      can stand for several asks, §10.4.1); an app that shows it marks
+      it read with `feed.update` when the ask closes, as for
+      `location.request.closed` (§10.16);
+    - a `connection.authenticate.approve` or `.deny` that arrives
+      afterwards, from any device, is answered as for an expired
+      request: the same error as for an unknown or expired
+      `request_id`, never a different one that would show the
+      withdrawal. A `.response` is not sent for it.
+  - **Not a decline.** A withdrawal is the challenger's act, not the
+    member's. It starts no cooldown, is not counted toward a pause and
+    is not a decline in the sense of §10.4.1.
+  - **Limits.** A withdrawn challenge **frees its pending slot** (the 2
+    `signin`, the 4 received challenges, the 8 asks of §10.4.1) and
+    **still counts toward the ask rate** of its bucket (10 `signin` per
+    24 hours, 5 `approval`, 5 in the general bucket), so withdrawing
+    cannot be used to send more prompts than the buckets allow (§10.4.1,
+    "Withdrawn challenges"). A repeated or late `withdraw` changes
+    nothing.
+  - **Order.** Messages arrive in no guaranteed order across relay
+    batches (§8.4). A `withdraw` that arrives before the challenge it
+    names is an unknown id and is ignored; the vault does not remember
+    it, because remembering ids it never saw would be a state kept for
+    any id a connection sends and would show whether it had. The
+    challenge then stays an ask until the member decides it or its
+    `exp`, and the challenger ignores the answer. This is the same
+    result as a vault before 0.81.0 and is accepted (§15 item 48).
+  - **Older vaults.** A vault before this release drops the unknown
+    type (§5.3); for a service connection, that is the existing
+    `drop.service_type` (§6.4 "Service connections"), dropped and
+    audited, nothing sent back. Nothing breaks: the challenge stays an
+    ask until `exp` as before, and the gap closes as vaults update. A
+    challenger needs no capability check: the message is one-way and
+    its absence is harmless.
+  - **Apps.** An app that knows `withdrawn` removes the ask from the
+    screen if it is showing, removes its notification and its entry in
+    the Approvals list, and shows the ask in History as "Withdrawn"
+    (ANDROID-PLAN 0.1.101, IOS-PLAN 0.1.51). It does not show it as
+    declined or as an error, and does not tell the member that anything
+    went wrong. An app that does not know the flag closes the ask on
+    `approved: false`, as for a decision on another device.
 - Approvals, denials and verdicts are audited
   (`connection.authenticate.requested`, `.signed`, `.denied`,
   `connection.authenticated`, `connection.authenticate_failed`,
   `connection.authenticate.key_rotated`,
-  `connection.authenticate.rotation_rejected`); an incoming challenge is a
+  `connection.authenticate.rotation_rejected`; and, since 0.81.0,
+  `connection.authenticate.withdrawn`); an incoming challenge is a
   feed item.
 
 #### 10.4.1 Asks from a connection: no approval fatigue
@@ -7388,7 +7528,9 @@ waits for the member's decision:
 
 (0.69.0) From a connection whose `peer_kind` is `"service"` (§6.4
 "Service connections") only the member-authentication challenge arrives
-as an ask; the other kinds are dropped (`drop.service_type`).
+as an ask; the other kinds are dropped (`drop.service_type`). (0.81.0)
+`connection.authenticate.withdraw` (§10.4) is not an ask: it asks the
+member nothing and closes one.
 
 Nothing else a connection sends waits for the member. Share-rule
 questions (`share.pending`, §10.12) come from the member's own rules,
@@ -7407,7 +7549,7 @@ version may make them settings):
 | Pending asks | 8 per connection, all kinds together |
 | Sign-in decline cooldown (0.65.0) | 1 hour |
 | Sign-in ask rate (0.65.0) | 10 `signin` challenges per connection per 24 hours |
-| Sign-in pending (0.65.0) | 2 `signin` challenges per connection, within the 8 |
+| Sign-in pending (0.65.0) | 2 `signin` challenges per connection, within the 8; a withdrawn one frees its place (0.81.0) |
 | Pause | after 3 declines from one connection within 30 days |
 | Batch | 10 minutes |
 | Neutral answer delay | 1–20 minutes, uniformly random (below) |
@@ -7483,6 +7625,25 @@ field that is not suitable, an action not offered, the per-type caps;
 
 An ask that passes reaches the member as before and counts in its
 bucket's window.
+
+**Withdrawn challenges** (0.81.0; §10.4 "Withdrawing a challenge"). A
+challenge the challenger withdrew with `connection.authenticate.withdraw`
+is no longer waiting for the member, so:
+
+| | A withdrawn challenge |
+|---|---|
+| Pending (point 4: the 8 asks, the 2 `signin`, and the 4 received challenges of §10.4) | Frees its place at once |
+| Rate (point 5) | **Still counts** in its bucket's window (10 `signin`, 5 `approval`, 5 general), which neither restarts nor shrinks: it reached the member |
+| Cooldown (point 3) | Starts none: it is not a decline |
+| Pause (3 declines in 30 days) | Not counted |
+| Batch | Not removed from the batch's `count`; the feed item is left to the app (§10.4) |
+
+So a service that supersedes a sign-in can always get the next one to the
+member, within the bucket's 10 a day, and cannot use withdrawal to send
+more than the bucket allows. Nothing is sent to the challenger in
+answer to a withdrawal, and none of this is visible to it beyond what it
+already knows: the member's vault answers an `approve` or `deny`
+of a withdrawn challenge as for an expired one.
 
 **Declines.** A **decline** is the member's explicit refusal of a whole
 ask: `grant.decide{approve: false}`, `critical-secret-use.deny`,
@@ -7609,8 +7770,9 @@ which are not asks). Five kinds arrived only as events and were lost;
 
 - **What is listed.** Every ask of these kinds that the vault would
   still accept a decision on: received, not yet decided by any device,
-  not expired and not withdrawn (a suppressed ask, §10.4.1, was never
-  sent and is never listed). The `body` is the event's body as the
+  not expired and not withdrawn (a challenger's
+  `connection.authenticate.withdraw`, §10.4, 0.81.0; a suppressed ask,
+  §10.4.1, was never sent and is never listed). The `body` is the event's body as the
   vault sent it, including any member a later release adds to that
   event; an app parses it as it parses the event. An entry carries no
   member the event did not.
@@ -7644,7 +7806,8 @@ which are not asks). Five kinds arrived only as events and were lost;
   only events whose inner `ts` is later than the first page's response
   `ts`: a creation event as old as that or older is ignored (the list
   already says whether the ask is open), and a closing event
-  (`sync.event` `connection.authenticate.decided`, `approval.decided`,
+  (`sync.event` `connection.authenticate.decided` (with or without
+  `withdrawn`), `approval.decided`,
   `action.decided`, each by its id; `device.session`, by `device_id`,
   since a device has at most one session request; and
   `location.request.closed`) for an ask not in the list does nothing. A
@@ -9509,6 +9672,9 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `connection.authenticate.requested`, `connection.authenticate.signed`,
   `connection.authenticate.denied`, `connection.authenticated`,
   `connection.authenticate_failed` (`ref` = `request_id`);
+  `connection.authenticate.withdrawn` (`connection_id`, `ref` =
+  `request_id`; 0.81.0: the challenger withdrew a challenge that was
+  open, §10.4; nothing is audited for an id that was not);
   `device.session.granted` (`device_id`, `ref` = `session_id`),
   `device.session.ended` (`device_id`), `device.session.denied`
   (`device_id`, `ref` = `request_id`; 0.77.0), `approval.granted`,
@@ -23460,6 +23626,73 @@ Follow-ups:
     keep the context line until the apps ship, then drop it),
     MEMBER-SERVICE-PLAN §4.2 (the page shows the same number), the
     apps (ANDROID-PLAN 0.1.100, IOS-PLAN 0.1.50).
+
+48. **A challenger can withdraw a challenge (0.81.0; owner decision
+    2026-10-30, vettid.org #465).** A service vault supersedes
+    sign-ins, and a decided or cancelled approval stays open on the
+    other admins' phones; a superseded challenge held one of the 2
+    `signin` slots until `exp`, so a member's third sign-in within the
+    challenge's lifetime was dropped by their own vault while the site
+    waited, and the phone showed requests that could not succeed.
+    Decided:
+    1. a new V↔V message `connection.authenticate.withdraw`
+       `{request_id}`, challenger to responder, named `withdraw`, for
+       `signin` and `approval` challenges alike;
+    2. the responder matches `request_id` only against open challenges
+       received on that same connection; an unknown, decided, expired
+       or already withdrawn id is ignored silently, nothing is sent
+       back, and the vault never reveals whether a request was open;
+    3. the closing sync event is the flag `withdrawn: true` on the
+       existing `connection.authenticate.decided` (with `approved:
+       false`), not a new event, so an app that does not know the flag
+       still closes the ask and a newer app labels it "Withdrawn";
+    4. a withdrawn challenge frees its pending slot (the 2 `signin`,
+       the 4 received, the 8) and still counts toward the ask rate and
+       its bucket (10 `signin` per 24 hours, 5 `approval`); it is not a
+       decline and starts no cooldown or pause count;
+    5. an `approve` or `deny` after a withdrawal is answered as for an
+       expired request;
+    6. audit `connection.authenticate.withdrawn` (`ref` = `request_id`);
+       the ask leaves `pending.list`;
+    7. the message is added to what a `peer_kind: "service"`
+       connection may send (§6.4);
+    8. the challenger SHOULD send it for a challenge it will no longer
+       accept and still ignores any later answer (§8.1); an older
+       vault drops the unknown type (`drop.service_type` for a
+       service connection), so nothing breaks.
+    - *Not chosen:* a new `connection.authenticate.closed` event (an
+      app that does not know it would keep the ask; the flag on
+      `decided` is understood by every app as a refusal); closing the
+      older sign-ins in the member's vault when a new one arrives (it
+      bakes one service's supersede rule into every vault, and does not
+      cover approvals); a shorter challenge lifetime (shortens the
+      window, does not close it); doing nothing (the third-attempt drop
+      remains, and the site can only tell the member to approve the
+      newest request by its match code).
+    - *Settled with the decision:* the vault answers a withdrawal of a
+      challenge it does not hold with silence, and a matched one with
+      silence too (the challenger knows what it withdrew); a late
+      `approve` or `deny` is an expired request and shows nothing
+      about the withdrawal; a withdrawal that arrives before its
+      challenge is ignored and the challenge stays until `exp`
+      (accepted: the vault keeps no state for ids it never saw); the
+      member-facing text is a draft for the owner (ANDROID-PLAN 0.1.101).
+    - *Open, with the recommendations:* **(a)** an owner device that
+      started a challenge with `connection.authenticate.request` has no
+      way to withdraw it (no `connection.authenticate.cancel` D→V
+      request). Only a service vault, which makes its own challenges,
+      is a known challenger; recommended: add the device request when
+      a member-to-member use needs it. **(b)** A challenger's own vault
+      is not told that a challenge it withdrew was open (nothing is
+      sent back); a service that wants to know shows the member the
+      newest request by its match code, as before.
+    Follow-ups: vettid-vault (a staging release after 24: receive and
+    match on the connection, close, `sync.event` with `withdrawn`,
+    audit, free the slot but keep the rate count, drop the type from
+    older service connections as today), the service vault
+    (vettid/service-vault: send `withdraw` from `CancelChallenge` and
+    the supersede path once vettid-vault supports it), and the apps
+    (ANDROID-PLAN 0.1.101, IOS-PLAN 0.1.51).
 
 ## 16. Test vectors
 
