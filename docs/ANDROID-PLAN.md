@@ -1,9 +1,32 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.107
+version: 0.1.108
 date: 2026-10-30
 changelog:
+  - 0.1.108: erratum (VAULT-MESSAGING 0.81.3, §15 item 48). (1) **New
+    member-facing text, approved by the owner on 2026-10-30:**
+    `vote_conflict_after_verified` (votes table, §4 "Votes"): "**Your vote
+    is in the published results.** %s also once showed a different vote
+    under your code. Save the proof and show it to the organisation."
+    Shown under the `vote_state_in_results` line when the vault's check is
+    `verified` and the vote has `conflict_evidence: true`, with the **Save
+    the proof** action and no error colour (not `vote_failed_title`, which
+    is for `failed`). (2) A results check the vault leaves `pending` with
+    reason `input` (a submission that does not verify) is shown as before
+    for a problem with the published results, and the app submits again at
+    its next retry; it is never shown as `vote_failed_title`. (3) The app
+    sends `ack_dropped: [connection_id]` in `vote.list` after it has shown
+    the `vote_dropped` text for those connections (the notice returns until
+    then). (4) The evidence the app saves (`vote.evidence`) now holds the
+    member's `choice_id` and the foreign ballots: the file is written only
+    on the member's **Save the proof** and is shown to nobody else; the
+    app never writes it to a log, a share sheet's preview or a cache. (5)
+    `vote.event` reaches the app only (nothing changes in the app). (6)
+    After a restore the app asks "Is this your vote?" only when the vault
+    returns a `service_ballot` (the service's ballot with the record's own
+    key); any other unsigned ballot is a problem (`vote_conflict_body`),
+    and **Cast** stays allowed. Tests below.
   - 0.1.107: erratum (VAULT-MESSAGING 0.81.2, §15 item 48). The app's
     work with the votes site (§4 "Votes"): (1) every vote request about
     one proposal (`vote.get`, `.cast`, `.check`, `.confirm`, `.release`,
@@ -1275,7 +1298,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.81.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.81.3) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -5161,6 +5184,7 @@ The History category is "Connections" (with the service's name); no entry shows 
 | `vote_state_waiting` | Waiting for %s to confirm. Your vote is saved on your vault and is sent again until %s answers. | never "failed" |
 | `vote_state_recorded` | %s recorded your vote. It can't be changed. | |
 | `vote_state_in_results` | The published results include your vote. | only after the check |
+| `vote_conflict_after_verified` | **Your vote is in the published results.** %s also once showed a different vote under your code. Save the proof and show it to the organisation. | **approved 2026-10-30.** `check` `verified` with `conflict_evidence: true`; under the `vote_state_in_results` line, with **Save the proof**, no error colour |
 | `vote_state_unconfirmed` | Not confirmed. %s sent no receipt for your vote, and the published results don't settle whether it counted. | |
 | `vote_state_didnt_vote` | You didn't vote in this one. | verified: no ballot under your code |
 | `vote_check_with_service` | Check with the service | |
@@ -5227,7 +5251,7 @@ The History category is "Connections" (with the service's name); no entry shows 
 
 **Not built, on purpose.** No "secret ballot" language; no change of vote; no share or copy of a choice; no verification badge for a service; no reminder of the app's own (the vault's `vote.closing` is the one); no widget; no desktop view (VAULT-MESSAGING §15 item 48, decision 4).
 
-**Tests.** The list shows only with a vault that answers `vote.list` and a vote or a `reconnect` entry, and never an empty screen; the badge counts open, not yet voted votes only; the vote screen shows the text as plain text (a text with markup, a link, control characters and a bidirectional override renders as clean text); the choices in order, `abstain` as sent; **Cast** disabled with the reason written for each `cannot_cast` code; the confirm sheet shows the fixed sentence with the service's name, and a proposal whose text contains the sentence or a different one changes nothing; the unlock prompt appears only without an open window and the request is sent once; each ballot state, refusal and check outcome shows its text (a table test over `ballot.state`, `code` and `check.state`); a `waiting` ballot never shows "failed"; "counted"/"include" appears only for a verified check; the choice appears in no list, notification, feed item, History entry or log (a scan of the app's logs after a cast); `Save the proof` writes the vault's evidence unchanged; restore confirm; the reconnect card from a `reconnect` entry and no change to the connection; removing a service with an unfinished vote asks; the hourly sync only while unlocked and no request without a session; offline: nothing shown unless a vote is `checking` or a check is pending; TalkBack reading order and focus on the disclosure; font scale 200%; a held vault shows the owner check, not the Votes list; the texts of the table above in the screen catalog. **0.1.107:** every vote request carries `connection_id` with `proposal_id` (two votes from two services with the same `proposal_id` open their own screens and a cast goes to the right connection); a sync of a 4,194,304-byte list is one blob call (over 245,760 bytes, deleted after the fetch; inline at or under), a request over 8,257,532 bytes is never sent, a catch-up of several lists is split in version order (a list over 1,048,576 bytes alone in its call, no call with more than 8 lists), a list is sent only when it differs from the held one (else `services_confirm`), an oversized one is sent as served and the vault ignores it, a blob request has the form `{blob: {id, key, sha256, size}}`; a `404` for a vote's document is sent as `absent` (a 5xx or timeout as `unreachable`, an odd body as `found`) with no time, and again at the next sync and when the screen opens, and the app shows `vote_unpublished` only for `site` `unpublished`.
+**Tests.** The list shows only with a vault that answers `vote.list` and a vote or a `reconnect` entry, and never an empty screen; the badge counts open, not yet voted votes only; the vote screen shows the text as plain text (a text with markup, a link, control characters and a bidirectional override renders as clean text); the choices in order, `abstain` as sent; **Cast** disabled with the reason written for each `cannot_cast` code; the confirm sheet shows the fixed sentence with the service's name, and a proposal whose text contains the sentence or a different one changes nothing; the unlock prompt appears only without an open window and the request is sent once; each ballot state, refusal and check outcome shows its text (a table test over `ballot.state`, `code` and `check.state`); a `waiting` ballot never shows "failed"; "counted"/"include" appears only for a verified check; the choice appears in no list, notification, feed item, History entry or log (a scan of the app's logs after a cast); `Save the proof` writes the vault's evidence unchanged; restore confirm; the reconnect card from a `reconnect` entry and no change to the connection; removing a service with an unfinished vote asks; the hourly sync only while unlocked and no request without a session; offline: nothing shown unless a vote is `checking` or a check is pending; TalkBack reading order and focus on the disclosure; font scale 200%; a held vault shows the owner check, not the Votes list; the texts of the table above in the screen catalog. **0.1.108:** a `verified` check with `conflict_evidence` shows `vote_state_in_results` and `vote_conflict_after_verified` with **Save the proof** and no error colour, and without the flag only the first; a `pending` check with reason `input` never shows `vote_failed_title`; `vote.list` is sent with `ack_dropped` after `vote_dropped` was shown and the entry does not come back; the saved proof holds `choice_id` and is written only on the member's action, and no log line has it. **0.1.107:** every vote request carries `connection_id` with `proposal_id` (two votes from two services with the same `proposal_id` open their own screens and a cast goes to the right connection); a sync of a 4,194,304-byte list is one blob call (over 245,760 bytes, deleted after the fetch; inline at or under), a request over 8,257,532 bytes is never sent, a catch-up of several lists is split in version order (a list over 1,048,576 bytes alone in its call, no call with more than 8 lists), a list is sent only when it differs from the held one (else `services_confirm`), an oversized one is sent as served and the vault ignores it, a blob request has the form `{blob: {id, key, sha256, size}}`; a `404` for a vote's document is sent as `absent` (a 5xx or timeout as `unreachable`, an odd body as `found`) with no time, and again at the next sync and when the screen opens, and the app shows `vote_unpublished` only for `site` `unpublished`.
 
 ### Devices & agents (0.1.53)
 
