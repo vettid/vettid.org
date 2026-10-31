@@ -1,9 +1,23 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.109
+version: 0.1.110
 date: 2026-10-31
 changelog:
+  - 0.1.110: erratum (wallet W1b, from vettid-android's chain-source
+    work). (1) The §5 storage table listed the chain server under
+    settings (DataStore / SharedPreferences, "None needed"), against §4
+    "The chain source" and the wallet's local state, which put it in the
+    app's encrypted settings. The encrypted rule stands: a member's own
+    server can point at their home node. The chain server per network,
+    the testnet4 label and the backed-up flag per `wallet_id` now have
+    their own row (encrypted state file in no-backup storage, cleared
+    by a wipe). (2) "`https` only" is for every URL the member types,
+    on every build and network; the regtest default of a devStack build
+    comes from the build config and may be `http` to a loopback host
+    (the local Esplora through `adb reverse`), in devStack only. (3)
+    testnet3 has no server setting and no default: its genesis hash is
+    built in only so that the check refuses a testnet3 server.
   - 0.1.109: owner decision of 2026-10-31: decision A ("Votes",
     screen privacy) is **yes**. The vote screen, the confirm sheet and a
     vote's evidence screen are kept out of screenshots, screen recordings
@@ -4154,17 +4168,23 @@ never asks.
   testnet4 `https://mempool.space/testnet4/api` (question 17). The
   mainnet default is chosen with the production approval.
 - **The member's own server.** "Use my own server": an Esplora URL,
-  `https` only, no credentials in the URL, redirects refused. Before it
+  `https` only (0.1.110: every URL the member types, on every build;
+  only a devStack build's regtest default, from its build config, may be
+  `http` to a loopback host), no credentials in the URL, redirects
+  refused. Before it
   is saved the app tests it: the server must answer and its block 0
   must be the genesis block of that network (the app has the four
   genesis hashes built in), so that a testnet3 server is never used for
-  a testnet4 wallet, or a mainnet server for a test one. **Electrum**
+  a testnet4 wallet, or a mainnet server for a test one (0.1.110:
+  testnet3 has no setting and no default; its hash is there only to
+  refuse a testnet3 server). **Electrum**
   servers (the protocol of Electrum, Electrs and Fulcrum, which is what
   most members' own nodes run) come later, after W2, if members ask
   (question 18); a proxy or Tor setting is out of scope here.
 - **Where it lives.** Wallet → ⋯ → **Chain server**, one setting per
   network (not per wallet), also reachable from each wallet's details
-  ("Using mempool.space"). Stored in the app's encrypted settings on
+  ("Using mempool.space"). Stored in the app's encrypted settings (§5,
+  an encrypted state file in no-backup storage) on
   this phone only (it is not a vault setting: a new phone starts from
   the defaults). "Reset to default" restores the network's default.
 - **Privacy note** (shown under the setting, and once before a
@@ -6694,7 +6714,8 @@ What the phone does keep, and why:
 | Transport state: session keys, relay token, the sealed credential blob, one-time keys, the outbox | Encrypted state file (AES-GCM) in no-backup storage | The Keystore key above | Wipe; each part when it is used up or replaced | None |
 | Account ids and flags (user_guid, vault_id, the masked email hint, markers); with location (not built yet), its "Not now" entries {request_id, exp} | Encrypted state file in no-backup storage | The same | Wipe; an entry at its `exp` | None |
 | Owner-check state, the lock record, the canary manifest | Encrypted state file in no-backup storage | The same (0.1.91: the lock record is encrypted as the others are; being fixed) | Wipe (the lock record is rewritten, never deleted otherwise) | None |
-| Settings and non-secret state: theme, app lock (on/off, method, timeout), notification mode, previews, push-registration flags, release-notice state (DataStore); the identity slot in use, the attestation-key list, the last served (public) release manifest, the pending-lock notice (SharedPreferences); with the wallet (not built yet), the chain server | DataStore / SharedPreferences | None needed: no secrets, no vault content | Wipe; uninstall | None |
+| Settings and non-secret state: theme, app lock (on/off, method, timeout), notification mode, previews, push-registration flags, release-notice state (DataStore); the identity slot in use, the attestation-key list, the last served (public) release manifest, the pending-lock notice (SharedPreferences) | DataStore / SharedPreferences | None needed: no secrets, no vault content | Wipe; uninstall | None |
+| (0.1.110) With the wallet: the chain server per network, the testnet4 label, the backed-up flag per `wallet_id` | Encrypted state file in no-backup storage | The Keystore key above (a member's own server can point at their home node) | Wipe; uninstall | None |
 | App lock key | Android Keystore, bound to user authentication (class 3 biometric or the device credential) | Hardware | Turned off; a new biometric (Biometrics method); wipe | None |
 | A copied secret item value | The system clipboard | Marked sensitive (`EXTRA_IS_SENSITIVE`), so the clipboard preview hides it; see the clipboard rule | 60 seconds after the copy, at the vault lock, and only if the clip is still the app's | None |
 | Notifications | The system | Texts follow the Content rules | When the vault stops being open | None |
