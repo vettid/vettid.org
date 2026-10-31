@@ -33,8 +33,11 @@ changelog:
     strictly (no duplicate member names at any depth, depth at most 32,
     valid UTF-8), and the site's own JSON (a proposal or extension
     `bundle`, an `index` element) is copied into it, so the app parses
-    each such value as strictly (the depth counted from the request
-    body, not from the value) and treats a failure as "not an object";
+    each such value as strictly (the depth counted from the inner
+    message, the body being level 2), checks the bytes it actually
+    sends, caps an `index` element at 65,536 bytes, and treats a
+    failure as "not an object"; a results row's `choice_id` must be a
+    valid choice id before `vote.results.submit`;
     (2) an `index` element whose `proposal_id` is not a valid proposal
     id is not sent; (3) from the next vault release a list that breaks a
     shape rule is judged as one that fails its signature, and the
@@ -13779,7 +13782,10 @@ row_proof: { "index": 1, "tree_size": 3, "path": ["<b64 32 bytes>"] }
   - **Bundle:** a proposal `bundle` that is not a JSON object or is over 65,536 bytes is left out (read with a 65,536-byte cap).
   - **Extensions:** at most 24; the list ends at the first extension whose document is over 4,096 bytes, whose `extension_sig` is not 64 bytes, or whose `bundle` is missing, not an object or over 65,536 bytes; the entry goes with the extensions before it.
   - **Index:** an `index` element whose `service_id` is present but not a string is left out; the entry goes without `index`. (0.81.6) An `index` element whose `proposal_id` is not a valid proposal id is not sent at all, nor an entry for it.
-  - **Strict JSON** (0.81.6): the vault parses the whole request strictly (no duplicate member names at any depth, nesting depth at most 32, valid UTF-8), and the site's own JSON values (a proposal `bundle`, an extension `bundle`, an `index` element) are copied into the request. The app parses each such value with the same rules before putting it in, and treats a failure as "not an object": the bundle is left out, the extension list ends there, the `index` element is left out. **The depth limit is for the whole request**, so the app checks each value against the depth left at its position, not 32 on its own: counting the request body as level 1, an `index` element sits at level 4 (body, `entries`, entry, `index`), a proposal `bundle` at level 5 (… entry, `document`, `bundle`) and an extension `bundle` at level 7 (… `document`, `extensions`, extension, `bundle`), so the value's own depth plus its level less 1 must be at most 32.
+  - **Strict JSON** (0.81.6): the vault parses the whole request strictly (no duplicate member names at any depth, nesting depth at most 32, valid UTF-8), and the site's own JSON values (a proposal `bundle`, an extension `bundle`, an `index` element) are copied into the request. The app parses each such value with the same rules before putting it in, and treats a failure as "not an object": the bundle is left out, the extension list ends there, the `index` element is left out. **The depth limit is for the whole message**, so the app checks each value against the depth left at its position, not 32 on its own. An inline request is parsed strictly as the whole inner message (§5.3), with the body inside it, so **count the inner message as level 1 and the body as level 2** (a blob request's body is parsed on its own, one level shallower; the app uses the inline count for both). Then an `index` element sits at level 5 (inner, body, `entries`, entry, `index`), a proposal `bundle` at level 6 (… entry, `document`, `bundle`), an extension `bundle` at level 8 (… `document`, `extensions`, extension, `bundle`) and the `bundle` of `vote.results.submit` at level 3; the value's own depth plus its level less 1 must be at most 32 (so at most 28, 27, 25 and 30).
+  - **What is checked is what is sent** (0.81.6): the strict checks apply to the bytes the app actually puts in the request. If the app re-encodes a site value, it checks the re-encoding (a lone surrogate in a member name can turn two distinct names into one on re-encoding); simplest is to embed the validated value's own bytes.
+  - **Index element size** (0.81.6): an `index` element over 65,536 bytes is left out before any strict parse (the vault reads only its `service_id`), so a hostile `index.json` cannot make the app parse megabytes per element.
+  - **Choice ids in results** (0.81.6): before `vote.results.submit`, the app checks that the member's own row's `choice_id` is a valid choice id (1 to 32 bytes of `[a-z0-9-]`, the vault's rule); otherwise it does not submit and shows the existing problem hint.
   - **Results:** an empty `results`, one over the request limit, or a `results_sig` that is not 64 bytes is not submitted; the vote shows the existing problem hint for a check it cannot complete.
   - **Stages:** the app sends the lists (or `services_confirm`), then the entries, then each `vote.results.submit`, as separate calls, so a refusal in one does not stop the next.
 
