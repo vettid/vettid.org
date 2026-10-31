@@ -1,9 +1,17 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.110
+version: 0.1.111
 date: 2026-10-31
 changelog:
+  - 0.1.111: erratum (wallet W1c). Question 16's option (c) is done: the
+    vault takes `network: "testnet4"` (VAULT-MESSAGING 0.37.0, in staging
+    since release 23). The app creates and imports testnet4 wallets with
+    that name and stores no label for them. The app-side label and "Which
+    test network is this wallet on?" remain only for a legacy `testnet`
+    wallet created before 0.37.0 (VAULT-MESSAGING §10.18 "Networks").
+    The spending-limit step at creation comes with W1d; W1c creates
+    without `caps`.
   - 0.1.110: erratum (wallet W1b, from vettid-android's chain-source
     work). (1) The §5 storage table listed the chain server under
     settings (DataStore / SharedPreferences, "None needed"), against §4
@@ -4150,7 +4158,10 @@ options:
 | (c) A vault field | The vault accepts `network: "testnet4"` as its own name (testnet encodings and coin type 1), and `testnet` keeps meaning testnet3 | Exact, durable, the same on every device and in desktops later | A vault change and a staging release |
 
 **Recommendation (question 16): (c)**, a small vault fix for the next
-staging release, and **(a) until then**: the app writes the label when
+staging release, and **(a) until then**. (0.1.111: (c) is done,
+VAULT-MESSAGING 0.37.0, in staging since release 23. New testnet4
+wallets are created and imported with `network: "testnet4"` and need no
+label; what follows applies only to a legacy `testnet` wallet.) the app writes the label when
 it creates or imports a testnet4 wallet, and a `testnet` wallet the
 phone has no label for opens on "Which test network is this wallet
 on?" (testnet4, or testnet3 with "VettID's staging app does not
