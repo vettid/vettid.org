@@ -33,7 +33,8 @@ changelog:
     strictly (no duplicate member names at any depth, depth at most 32,
     valid UTF-8), and the site's own JSON (a proposal or extension
     `bundle`, an `index` element) is copied into it, so the app parses
-    each such value as strictly and treats a failure as "not an object";
+    each such value as strictly (the depth counted from the request
+    body, not from the value) and treats a failure as "not an object";
     (2) an `index` element whose `proposal_id` is not a valid proposal
     id is not sent; (3) from the next vault release a list that breaks a
     shape rule is judged as one that fails its signature, and the
@@ -13778,7 +13779,7 @@ row_proof: { "index": 1, "tree_size": 3, "path": ["<b64 32 bytes>"] }
   - **Bundle:** a proposal `bundle` that is not a JSON object or is over 65,536 bytes is left out (read with a 65,536-byte cap).
   - **Extensions:** at most 24; the list ends at the first extension whose document is over 4,096 bytes, whose `extension_sig` is not 64 bytes, or whose `bundle` is missing, not an object or over 65,536 bytes; the entry goes with the extensions before it.
   - **Index:** an `index` element whose `service_id` is present but not a string is left out; the entry goes without `index`. (0.81.6) An `index` element whose `proposal_id` is not a valid proposal id is not sent at all, nor an entry for it.
-  - **Strict JSON** (0.81.6): the vault parses the whole request strictly (no duplicate member names at any depth, nesting depth at most 32, valid UTF-8), and the site's own JSON values (a proposal `bundle`, an extension `bundle`, an `index` element) are copied into the request. The app parses each such value with the same rules before putting it in, and treats a failure as "not an object": the bundle is left out, the extension list ends there, the `index` element is left out.
+  - **Strict JSON** (0.81.6): the vault parses the whole request strictly (no duplicate member names at any depth, nesting depth at most 32, valid UTF-8), and the site's own JSON values (a proposal `bundle`, an extension `bundle`, an `index` element) are copied into the request. The app parses each such value with the same rules before putting it in, and treats a failure as "not an object": the bundle is left out, the extension list ends there, the `index` element is left out. **The depth limit is for the whole request**, so the app checks each value against the depth left at its position, not 32 on its own: counting the request body as level 1, an `index` element sits at level 4 (body, `entries`, entry, `index`), a proposal `bundle` at level 5 (… entry, `document`, `bundle`) and an extension `bundle` at level 7 (… `document`, `extensions`, extension, `bundle`), so the value's own depth plus its level less 1 must be at most 32.
   - **Results:** an empty `results`, one over the request limit, or a `results_sig` that is not 64 bytes is not submitted; the vote shows the existing problem hint for a check it cannot complete.
   - **Stages:** the app sends the lists (or `services_confirm`), then the entries, then each `vote.results.submit`, as separate calls, so a refusal in one does not stop the next.
 
