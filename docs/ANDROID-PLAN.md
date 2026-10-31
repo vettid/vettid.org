@@ -10,7 +10,9 @@ changelog:
     is in the published results.** %s also once showed a different vote
     under your code. Save the proof and show it to the organisation."
     Shown under the `vote_state_in_results` line when the vault's check is
-    `verified` and the vote has `conflict_evidence: true`, with the **Save
+    `verified` and the vote has `conflict_evidence: true` (a `recorded`
+    ballot stays `recorded`; the app shows this text, not
+    `vote_conflict_body`, for it), with the **Save
     the proof** action and no error colour (not `vote_failed_title`, which
     is for `failed`). (2) A results check the vault leaves `pending` with
     reason `input` (a submission that does not verify) is shown as before
@@ -23,9 +25,9 @@ changelog:
     on the member's **Save the proof** and is shown to nobody else; the
     app never writes it to a log, a share sheet's preview or a cache. (5)
     `vote.event` reaches the app only (nothing changes in the app). (6)
-    After a restore the app asks "Is this your vote?" only when the vault
-    returns a `service_ballot` (the service's ballot with the record's own
-    key); any other unsigned ballot is a problem (`vote_conflict_body`),
+    After a restore the app asks "Is this your vote?" only when `vote.get`
+    returns a `service_ballot` (`confirm_pending: true` in the list); the
+    dialog shows the label of `service_ballot.choice_id`; any other unsigned ballot is a problem (`vote_conflict_body`),
     and **Cast** stays allowed. Tests below.
   - 0.1.107: erratum (VAULT-MESSAGING 0.81.2, §15 item 48). The app's
     work with the votes site (§4 "Votes"): (1) every vote request about
