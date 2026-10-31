@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.81.5
+version: 0.81.6
 date: 2026-10-31
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,16 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.81.6: erratum (review of vettid-vault #176). §10.19.8 "Shape
+    checks before sending": (1) the vault parses the whole request
+    strictly (no duplicate member names at any depth, depth at most 32,
+    valid UTF-8), and the site's own JSON (a proposal or extension
+    `bundle`, an `index` element) is copied into it, so the app parses
+    each such value as strictly and treats a failure as "not an object";
+    (2) an `index` element whose `proposal_id` is not a valid proposal
+    id is not sent; (3) from the next vault release a list that breaks a
+    shape rule is judged as one that fails its signature, and the
+    `services` results stay one per list, in request order.
   - 0.81.5: owner decision of 2026-10-31 (option a). §10.19.8: one
     malformed site item made the vault refuse a whole `vote.site.sync`
     (`bad_request`), so a bad or hostile votes site could stop a member's
@@ -13767,11 +13777,12 @@ row_proof: { "index": 1, "tree_size": 3, "path": ["<b64 32 bytes>"] }
   - **Proposal:** a `proposal` over 65,536 bytes (decoded) is sent as `{status: "unreachable"}`. `proposal_sig` is sent as served (the vault judges it).
   - **Bundle:** a proposal `bundle` that is not a JSON object or is over 65,536 bytes is left out (read with a 65,536-byte cap).
   - **Extensions:** at most 24; the list ends at the first extension whose document is over 4,096 bytes, whose `extension_sig` is not 64 bytes, or whose `bundle` is missing, not an object or over 65,536 bytes; the entry goes with the extensions before it.
-  - **Index:** an `index` element whose `service_id` is present but not a string is left out; the entry goes without `index`.
+  - **Index:** an `index` element whose `service_id` is present but not a string is left out; the entry goes without `index`. (0.81.6) An `index` element whose `proposal_id` is not a valid proposal id is not sent at all, nor an entry for it.
+  - **Strict JSON** (0.81.6): the vault parses the whole request strictly (no duplicate member names at any depth, nesting depth at most 32, valid UTF-8), and the site's own JSON values (a proposal `bundle`, an extension `bundle`, an `index` element) are copied into the request. The app parses each such value with the same rules before putting it in, and treats a failure as "not an object": the bundle is left out, the extension list ends there, the `index` element is left out.
   - **Results:** an empty `results`, one over the request limit, or a `results_sig` that is not 64 bytes is not submitted; the vote shows the existing problem hint for a check it cannot complete.
   - **Stages:** the app sends the lists (or `services_confirm`), then the entries, then each `vote.results.submit`, as separate calls, so a refusal in one does not stop the next.
 
-  From the next vault release (staging release 26) the vault applies these rules per item and refuses only the bad item (answering it in the per-entry results), not the call; the app's checks stay, for older vault releases and to keep the requests small.
+  From the next vault release (staging release 26) the vault applies these rules per item and refuses only the bad item (answering it in the per-entry results), not the call; the app's checks stay, for older vault releases and to keep the requests small. (0.81.6) There, a list that breaks a shape rule is judged as one that fails its signature (`rejected`, audited `vote.list_rejected`; over 4,194,304 bytes it is `ignored` by the size rule, audited `vote.list_ignored`), later lists in the call are `ignored`, and the `services` results are one per list, in request order. Members the app builds itself (base64, `status`, required members) stay call-level `bad_request`: a failure there is an app bug, not site content.
 - **The `entries` results** (0.81.3): `known` is a proposal the vault holds (its documents compared, its extensions learned); **`kept` means *asked***: the proposal is not held, the entry names a service the vault is connected to, and the vault has asked that service for it with `vote.status` (not that the proposal is held: it is kept only if the service sends a `vote.proposal` that passes §10.19.4; an ask is made at most once an hour per proposal); `ignored` is an entry that matches none of its service connections, or that it asked for within the hour; `rejected` is as in §10.19.4.
 - **`vote.results.submit`**: `results` and `bundle` as the site serves them (`results` the standard base64 of the exact bytes). A repeat for a final check is answered with that state. A submission that does not verify is answered `{state: "pending", reason: "input"}` (§10.19.6 step 3; 0.81.3), as `service_list`, `trust_root` and `clock` are.
 - **Reconnecting for votes** (chosen; decision 9). The vault keeps the verified service list. A connection of kind **person** whose pinned `ik` is an `ik` of a listed service is a service the member connected to before the invitation said so: the vault lists it in `reconnect` and **changes nothing about it**. The kind stays fixed at connect (§6.4); the list is information only, and is VettID's list, not a proof of who runs the service. The app tells the member to remove the connection and accept a fresh invitation. Nothing is listed until the vault holds a verified service list.
