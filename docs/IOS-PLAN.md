@@ -1,9 +1,13 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.52
-date: 2026-10-30
+version: 0.1.53
+date: 2026-10-31
 changelog:
+  - 0.1.53: owner decision of 2026-10-31 (ANDROID-PLAN 0.1.109):
+    decision A is **yes**. §4.16 "Screen privacy": the vote screen, its
+    confirm sheet and the evidence screen join the `SecureWindow` list;
+    the conditional wording is removed.
   - 0.1.52: owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0, §15
     item 48; ANDROID-PLAN 0.1.102). New §4.16 "Votes": the same as
     ANDROID-PLAN §4 "Votes (0.1.102)" (the Votes entry only when there
@@ -1650,12 +1654,11 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   no cache, no identifier), the same schedule as Android (at unlock, at
   open, hourly while open and unlocked; no background refresh, because
   a locked vault cannot be handed anything).
-- **Screen privacy** (ANDROID-PLAN decision A): iOS already covers the
+- **Screen privacy** (ANDROID-PLAN decision A, decided): iOS already covers the
   app switcher and hides content while the screen is recorded
   (ID10, §6.4). The vote screen, its confirm sheet and the evidence
   screen join the `SecureWindow` list (the secure-text-field layer that
-  screenshots leave out) if the owner approves decision A; otherwise
-  only the cover and capture hiding apply.
+  screenshots leave out): decision A, owner 2026-10-31, yes.
 - "Save the proof" uses the share sheet with a file (`.json`), not a
   copy to the pasteboard.
 

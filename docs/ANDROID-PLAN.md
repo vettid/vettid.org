@@ -1,9 +1,15 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.108
-date: 2026-10-30
+version: 0.1.109
+date: 2026-10-31
 changelog:
+  - 0.1.109: owner decision of 2026-10-31: decision A ("Votes",
+    screen privacy) is **yes**. The vote screen, the confirm sheet and a
+    vote's evidence screen are kept out of screenshots, screen recordings
+    and the recent-apps preview (`FLAG_SECURE`). No longer an open point.
+    android #230 already does this (`SecureWindow()` on the vote screen;
+    its sheets and dialogs inherit the flag). IOS-PLAN 0.1.53 follows.
   - 0.1.108: erratum (VAULT-MESSAGING 0.81.3, §15 item 48). (1) **New
     member-facing text, approved by the owner on 2026-10-30:**
     `vote_conflict_after_verified` (votes table, §4 "Votes"): "**Your vote
@@ -5249,7 +5255,7 @@ The History category is "Connections" (with the service's name); no entry shows 
 - All text scales to 200% without clipping or horizontal scrolling; targets are at least 48 dp; the confirm sheet and the list work with a hardware keyboard and with switch access.
 - A failure or refusal is announced as a live region when it arrives while the screen is open.
 
-**Screen privacy** (open point for the owner, decision A): the vote screen, the confirm sheet and a vote's evidence screen are excluded from screenshots and the recent-apps preview (`FLAG_SECURE`, as §4 "Recovery: type the code" already proposes), because a vote's choice is shown on them. Recommended: yes. Without it a screenshot can capture a choice.
+**Screen privacy** (decision A, owner 2026-10-31: yes): the vote screen, the confirm sheet and a vote's evidence screen are kept out of screenshots, screen recordings and the recent-apps preview (`FLAG_SECURE`, as §4 "Recovery: type the code" already does), because a vote's choice is shown on them. A sheet or dialog opened from these screens inherits the flag.
 
 **Not built, on purpose.** No "secret ballot" language; no change of vote; no share or copy of a choice; no verification badge for a service; no reminder of the app's own (the vault's `vote.closing` is the one); no widget; no desktop view (VAULT-MESSAGING §15 item 48, decision 4).
 
