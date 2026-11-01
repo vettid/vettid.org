@@ -33,17 +33,24 @@ changelog:
     before 26 let a vault hold two wallets made from one phrase, which
     share their account xpub (a "twin"). 0.82.2's `exists` stops new
     ones only, and caps apply to the wallet a request names, so a twin of
-    a capped wallet had no caps: §10.18's statement that a wallet without
-    caps cannot be made from a capped wallet's phrase did not hold. Now
-    `wallet.caps.set` and `wallet.caps.raise` on a twin (and a
-    `wallet.create{caps}` that would make one) are refused with the new
-    error `duplicate_wallet`; the phrase of a twin always needs the PIN
-    to reveal, as for a capped wallet; signing is unchanged. Sections
-    changed: §10.1 (error list), §10.18 (the message table, "Revealing a
-    capped wallet's phrase", "A second wallet with the same keys", tests).
-    Apps: on `duplicate_wallet`, tell the member that the vault holds
-    another copy of this wallet, which must be deleted before limits can
-    be set (ANDROID-PLAN and IOS-PLAN: text to add, not edited here).
+    a capped wallet had no caps. Now `wallet.caps.set` and
+    `wallet.caps.raise` on a twin are refused with the new error
+    `duplicate_wallet` (after `conflict`, before the value rules, never a
+    failed owner check; `wallet.create` needs none, `exists` refuses
+    every new twin). Revealing a wallet's phrase needs the PIN if its
+    master `fingerprint` equals that of any capped wallet or twin in the
+    vault (same mnemonic with another passphrase is not caught;
+    accepted). Twin and PIN status are computed at each request, never
+    stored. No release before 26 implemented caps, so no twin is capped
+    today. Signing is unchanged. Sections changed: §10.1 (error list),
+    §10.7 (the `item.reveal` row), §10.18 (message table, "Revealing a
+    capped wallet's phrase", "Twin wallets", "Who needs the PIN to
+    reveal", the check order, tests). Apps: there is no `<wallet>.twin`
+    flag; an app asks for the PIN when a reveal answers `pin_required`
+    and then retries; on `duplicate_wallet` it tells the member that the
+    vault holds another copy of this wallet, which must be deleted
+    before limits can be set (ANDROID-PLAN and IOS-PLAN: text to add,
+    not edited here).
   - 0.82.2: erratum, 2026-11-01, from the vault implementation of
     §10.18 (vettid-vault, staging release 26); no change for apps except
     item 5, which adds a member. Clarifications to "Spend caps" (the
@@ -7093,8 +7100,8 @@ an answer to an unknown or expired id is dropped.
   - `exists`: the object already exists (`credential.create`; since
     0.10.2 also `connection.invite.accept` of a vault already connected
     or requested, with body `{connection_id}`, §6.4);
-  - `duplicate_wallet` (0.82.3): `wallet.caps.set`, `wallet.caps.raise`
-    or `wallet.create{caps}` on a wallet that shares an account xpub with
+  - `duplicate_wallet` (0.82.3): `wallet.caps.set` or `wallet.caps.raise`
+    on a wallet that shares an account xpub with
     another wallet of the vault (a twin, §10.18); the message says to
     delete the other wallet first;
   - `limit`: a count or size limit of the feature would be exceeded.
@@ -9327,7 +9334,7 @@ decision 1):
 | | dry run (0.21.0): `{dry_run: true, item_id?, version?, sensitivity?, tags?}` (Dry run, below) | `{version?, shares, withdrawals}` |
 | `item.get` (app, desktop) | `{item_id}` | `<item>`: a `data` item with its values; a `secret` or `critical` item without `value`s and `notes`, with `has_notes`; with `size` (0.21.0, below) |
 | `item.reveal` (app; desktop: step-up) | `secret`: `{item_id, fields?: [<field_id>]}` (a `data` item: `{item_id}`, as `item.get`) | `<item>` with its values (only those `fields`, without `notes`, if given) |
-| | `critical` (app): `{item_id, credential, utk_id, sealed{password, item_id, reply_key, pin?}}` (0.56.0: `pin` required for the item of a wallet that has a cap, `pin_required`; a `pin` that is present is checked as above whatever the wallet's caps, §10.18) | `{item_id, version, values_sealed, credential, credential_version, utks}` |
+| | `critical` (app): `{item_id, credential, utk_id, sealed{password, item_id, reply_key, pin?}}` (0.56.0: `pin` required for the item of a wallet that has a cap, `pin_required`; (0.82.3) or that needs the PIN under §10.18 "Twin wallets"; a `pin` that is present is checked as above whatever the wallet's caps, §10.18) | `{item_id, version, values_sealed, credential, credential_version, utks}` |
 | `item.list` (app, desktop) | `{tags?, match?, category?, sensitivity?, after?, limit?}` | `{items: [<item without values and notes>], next?}` |
 | `item.tag` (app; desktop: step-up) | `{item_id, version, tags, dry_run?}` | `{version}`; with `dry_run` (0.21.0): `{version, shares, withdrawals}` |
 | `item.sensitivity` (app; desktop: step-up, `data` ↔ `secret` only) | `{item_id, version, sensitivity}`; to or from `critical` (app) also `credential, utk_id, sealed{password, item_id}` | `{version}`; with the credential also `{credential, credential_version, utks}` |
@@ -13213,7 +13220,7 @@ app (chain source)                                   vault
 
 | Type | Request body | Response body |
 |---|---|---|
-| `wallet.create` (app) | `{name, network?, address_type?, caps?, tags?, credential, utk_id, sealed{password, item?}}`; `item` = `{mnemonic, passphrase?}` to import a phrase | `<wallet>` and `{credential, credential_version, utks}`; `limit`, `bad_request` (0.56.0: `caps` as in `wallet.caps.set`; 0.82.2: a `null` member, message `use_wallet_caps_raise`), `exists` (0.56.0: an import whose account keys equal an existing wallet's; 0.82.2: also a second non-mainnet wallet of one phrase: every network but mainnet uses coin type 1), `duplicate_wallet` (0.82.3: `caps` for a wallet that would be a twin; in practice `exists` answers first) |
+| `wallet.create` (app) | `{name, network?, address_type?, caps?, tags?, credential, utk_id, sealed{password, item?}}`; `item` = `{mnemonic, passphrase?}` to import a phrase | `<wallet>` and `{credential, credential_version, utks}`; `limit`, `bad_request` (0.56.0: `caps` as in `wallet.caps.set`; 0.82.2: a `null` member, message `use_wallet_caps_raise`), `exists` (0.56.0: an import whose account keys equal an existing wallet's; 0.82.2: also a second non-mainnet wallet of one phrase: every network but mainnet uses coin type 1; 0.82.3: so every new twin) |
 | `wallet.list` (app, desktop) | `{}` | `{wallets: [<wallet>]}` |
 | `wallet.get` (app, desktop) | `{wallet_id}` | `<wallet>` |
 | `wallet.update` (app, desktop) | `{wallet_id, version, address_type?, accounts?: [{type, next_receive?, next_change?}]}` (at least one of the two; 0.37.0: `accounts`, app only) | `{version}`; `conflict`, `bad_request`, `forbidden` (`accounts` from a desktop) |
@@ -13446,7 +13453,8 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     `bad_request`. One whose every named member equals the current value
     answers `{version}` unchanged: no version bump, no audit entry and no
     `wallet.changed`. The checks run in this order: a stale `version`
-    is `conflict` first, then the value rules. A `null`, a larger value
+    is `conflict` first, then `duplicate_wallet` (0.82.3, "Twin
+    wallets"), then the value rules. A `null`, a larger value
     or `per_tx_sats` above `per_period_sats` is `bad_request` (message `use_wallet_caps_raise`
     for the first two). It audits
     `wallet.caps_lowered` (`ref` = `wallet_id`) and sends
@@ -13471,9 +13479,10 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     `per_period_sats` is `bad_request`. It must raise or remove at least one cap (`bad_request`
     otherwise); a member it does not name is unchanged, and it may
     lower another in the same request. (0.82.2) The checks of the
-    request run in this order: a stale `version` is `conflict`, then the
-    value rules (`bad_request`), then the `payload_sha256` binding
-    (`bad_request`). All three run after `sealed` is opened (§3.5.3
+    request run in this order: a stale `version` is `conflict`, then
+    `duplicate_wallet` (0.82.3, "Twin wallets"), then the value rules
+    (`bad_request`), then the `payload_sha256` binding
+    (`bad_request`). All four run after `sealed` is opened (§3.5.3
     step 2) and before the backoff and the PIN and password (steps 4
     and 5), so a stale or invalid raise tries no PIN or password and
     never counts as a failed check. The UTK is still spent (§3.5.3 step
@@ -13591,8 +13600,7 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     owner check checks them (§3.6.1; a wrong one is a failed check) and
     not itself an owner check; without `pin` it is `bad_request`
     (message `pin_required`). A wallet without caps reveals with the
-    password alone, except a twin (below, 0.82.3), whose phrase always
-    needs the PIN as a capped wallet's does. A `pin` that is present is
+    password alone, except as "Twin wallets" below (0.82.3) says. A `pin` that is present is
     checked as above whatever the wallet's caps.
   - **A second wallet with the same keys.** `wallet.create` refuses an
     import whose account keys equal those of an existing wallet (code
@@ -13603,18 +13611,37 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     `exists`. For example, testnet3 (`testnet`) and testnet4 share their
     keys; testnet3 is legacy and the app no longer offers it.
   - **Twin wallets** (0.82.3; owner decision 2026-11-01, option b).
-    Releases before 26 let a vault hold two wallets made from one phrase.
-    A wallet that shares an account xpub with another wallet in the
-    vault is a **twin**. Caps apply to the wallet a request names, so a
-    twin of a capped wallet would be uncapped. Therefore
-    `wallet.caps.set`, `wallet.caps.raise` and `wallet.create{caps}` on a
-    twin are refused with `duplicate_wallet`, the message saying to
-    delete the other wallet first (a `wallet.create` that would make a
-    twin is already `exists`, above). The phrase of a twin always needs
-    the PIN to reveal (`item.reveal`, "Revealing a capped wallet's
-    phrase"). Signing is unchanged: a twin has no caps. The app, on
-    `duplicate_wallet`, tells the member that the vault holds another
-    copy of this wallet, which must be deleted before limits can be set.
+    Releases before 26 let a vault hold two wallets made from one
+    phrase. A wallet that shares an account xpub with another wallet in
+    the vault is a **twin**. Caps apply to the wallet a request names, so
+    a twin of a capped wallet would be uncapped. Therefore
+    `wallet.caps.set` and `wallet.caps.raise` on a twin are refused with
+    `duplicate_wallet`, the message saying to delete the other wallet
+    first. It is checked after `conflict` and before the value rules
+    (for raise, so before the binding, the backoff and the PIN and
+    password too, within the steps of §3.5.3 as above), and is never a
+    failed owner check. `wallet.create` needs no such error: `exists`
+    refuses every new twin. No release before 26 implemented caps, so no
+    twin is capped today and the rule is complete. Signing is unchanged:
+    a twin has no caps.
+  - **Who needs the PIN to reveal** (0.82.3). Revealing a wallet's
+    phrase needs the PIN (`pin_required` without it, as for a capped
+    wallet) if its master `fingerprint` (§10.18 "Networks") equals the
+    `fingerprint` of any capped wallet or of a twin in the vault. The
+    fingerprint, not the account xpub, because the same phrase on
+    mainnet and on testnet4 or signet gives different account xpubs, and
+    the test-network wallet's reveal would otherwise give the capped
+    mainnet wallet's phrase without the PIN; the `duplicate_wallet`
+    refusal stays on account xpubs, since a test-network wallet cannot
+    spend mainnet coins. A collision of the 32-bit fingerprint between
+    unrelated phrases only asks for an extra PIN, which is harmless. The
+    same mnemonic with another passphrase has another fingerprint and is
+    not caught: that reveal gives the mnemonic but not the passphrase.
+    This is accepted. Twin and PIN status are **computed** from the
+    vault's current wallets at each request and never stored: they carry
+    over a transfer and a recovery, end when the other wallet is
+    deleted, and a rename or tag cannot affect them (`item.put` on a
+    wallet item is refused `in_use`).
   - **`wallet.psbt.inspect`** (without the credential) also returns
     `cap: {ok, reason?, limit_sats?, remaining_sats?, allowed_after?}`: whether
     `wallet.sign` would pass the caps now, and if not why, with the
@@ -13716,7 +13743,10 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     `wallet.caps.set` and `wallet.caps.raise` on either are
     `duplicate_wallet`, `item.reveal` of either without `pin` is
     `pin_required`, `wallet.sign` is unchanged; after the other wallet is
-    deleted, caps can be set.
+    deleted, caps can be set. The same phrase as a capped mainnet wallet
+    and a testnet4 wallet: the reveal of the testnet4 wallet needs the
+    PIN. `duplicate_wallet` comes after `conflict` and before the value
+    rules, and counts as no failed check.
   - State: caps and ledger survive lock and unlock, a phone transfer
     and a recovery; `credential.reset` and a wallet's deletion remove
     them; a wallet created before this release has no caps and signs as
