@@ -14,11 +14,11 @@ related:
   - VAULT-LOCK.md (0.1.2) (the idle lock), AGENT-PLAN.md (0.1.6) (the dev stack's held-vault test)
   - vettid-vault `main` f0976ee (read only: `enclave/releasecfg/*.json`, `releasecfg.go` and the timer constants)
 changelog:
-  - 0.1.5: VAULT-MESSAGING 0.82.0 (owner decision 2026-11-01). S18: the
-    24-hour cap on an `approval` challenge's life is a wait of 1 hour or
-    more and is divided by `time_scale` (1 h at 24) when the challenge
-    is created; the 10-minute minimum and the receiver's bound are not
-    scaled
+  - 0.1.5: VAULT-MESSAGING 0.82.0 (owner decision 2026-11-01). N16: an
+    `approval` challenge's life (up to 24 h) is not scaled by the vault;
+    its challenger is service-vault, which has no `time_scale`, and its
+    approval TTL (`SV_APPROVAL_TTL`) is at most 1 h on staging; a named
+    exception to T4. The receiver's 24 h cap is a bound and not scaled
   - 0.1.4: draft, proposed for the owner's approval (VAULT-MESSAGING
     0.56.0). S17: the wallet spend cap's period (a rolling 24 hours,
     §10.18 "Spend caps") is a wait of 24 h and is divided by
@@ -103,7 +103,6 @@ value at `time_scale` 24.
 | S15 | Account site PIN locked after 15 failures in a day | member API | MEMBER-API rate limits | 24 h lock (the day of counting unchanged) | 1 h lock |
 | S16 | Vault update banner dismissed | app | ANDROID-PLAN 0.1.19 | at most 24 h | at most 1 h |
 | S17 | Wallet spend cap period (VAULT-MESSAGING 0.56.0; proposed, for the owner's approval) | vault | §10.18 "Spend caps" | rolling 24 h | rolling 1 h; the ledger keeps absolute times |
-| S18 | Approval challenge cap (`exp` = min(`until`, now + 24 h), VAULT-MESSAGING 0.82.0) | vault (the challenger) | §10.4 "Long-lived approval challenges" | at most 24 h; 10 minutes at least | at most 1 h; the 10-minute minimum unchanged; the receiver's bound (24 h + 5 min) is not scaled |
 
 Already short on staging and left as is: the **recovery waits** `W(k)`
 (§11.14.6), whose unit `recovery_wait_unit_seconds` is 86,400 in
@@ -129,6 +128,7 @@ scale does not divide it again (§6 T6).
 | N13 | Member API daily jobs: a cancelled account deleted after 7 days, an orphaned vault after 7 days, unverified requests after 14, declined after 30 | member API (daily at 07:00 UTC) | as listed | Deletes account data and runs once a day (§6 T8) |
 | N14 | Calls: busy for at most 12 h; ICE credentials 6 h | vault, calling service | as listed | The calling service's credentials are real time |
 | N15 | Push: blobs 90 days, renewal after 30 days, retired gateway keys 400 days | vault, gateway | as listed | The gateway's lifetimes |
+| N16 | Approval challenge life (0.82.0; the challenger's `exp`, and the receiver's cap of 24 h) | service-vault (challenger), vault (receiver) | `exp` up to 24 h; the cap is 24 h | Named exception to T4. Service-vault has no `time_scale`; on staging its approval TTL (`SV_APPROVAL_TTL`) is at most 1 h, so `exp` is short. The receiver's 24 h is a bound, not a wait. Staging to production gives at most 1 h; production to staging can hold a place up to 24 h, accepted |
 
 Shorter than an hour, and so never scaled: per-minute rate limits, the
 10-minute request windows and 5-minute approvals of access sessions, the
