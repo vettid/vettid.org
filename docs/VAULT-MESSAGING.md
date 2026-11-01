@@ -7526,7 +7526,7 @@ vault signs a fresh challenge with the member's **credential key**
   the member. A challenge lives 10 minutes (`exp`), except an `approval`
   challenge from a service (0.82.0, below). A vault keeps at most
   8 outstanding challenges it sent per connection (`limit`) and 4 it
-  received (of which at most 2 long-lived, 0.82.0) (more are dropped and audited; a challenge the challenger
+  received, at most 2 of them long-lived (0.82.0; more are dropped and audited; a challenge the challenger
   withdrew no longer counts toward either, 0.80.0, below). Since 0.23.0 a received
   challenge is an ask (§10.4.1), gated by its `purpose` since 0.65.0
   (below).
@@ -7739,7 +7739,7 @@ vault signs a fresh challenge with the member's **credential key**
     §10.4.1). A long-lived challenge holds one of the 8 pending asks
     (§10.4.1) and a received place for up to 24 hours, not 10 minutes.
     The `approval` rate bucket (5 per 24 hours) already counts a
-    challenge on receipt, and the 7-day decline cooldown is unchanged.
+    challenge that reaches the member (a suppressed one does not, §10.4.1), and the 7-day decline cooldown is unchanged.
     `connection.authenticate.withdraw` (below) frees the places as
     before; a lock or a hold keeps the challenge, under the rules for
     held asks (§3.6.3, §10.4.1). A challenge waiting in a locked vault's
@@ -7747,7 +7747,7 @@ vault signs a fresh challenge with the member's **credential key**
   - **After the hold.** The challenge is an ask of the member's vault
     like any other; once the member passes the owner check it is in
     `pending.list` (§10.4.2) while it is open and not expired. Apps show
-    its expiry from `pending.exp` and show a date when it is not today
+    its expiry (after the receiver's clamp) from `pending.exp` and show a date when it is not today
     (ANDROID-PLAN, IOS-PLAN: a one-line pointer; those plans are not
     edited here).
   - **A suppressed challenge.** Its neutral answer is still due at

@@ -17,8 +17,11 @@ changelog:
   - 0.1.5: VAULT-MESSAGING 0.82.0 (owner decision 2026-11-01). N16: an
     `approval` challenge's life (up to 24 h) is not scaled by the vault;
     its challenger is service-vault, which has no `time_scale`, and its
-    approval TTL (`SV_APPROVAL_TTL`) is at most 1 h on staging; a named
-    exception to T4. The receiver's 24 h cap is a bound and not scaled
+    approval TTL (`SV_APPROVAL_TTL`) is at most 1 h on staging (the
+    ServiceVault-staging deployment config sets it, and service-vault
+    refuses a longer value on the staging channel); consistent with T4
+    (nothing between vaults is scaled). The receiver's 24 h cap is a
+    bound and not scaled
   - 0.1.4: draft, proposed for the owner's approval (VAULT-MESSAGING
     0.56.0). S17: the wallet spend cap's period (a rolling 24 hours,
     §10.18 "Spend caps") is a wait of 24 h and is divided by
@@ -128,7 +131,7 @@ scale does not divide it again (§6 T6).
 | N13 | Member API daily jobs: a cancelled account deleted after 7 days, an orphaned vault after 7 days, unverified requests after 14, declined after 30 | member API (daily at 07:00 UTC) | as listed | Deletes account data and runs once a day (§6 T8) |
 | N14 | Calls: busy for at most 12 h; ICE credentials 6 h | vault, calling service | as listed | The calling service's credentials are real time |
 | N15 | Push: blobs 90 days, renewal after 30 days, retired gateway keys 400 days | vault, gateway | as listed | The gateway's lifetimes |
-| N16 | Approval challenge life (0.82.0; the challenger's `exp`, and the receiver's cap of 24 h) | service-vault (challenger), vault (receiver) | `exp` up to 24 h; the cap is 24 h | Named exception to T4. Service-vault has no `time_scale`; on staging its approval TTL (`SV_APPROVAL_TTL`) is at most 1 h, so `exp` is short. The receiver's 24 h is a bound, not a wait. Staging to production gives at most 1 h; production to staging can hold a place up to 24 h, accepted |
+| N16 | Approval challenge life (0.82.0; the challenger's `exp`, and the receiver's cap of 24 h) | service-vault (challenger), vault (receiver) | `exp` up to 24 h; the cap is 24 h | Consistent with T4 (nothing between vaults is scaled). Service-vault has no `time_scale`; on staging the ServiceVault-staging deployment config sets its approval TTL (`SV_APPROVAL_TTL`) to at most 1 h, and service-vault refuses a longer value when it runs on the staging channel, so `exp` is short. The receiver's 24 h is a bound, not a wait. Staging to production gives at most 1 h; production to staging can hold a place up to 24 h, accepted |
 
 Shorter than an hour, and so never scaled: per-minute rate limits, the
 10-minute request windows and 5-minute approvals of access sessions, the
