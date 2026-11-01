@@ -1,9 +1,13 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.112
-date: 2026-10-31
+version: 0.1.113
+date: 2026-11-01
 changelog:
+  - 0.1.113: owner decision of 2026-11-01. "Spending limits": staging
+    keeps the production wording ("Most in any 24 hours", "Used in the
+    last 24 hours"), though staging's period is 1 hour (`time_scale`
+    24); the screen no longer says "last hour" on staging.
   - 0.1.112: erratum (wallet W1c-2a, vettid-android #238 and its
     reviews). (1) A wrong word in the phrase check **ends the check**:
     only **Show the words again** stays, and the next check draws new
@@ -4355,8 +4359,8 @@ and respect them.
   for the PIN as well as the password ("To protect your spending limit,
   enter your PIN too."); the vault answers `pin_required` otherwise.
 - **The screen** (wallet ⋯, **Spending limits**): the two limits as
-  they stand, "Used in the last 24 hours: {spent} of {limit}" (on staging
-  "last hour"), and the buttons **Lower a limit** and **Raise or remove
+  they stand, "Used in the last 24 hours: {spent} of {limit}" (staging keeps
+  this wording, though its period is 1 hour, `time_scale` 24), and the buttons **Lower a limit** and **Raise or remove
   a limit**. Lowering is a form with the new number (`wallet.caps.set`),
   confirmed with no password. Raising or removing asks for the PIN and
   the credential password (`wallet.caps.raise`, one credential

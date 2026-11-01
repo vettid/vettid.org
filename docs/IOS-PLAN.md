@@ -1,9 +1,14 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.53
-date: 2026-10-31
+version: 0.1.54
+date: 2026-11-01
 changelog:
+  - 0.1.54: owner decision of 2026-11-01 (option a). §4.16 "Save the
+    proof" uses the file exporter, not the share sheet: the member picks
+    a folder in Files and the file is written only there, as History's
+    export does; no temporary copy of the proof stays on the phone after
+    a save or a cancel.
   - 0.1.53: owner decision of 2026-10-31 (ANDROID-PLAN 0.1.109):
     decision A is **yes**. §4.16 "Screen privacy": the vote screen, its
     confirm sheet and the evidence screen join the `SecureWindow` list;
@@ -1659,8 +1664,11 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   (ID10, §6.4). The vote screen, its confirm sheet and the evidence
   screen join the `SecureWindow` list (the secure-text-field layer that
   screenshots leave out): decision A, owner 2026-10-31, yes.
-- "Save the proof" uses the share sheet with a file (`.json`), not a
-  copy to the pasteboard.
+- "Save the proof" uses the file exporter (the member picks a folder in
+  Files; the file, `.json`, is written only there, as History's export
+  does), not the share sheet and not a copy to the pasteboard. No
+  temporary copy of the proof stays on the phone after a save or a
+  cancel.
 
 ## 5. Architecture
 
