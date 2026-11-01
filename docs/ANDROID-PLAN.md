@@ -1,9 +1,23 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.111
+version: 0.1.112
 date: 2026-10-31
 changelog:
+  - 0.1.112: erratum (wallet W1c-2a, vettid-android #238 and its
+    reviews). (1) A wrong word in the phrase check **ends the check**:
+    only **Show the words again** stays, and the next check draws new
+    positions (before, the same four candidates could be tried until one
+    passed). (2) The passphrase, when the wallet has one, is shown under
+    the words with "You need this passphrase as well as the words to
+    recover this wallet.", and "Backed up" covers both. (3) The name
+    limit is 1–128 bytes of UTF-8 (the vault's item name rule), not
+    characters; a long name: "That name is too long.", a blank one:
+    "Enter a name.". (4) Texts: the password is the member's existing
+    **VettID password** ("Enter your VettID password. It protects this
+    wallet: you will need it for every payment."); under the phrase:
+    "This screen is hidden from screenshots and the app switcher." The
+    owner approves the final wording with #238's texts table.
   - 0.1.111: erratum (wallet W1c). Question 16's option (c) is done: the
     vault takes `network: "testnet4"` (VAULT-MESSAGING 0.37.0, in staging
     since release 23). The app creates and imports testnet4 wallets with
@@ -4281,10 +4295,10 @@ promoted.
 |---|---|---|
 | Wallet (drawer) | Folder list | The wallets (`wallet.list`), each a row: name, network chip ("Signet", "Testnet4"; gold-ink, never on mainnet), balance in BTC with sats underneath, "Not backed up" in the error colour while the phrase is not confirmed. The floating action button: **New wallet** / **Import a wallet**. Empty state: "No wallets yet". A test network shows a banner: "Test network: these coins have no value." Up to 16 wallets (`limit`: "Your vault holds 16 wallets, the most it can.") |
 | Wallet detail | Message detail | Balance (confirmed; "+ 0.001 incoming" while unconfirmed), the last look-up's time and the server's host, pull to refresh; **Receive** and **Send** in the pill (Send from W2); the transactions (W2, below); ⋯: Show recovery phrase (question 21), Receiving address type (P2TR "Taproot (recommended)" or P2WPKH "Native SegWit"), Spending limits (0.1.74), Chain server, Details (fingerprint, network, account paths, descriptors, each copyable), Delete wallet |
-| New wallet | — | Name (1–128 characters, no control characters), network (signet or testnet4 on staging), then the credential password ("Your password protects this wallet. You will need it for every payment."); `wallet.create` without `item`; then the phrase (below) |
+| New wallet | — | Name (1–128 bytes of UTF-8, not blank, no control characters; 0.1.112: "That name is too long." / "Enter a name."), network (signet or testnet4 on staging), then the credential password ("Your password protects this wallet. You will need it for every payment."); `wallet.create` without `item`; then the phrase (below) |
 | Import a wallet | — | Name, network, the words (12, 15, 18, 21 or 24), and an optional passphrase behind "Advanced" ("Only if you set one when the wallet was made. Letters, digits and symbols from a standard keyboard only."; printable ASCII, at most 256 bytes, as the vault requires). Each word is checked against the BIP39 English list as typed, and the checksum before anything is sent ("These words aren't a valid recovery phrase. Check each word and the order."). Then the password and `wallet.create` with `item: {mnemonic, passphrase?}`, then the scan above ("Looking for this wallet's history…") |
-| Recovery phrase | — | After creating (and from ⋯ → Show recovery phrase): `item.reveal` of the wallet's item with a reply key; the words in a numbered grid of two columns, the passphrase (if any) under it; "Write these words on paper, in order, and keep them somewhere safe. Anyone with them can take your coins. VettID never shows them to anyone else." **No copy button**; Continue goes to the check |
-| Check the phrase | — | Three positions chosen at random ("Word 4", "Word 11", "Word 19"), each picked from four candidate words or typed; a wrong one: "That's not word 11. Look at your paper again." with **Show the words again**. When all three are right: "Backed up" |
+| Recovery phrase | — | After creating (and from ⋯ → Show recovery phrase): `item.reveal` of the wallet's item with a reply key; the words in a numbered grid of two columns, the passphrase (if any) under it (0.1.112: with "You need this passphrase as well as the words to recover this wallet."); "Write these words on paper, in order, and keep them somewhere safe. Anyone with them can take your coins. VettID never shows them to anyone else." **No copy button**; Continue goes to the check |
+| Check the phrase | — | Three positions chosen at random ("Word 4", "Word 11", "Word 19"), each picked from four candidate words or typed; a wrong one: "That's not word 11. Look at your paper again." with **Show the words again** (0.1.112: a wrong word ends the check; only Show the words again stays, and the next check draws new positions). When all three are right: "Backed up" |
 | Receive | — | The address as a QR code (a BIP21 `bitcoin:` URI, upper case for a denser code) and as text in groups of four; Copy (the clipboard marked sensitive), Share; an optional amount; "New address"; the account ("Taproot address") and "Only send <network> bitcoin to this address." A wallet whose phrase is not confirmed shows the phrase check instead (question 20) |
 | Send (W2) | Compose | Below |
 | Transaction detail (W2) | Message detail | Below |
@@ -4505,9 +4519,9 @@ labels on addresses, a fiat value.
 |---|---|
 | Wallet, empty | "No wallets yet" / "Keep bitcoin in your vault. Payments need your password." |
 | Test network banner | "Test network: these coins have no value." |
-| New wallet, password | "Your password protects this wallet. You will need it for every payment." |
+| New wallet, password | (0.1.112) label "VettID password"; "Enter your VettID password. It protects this wallet: you will need it for every payment." |
 | Recovery phrase | "Write these words on paper, in order, and keep them somewhere safe. Anyone with them can take your coins. VettID never shows them to anyone else." |
-| Recovery phrase, below | "No screenshots: this screen is hidden from screenshots and the app switcher." |
+| Recovery phrase, below | (0.1.112) "This screen is hidden from screenshots and the app switcher." |
 | Check | "Which is word {n}?"; wrong: "That's not word {n}. Look at your paper again." |
 | Not backed up | "Not backed up. If your vault is lost, these coins are lost too." |
 | Import, invalid | "These words aren't a valid recovery phrase. Check each word and the order." |
