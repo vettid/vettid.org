@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.82.0
+version: 0.82.1
 date: 2026-11-01
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,10 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.82.1: editorial, 2026-11-01. The owner approved the text of §10.18
+    "Spend caps" (0.56.0) as written; the 0.56.0 entry and §10.18 no
+    longer say "awaiting approval". No rule changes. Being built in
+    vettid-vault for staging release 26
   - 0.82.0: owner decision 2026-11-01 (option a). **An `approval`
     challenge from a service may outlive a hold.** A
     `connection.authenticate.challenge` lived a fixed 10 minutes, shorter
@@ -858,8 +862,8 @@ changelog:
     an editorial note that "shortening may lock the vault at once" has
     no effect (the setting cannot change past the deadline). No other
     rule changes
-  - 0.56.0: **draft; the owner answered the proposed choices on 2026-10-23, the
-    text awaits approval** (the owner decided on 2026-10-23 to specify and build wallet spend caps before
+  - 0.56.0: the owner answered the proposed choices on 2026-10-23;
+    **text approved by the owner 2026-11-01** (0.82.1) (the owner decided on 2026-10-23 to specify and build wallet spend caps before
     the Android wallet work, W1 and W2); ANDROID-PLAN 0.1.74,
     STAGING-TIME-SCALE 0.1.4. **A vault change** (vettid-vault
     `features/wallet`), with a release, and new app screens. The
@@ -13367,7 +13371,7 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   without the credential and returns the summary that `wallet.sign`
   would sign for; apps MUST show it (the payees, amounts, change and fee)
   to the member before asking for the password.
-- **Spend caps** (0.56.0; owner decisions of 2026-10-23, text awaiting approval; the
+- **Spend caps** (0.56.0; owner decisions of 2026-10-23, text approved 2026-11-01; the
   requirement of VAULT-PLAN V4 and PROTEAN-CREDENTIAL §5). A wallet has
   two optional limits on what leaves it, set by its owner:
   - **The cap model.** `per_tx_sats`: the most one signed transaction
