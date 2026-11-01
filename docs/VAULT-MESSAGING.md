@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.82.2
+version: 0.82.3
 date: 2026-11-01
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,22 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.82.3: erratum, owner decision 2026-11-01 (option b); needs the
+    vault release (staging 26) and app text. **Twin wallets.** Releases
+    before 26 let a vault hold two wallets made from one phrase, which
+    share their account xpub (a "twin"). 0.82.2's `exists` stops new
+    ones only, and caps apply to the wallet a request names, so a twin of
+    a capped wallet had no caps: §10.18's statement that a wallet without
+    caps cannot be made from a capped wallet's phrase did not hold. Now
+    `wallet.caps.set` and `wallet.caps.raise` on a twin (and a
+    `wallet.create{caps}` that would make one) are refused with the new
+    error `duplicate_wallet`; the phrase of a twin always needs the PIN
+    to reveal, as for a capped wallet; signing is unchanged. Sections
+    changed: §10.1 (error list), §10.18 (the message table, "Revealing a
+    capped wallet's phrase", "A second wallet with the same keys", tests).
+    Apps: on `duplicate_wallet`, tell the member that the vault holds
+    another copy of this wallet, which must be deleted before limits can
+    be set (ANDROID-PLAN and IOS-PLAN: text to add, not edited here).
   - 0.82.2: erratum, 2026-11-01, from the vault implementation of
     §10.18 (vettid-vault, staging release 26); no change for apps except
     item 5, which adds a member. Clarifications to "Spend caps" (the
@@ -7077,6 +7093,10 @@ an answer to an unknown or expired id is dropped.
   - `exists`: the object already exists (`credential.create`; since
     0.10.2 also `connection.invite.accept` of a vault already connected
     or requested, with body `{connection_id}`, §6.4);
+  - `duplicate_wallet` (0.82.3): `wallet.caps.set`, `wallet.caps.raise`
+    or `wallet.create{caps}` on a wallet that shares an account xpub with
+    another wallet of the vault (a twin, §10.18); the message says to
+    delete the other wallet first;
   - `limit`: a count or size limit of the feature would be exceeded.
     Since 0.21.0 (owner decision of 2026-10-08, §15 item 29) its body
     names the limit: `{limit: <name>, max, size?}`, where `max` is the
@@ -13193,7 +13213,7 @@ app (chain source)                                   vault
 
 | Type | Request body | Response body |
 |---|---|---|
-| `wallet.create` (app) | `{name, network?, address_type?, caps?, tags?, credential, utk_id, sealed{password, item?}}`; `item` = `{mnemonic, passphrase?}` to import a phrase | `<wallet>` and `{credential, credential_version, utks}`; `limit`, `bad_request` (0.56.0: `caps` as in `wallet.caps.set`; 0.82.2: a `null` member, message `use_wallet_caps_raise`), `exists` (0.56.0: an import whose account keys equal an existing wallet's; 0.82.2: also a second non-mainnet wallet of one phrase: every network but mainnet uses coin type 1) |
+| `wallet.create` (app) | `{name, network?, address_type?, caps?, tags?, credential, utk_id, sealed{password, item?}}`; `item` = `{mnemonic, passphrase?}` to import a phrase | `<wallet>` and `{credential, credential_version, utks}`; `limit`, `bad_request` (0.56.0: `caps` as in `wallet.caps.set`; 0.82.2: a `null` member, message `use_wallet_caps_raise`), `exists` (0.56.0: an import whose account keys equal an existing wallet's; 0.82.2: also a second non-mainnet wallet of one phrase: every network but mainnet uses coin type 1), `duplicate_wallet` (0.82.3: `caps` for a wallet that would be a twin; in practice `exists` answers first) |
 | `wallet.list` (app, desktop) | `{}` | `{wallets: [<wallet>]}` |
 | `wallet.get` (app, desktop) | `{wallet_id}` | `<wallet>` |
 | `wallet.update` (app, desktop) | `{wallet_id, version, address_type?, accounts?: [{type, next_receive?, next_change?}]}` (at least one of the two; 0.37.0: `accounts`, app only) | `{version}`; `conflict`, `bad_request`, `forbidden` (`accounts` from a desktop) |
@@ -13202,8 +13222,8 @@ app (chain source)                                   vault
 | `wallet.address.used` (app, desktop) | `{wallet_id, addresses: [<address string>]}` (1–256) | `{marked, version}` |
 | `wallet.psbt.inspect` (app, desktop) | `{wallet_id, psbt}` | `<summary>` and (0.56.0) `cap`; `invalid_psbt` |
 | `wallet.sign` (app) | `{wallet_id, psbt, broadcast?, credential, utk_id, sealed{password, item_id, payload_sha256}}` | `<summary>` and `{tx, credential, credential_version, utks}`; `credential_locked`, `invalid_psbt`, `cap_exceeded` (0.56.0), `unavailable` (`broadcast` without a chain source) |
-| `wallet.caps.set` (app; 0.56.0) | `{wallet_id, version, per_tx_sats?, per_period_sats?}`; each member an integer 1–2,100,000,000,000,000; a member absent is unchanged | `{version}` (0.82.2: also when every named member equals the current value, unchanged); `conflict`, `bad_request` (a value that is not lower than the current one, or `null`: message `use_wallet_caps_raise`; also `per_tx_sats` above `per_period_sats`, and (0.82.2) neither member named), `forbidden` (a desktop) |
-| `wallet.caps.raise` (app, the holder; a credential operation; 0.56.0) | `{wallet_id, version, per_tx_sats?, per_period_sats?, credential, utk_id, sealed{pin, password, item_id, payload_sha256}}`; each member an integer or `null` (no limit); a member absent is unchanged | `{version, credential, credential_version, utks}`; `bad_pin`, `bad_password`, `backoff`, `conflict`, `bad_request` (nothing is raised), `forbidden` |
+| `wallet.caps.set` (app; 0.56.0) | `{wallet_id, version, per_tx_sats?, per_period_sats?}`; each member an integer 1–2,100,000,000,000,000; a member absent is unchanged | `{version}` (0.82.2: also when every named member equals the current value, unchanged); `conflict`, `duplicate_wallet` (0.82.3), `bad_request` (a value that is not lower than the current one, or `null`: message `use_wallet_caps_raise`; also `per_tx_sats` above `per_period_sats`, and (0.82.2) neither member named), `forbidden` (a desktop) |
+| `wallet.caps.raise` (app, the holder; a credential operation; 0.56.0) | `{wallet_id, version, per_tx_sats?, per_period_sats?, credential, utk_id, sealed{pin, password, item_id, payload_sha256}}`; each member an integer or `null` (no limit); a member absent is unchanged | `{version, credential, credential_version, utks}`; `bad_pin`, `bad_password`, `backoff`, `conflict`, `duplicate_wallet` (0.82.3), `bad_request` (nothing is raised), `forbidden` |
 | `wallet.history` (app, desktop) | `{wallet_id, limit?}` (1–200, default 50) | `{transactions: [{txid, at, sending_sats, change_sats, fee_sats, payees: [{address, amount_sats}], connection_id?, invocation_id?}]}`, newest first |
 | `wallet.balance` (app, desktop) | `{wallet_id}` | `{confirmed_sats, unconfirmed_sats}`; `unavailable` without a vault-side chain source (every release) |
 
@@ -13571,8 +13591,9 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     owner check checks them (§3.6.1; a wrong one is a failed check) and
     not itself an owner check; without `pin` it is `bad_request`
     (message `pin_required`). A wallet without caps reveals with the
-    password alone. A `pin` that is present is checked as above whatever
-    the wallet's caps.
+    password alone, except a twin (below, 0.82.3), whose phrase always
+    needs the PIN as a capped wallet's does. A `pin` that is present is
+    checked as above whatever the wallet's caps.
   - **A second wallet with the same keys.** `wallet.create` refuses an
     import whose account keys equal those of an existing wallet (code
     `exists`), so a wallet without caps cannot be made from a capped
@@ -13581,6 +13602,19 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     most one non-mainnet wallet in a vault: the second import is
     `exists`. For example, testnet3 (`testnet`) and testnet4 share their
     keys; testnet3 is legacy and the app no longer offers it.
+  - **Twin wallets** (0.82.3; owner decision 2026-11-01, option b).
+    Releases before 26 let a vault hold two wallets made from one phrase.
+    A wallet that shares an account xpub with another wallet in the
+    vault is a **twin**. Caps apply to the wallet a request names, so a
+    twin of a capped wallet would be uncapped. Therefore
+    `wallet.caps.set`, `wallet.caps.raise` and `wallet.create{caps}` on a
+    twin are refused with `duplicate_wallet`, the message saying to
+    delete the other wallet first (a `wallet.create` that would make a
+    twin is already `exists`, above). The phrase of a twin always needs
+    the PIN to reveal (`item.reveal`, "Revealing a capped wallet's
+    phrase"). Signing is unchanged: a twin has no caps. The app, on
+    `duplicate_wallet`, tells the member that the vault holds another
+    copy of this wallet, which must be deleted before limits can be set.
   - **`wallet.psbt.inspect`** (without the credential) also returns
     `cap: {ok, reason?, limit_sats?, remaining_sats?, allowed_after?}`: whether
     `wallet.sign` would pass the caps now, and if not why, with the
@@ -13678,6 +13712,11 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     §16; `wallet.psbt.inspect` returns `cap` and writes nothing.
   - A duplicate import (same account keys) is `exists`; the ledger is
     kept with no caps set and counts after a cap is set.
+  - A twin from an older release (two wallets with one account xpub):
+    `wallet.caps.set` and `wallet.caps.raise` on either are
+    `duplicate_wallet`, `item.reveal` of either without `pin` is
+    `pin_required`, `wallet.sign` is unchanged; after the other wallet is
+    deleted, caps can be set.
   - State: caps and ledger survive lock and unlock, a phone transfer
     and a recovery; `credential.reset` and a wallet's deletion remove
     them; a wallet created before this release has no caps and signs as
