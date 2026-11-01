@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.81.6
-date: 2026-10-31
+version: 0.82.0
+date: 2026-11-01
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -26,8 +26,27 @@ related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.6; D3, D4, D5; §4 the automation CA)
   - VAULT-HOST-PROTOCOL.md (0.1.16; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
-  - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
+  - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.82.0: owner decision 2026-11-01 (option a). **An `approval`
+    challenge may outlive a hold.** A `connection.authenticate.challenge`
+    lived a fixed 10 minutes, shorter than a hold (§3.6.3), whose queued
+    asks "keep their own expiries"; so a challenge sent to a held vault
+    expired before the member could pass the owner check and was never
+    seen (staging real-ballot test, 2026-10-31: a service-vault approval
+    reached an admin whose vault was held, and only an operator's reminder
+    got it answered). Now a challenge with `purpose: "approval"` MAY carry
+    `until` (RFC 3339), the approval's own expiry, and the challenger sets
+    `exp` = min(`until`, now + 24 h), never below 10 minutes; every other
+    challenge keeps exactly 10 minutes. A receiver accepts an approval
+    challenge whose `exp` is at most 24 h plus 5 minutes ahead and clamps
+    a longer one. On staging the 24 h cap is divided by `time_scale`
+    (1 h at 24; STAGING-TIME-SCALE S18). Sections changed: §10.4
+    (the table, "A challenge lives", new bullet "Long-lived approval
+    challenges"), §10.4.1 (constants), §3.6.3 (queued asks), §10.4.2
+    (what is listed). **Needs a vault release; service-vault sends
+    `until`** (only for approvals). A vault before it ignores `until`
+    and keeps 10 minutes, the old behaviour.
   - 0.81.6: erratum (review of vettid-vault #176). §10.19.8 "Shape
     checks before sending": (1) the vault parses the whole request
     strictly (no duplicate member names at any depth, depth at most 32,
@@ -4211,7 +4230,9 @@ the hold off, `"held"` with it on.
   request stays pending; in-person auto-approval does not apply while
   held), grant and share requests, critical-item use requests, actions
   invoked in an `ask` mode, introductions and location requests. They
-  keep their own expiries, which run during the hold;
+  keep their own expiries, which run during the hold (an `approval`
+  challenge's may be up to 24 h, so it can outlive the hold; §10.4,
+  "Long-lived approval challenges", 0.82.0);
 - clone detection and its alarm: a `credential.alarm`, its feed item and
   its `sync.event` are delivered while held (§3.5.9).
 
@@ -7486,7 +7507,7 @@ vault signs a fresh challenge with the member's **credential key**
 | Type | Request body | Response / event body |
 |---|---|---|
 | `connection.authenticate.request` (app, desktop) | `{connection_id, context?, purpose?, match_code?}` | `{request_id, exp}` |
-| `connection.authenticate.challenge` (V↔V) | — | `{request_id, nonce, context?, purpose?, match_code?}`, with `exp` |
+| `connection.authenticate.challenge` (V↔V) | — | `{request_id, nonce, context?, purpose?, match_code?, until?}`, with `exp` (`until` only with `purpose: "approval"`, 0.82.0) |
 | `connection.authenticate.pending` (V→D, apps and desktops) | — | `{connection_id, request_id, context?, purpose?, match_code?, exp}` |
 | `connection.authenticate.approve` (app) | `{request_id}` | `{}`; `credential_locked` outside the unlock window; `not_found` for an unknown, decided, expired or withdrawn `request_id` (named in 0.80.0) |
 | `connection.authenticate.deny` (app, desktop) | `{request_id}` | `{}`; `not_found` as for `.approve` |
@@ -7498,7 +7519,8 @@ vault signs a fresh challenge with the member's **credential key**
 | `connection.authenticate.list` (app, desktop) | `{}` | `{states: [{connection_id, key?, verified_at?, last_result?, last_at?}]}` |
 
 - `nonce` is 32 random bytes; `context` is at most 256 bytes and shown to
-  the member. A challenge lives 10 minutes (`exp`). A vault keeps at most
+  the member. A challenge lives 10 minutes (`exp`), except an `approval`
+  challenge (0.82.0, below). A vault keeps at most
   8 outstanding challenges it sent per connection (`limit`) and 4 it
   received (more are dropped and audited; a challenge the challenger
   withdrew no longer counts toward either, 0.80.0, below). Since 0.23.0 a received
@@ -7680,6 +7702,63 @@ vault signs a fresh challenge with the member's **credential key**
   before. A desktop's deny of a `signin` challenge is labelled "Not me"
   too. On the requesting side, apps show a refusal neutrally, as
   §10.4.1 says, whatever the purpose.
+- **Long-lived approval challenges** (0.82.0; owner decision
+  2026-11-01, option a). A vault held for its owner check (§3.6.3)
+  queues asks and lets their expiries run, so a 10-minute challenge sent
+  to a held vault expired before the member could pass the check, and
+  was never seen. An `approval` challenge now may live as long as the
+  approval it asks about, at most 24 hours.
+  - **Challenger.** A challenge with `purpose: "approval"` MAY carry
+    `until`, an RFC 3339 time in UTC (`Z`), the approval's own expiry.
+    The challenger sets `exp` = min(`until`, now + 24 h), and never
+    below now + 10 minutes (an `until` that is sooner, or not a valid
+    time, is ignored and `exp` is now + 10 minutes). `until` is a hint of
+    the challenger's own choice; the receiver relies on `exp` only. A
+    challenge with `purpose: "signin"`, no purpose or an unknown one
+    carries no `until` and has `exp` = now + 10 minutes, as before. The
+    challenger keeps the challenge outstanding until `exp`, answered or
+    withdrawn, as before.
+  - **Receiver.** It reads `until` for nothing. For an `approval`
+    challenge it accepts an `exp` at most 24 hours plus 5 minutes (for
+    clock skew, as the presence rule of §10.17 allows) ahead of its own
+    clock, and **clamps** a later one to its own now + 24 hours; it does
+    not drop it. Clamping keeps a real approval from a challenger with a
+    fast clock answerable, and the cap is the same bound the challenger
+    obeys, so a hostile peer gains only what a compliant one has. For any
+    other challenge the bound is 10 minutes plus the same 5, clamped the
+    same way, so no peer can make a sign-in outlive its 10 minutes.
+    An `exp` already past is dropped and audited as now.
+  - **Limits.** A long-lived challenge holds one of the 8 pending asks
+    (§10.4.1), and one of the 4 received and 8 sent outstanding
+    challenges (above), for longer: up to 24 hours, not 10 minutes. The
+    rate bucket (5 `approval` challenges per 24 hours) and the 7-day
+    decline cooldown are unchanged. `connection.authenticate.withdraw`
+    (below) frees the places as before; a lock or a hold keeps the
+    challenge, under the rules for held asks (§3.6.3, §10.4.1).
+  - **After the hold.** The challenge is an ask of the member's vault
+    like any other; once the member passes the owner check it is in
+    `pending.list` (§10.4.2) while it is open and not expired, and the
+    apps show it as before.
+  - **A suppressed challenge.** Its neutral answer is still due at
+    min(now + d, `exp` − 1 minute), d drawn from 1 to 20 minutes
+    (§10.4.1). With a long `exp` that is now + d; it does not wait for
+    `exp`, so the challenger learns nothing more from the longer life,
+    and the 16 held answers per connection are held for at most 20
+    minutes as before.
+  - **Staging** (STAGING-TIME-SCALE S18). The 24-hour cap is a wait of
+    1 hour or more, so the challenger divides it by `time_scale` when
+    the challenge is created (1 hour at 24); the receiver's bound above
+    stays 24 hours plus 5 minutes (a bound, not a wait, so it is not
+    scaled and accepts a challenge from a vault with any scale). The
+    10-minute minimum is not scaled.
+  - **Older vaults.** A vault before this release ignores `until` (an
+    unknown member, §5.3) and keeps 10 minutes; as a challenger it sends
+    no `until`. A receiver before this release does not clamp, and
+    keeps the challenge to its `exp`. Both are the old behaviour. **Needs
+    a vault release**; the service sends `until` only for approvals
+    (service-vault). The longer life reaches a member only when both
+    vaults have the release.
+
 - **Withdrawing a challenge** (0.80.0; owner decision 2026-10-30,
   vettid.org #465, §15 item 47). Until 0.80.0 a challenge stayed an open
   ask in the member's vault until the member decided it or its `exp`
@@ -7852,7 +7931,7 @@ version may make them settings):
 |---|---|
 | Decline cooldown | 7 days |
 | Ask rate | 5 asks per connection per 24 hours (since 0.65.0 per rate bucket: the general bucket and the `approval` bucket each) |
-| Pending asks | 8 per connection, all kinds together; a withdrawn one frees its place (0.80.0) |
+| Pending asks | 8 per connection, all kinds together; a withdrawn one frees its place (0.80.0); an `approval` challenge holds its place for up to 24 hours (0.82.0) |
 | Sign-in decline cooldown (0.65.0) | 1 hour |
 | Sign-in ask rate (0.65.0) | 10 `signin` challenges per connection per 24 hours |
 | Sign-in pending (0.65.0) | 2 `signin` challenges per connection, within the 8; a withdrawn one frees its place (0.80.0) |
@@ -8078,7 +8157,8 @@ which are not asks). Five kinds arrived only as events and were lost;
 
 - **What is listed.** Every ask of these kinds that the vault would
   still accept a decision on: received, not yet decided by any device,
-  not expired and not withdrawn (a challenger's
+  not expired (an `approval` challenge's `exp` may be up to 24 h away,
+  so it is listed after a hold, §10.4, 0.82.0) and not withdrawn (a challenger's
   `connection.authenticate.withdraw`, §10.4, 0.80.0; a suppressed ask,
   §10.4.1, was never sent and is never listed). The `body` is the event's body as the
   vault sent it, including any member a later release adds to that
