@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.82.1
+version: 0.82.2
 date: 2026-11-01
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,27 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.82.2: erratum, 2026-11-01, from the vault implementation of
+    §10.18 (vettid-vault, staging release 26); no change for apps except
+    item 5, which adds a member. Clarifications to "Spend caps" (the
+    lead's rulings within the owner's approved text): (1) testnet3
+    (`testnet`) and testnet4 wallets share their account keys, so one
+    vault cannot hold both networks of one phrase and the second import
+    is `exists` (testnet3 is legacy; the app no longer offers it);
+    (2) `wallet.caps.set` that names neither member is `bad_request`;
+    (3) a `wallet.caps.set` whose every named member equals the current
+    value answers `{version}` unchanged, with no version bump, no audit
+    entry and no `wallet.changed`; (4) the order of checks for set and
+    raise: `conflict`, then the value rules, then, for raise, the
+    `payload_sha256` binding; (5) the `cap` object of
+    `wallet.psbt.inspect` is `{ok, reason?, limit_sats?, remaining_sats?,
+    allowed_after?}`, adding `limit_sats` (the fields of `cap_exceeded`),
+    fixed in the field list of §10.18; (6) `wallet.create{caps}` with a
+    `null` member is `bad_request` with message
+    `use_wallet_caps_raise`, as for set; (7) on staging the period is
+    86,400 / `time_scale` rounded up to whole seconds; (8) on staging
+    the ledger drops entries at each write against the current period,
+    so a later change of `time_scale` does not bring them back.
   - 0.82.1: editorial, 2026-11-01. The owner approved the text of §10.18
     "Spend caps" (0.56.0) as written; the 0.56.0 entry and §10.18 no
     longer say "awaiting approval". No rule changes. Being built in
@@ -13169,7 +13190,7 @@ app (chain source)                                   vault
 
 | Type | Request body | Response body |
 |---|---|---|
-| `wallet.create` (app) | `{name, network?, address_type?, caps?, tags?, credential, utk_id, sealed{password, item?}}`; `item` = `{mnemonic, passphrase?}` to import a phrase | `<wallet>` and `{credential, credential_version, utks}`; `limit`, `bad_request` (0.56.0: `caps` as in `wallet.caps.set`), `exists` (0.56.0: an import whose account keys equal an existing wallet's) |
+| `wallet.create` (app) | `{name, network?, address_type?, caps?, tags?, credential, utk_id, sealed{password, item?}}`; `item` = `{mnemonic, passphrase?}` to import a phrase | `<wallet>` and `{credential, credential_version, utks}`; `limit`, `bad_request` (0.56.0: `caps` as in `wallet.caps.set`; 0.82.2: a `null` member, message `use_wallet_caps_raise`), `exists` (0.56.0: an import whose account keys equal an existing wallet's; 0.82.2: also a `testnet` and a `testnet4` wallet of one phrase) |
 | `wallet.list` (app, desktop) | `{}` | `{wallets: [<wallet>]}` |
 | `wallet.get` (app, desktop) | `{wallet_id}` | `<wallet>` |
 | `wallet.update` (app, desktop) | `{wallet_id, version, address_type?, accounts?: [{type, next_receive?, next_change?}]}` (at least one of the two; 0.37.0: `accounts`, app only) | `{version}`; `conflict`, `bad_request`, `forbidden` (`accounts` from a desktop) |
@@ -13178,7 +13199,7 @@ app (chain source)                                   vault
 | `wallet.address.used` (app, desktop) | `{wallet_id, addresses: [<address string>]}` (1–256) | `{marked, version}` |
 | `wallet.psbt.inspect` (app, desktop) | `{wallet_id, psbt}` | `<summary>` and (0.56.0) `cap`; `invalid_psbt` |
 | `wallet.sign` (app) | `{wallet_id, psbt, broadcast?, credential, utk_id, sealed{password, item_id, payload_sha256}}` | `<summary>` and `{tx, credential, credential_version, utks}`; `credential_locked`, `invalid_psbt`, `cap_exceeded` (0.56.0), `unavailable` (`broadcast` without a chain source) |
-| `wallet.caps.set` (app; 0.56.0) | `{wallet_id, version, per_tx_sats?, per_period_sats?}`; each member an integer 1–2,100,000,000,000,000; a member absent is unchanged | `{version}`; `conflict`, `bad_request` (a value that is not lower than the current one, or `null`: message `use_wallet_caps_raise`; also `per_tx_sats` above `per_period_sats`), `forbidden` (a desktop) |
+| `wallet.caps.set` (app; 0.56.0) | `{wallet_id, version, per_tx_sats?, per_period_sats?}`; each member an integer 1–2,100,000,000,000,000; a member absent is unchanged | `{version}` (0.82.2: also when every named member equals the current value, unchanged); `conflict`, `bad_request` (a value that is not lower than the current one, or `null`: message `use_wallet_caps_raise`; also `per_tx_sats` above `per_period_sats`, and (0.82.2) neither member named), `forbidden` (a desktop) |
 | `wallet.caps.raise` (app, the holder; a credential operation; 0.56.0) | `{wallet_id, version, per_tx_sats?, per_period_sats?, credential, utk_id, sealed{pin, password, item_id, payload_sha256}}`; each member an integer or `null` (no limit); a member absent is unchanged | `{version, credential, credential_version, utks}`; `bad_pin`, `bad_password`, `backoff`, `conflict`, `bad_request` (nothing is raised), `forbidden` |
 | `wallet.history` (app, desktop) | `{wallet_id, limit?}` (1–200, default 50) | `{transactions: [{txid, at, sending_sats, change_sats, fee_sats, payees: [{address, amount_sats}], connection_id?, invocation_id?}]}`, newest first |
 | `wallet.balance` (app, desktop) | `{wallet_id}` | `{confirmed_sats, unconfirmed_sats}`; `unavailable` without a vault-side chain source (every release) |
@@ -13378,7 +13399,7 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     may take out of the wallet. `per_period_sats`: the most the wallet's
     signed transactions may take out within the **period**, a rolling
     24 hours (`period_seconds` 86,400; divided by `time_scale` on
-    staging, so 3,600 at 24, STAGING-TIME-SCALE S17). Both are integers
+    staging, so 3,600 at 24, STAGING-TIME-SCALE S17; rounded up to whole seconds, 0.82.2). Both are integers
     of **satoshis**, 1–2,100,000,000,000,000, or absent (no limit);
     when both are set `per_tx_sats` MUST NOT exceed `per_period_sats`.
     The caps belong to **one wallet** and are kept in the wallet's
@@ -13387,7 +13408,8 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     has no price source).
   - **Defaults** (owner decision of 2026-10-23). A wallet has no caps
     until its owner sets them (`wallet.create{caps}` or
-    `wallet.caps.set`). The vault never invents a number; the app asks at
+    `wallet.caps.set`; a `null` member of `caps` in `wallet.create` is
+    `bad_request`, message `use_wallet_caps_raise`, as for set, 0.82.2). The vault never invents a number; the app asks at
     creation, and a mainnet wallet cannot skip the question
     (ANDROID-PLAN). `<wallet>.caps` (in a vault that implements caps) is
     always present: `per_tx_sats` and
@@ -13397,7 +13419,12 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     versioned change (`conflict` on a stale `version`, §10.1). It may
     only **lower**: a member is accepted if it sets a cap where there
     was none or sets a smaller value; a value equal to the current one
-    changes nothing. A `null`, a larger value or `per_tx_sats` above
+    changes nothing. (0.82.2) A request that names neither member is
+    `bad_request`. One whose every named member equals the current value
+    answers `{version}` unchanged: no version bump, no audit entry and no
+    `wallet.changed`. The checks run in this order (also for raise): a
+    stale `version` is `conflict` first, then the value rules, then, for
+    raise, the `payload_sha256` binding. A `null`, a larger value or `per_tx_sats` above
     `per_period_sats` is `bad_request` (message `use_wallet_caps_raise`
     for the first two). It audits
     `wallet.caps_lowered` (`ref` = `wallet_id`) and sends
@@ -13483,7 +13510,9 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     (a signed transaction the app drops uses the allowance until the
     period passes). A retried `wallet.sign` is answered from the
     response cache and counts once. The total is computed on read; entries older than the period are
-    dropped at the next write; at most 200 are
+    dropped at the next write (on staging, against the period then
+    current, so a later change of `time_scale` does not bring a dropped
+    entry back; 0.82.2); at most 200 are
     kept, and a 201st merges the two oldest into one with the later
     time (the allowance is never given back early). `<wallet>.caps`
     reports `spent_sats` (the ledger's total within the period) and
@@ -13494,7 +13523,8 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     table). An entry counts while now < `at_ms` + period. The vault never
     rewrites `at_ms`, so after a clock step back a future entry counts
     for longer, never shorter. On staging the
-    period is `86,400 / time_scale` seconds, divided when the check runs
+    period is `86,400 / time_scale` seconds, rounded up to whole seconds
+    (0.82.2), divided when the check runs
     (the ledger holds absolute times), so a change of scale moves no
     entry. In production the scale is 1.
   - **Other wallets.** Each wallet has its own caps and ledger. The most
@@ -13537,9 +13567,12 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   - **A second wallet with the same keys.** `wallet.create` refuses an
     import whose account keys equal those of an existing wallet (code
     `exists`), so a wallet without caps cannot be made from a capped
-    wallet's phrase inside the same vault.
+    wallet's phrase inside the same vault. (0.82.2) A `testnet` (testnet3)
+    and a `testnet4` wallet share their account keys (§10.18 "Networks"),
+    so one vault cannot hold both networks of one phrase: the second
+    import is `exists`. testnet3 is legacy; the app no longer offers it.
   - **`wallet.psbt.inspect`** (without the credential) also returns
-    `cap: {ok, reason?, remaining_sats?, allowed_after?}`: whether
+    `cap: {ok, reason?, limit_sats?, remaining_sats?, allowed_after?}`: whether
     `wallet.sign` would pass the caps now, and if not why, with the
     fields of `cap_exceeded`; the app shows it before it asks for the
     password. It changes nothing and writes no audit entry. (0.78.1) A
