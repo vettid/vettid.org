@@ -1,9 +1,33 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.113
-date: 2026-11-01
+version: 0.1.114
+date: 2026-11-02
 changelog:
+  - 0.1.114: erratum (wallet W2-2, vettid-android #254; owner decisions
+    of 2026-11-02). (1) "Sending" step 6 said that of two sends "only
+    one can ever confirm". That holds only while the phone still has the
+    signed transaction: after a lock or a restart a new send can pick
+    other coins and both can go through. Replaced by a check before a
+    new payment (new paragraph "Recent payments"): the `wallet.history`
+    entries of the last 24 hours on the vault's clock (or without a
+    time; at most 10), each asked of the chain server with
+    `GET /tx/{txid}`. The worst answer wins: not found ("may have gone
+    through"), then unreadable, then unconfirmed ("waiting"); each is a
+    hold that needs **Send anyway**. `prepareSend` refuses until the
+    check has run for the wallet in this session (or ran out of time and
+    was shown as unreadable) and any hold was acknowledged with **Send
+    anyway** (memory only, cleared at lock). Confirmed payments with a
+    time give a soft note naming the newest, not a hold. (2) Step 1: a
+    `bitcoin:` link with a `req-*` parameter, a bad amount or two
+    amounts is refused whole (BIP21): nothing is filled in, and the
+    address and amount fields are cleared; a valid link without an
+    amount clears the amount field, and any link turns **Send all** off.
+    (3) Step 2: a fee above 10% of the amount sent asks, naming the fee;
+    the review asks again when the vault's fee is over 10% and more than
+    1.5 times the fee agreed to. Typing an amount, a link that sets or
+    clears the amount, a refused link, or changing the fee, **Send all**
+    or "Include unconfirmed coins" forgets that agreement.
   - 0.1.113: owner decision of 2026-11-01. "Spending limits": staging
     keeps the production wording ("Most in any 24 hours", "Used in the
     last 24 hours"), though staging's period is 1 hour (`time_scale`
@@ -4383,20 +4407,38 @@ and respect them.
 
 **Sending** (W2).
 
-1. **Who and how much.** Paste, type or scan (QR, a BIP21 URI's
-   address and amount; other URI parameters ignored) the address. The
-   app checks it for the wallet's network first: a mainnet address in a
-   test wallet (or the reverse) is refused, "This is a <network>
-   address. This wallet is on <network>." The amount in BTC or sats,
-   or **Send all**. One payee per send in W2.
-2. **Fee.** From the server's `/fee-estimates`: **Slow** (about a
-   day, 144 blocks), **Normal** (about an hour, 6), **Fast** (about 20
+1. **Who and how much.** Paste, type or scan (QR) the address. From a
+   BIP21 URI the app takes the address and amount and ignores other
+   parameters, but refuses the whole link if it has a `req-*` parameter
+   (0.1.114: the app understands none), a bad amount (negative, not a
+   number, more than 8 decimals) or two amounts: nothing is filled in,
+   and the address and amount fields are cleared ("This payment link has
+   something VettID can't safely use, so nothing was filled in. Check it
+   with whoever sent it."). A valid link without an amount clears the
+   amount field, and any link turns **Send all** off. The app checks the
+   address for the wallet's network first: a mainnet address in a test
+   wallet (or the reverse) is refused, "This is a <network> address.
+   This wallet is on <network>." The amount in BTC or sats, or **Send
+   all**. One payee per send in W2.
+2. **Fee.** From the server's `/fee-estimates`: **Slow** (about a day,
+   144 blocks), **Normal** (about an hour, 6), **Fast** (about 20
    minutes, 2), and **Custom** in sat/vB. Never below 1 sat/vB, never
    above 1,000 sat/vB (the vault's cap, `fee_rate`), and above twice the
    Fast rate the app asks "This fee is much higher than needed right
-   now. Pay it anyway?". The transaction signals replacement (BIP125,
-   sequence `0xfffffffd`) so that a later version can raise a fee; W2
-   has no fee bump.
+   now. Pay it anyway?". A fee above 10% of what the payee receives
+   (0.1.114) asks too, naming the fee: "The fee, {fee} sats, is more
+   than 10% of what you're sending. Pay it anyway?" (when both apply,
+   one question: this one). Before the build it is asked when the rate
+   times 110 vB (the smallest transaction) is already over 10% of an
+   amount entered (typed or from a link), "The fee, at least {fee} sats,
+   …". At the review it is asked from the vault's fee (so also for
+   **Send all**), unless the member agreed to a 10% question before and
+   the vault's fee is at most 1.5 times the fee agreed to; typing an
+   amount, a link that sets or clears the amount, a refused link, or
+   changing the fee, **Send all** or "Include unconfirmed coins" forgets
+   that agreement. **Cancel** at the review goes back to the form. The
+   transaction signals replacement (BIP125, sequence `0xfffffffd`) so
+   that a later version can raise a fee; W2 has no fee bump.
 3. **Building.** Coin selection over both accounts' confirmed coins
    (unconfirmed coins only with "Include unconfirmed coins", off by
    default), branch and bound and then largest first; change to the
@@ -4430,9 +4472,37 @@ and respect them.
 6. **Broadcast.** `POST /tx` with the returned `tx`. Success: "Sent.
    It will confirm in about <time>." Failure: the signed transaction
    stays in memory and **Try again** resends it (also after choosing
-   another server); it is dropped at lock, and a later send simply
-   spends the same coins again (only one of two can ever confirm). The
-   app never writes `tx` to disk.
+   another server); it is dropped at lock, and a later send can pick
+   other coins, so both can go through (0.1.114: before, this said only
+   one of two can ever confirm, which holds only while the phone still
+   has the transaction; see "Recent payments"). The app never writes
+   `tx` to disk.
+
+**Recent payments** (0.1.114). When Send opens and nothing else holds it
+(and again whenever such a hold clears), the app reads the vault's
+`wallet.history` for the wallet and takes the entries from the last 24
+hours on the vault's clock (an entry without a time counts as recent),
+at most 10, and asks the chain server about each with `GET /tx/{txid}`.
+Review is off while this runs ("Checking your recent payments…"), for at
+most 20 seconds. The worst answer wins: not found ("may have gone
+through": the broadcast got no answer, or never left the phone), then
+unreadable (the history, the vault's clock or the chain server could not
+be read, an answer did not parse, the 20 seconds ran out, or the check
+could not start: the wallet's privacy note not yet shown, its network
+unknown, or its chain server not ready), then unconfirmed ("waiting for
+confirmation"). Each of these is a hold, and a new payment needs **Send
+anyway** first. The "may have gone through" and "waiting" notices name
+the newest such payment (one without a time counts as the newest, "at an
+unknown time") and how many more are in the same state; "couldn't check"
+names none. `prepareSend` refuses (`RecentUnchecked`) until the check
+has run for the wallet in this session (or ran out of time and was shown
+as unreadable) and any hold it found was acknowledged with **Send
+anyway**, which cannot be skipped; every new check needs its own
+acknowledgement. Both are kept in memory only and cleared at lock. When
+nothing is held, the confirmed payments that have a time give one soft
+note naming the newest ("A payment you approved went through at {time}:
+{amount} to {address}."); it is not a hold, needs no acknowledgement,
+and Dismiss hides it for the visit.
 
 **`cap_exceeded` texts** (0.1.74; for the owner's approval; the vault
 refuses before it opens the password, so nothing was signed and nothing
