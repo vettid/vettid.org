@@ -4405,16 +4405,15 @@ and respect them.
 
 1. **Who and how much.** Paste, type or scan (QR) the address. From a
    BIP21 URI the app takes the address and amount and ignores other
-   parameters, but refuses the whole link if it has a `req-*`
-   parameter (0.1.114: the app understands none), a bad amount
-   (negative, not a number, more than 8 decimals) or two amounts:
-   nothing is filled in, and the address and amount fields are
-   cleared ("This payment link has something VettID can't safely use,
-   so nothing was filled in. Check it with whoever sent it."). The app checks it for the wallet's network
+   parameters, but refuses the whole link if it has a `req-*` parameter
+   (0.1.114: the app understands none), a bad amount (negative, not a
+   number, more than 8 decimals) or two amounts: nothing is filled in,
+   and the address and amount fields are cleared ("This payment link has
+   something VettID can't safely use, so nothing was filled in. Check it
+   with whoever sent it."). The app checks it for the wallet's network
    first: a mainnet address in a test wallet (or the reverse) is
-   refused, "This is a <network> address. This wallet is on
-   <network>." The amount in BTC or sats, or **Send all**. One payee
-   per send in W2.
+   refused, "This is a <network> address. This wallet is on <network>."
+   The amount in BTC or sats, or **Send all**. One payee per send in W2.
 2. **Fee.** From the server's `/fee-estimates`: **Slow** (about a
    day, 144 blocks), **Normal** (about an hour, 6), **Fast** (about 20
    minutes, 2), and **Custom** in sat/vB. Never below 1 sat/vB, never
