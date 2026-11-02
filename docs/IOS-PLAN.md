@@ -2250,12 +2250,12 @@ Apple push this works only while the app is open:
 - **When:** only on an item's arrival (a live event or a catch-up,
   never a full read, so nothing missed while the vault was locked is
   replayed), while the app is active, the vault open and not held or
-  due, the item active, permission granted, and neither the
-  Notifications list nor the item's own screen in front. An arrival
-  while the app is inactive (Control Center, a call, the app lock's
-  prompt) posts nothing; the item is still in the list and on the
-  bell. One notification per item, updated in place without alerting
-  again.
+  due (and no check after a cancelled recovery showing), the item
+  active, permission granted, and neither the Notifications list nor
+  the item's own screen in front. An arrival while the app is
+  inactive (Control Center, a call, the app lock's prompt) posts
+  nothing; the item is still in the list and on the bell. One
+  notification per item, updated in place without alerting again.
 - **In front:** a banner with its category's sound; Vault activity
   and an update in place go to Notification Center's list only.
 - **When they go:** an item read, archived or deleted on any device
