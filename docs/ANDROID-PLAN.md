@@ -13,10 +13,9 @@ changelog:
     (#252, #254), W2-3 (the transactions) still not built. Left out by
     the PRs and noted in the text: the Votes line of "What this service
     can ask"; "Unlock your vault to call"; the "(connection lost)" on a
-    conversation's call line; the note on confirmed payments in "Recent
-    payments". §4 "Sign-in match code", "Withdrawn requests", "Votes",
-    "Devices & agents" and "Wallet, presence, location and video", and
-    the status text of §6, were changed.
+    conversation's call line. §4 "Sign-in match code", "Withdrawn
+    requests", "Votes", "Devices & agents" and "Wallet, presence,
+    location and video", and the status text of §6, were changed.
   - 0.1.114: erratum (wallet W2-2, vettid-android #254; owner decisions
     of 2026-11-02). (1) "Sending" step 6 said that of two sends "only
     one can ever confirm". That holds only while the phone still has the
@@ -4166,8 +4165,8 @@ the owner's rewording). The app's side of VAULT-MESSAGING
 The vault side of the first three is built (vettid-vault `main`,
 features `wallet`, `presence` and `location`, on in staging and off in
 production, VAULT-MESSAGING §11.10.8) but has never been used from a
-phone. Of this section, only the wallet is built in the app so far (W0
-to W2-2, see its PRs below); presence, location and video are not. The
+phone. Of this section, only the wallet is built in the app so far (W1
+to W2-2; the W0 spikes were not merged, see its PRs below); presence, location and video are not. The
 owner decided on
 2026-10-17 the wallet's networks on staging, that the chain source is
 the member's choice, and the order (D8); the other choices are open
@@ -4696,9 +4695,8 @@ spending limits at creation and import, Import a wallet and the PIN for
 a capped phrase (#247, W1d-1); and the Spending limits screen with a
 reset of unreadable wallet settings on the phone (#248, W1d-2; the
 reset is not in the text above). W2: the core of sending, no screens
-(#252, W2-1) and the send screens (#254, W2-2). The description of #254
-leaves out the note on confirmed payments of "Recent payments", which it
-says waits for the owner's answer. **W2-3 (the transactions list and the
+(#252, W2-1) and the send screens (#254, W2-2), with the note on
+confirmed payments of "Recent payments". **W2-3 (the transactions list and the
 transaction detail) is not built.**
 
 #### Presence
@@ -5122,8 +5120,7 @@ has no Call, message or share rows; an unknown `peer_kind` is a person; a
 ### Sign-in match code (0.1.100)
 
 *Owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0 §10.4, §15 item
-46). Draft texts for the owner. Built (vettid-android #229,
-staging release 25).*
+46). Draft texts for the owner. Built (vettid-android #229).*
 A sign-in challenge (`purpose: "signin"`) may carry `match_code`, 2 or
 3 digits that the service's sign-in screen shows too.
 
@@ -5177,8 +5174,7 @@ the notification text carries no code; the block has no check mark or success st
 
 *Owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0 §10.4
 "Withdrawing a challenge", §15 item 47; vettid.org #465). Texts approved by
-the owner, 2026-10-30. Built (vettid-android #229, staging release
-25).* A service that no longer
+the owner, 2026-10-30. Built (vettid-android #229).* A service that no longer
 accepts a sign-in or approval challenge (a sign-in superseded by a newer
 one, an approval decided or cancelled) tells the member's vault, which
 closes the ask. The member must see that it closed, not a request that
@@ -5247,7 +5243,7 @@ error colour.
 Built (vettid-android #230, 0.1.102 to 0.1.108; #236 follows: one
 malformed item in the votes site's data no longer stops the rest). Left
 out of #230: the addition to "What this service can ask" (the Service
-connections screens are not built); the unlock window prompt is built
+connections screens are not built); and the unlock window prompt is built
 for votes only (AA3's other uses come later).
 Vault: staging release 25 (`features/vote`); until the vault answers `vote.list`, nothing here shows.*
 
