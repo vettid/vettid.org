@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.82.3
-date: 2026-11-01
+version: 0.82.4
+date: 2026-11-02
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -28,6 +28,22 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.82.4: erratum, 2026-11-02, from the review of the vault
+    implementation (vettid-vault #180); no change for apps. §10.18
+    "Setting and lowering", "Raising and removing" and "Twin wallets":
+    the order of the checks starts with the request's **shape**. A body
+    that does not parse, a `wallet_id` that is not a ULID, a `version`
+    that is not an integer from 1, or a cap member that is neither an
+    integer 1–2,100,000,000,000,000 nor `null` is `bad_request` at once,
+    before `conflict` and `duplicate_wallet`; an unknown `wallet_id` is
+    `not_found` there too (a `null` in `wallet.caps.set` stays a value
+    rule, `use_wallet_caps_raise`). For `wallet.caps.raise` this is before
+    `sealed` is opened, so no PIN or password is tried and no failed
+    check is counted; the UTK presented is still spent (§3.5.4), as for
+    any request. Then, as before: `conflict`, `duplicate_wallet`, the
+    value rules and (raise) the `payload_sha256` binding. The vault
+    already does this; the text did not say it. Sections changed:
+    §10.18.
   - 0.82.3: erratum, owner decision 2026-11-01 (option b); needs the
     vault release (staging 26) and app text. **Twin wallets.** Releases
     before 26 let a vault hold two wallets made from one phrase, which
@@ -13452,9 +13468,12 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     changes nothing. (0.82.2) A request that names neither member is
     `bad_request`. One whose every named member equals the current value
     answers `{version}` unchanged: no version bump, no audit entry and no
-    `wallet.changed`. The checks run in this order: a stale `version`
-    is `conflict` first, then `duplicate_wallet` (0.82.3, "Twin
-    wallets"), then the value rules. A `null`, a larger value
+    `wallet.changed`. The checks run in this order: (0.82.4) the
+    request's shape first (a body that does not parse, a `wallet_id`
+    that is not a ULID, a `version` that is not an integer from 1, or a
+    member that is neither an integer 1–2,100,000,000,000,000 nor `null`
+    is `bad_request`; an unknown `wallet_id` is `not_found`), then a stale `version` is `conflict`, then
+    `duplicate_wallet` (0.82.3, "Twin wallets"), then the value rules. A `null`, a larger value
     or `per_tx_sats` above `per_period_sats` is `bad_request` (message `use_wallet_caps_raise`
     for the first two). It audits
     `wallet.caps_lowered` (`ref` = `wallet_id`) and sends
@@ -13478,7 +13497,12 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     wallet will have obey the model's rule: `per_tx_sats` above
     `per_period_sats` is `bad_request`. It must raise or remove at least one cap (`bad_request`
     otherwise); a member it does not name is unchanged, and it may
-    lower another in the same request. (0.82.2) The checks of the
+    lower another in the same request. (0.82.4) The request's shape is
+    checked first, before `sealed` is opened: a body that does not
+    parse, a `wallet_id` that is not a ULID, a `version` that is not an
+    integer from 1, or a member that is neither an integer 1–2,100,000,000,000,000 nor `null` is
+    `bad_request`, and an unknown `wallet_id` is `not_found`; no PIN or
+    password is tried. (0.82.2) Then the checks of the
     request run in this order: a stale `version` is `conflict`, then
     `duplicate_wallet` (0.82.3, "Twin wallets"), then the value rules
     (`bad_request`), then the `payload_sha256` binding
@@ -13618,7 +13642,8 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     a twin of a capped wallet would be uncapped. Therefore
     `wallet.caps.set` and `wallet.caps.raise` on a twin are refused with
     `duplicate_wallet`, the message saying to delete the other wallet
-    first. It is checked after `conflict` and before the value rules
+    first. It is checked after the request's shape (0.82.4) and
+    `conflict`, and before the value rules
     (for raise, so before the binding, the backoff and the PIN and
     password too, within the steps of §3.5.3 as above), and is never a
     failed owner check. `wallet.create` needs no such error: `exists`
