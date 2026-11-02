@@ -4,12 +4,12 @@ status: approved (owner, 2026-10-17)
 version: 0.1.55
 date: 2026-11-02
 changelog:
-  - 0.1.55: erratum, to match what the app now does (Votes 3). §4.16: the
-    vote screen is a `ScrollView`, not a `List`. Notifications: the vote
-    feed kinds are in the Notifications screen and the Votes badge counts
-    open votes not yet voted on, but there are no local phone
-    notifications for them yet; those come in a later change, for every
-    feed kind (owner decision, 2026-11-02).
+  - 0.1.55: erratum (owner 2026-11-02), as built (vettid-ios #195).
+    §4.16: the vote screen is a `ScrollView`, not a `List`. The vote
+    feed kinds are in the Notifications screen and the Votes badge
+    counts open votes not yet voted on, but there are no local phone
+    notifications for them yet (a later change, for every feed kind).
+    The section's header says it is built (vettid-ios #191 to #195).
   - 0.1.54: owner decision of 2026-11-01 (option a). §4.16 "Save the
     proof" uses the file exporter, not the share sheet: the member picks
     a folder in Files and the file is written only there, as History's
@@ -1635,7 +1635,7 @@ as today. Batches, the `not_found` rule and the "Mute requests from %@" offer (a
 ### 4.16 Votes (0.1.52)
 
 *Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §10.19, §15 item
-48). Texts approved by the owner, 2026-10-30. Not built.* The same as ANDROID-PLAN §4
+48). Texts approved by the owner, 2026-10-30. Built (vettid-ios #191 to #195).* The same as ANDROID-PLAN §4
 "Votes (0.1.102)": its screens, states, rules for what the app may say
 (**never "secret"**, never "counted" or "verified" before the vault's
 results check, the fixed disclosure "<service> will see how you vote and
@@ -1647,12 +1647,13 @@ is shown in the sidebar only when the vault has a vote or a service to
 reconnect, and a vote is not in Messages, in the approvals indicator
 (§4.12) or in Approvals. On iOS:
 
-- The vote screen is a `ScrollView` with the choices as a single-selection
-  group (`.accessibilityAddTraits(.isSelected)`, the group labelled
-  "Choose one"); the proposal text is plain text (`Text(verbatim:)`),
-  with control and bidirectional-override characters removed; Dynamic
-  Type up to the accessibility sizes without clipping; the confirm
-  sheet takes VoiceOver focus on the fixed disclosure first.
+- The vote screen is a `ScrollView`, with the choices as a
+  single-selection group (`.accessibilityAddTraits(.isSelected)`, the
+  group labelled "Choose one"); the proposal text is plain text
+  (`Text(verbatim:)`), with control and bidirectional-override
+  characters removed; Dynamic Type up to the accessibility sizes
+  without clipping; the confirm sheet takes VoiceOver focus on the
+  fixed disclosure first.
 - The credential password prompt is the existing one (§4, the unlock
   window), used before `vote.cast`.
 - **Notifications:** the feed items (`vote.open`, `vote.closing`,
@@ -1662,8 +1663,7 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   change, for every feed kind (owner decision, 2026-11-02). System
   notifications while the app is closed wait for the push gateway's APNs
   support (PUSH-GATEWAY §11.2); until then a vote is seen when the
-  member opens the app, and the reminder `vote.closing` shows then
-  (stated to the owner in the PR).
+  member opens the app, and the reminder `vote.closing` shows then.
 - **The site:** `URLSession` with an ephemeral configuration (no cookies,
   no cache, no identifier), the same schedule as Android (at unlock, at
   open, hourly while open and unlocked; no background refresh, because
