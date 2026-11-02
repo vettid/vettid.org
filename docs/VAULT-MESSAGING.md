@@ -34,10 +34,9 @@ changelog:
     (`results.json` parses, `results_sig` verifies under the service
     key, the bundle holds, and the member's own row's inclusion proof
     verifies to the signed `rows_root` with `tree_size` =
-    `counts.eligible`). A failure only in the rest of the observer check
-    (other rows' ballots or signatures, the recomputed tally, the
-    published trees) is shown as a problem with the published results
-    but does not stop the submit; the vault judges the row as usual. On
+    `counts.eligible`). Any failure of the observer check outside
+    those four inputs is shown to the member but does not stop the
+    submit; the vault judges the row as usual. On
     `verified` the app shows the member's vote as in the results with a
     line that the rest of the results do not add up. The vault side
     (steps 2 to 5) is unchanged. The `related:` entry for ANDROID-PLAN
