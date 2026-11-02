@@ -15,8 +15,10 @@ changelog:
     and a batch's is not posted again; the wait after `not_found` and
     the History mute are described as built, and the confirmation on a
     connection of unknown kind is named as an iOS difference for the
-    owner. §6.7: every item notification is also removed when the app
-    lock covers the app (vettid-ios #197).
+    owner; Android's re-post of a batch's notification after a
+    withdrawal is not built. §6.7, §6.9 and I2.6: every item
+    notification is also removed when the app lock covers the app
+    (vettid-ios #197).
   - 0.1.56: owner decision of 2026-11-02 (option a), built in
     vettid-ios #197. **Local notifications for feed items before
     Apple push**, posted only while the app is open, as ANDROID-PLAN §4
@@ -1681,15 +1683,17 @@ here by reference and not to be changed on one platform alone. On iOS:
   Approvals and updates the approvals indicator, as for a decision on
   another device.
   A late `.pending`, a replayed event or a list read begun before the
-  withdrawal does not bring it back. A flag for an unknown request
-  changes nothing on screen. Without the flag, the ask closes as today.
-  The app remembers the last 512 withdrawn asks for a showing screen,
-  and forgets them when the vault locks.
-- **Notifications:** an ask's local notification (§6.7, while the
-  app is open) goes with its feed item: a withdrawn ask's own item is
-  marked read, which removes its notification, and a batch's goes when
-  the batch's last open ask closes (below). Android's re-post of a
-  batch's notification after one of its asks is withdrawn is not
+  withdrawal does not bring it back. A flag for a request this phone
+  does not hold opens nothing, but that request's own feed item is
+  still marked read. Without the flag, the ask closes as today. The
+  app remembers the last 512 withdrawn asks for a showing screen, and
+  forgets them when the vault locks, is held or its daily check is
+  due.
+- **Notifications:** an ask's local notification (§6.7, while the app is
+  open; vettid-ios #197) goes with its feed item: a withdrawn ask's own
+  item is marked read, which removes its notification, and a batch's
+  goes when the batch's last open ask closes (below). Android's re-post
+  of a batch's notification after one of its asks is withdrawn is not
   built.
 - **A showing screen** keeps its place, with the notice "%@ withdrew
   this request. You don't need to answer it." in a neutral info style
@@ -2334,15 +2338,15 @@ Apple push this works only while the app is open:
 - **In front:** a banner with its category's sound; Vault activity
   and an update in place go to Notification Center's list only.
 - **When they go:** an item read, archived or deleted on any device
-  removes its notification. Every item notification is removed when
-  the vault locks or is held, at a wipe, when the choice is narrowed
-  (to Nothing, or from Names and message text to Names), **when the
-  app goes to the background** (owner decision of 2026-11-02: iOS
-  gives a suspended app no chance to remove a name later), **when the
-  app lock covers the app** ("Lock now" included, so no name shows
-  over it), and at launch for any left by an ended process.
-  Notifications that are not a feed item's are left alone (the app
-  posts no others yet).
+  removes its notification. Every item notification is removed when the
+  vault locks or is held, at a wipe, when the choice is narrowed (to
+  Nothing, or from Names and message text to Names), **when the app goes
+  to the background** (owner decision of 2026-11-02: iOS gives a
+  suspended app no chance to remove a name later), **when the app lock
+  covers the app** ("Lock now" included, so no name shows over it;
+  vettid-ios #197), and at launch for any left by an ended process.
+  Notifications that are not a feed item's are left alone (the app posts
+  no others yet).
 - **A tap** goes through the app lock, unlock and daily check first
   and never acts behind them. It marks the item read and opens what
   the item opens from the Notifications list (a drawer destination or
@@ -2424,7 +2428,7 @@ Secure Enclave key only gates the prompt (0.1.46).
 | Theme and Show in notifications (`settings.theme`, `settings.notification_previews`) | UserDefaults | — | Wipe; uninstall | Included in backups (these two only) |
 | App lock | Secure Enclave key (.biometryCurrentSet or .devicePasscode), its "made" record in the keychain WhenUnlockedThisDeviceOnly, encrypted settings file | Hardware; protects no data at rest | Turned off; wipe | None |
 | A copied secret item value | `UIPasteboard`, `.localOnly`, `.expirationDate` 60 s | Local to the phone, not shared with other devices | After 60 seconds, at the vault lock (only if still the app's item) | None |
-| Notifications | The system | Content rules | Before phase P only feed items' local notifications while the app is open (§6.7), removed when the vault stops being open and when the app goes to the background; from phase P, when the vault stops being open | None |
+| Notifications | The system | Content rules | Before phase P only feed items' local notifications while the app is open (§6.7), removed when the vault stops being open, when the app lock covers the app and when the app goes to the background; from phase P, when the vault stops being open | None |
 
 **Backups:** the state files carry `isExcludedFromBackup`, keychain items
 are `ThisDeviceOnly` and none is synchronizable (§6.1); only the theme
@@ -2434,12 +2438,13 @@ authentication, and the files hold transport state only.
 
 **Notifications never outlive the vault being open.** Every notification
 is removed when the vault locks, is held, is wiped or closes. (Today the
-app posts only feed items' local notifications, while it is open
-(§6.7): they also go when it goes to the background, and any left by
-an ended process go at launch. It has no extension yet.) A process
-that was killed cannot remove one, so (from phase P; to be built) a
-notification service extension's start also removes the delivered
-and pending notifications when the vault is not open.
+app posts only feed items' local notifications, while it is open (§6.7):
+they also go when the app lock covers the app and when it goes to the
+background, and any left by an ended process go at launch. It has no
+extension yet.) A process that was killed cannot remove one, so (from
+phase P; to be built) a notification service extension's start also
+removes the delivered and pending notifications when the vault is not
+open.
 
 ## 7. Test vectors
 
@@ -2552,7 +2557,7 @@ owner prerequisites of §10.
 | I2.3 | Approvals, the Notifications screen (feed), History with search and export | §10.4.1, §10.9, §10.12, §10.13 | `feature/approvals/*`, `feature/notifications/*`, `feature/history/*`, `core/data/…/feed/*`, `History*.kt` | Approvals of ANDROID-PLAN §4; export via Save to Files |
 | I2.4 | Photo attachments and the viewer | §5.5, §10.5.1; ANDROID-PLAN §4 "Photo attachments" | `core/media/*`, `feature/messages/Photo*.kt`, `core/data/…/social/Attachments.kt`, `core/vault/AttachmentApi.kt` | Metadata stripped (EXIF and GPS absent in the sent JPEG); bounded decoding refuses oversized and mistyped files; the memory cache is empty after lock; a data-directory scan finds no image |
 | I2.5 | Shared profile and the camera-only profile photo | §10.8 | `feature/settings/ProfileScreens.kt`, `PhotoCapture*.kt`, `PhotoCrop.kt` | JPEG ≤ 65,536 bytes without EXIF |
-| I2.6 | Local notifications for feed items before Apple push: the kinds, texts and "Show in notifications" as Android; posted only while the app is open; removed on read, lock, hold, wipe, a narrower choice and the app going to the background | IOS-PLAN §6.7; ANDROID-PLAN §4 Notification modes 7 and 8 | `core/notify/…/NotificationContent.kt`, `NotificationMapping.kt`, `FeedNotifier.kt` | A message or request arriving while the app is open on another screen shows a banner with Android's text; a Vault activity item goes to the list only; none on the Notifications list or the item's screen; none left after lock or background |
+| I2.6 | Local notifications for feed items before Apple push: the kinds, texts and "Show in notifications" as Android; posted only while the app is open; removed on read, lock, hold, wipe, a narrower choice, the app lock covering the app and the app going to the background | IOS-PLAN §6.7; ANDROID-PLAN §4 Notification modes 7 and 8 | `core/notify/…/NotificationContent.kt`, `NotificationMapping.kt`, `FeedNotifier.kt` | A message or request arriving while the app is open on another screen shows a banner with Android's text; a Vault activity item goes to the list only; none on the Notifications list or the item's screen; none left after lock, app lock or background |
 
 **Exit I2** (iPhone, Staging): an iPhone and an Android phone connect,
 exchange messages and photos both ways, and approve each other's asks.
