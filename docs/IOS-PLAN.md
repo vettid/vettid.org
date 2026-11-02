@@ -1,9 +1,21 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.55
+version: 0.1.56
 date: 2026-11-02
 changelog:
+  - 0.1.56: owner decision of 2026-11-02 (option a), built in
+    vettid-ios #197. **Local notifications for feed items before
+    Apple push**, posted only while the app is open, as ANDROID-PLAN §4
+    Notification modes 7 and 8 (kinds, categories, texts and **Show in
+    notifications**, word for word; the setting in Settings → App).
+    ID12, ID19, §4 (the Settings → App row), §4.12 (a request's local
+    notification and its tap), §4.16 (vote kinds on Vault activity),
+    §6.7 (the rules, and sounds) and §6.9 (the setting in
+    UserDefaults; what is removed when) say so, and §8 has row I2.6.
+    Every item notification is removed when the app goes to the
+    background (owner decision of 2026-11-02), as well as at lock,
+    hold, wipe and a narrower choice.
   - 0.1.55: erratum (owner 2026-11-02), as built (vettid-ios #195).
     §4.16: the vote screen is a `ScrollView`, not a `List`. The vote
     feed kinds are in the Notifications screen and the Votes badge
@@ -609,14 +621,14 @@ the Mac agent does not reopen them.
 | ID9 | **Phone-held unlock secret on iOS** (owner) | **Approved 2026-10-17.** §6.3, as recorded in VAULT-MESSAGING 0.35.0 §11.14.1: a Secure Enclave P-256 key-agreement key per `key_vault`, `WhenUnlockedThisDeviceOnly`; per epoch, a fresh software key pair whose private half is dropped after a key confirmation, its public key stored before the secret is sent and kept until 7 days after a later epoch is confirmed; `unlock_secret` = HKDF over the ECDH x-coordinate with both public keys in `info`; a 16-byte check tag | (b) a random 32-byte secret stored ECIES-encrypted to a Secure Enclave key (same security, Apple-specific format); (c) ECDH of the enclave key with its own public key (one long-lived value for every epoch: a leak would outlive `vault.secret.renew`); (d) a stateless form with each epoch's point hashed to the curve (code that ran as the app could compute future epochs; no hash-to-curve in CryptoKit or Go's standard library) | I1.4 |
 | ID10 | **Screen capture** (owner) | Always: a cover in the app switcher and content hidden while the screen is recorded, mirrored or shared. On the screens Android holds secure individually (`SecureWindow`: the typed recovery code, and the same list as Android; 0.1.23: the item screen and the item editor, I3.1), also the secure-text-field layer that iOS leaves out of screenshots, behind one component with a runtime self-check (§6.4) | Only the cover and capture hiding (screenshots possible everywhere) | I1.5 |
 | ID11 | **Keyboards and autofill** | Third-party keyboards refused app-wide; the vault PIN on an in-app keypad; no AutoFill and no "Save Password?" on any secret field; no autocorrect, suggestions or learning (§6.5) | System keyboard for the PIN | I1.5 |
-| ID12 | **Notifications before APNs** | None in the background: the app shows activity when open, and schedules **local** notifications for the owner check's early warning (ANDROID-PLAN §6 owner check, item 5). Settings → Notifications says Apple push is not available yet. Apple push (PUSH-GATEWAY §11.2, notification service extension) is phase P, after the owner's APNs actions | Background App Refresh as a stopgap (rare, unpredictable wakes; not worth its code before APNs) | I1 |
+| ID12 | **Notifications before APNs** | None in the background: the app shows activity when open, and posts **local** notifications for the owner check's early warning (ANDROID-PLAN §6 owner check, item 5) and, **while the app is open, for feed items** (ANDROID-PLAN §4 Notification modes 7 and 8; owner decision of 2026-11-02, option a; §6.7). Settings → Notifications says Apple push is not available yet. **Show in notifications** (Names / Names and message text / Nothing; Android's default, Names) is a row of Settings → App until phase P, since there is no notification mode to choose before Apple push. Apple push (PUSH-GATEWAY §11.2, notification service extension) is phase P, after the owner's APNs actions | Background App Refresh as a stopgap (rare, unpredictable wakes; not worth its code before APNs) | I1 |
 | ID13 | **Distribution** (owner) | TestFlight: an App Store Connect record for **VettID Staging** (`com.vettid.app.staging`, internal testers only, never released) and later **VettID** (`com.vettid.app`). Development installs from Xcode on the test iPhones. No ad-hoc builds unless a tester cannot use TestFlight | Ad-hoc distribution with registered UDIDs | I1 exit |
 | ID14 | **Navigation** | The Android drawer (Proton Mail's iOS app also uses a side menu), the same destinations and order (ANDROID-PLAN §4 "Drawer"); the system back gesture | A tab bar (diverges from Android and the texts) | I0.2 |
 | ID15 | **"Installed from" on iOS** | App Attest reports no signer and an iOS binding has none (VAULT-MESSAGING §11.7.1 "iOS"). Settings → Vault status shows "Installed from: Apple (App Store or TestFlight)" for the release and staging builds and "Installed from: Xcode (development)" for the others, from the build configuration, with the line "Apple App Attest confirms this is the VettID app" | No line | I1.7 |
 | ID16 | **Real iPhone on staging before VA2** | Wait for VA2 (a staging release that pins `<team>.com.vettid.app.staging`). Not recommended: pointing a `com.vettid.app` build at staging, which today's staging images would accept | — | I1 exit |
 | ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`); a UI gate only that protects no data at rest (0.1.44; 0.1.46, owner decision of 2026-10-28: **no data key**; a Secure Enclave key (`.biometryCurrentSet` or `.devicePasscode`) gates the prompt with a fresh challenge each time, as Android's prompt key does, so a new face or finger is noticed; the app keeps no vault content on the phone, §6.9), never in place of the PIN or the password | — | I1.6 |
 | ID18 | **Contact with Apple at attestation** | Say it in Help → Privacy: "When you set up, move or recover a vault, your iPhone asks Apple to vouch for the VettID app. Apple learns that VettID was set up on an iPhone, nothing about your vault." (`attestKey` reaches Apple's servers; assertions do not.) | Silence | I1.5 |
-| ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.12): a toolbar item beside the bell while something waits for the member's decision, with its count; time-critical from arrival (sign-ins shown neutral) for sign-in and approval challenges, session requests and `approval.pending`, else in the last 2 minutes, with the time left; a tap opens the Approvals list; a short banner with View for a new time-critical request while the app is open; from phase P a request's notification opens that request, `.timeSensitive` for approval challenges and session requests but not for sign-ins; a sign-in's countdown is neutral. Before APNs (ID12) the indicator and the banner are the only cues | — | I2.3 |
+| ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.12): a toolbar item beside the bell while something waits for the member's decision, with its count; time-critical from arrival (sign-ins shown neutral) for sign-in and approval challenges, session requests and `approval.pending`, else in the last 2 minutes, with the time left; a tap opens the Approvals list; a short banner with View for a new time-critical request while the app is open; from phase P a request's notification opens that request, `.timeSensitive` for approval challenges and session requests but not for sign-ins; a sign-in's countdown is neutral. Before APNs (ID12) the indicator, the banner and, while the app is open, a request's local notification are the only cues | — | I2.3 |
 
 ## 3. Design language
 
@@ -658,6 +670,7 @@ Only these differ on iOS:
 | Every secret or code field | §6.5. |
 | Typed recovery code | "Password-class keyboard" on Android: on iOS an ASCII-capable keyboard with autocorrection, spell checking, smart punctuation and inline predictions off, `textContentType` cleared; the screen holds the secure layer (ID10). |
 | Settings → App → Allow screenshots | Turns off the secure layer of ID10 only; the app-switcher cover and capture hiding stay (they protect against what the member does not see). Same lifetime rules as Android (`core/data/…/lock/ScreenshotAllowance.kt`). |
+| Settings → App → Show in notifications | Android's choice, texts and default (ANDROID-PLAN §4 Notification modes 8), in Settings → App until phase P. |
 | Settings → Notifications | Two modes, **Apple push** and **Off** (PUSH-GATEWAY §11.2); until phase P, Apple push shows "Not available yet" (§14). No on-phone service exists on iOS. |
 | Settings → Vault status | ID15. |
 | Profile photo | **Camera only**, as on Android (ANDROID-PLAN §4 Settings → Privacy; row I2.5): the app's own AVFoundation camera screen, to memory; no photo picker and no other camera app. Camera access "not yet asked" asks; "denied" and "restricted" show `ios_settings_photo_capture_permission_blocked` (§14) with **Open settings**, which opens the app's page in Settings (Android's text names its phone's Permissions screen). |
@@ -1538,10 +1551,19 @@ and back-stack rules.* Only these differ on iOS:
 - **The in-app banner** is a short banner at the top of the screen with
   **View** (a `UIAccessibility` announcement; shown once per entry,
   10 seconds, longer with VoiceOver or Switch Control running).
-- **Before phase P there is no request notification** (ID12: nothing
-  arrives in the background, and the app posts local notifications only
-  for the owner check and releases), so the indicator and the banner
-  are the member's only cues, and only while the app is open.
+- **Before phase P a request's notification is a local one** (ID12,
+  §6.7), posted only while the app is open and neither the
+  Notifications list nor that request's screen is in front (the
+  Approvals list does not hold it back, as on Android; owner decision
+  of 2026-11-02, option a). In the background and when the app is
+  closed there is none, and none stays showing, so the member sees a
+  request only on opening the app. A tap goes through the app lock,
+  unlock and daily check first and opens what the item opens from the
+  Notifications list (for most requests, that request's screen over
+  the current one; the Notifications screen if the item has no screen
+  of its own or is not in the feed within 10 seconds); the back
+  stack, the replacement of another request's screen and the wait
+  for a decision in flight below come with phase P.
 - **From phase P: the notification opens that request.** The
   notification's `userInfo` carries the entry's `ref`;
   `userNotificationCenter(_:didReceive:)` looks it up in the open list
@@ -1658,9 +1680,10 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   window), used before `vote.cast`.
 - **Notifications:** the feed items (`vote.open`, `vote.closing`,
   `vote.result`, `vote.problem`) appear in the Notifications screen, and
-  the Votes entry's badge counts the open votes not yet voted on. There
-  are no local phone notifications for them yet: those come in a later
-  change, for every feed kind (owner decision, 2026-11-02). System
+  the Votes entry's badge counts the open votes not yet voted on. While
+  the app is open they also post a local notification on Vault
+  activity (silent, to the list only), as the other feed kinds do
+  (§6.7; owner decision of 2026-11-02, option a). System
   notifications while the app is closed wait for the push gateway's APNs
   support (PUSH-GATEWAY §11.2); until then a vote is seen when the
   member opens the app, and the reminder `vote.closing` shows then.
@@ -2170,7 +2193,8 @@ leaving the screen.
   Android app does in the foreground.
 - **On leaving**: `beginBackgroundTask` to finish what is in flight
   (persist then ack, §8.3; a lock request; an outbox send), then close
-  the socket. Nothing assumes it ran longer.
+  the socket. Nothing assumes it ran longer; remove every feed item
+  notification (§6.7).
 - **Lock and app lock**: the app-lock timeout counts from the moment
   the scene went to the background, read on return; the vault's own
   locks (VAULT-LOCK, owner check) are the vault's and need nothing from
@@ -2218,15 +2242,53 @@ of `core/notify/…/NotificationContent.kt`; removal of named
 notifications on `vault.locking` and `vault.held`; the filtering
 entitlement when Apple grants it.
 
+**Local notifications for feed items before phase P** (owner decision
+of 2026-11-02, option a; built in vettid-ios #197). The app posts a
+local notification for a feed item as ANDROID-PLAN §4 Notification
+modes 7 and 8 do: the same kinds, the same categories (Messages,
+Requests, Missed calls, Security, Vault activity; the vote kinds on
+Vault activity) and the same texts by **Show in notifications**
+(Names, Names and message text, Nothing), word for word. Before
+Apple push this works only while the app is open:
+- **When:** only on an item's arrival (a live event or a catch-up, never
+  a full read, so nothing missed while the vault was locked is
+  replayed), while the app is active, the vault open and not held or due
+  (and no check after a cancelled recovery showing), the app lock not
+  covering the app, the item active, permission granted, and neither the
+  Notifications list nor the item's own screen in front. An arrival
+  while the app is inactive (Control Center, a call, the app lock's
+  prompt) posts nothing; the item is still in the list and on the bell.
+  One notification per item, updated in place without alerting again.
+- **In front:** a banner with its category's sound; Vault activity
+  and an update in place go to Notification Center's list only.
+- **When they go:** an item read, archived or deleted on any device
+  removes its notification. Every item notification is removed when
+  the vault locks or is held, at a wipe, when the choice is narrowed
+  (to Nothing, or from Names and message text to Names), **when the
+  app goes to the background** (owner decision of 2026-11-02: iOS
+  gives a suspended app no chance to remove a name later), and at
+  launch for any left by an ended process. Notifications that are not
+  a feed item's are left alone (the app posts no others yet).
+- **A tap** goes through the app lock, unlock and daily check first
+  and never acts behind them. It marks the item read and opens what
+  the item opens from the Notifications list (a drawer destination or
+  a screen over the current one), or the Notifications screen for an
+  item with no screen of its own or not in the feed within
+  10 seconds. A tap not taken up within 10 minutes (an unlock left
+  for later) is dropped.
+- **Permission** is asked once, the first time the open app is shown
+  (after the unlock and the daily check, not under the app lock),
+  never during onboarding.
+
 **Sounds** (0.1.29, owner decision of 2026-10-23; the files, their
 licence (AGPL-3.0) and the channel mapping are in ANDROID-PLAN §4
 Notification modes, 6, "Sounds"). The app bundles `vettid_general.caf`,
 `vettid_message.caf`, `vettid_urgent.caf` and `vettid_ringtone.caf`
 (CAF, IMA4; target membership of the app and of the extension: keep the files in both; verify in phase P that a sound set by the extension plays). A notification sound longer than 30 s plays the default instead; ours are at most 8 s. The
 notification service extension (PUSH-GATEWAY §11.2) and the app's own
-local notifications (the owner check's early warning, release notices)
-set `content.sound = UNNotificationSound(named:)` locally, by the
-notification's category, never from the payload:
+local notifications (the owner check's early warning, release notices,
+and feed items) set `content.sound = UNNotificationSound(named:)`
+locally, by the notification's category, never from the payload:
 
 | Category | Sound | Level |
 |---|---|---|
@@ -2285,24 +2347,24 @@ Secure Enclave key only gates the prompt (0.1.46).
 | Transport state: session keys, relay token, sealed credential blob, one-time keys, outbox | Encrypted state file (AES-GCM) in Application Support | The state files' key | Wipe; each part when used up or replaced | Excluded |
 | Account ids and flags; with location (not built yet), the "Not now" entries | Encrypted state file | The same | Wipe; an entry at its `exp` | Excluded |
 | Owner-check state, lock record, canary manifest | Encrypted state file | The same | Wipe | Excluded |
-| Theme only (`vettid.theme`) | UserDefaults | — | Wipe; uninstall | Included in backups (the theme only) |
+| Theme and Show in notifications (`settings.theme`, `settings.notification_previews`) | UserDefaults | — | Wipe; uninstall | Included in backups (these two only) |
 | App lock | Secure Enclave key (.biometryCurrentSet or .devicePasscode), its "made" record in the keychain WhenUnlockedThisDeviceOnly, encrypted settings file | Hardware; protects no data at rest | Turned off; wipe | None |
 | A copied secret item value | `UIPasteboard`, `.localOnly`, `.expirationDate` 60 s | Local to the phone, not shared with other devices | After 60 seconds, at the vault lock (only if still the app's item) | None |
-| Notifications | The system | Content rules | None are posted before phase P; from then, when the vault stops being open | None |
+| Notifications | The system | Content rules | Before phase P only feed items' local notifications while the app is open (§6.7), removed when the vault stops being open and when the app goes to the background; from phase P, when the vault stops being open | None |
 
 **Backups:** the state files carry `isExcludedFromBackup`, keychain items
 are `ThisDeviceOnly` and none is synchronizable (§6.1); only the theme
-setting is in a backup. **The state files' key** is the same residual as
-on Android: not bound to user authentication, and the files hold
-transport state only.
+and Show in notifications settings are in a backup. **The state
+files' key** is the same residual as on Android: not bound to user
+authentication, and the files hold transport state only.
 
 **Notifications never outlive the vault being open.** Every notification
 is removed when the vault locks, is held, is wiped or closes. (Today the
-app posts none before phase P, has no extension, and only the wipe
-removes notifications.) A process
-that was killed cannot remove one, so (from phase P; to be built) at
-launch, and in a notification
-service extension's start, the app removes its delivered
+app posts only feed items' local notifications, while it is open
+(§6.7): they also go when it goes to the background, and any left by
+an ended process go at launch. It has no extension yet.) A process
+that was killed cannot remove one, so (from phase P; to be built) a
+notification service extension's start also removes the delivered
 and pending notifications when the vault is not open.
 
 ## 7. Test vectors
@@ -2416,6 +2478,7 @@ owner prerequisites of §10.
 | I2.3 | Approvals, the Notifications screen (feed), History with search and export | §10.4.1, §10.9, §10.12, §10.13 | `feature/approvals/*`, `feature/notifications/*`, `feature/history/*`, `core/data/…/feed/*`, `History*.kt` | Approvals of ANDROID-PLAN §4; export via Save to Files |
 | I2.4 | Photo attachments and the viewer | §5.5, §10.5.1; ANDROID-PLAN §4 "Photo attachments" | `core/media/*`, `feature/messages/Photo*.kt`, `core/data/…/social/Attachments.kt`, `core/vault/AttachmentApi.kt` | Metadata stripped (EXIF and GPS absent in the sent JPEG); bounded decoding refuses oversized and mistyped files; the memory cache is empty after lock; a data-directory scan finds no image |
 | I2.5 | Shared profile and the camera-only profile photo | §10.8 | `feature/settings/ProfileScreens.kt`, `PhotoCapture*.kt`, `PhotoCrop.kt` | JPEG ≤ 65,536 bytes without EXIF |
+| I2.6 | Local notifications for feed items before Apple push: the kinds, texts and "Show in notifications" as Android; posted only while the app is open; removed on read, lock, hold, wipe, a narrower choice and the app going to the background | IOS-PLAN §6.7; ANDROID-PLAN §4 Notification modes 7 and 8 | `core/notify/…/NotificationContent.kt`, `NotificationMapping.kt`, `FeedNotifier.kt` | A message or request arriving while the app is open on another screen shows a banner with Android's text; a Vault activity item goes to the list only; none on the Notifications list or the item's screen; none left after lock or background |
 
 **Exit I2** (iPhone, Staging): an iPhone and an Android phone connect,
 exchange messages and photos both ways, and approve each other's asks.
