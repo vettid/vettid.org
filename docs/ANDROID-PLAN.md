@@ -25,7 +25,9 @@ changelog:
     amount clears the amount field, and any link turns **Send all** off.
     (3) Step 2: a fee above 10% of the amount sent asks, naming the fee;
     the review asks again when the vault's fee is over 10% and more than
-    1.5 times the fee agreed to.
+    1.5 times the fee agreed to. Typing an amount, a link that sets or
+    clears the amount, a refused link, or changing the fee, **Send all**
+    or "Include unconfirmed coins" forgets that agreement.
   - 0.1.113: owner decision of 2026-11-01. "Spending limits": staging
     keeps the production wording ("Most in any 24 hours", "Used in the
     last 24 hours"), though staging's period is 1 hour (`time_scale`
@@ -4432,11 +4434,11 @@ and respect them.
    …". At the review it is asked from the vault's fee (so also for
    **Send all**), unless the member agreed to a 10% question before and
    the vault's fee is at most 1.5 times the fee agreed to; typing an
-   amount, changing the fee, **Send all** or "Include unconfirmed
-   coins", or a refused link forgets that agreement. **Cancel** at the
-   review goes back to the form. The transaction signals replacement
-   (BIP125, sequence `0xfffffffd`) so that a later version can raise a
-   fee; W2 has no fee bump.
+   amount, a link that sets or clears the amount, a refused link, or
+   changing the fee, **Send all** or "Include unconfirmed coins" forgets
+   that agreement. **Cancel** at the review goes back to the form. The
+   transaction signals replacement (BIP125, sequence `0xfffffffd`) so
+   that a later version can raise a fee; W2 has no fee bump.
 3. **Building.** Coin selection over both accounts' confirmed coins
    (unconfirmed coins only with "Include unconfirmed coins", off by
    default), branch and bound and then largest first; change to the
