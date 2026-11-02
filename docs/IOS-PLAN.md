@@ -1554,12 +1554,14 @@ and back-stack rules.* Only these differ on iOS:
 - **Before phase P a request's notification is a local one** (ID12,
   §6.7), posted only while the app is open and neither the
   Notifications list nor that request's screen is in front (the
-  Approvals list does not hold it back; owner decision of 2026-11-02,
-  option a). In the background and when the app is closed there is
-  none, so the indicator and the banner stay the member's cues then.
-  A tap goes through the app lock, unlock and daily check first and
-  opens that request's screen over the current one (the Notifications
-  screen if the item is not in the feed within 10 seconds); the back
+  Approvals list does not hold it back, as on Android; owner decision
+  of 2026-11-02, option a). In the background and when the app is
+  closed there is none, and none stays showing, so the member sees a
+  request only on opening the app. A tap goes through the app lock,
+  unlock and daily check first and opens what the item opens from the
+  Notifications list (for most requests, that request's screen over
+  the current one; the Notifications screen if the item has no screen
+  of its own or is not in the feed within 10 seconds); the back
   stack, the replacement of another request's screen and the wait
   for a decision in flight below come with phase P.
 - **From phase P: the notification opens that request.** The
@@ -2191,7 +2193,8 @@ leaving the screen.
   Android app does in the foreground.
 - **On leaving**: `beginBackgroundTask` to finish what is in flight
   (persist then ack, §8.3; a lock request; an outbox send), then close
-  the socket. Nothing assumes it ran longer.
+  the socket. Nothing assumes it ran longer; remove every feed item
+  notification (§6.7).
 - **Lock and app lock**: the app-lock timeout counts from the moment
   the scene went to the background, read on return; the vault's own
   locks (VAULT-LOCK, owner check) are the vault's and need nothing from
@@ -2247,15 +2250,15 @@ Requests, Missed calls, Security, Vault activity; the vote kinds on
 Vault activity) and the same texts by **Show in notifications**
 (Names, Names and message text, Nothing), word for word. Before
 Apple push this works only while the app is open:
-- **When:** only on an item's arrival (a live event or a catch-up,
-  never a full read, so nothing missed while the vault was locked is
-  replayed), while the app is active, the vault open and not held or
-  due (and no check after a cancelled recovery showing), the item
-  active, permission granted, and neither the Notifications list nor
-  the item's own screen in front. An arrival while the app is
-  inactive (Control Center, a call, the app lock's prompt) posts
-  nothing; the item is still in the list and on the bell. One
-  notification per item, updated in place without alerting again.
+- **When:** only on an item's arrival (a live event or a catch-up, never
+  a full read, so nothing missed while the vault was locked is
+  replayed), while the app is active, the vault open and not held or due
+  (and no check after a cancelled recovery showing), the app lock not
+  covering the app, the item active, permission granted, and neither the
+  Notifications list nor the item's own screen in front. An arrival
+  while the app is inactive (Control Center, a call, the app lock's
+  prompt) posts nothing; the item is still in the list and on the bell.
+  One notification per item, updated in place without alerting again.
 - **In front:** a banner with its category's sound; Vault activity
   and an update in place go to Notification Center's list only.
 - **When they go:** an item read, archived or deleted on any device
