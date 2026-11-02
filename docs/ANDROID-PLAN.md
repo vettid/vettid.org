@@ -1,9 +1,23 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.115
+version: 0.1.116
 date: 2026-11-02
 changelog:
+  - 0.1.116: erratum, 2026-11-02 (owner decision a, thread
+    01M6F1RDHN5VCQHFG4KVW89851; VAULT-MESSAGING 0.83.2, §10.19.6 step
+    1). When the app's observer check of the published results fails
+    only in the rest of the results (other rows, the recomputed tally,
+    the published trees), but the results parse, `results_sig` verifies,
+    the bundle holds and the member's own row's proof verifies to the
+    signed `rows_root` with `tree_size` = `counts.eligible`, the app
+    still sends `vote.results.submit`; the vault judges the row as
+    usual. If the vault answers `verified`, the app shows
+    `vote_state_in_results` with the new line `vote_results_dont_add_up`
+    under it. New text (owner decision a): "The rest of the published
+    results don't add up. The service may have published them
+    wrongly." The app always shows the reserved `abstain` choice as
+    "Abstain", in its own words (owner's earlier decision a).
   - 0.1.115: editorial, status as of 2026-11-02 (no rule changes): the
     features below are marked built, with their vettid-android PRs.
     Sign-in match code and withdrawn requests (#229); votes, member side
@@ -5272,7 +5286,7 @@ The app **never** says: that the vote is "secret" or "anonymous" without "the pu
 2. **A vote:**
    - title, the service's name with "Service" and "Name given by the service" (as in "Service connections"), and the proposal `text` as **plain text in the service's words** (control and bidirectional-override characters removed; no links, no markup; the whole text scrolls; never truncated), captioned "Written by <service>";
    - the quorum as the service states it, and whether it says the vote is binding (both as the service's claim); the closing time (and "The closing time was extended to …" after an extension);
-   - **Choose one:** the choices in the order sent, each with its label as sent (the reserved `abstain` too, whatever its label says), as a radio group. **Cast your vote** is enabled once a choice is selected and `can_cast` is true; otherwise the reason is written where the button would be (`cannot_cast`, the table below), never only a disabled button.
+   - **Choose one:** the choices in the order sent, each with its label as sent (the reserved `abstain` always as "Abstain", in the app's own words, whatever its label says), as a radio group. **Cast your vote** is enabled once a choice is selected and `can_cast` is true; otherwise the reason is written where the button would be (`cannot_cast`, the table below), never only a disabled button.
 3. **Confirm sheet** ("Vote “<label>”?"): the fixed disclosure sentence, "Your vote can't be changed after you cast it.", **Cast vote** and **Back**. Then, unless the credential's unlock window is open, the existing **unlock window prompt** (§4 "The unlock window prompt", also used before `vote.cast`): "Confirm with your credential password", "Your vote is signed with your credential. Enter your credential password."; then `vote.cast`.
 4. **After the cast:** the vote screen shows the state in words: *Sending your vote to <service>…* (`sending`), *Waiting for <service> to confirm* with the line "Your vote is saved on your vault and is sent again until <service> answers" (`waiting` or a slow `sending`; never "failed"), *<service> recorded your vote. It can't be changed.* (`recorded`), and after the results check *The published results include your vote.* The member's own choice is shown (from `vote.get`, which alone carries it) beside the state. A `Check with the service` text button (`vote.check`) appears while the ballot is not recorded.
 5. **Results** (after `closed` and a passed check): "Results", each choice with its count, "<ballots> of <eligible> eligible members voted", the quorum line computed from the published numbers, and, if `counts.unhandled` is above 0, the line about messages that could not be read. Every number is from the verified results; before then, none is shown.
@@ -5349,6 +5363,7 @@ The History category is "Connections" (with the service's name); no entry shows 
 | `vote_state_waiting` | Waiting for %s to confirm. Your vote is saved on your vault and is sent again until %s answers. | never "failed" |
 | `vote_state_recorded` | %s recorded your vote. It can't be changed. | |
 | `vote_state_in_results` | The published results include your vote. | only after the check |
+| `vote_results_dont_add_up` | The rest of the published results don't add up. The service may have published them wrongly. | **owner decision a, 2026-11-02.** Under the `vote_state_in_results` line when the vault's check is `verified` but the app's observer check failed in the rest of the results; no error colour |
 | `vote_conflict_after_verified` | **Your vote is in the published results.** %s also once showed a different vote under your code. Save the proof and show it to the organisation. | **approved 2026-10-30.** `check` `verified` with `conflict_evidence: true`; under the `vote_state_in_results` line, with **Save the proof**, no error colour |
 | `vote_state_unconfirmed` | Not confirmed. %s sent no receipt for your vote, and the published results don't settle whether it counted. | |
 | `vote_state_didnt_vote` | You didn't vote in this one. | verified: no ballot under your code |
