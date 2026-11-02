@@ -6,16 +6,19 @@ date: 2026-11-02
 changelog:
   - 0.1.115: editorial, status as of 2026-11-02 (no rule changes): the
     features below are marked built, with their vettid-android PRs.
-    Sign-in match code and withdrawn requests (#229); votes, member
-    side (#230, with #236); devices and agents AA1 (#196) and AA2
-    (#199), AA3 to AA5 still not built; calls C1 (#128); wallet W0 and
-    W1 (#223, #234, #235, #238, #239, #247, #248) and W2-1 and W2-2
-    (#252, #254), W2-3 (the transactions) still not built. Left out by
-    the PRs and noted in the text: the Votes line of "What this service
-    can ask"; "Unlock your vault to call"; the "(connection lost)" on a
-    conversation's call line. §4 "Sign-in match code", "Withdrawn
-    requests", "Votes", "Devices & agents" and "Wallet, presence,
-    location and video", and the status text of §6, were changed.
+    Sign-in match code and withdrawn requests (#229); votes, member side
+    (#230, with #236); devices and agents AA1 (#196) and AA2 (#199), AA3
+    to AA5 still not built; calls C1 (#128); wallet W1 (#223, #234,
+    #235, #238, #239, #247, #248; the W0 spikes #217 and #219 were not
+    merged) and W2-1 and W2-2 (#252, #254), W2-3 (the transactions)
+    still not built. Left out by the PRs and noted in the text: the
+    Votes line of "What this service can ask"; "Unlock your vault to
+    call"; the "(connection lost)" on a conversation's call line; #196's
+    and #199's deferrals; the reset of unreadable wallet settings
+    (#248), which the plan did not have. §4 "Sign-in match code",
+    "Withdrawn requests", "Votes", "Devices & agents" and "Wallet,
+    presence, location and video", and the status text of §6, were
+    changed.
   - 0.1.114: erratum (wallet W2-2, vettid-android #254; owner decisions
     of 2026-11-02). (1) "Sending" step 6 said that of two sends "only
     one can ever confirm". That holds only while the phone still has the
@@ -6921,8 +6924,9 @@ production release APKs still carry no call code); **release R**
 (recovery and unlock) is built (#134 to #143); the **staging time
 scale** (#145, #146, #153, #154), **photo attachments** (#131 to #133)
 and the **notification sounds** (#180) are built; **devices and agents**
-(AA3 to AA5), **presence and location** are not started in the app
-(AA1 and AA2, and the wallet, are built: see 2026-11-02 below).
+AA3 to AA5 (apart from the unlock window prompt for votes, #230),
+**presence and location** are not built in the app (AA1 and AA2, and the
+wallet, are built: see 2026-11-02 below).
 (2026-10-26) Merged since
 2026-10-23: **release L** in the app (#190 the lock bound to its
 unlock and the pending lock that survives the process, #191 the idle
@@ -6936,9 +6940,10 @@ and **a phone that could not tell** (#195, merged 2026-10-26).
 list, device page, End access, Remove) and AA2 (#199: pair an agent);
 AA3 to AA5 are not built. **Sign-in match code** and **withdrawn
 requests** (#229); **votes**, member side (#230, with #236); the
-**wallet** W0 and W1 (#223, #234, #235, #238, #239, #247, #248) and W2-1
-and W2-2 (#252, #254). The wallet's W2-3, the transactions, is not
-built. §4 "Wallet, presence, location and video" lists each PR.
+**wallet** W1 (#223, #234, #235, #238, #239, #247, #248; the W0 spikes
+#217 and #219 were not merged) and W2-1 and W2-2 (#252, #254). The
+wallet's W2-3, the transactions, is not built. §4 "Wallet, presence,
+location and video" lists each PR.
 
 Calls, devices/agents/LEASH, wallet, presence and location follow v1 in
 that order (D8 puts presence before location), each as its own phase. (0.1.53) Devices & agents is AA1–AA5
