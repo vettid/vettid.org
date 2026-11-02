@@ -37,8 +37,9 @@ changelog:
     `counts.eligible`). Any failure of the observer check outside
     those four inputs is shown to the member but does not stop the
     submit; the vault judges the row as usual. On
-    `verified` the app shows the member's vote as in the results with a
-    line that the rest of the results do not add up. The vault side
+    `verified` or `unconfirmed` (owner decision a, thread
+    01M6F2GFXDMDY1GC0QWEC1ZJNJ) the app shows the state with a line
+    that the rest of the results do not add up and hides the counts. The vault side
     (steps 2 to 5) is unchanged. The `related:` entry for ANDROID-PLAN
     is now 0.1.116, which carries the text.
   - 0.83.1: erratum, 2026-11-02 (lead's decision; from the inner
