@@ -30,11 +30,11 @@ related:
 changelog:
   - 0.82.7: owner decision 2026-11-02 (VAULT-PLAN §8 follow-up 1,
     dropped): grants carry no retention hint. §10.12 "Keeping a fetched
-    value" states what the phone apps already do: a fetched value is kept in
-    memory only, on the screen that opened it, and forgotten when that
-    screen closes, at a lock and when the app leaves the foreground; a
-    revocation by the connection is not yet acted on. No change to the
-    protocol, the vault or the apps.
+    value" states what the phone apps already do: a fetched value is
+    kept in memory only, on the screen that opened it, and forgotten
+    when that screen closes, at a lock and when the app leaves the
+    foreground; a revocation by the connection is not yet acted on. No
+    change to the protocol, the vault or the apps.
   - 0.82.6: erratum, 2026-11-02, as built (vettid-vault main
     `5e1f888`, `holderReset`): a reset destroys every other app's
     UTKs, not the holder's. The holder keeps its UTK pool, less the UTK
