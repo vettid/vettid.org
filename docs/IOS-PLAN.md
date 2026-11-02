@@ -1,9 +1,15 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.54
-date: 2026-11-01
+version: 0.1.55
+date: 2026-11-02
 changelog:
+  - 0.1.55: erratum, to match what the app now does (Votes 3). §4.16: the
+    vote screen is a `ScrollView`, not a `List`. Notifications: the vote
+    feed kinds are in the Notifications screen and the Votes badge counts
+    open votes not yet voted on, but there are no local phone
+    notifications for them yet; those come in a later change, for every
+    feed kind (owner decision, 2026-11-02).
   - 0.1.54: owner decision of 2026-11-01 (option a). §4.16 "Save the
     proof" uses the file exporter, not the share sheet: the member picks
     a folder in Files and the file is written only there, as History's
@@ -1641,7 +1647,7 @@ is shown in the sidebar only when the vault has a vote or a service to
 reconnect, and a vote is not in Messages, in the approvals indicator
 (§4.12) or in Approvals. On iOS:
 
-- The vote screen is a `List` with the choices as a single-selection
+- The vote screen is a `ScrollView` with the choices as a single-selection
   group (`.accessibilityAddTraits(.isSelected)`, the group labelled
   "Choose one"); the proposal text is plain text (`Text(verbatim:)`),
   with control and bidirectional-override characters removed; Dynamic
@@ -1649,12 +1655,15 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   sheet takes VoiceOver focus on the fixed disclosure first.
 - The credential password prompt is the existing one (§4, the unlock
   window), used before `vote.cast`.
-- **Notifications:** the feed items appear in the Notifications screen
-  and as local notifications while the app runs. System notifications
-  while the app is closed wait for the push gateway's APNs support
-  (PUSH-GATEWAY §11.2); until then a vote is seen when the member opens
-  the app, and the reminder `vote.closing` shows then (stated to the
-  owner in the PR).
+- **Notifications:** the feed items (`vote.open`, `vote.closing`,
+  `vote.result`, `vote.problem`) appear in the Notifications screen, and
+  the Votes entry's badge counts the open votes not yet voted on. There
+  are no local phone notifications for them yet: those come in a later
+  change, for every feed kind (owner decision, 2026-11-02). System
+  notifications while the app is closed wait for the push gateway's APNs
+  support (PUSH-GATEWAY §11.2); until then a vote is seen when the
+  member opens the app, and the reminder `vote.closing` shows then
+  (stated to the owner in the PR).
 - **The site:** `URLSession` with an ephemeral configuration (no cookies,
   no cache, no identifier), the same schedule as Android (at unlock, at
   open, hourly while open and unlocked; no background refresh, because
