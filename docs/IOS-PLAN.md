@@ -1,9 +1,16 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.57
+version: 0.1.58
 date: 2026-11-02
 changelog:
+  - 0.1.58: erratum (owner 2026-11-02), as built (vettid-ios #198).
+    §4.15: the withdrawn notice offers the mute only while the
+    connection is in the list read, has a name and its asks are not
+    muted, as History does, so a connection of unknown kind is no longer
+    offered it and the iOS difference about confirming its mute is gone;
+    the notice's mute for a connection with no name, which Android
+    offers, is named as the iOS difference.
   - 0.1.57: erratum (owner 2026-11-02), as built (vettid-ios #183,
     #184). §4.14 and §4.15 say built, not "Not built". §4.14: the
     spoken digits use `accessibilitySpeechSpellsOutCharacters`; the
@@ -1709,14 +1716,16 @@ here by reference and not to be changed on one platform alone. On iOS:
   waits, because only a member authentication can be withdrawn.
 - **Mute:** "Mute requests from %@" is a secondary action on the notice
   and on the History entry (`connection.asks.mute`), with its own
-  progress state, so the screen stays withdrawn while it runs. It is
-  confirmed first on a service connection; a person's is muted at once.
-  One iOS difference, for the owner: the request screen also confirms
-  when the connection's kind is not known (the connection is not in the
-  list read), where ANDROID-PLAN confirms "on a service connection
-  only". The confirmation's title is the action's own text. History
-  offers the action only while the connection exists, has a name and is
-  not muted. The connection gains `peer_kind` and `isService` for this
+  progress state, so the screen stays withdrawn while it runs. Both
+  offer it only while the connection is in the list read, has a name and
+  its asks are not muted (0.1.58, vettid-ios #198): a mute names whom it
+  mutes. A blank name, or one of only whitespace or invisible
+  characters, counts as none, and the notice then still says "A
+  connection". One iOS difference: Android's notice also offers the mute
+  for a connection in the list that has no name, as "Mute requests from
+  A connection". The mute is confirmed first on a service connection; a
+  person's is muted at once. The confirmation's title is the action's
+  own text. The connection gains `peer_kind` and `isService` for this
   (VAULT-MESSAGING §6.4: only `"service"` counts).
 - **Batches and the feed:** a withdrawn ask's own feed item, one that
   stands for that ask alone, is marked read. A batch's item is kept
