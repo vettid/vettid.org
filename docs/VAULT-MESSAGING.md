@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.82.7
+version: 0.83.0
 date: 2026-11-02
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,35 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.83.0: owner decision 2026-10-20 (ANDROID-PLAN §9 decisions 14 and
+    17(d)): the specification gaps of the device flows. §10.4.2: the new
+    kind `pairing` of `pending.list` (apps only) lists the pairings
+    waiting for the member (owner decision 2026-11-02, option a: access
+    requests and held approvals were already listed there since 0.70.0,
+    so no new op), so a restarted app gets back what the events gave it;
+    the `device.pair.pending` feed item's `ref` is the request's
+    `pending_id`, which `device.pair.approve` and `.reject` accept in
+    place of `pairing_id`; `device.pair.approve` answers `{device_id}`;
+    `not_found` for a pairing, access request or approval that is
+    unknown, ended or expired, and `bad_request` for a pairing whose
+    handshake has begun (`hs.init`) but not reached `hs.fin`; the `kind`
+    and `state` values of `device.list`. §10.1: `leash.item.changed` and
+    `location.request.closed` in the `sync.event` table. §10.11:
+    `leash.agent.resume` sends `sync.event{leash.agent.suspended}` with
+    `suspended: false`; what `item.use` gives away of a short or
+    guessable value. §10.12: a dry run of `share.rule.set` for an agent
+    subject needs no unlock window. §11.10.9: the capability
+    `item_ways`. The `pairing` kind, the `device_id` in the approve
+    answer and cancelling an unopened invite with `device.pair.reject`
+    (owner decision 2026-11-02) need a vault change;
+    `leash.item.changed` and `item_ways` come with the ways to use a
+    secret (AGENT-PLAN AV9); the rest states what the vault already does
+    (vettid-vault `5e1f888`). Not changed: `audit.list` has no device
+    filter (decision 14e). §15 item 49. §8.6 (erratum, from the desktop
+    relay client's review, lead 2026-11-02): a retried open-token
+    `hs.init` answered `token_used` or `token_revoked` is treated as
+    possibly delivered, and the client waits for `hs.resp` until the
+    token's `exp` plus 60 s before it restarts first contact.
   - 0.82.7: owner decision 2026-11-02 (VAULT-PLAN §8 follow-up 1,
     dropped): grants carry no retention hint. §10.12 "Keeping a fetched
     value" states what the phone apps already do: a fetched value is
@@ -6938,8 +6967,8 @@ How each error is handled:
 | Error | Handling |
 |---|---|
 | `token_expired` | Refresh the token, or reconnect (§6.6). |
-| `token_revoked` | Terminal. Stop sending to that mailbox. |
-| `token_used` | The open token is already spent. Restart first contact. |
+| `token_revoked` | Terminal. Stop sending to that mailbox (0.83.0: for a retried open-token `hs.init`, see `token_used`). |
+| `token_used` | The open token is already spent. Restart first contact; except that (0.83.0) when the client retried its own `hs.init` with that token after a lost or failed answer, `token_used` and `token_revoked` both mean the first attempt may have been delivered: it waits for `hs.resp` until the token's `exp` plus 60 s, and restarts first contact only then. For a pairing or transfer this is at most the link's 10 minutes; a vault's accepted connection request stays `waiting` (§6.4) until then, and its member can decline it. |
 | `mailbox_unknown` | Re-resolve the address, or mark the connection `stale`. |
 | `quota_exceeded` (0.32.0) | Not retried at once, and handled by what is used up (RELAY-PROTOCOL 0.9.2 §7.1 `quota`): **`token`**: a peer vault MAY ask for a fresh token (§7.2) and retries once with it; **`mailbox` or `mailbox_blobs` or `sender_blobs`**: a fresh token does not help; a deposit waits in the outbox and is retried with backoff, and a blob upload is not retried: the vault waits until the recipient asks for it (§10.5.1 "Delivery to the peer"). A relay that sends no `quota` is read as `token` the first time and as the mailbox after a fresh token. A device does not upload again on its own: it tells the member and retries later. |
 
@@ -7427,6 +7456,7 @@ an answer to an unknown or expired id is dropped.
   | `leash.grant.changed` | `grant_id`, `agent_id`, `version` (§10.11) |
   | `leash.grant.revoked` | `grant_id`, `agent_id` (§10.11) |
   | `leash.agent.suspended` | `agent_id`, `suspended` (§10.11) |
+  | `leash.item.changed` | `agent_id`, `item_id`, `version` (of `item_ways`; absent when the settings were deleted): the ways to use an item changed (§10.11; 0.42.0, not yet built in the vault, AGENT-PLAN AV9) |
   | `grant.changed` | `grant_id`, `state` (`active`, `used`, `expired`, `revoked`) (§10.12) |
   | `grant.request.decided` | `request_id`, `approved` (§10.12) |
   | `share.rule.changed` | `rule_id`, `version` (§10.12) |
@@ -7438,6 +7468,7 @@ an answer to an unknown or expired id is dropped.
   | `action.offers` | `connection_id`: the actions it offers changed (§10.14) |
   | `intro.changed` | `intro_id`, `state` (§10.15) |
   | `location.share.changed` | `share_id`, `state` (`active`, `ended`): an outgoing share (§10.16) |
+  | `location.request.closed` | `request_id`, `reason` (`answered`, `expired`): a request is no longer pending (§10.16) |
   | `location.history.changed` | `count`: positions were deleted from the location log (§10.16) |
   | `presence.changed` | `version` (§10.17) |
   | `wallet.changed` | `wallet_id`, `version` (§10.18; 0.56.0: also when caps are set or raised) |
@@ -7529,8 +7560,8 @@ device belongs to the unlock it ends.
 |---|---|---|
 | `device.pair.create` (app) | `{role: "desktop" \| "agent"}` | `{pairing_id, link, exp}`; `{role: "app"}` is answered `one_app` (§6.7) |
 | `device.pair.pending` (to apps) | — | `{pairing_id, pending_id, role, name, sas}`; `name` is the new device's self-asserted `profile.name` |
-| `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}`; `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window) | `{}` |
-| `device.pair.reject` (app) | `{pairing_id}` | `{}` |
+| `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}` (`pairing_id` or the request's `pending_id`, 0.83.0); `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window) | `{device_id}`, the new device's id, as on `device.paired` (0.83.0; not yet built in the vault, which answers `{}`) |
+| `device.pair.reject` (app) | `{pairing_id}` (or the request's `pending_id`, 0.83.0) | `{}` |
 | `device.pair.rejected` (to the new device) | — | `{}`: the owner rejected the pairing or transfer after its `hs.fin` (0.10.5); sealed under the handshake's epoch, on the device's token from `hs.init`, as `device.paired`; the device stops waiting (§6.7) |
 | `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?, user_guid?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true`, the credential's `credential_version` and (0.17.0) the member's `user_guid`, which its unlocks need, for a transferred app only (§6.7.1) |
 | `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?, push?, signer?}]}`; `push` (0.24.0) only on the app's entry while it has a registration: the push state of §14.1; `signer` (0.27.0) only on an Android app's entry with a recorded signer: `{class: "vettid" \| "google_play" \| "development" \| "automation", digest: "<64 hex>"}` (`automation`: staging only, 0.66.0), the vault's signer binding (§11.7.1) |
@@ -7554,6 +7585,34 @@ device belongs to the unlock it ends.
 - `last_active_at` is when the vault last processed a durable message from
   the principal, to the minute; `session_expires_at` is present while an
   access session lasts.
+- **Pairings waiting for the member** (0.83.0; not yet built in the
+  vault). `pending.list` (§10.4.2, kind `pairing`) lists them, so an
+  app that restarts, or that was locked when the event arrived, reads
+  them back. A transfer is not listed (§15 item 44). A device that is
+  paired is in `device.list`.
+- **The pairing feed item.** The `ref` of the `device.pair.pending`
+  feed item is the request's `pending_id`. `device.pair.approve` and
+  `device.pair.reject` accept it in place of `pairing_id`, so an app
+  that lost the pairing can reject it with that `ref`. The item has
+  no name: the `pairing` entry of `pending.list` carries it.
+- **Ended requests.** `device.pair.approve` and `device.pair.reject`
+  answer `not_found` for a pairing that is unknown, rejected or expired,
+  and for a transfer's; `device.session.approve` and
+  `device.session.deny` for an access request that is unknown, answered
+  or expired (`device.session.approve` also when the device is no longer
+  active); `approval.decide` for an approval that is unknown, decided or
+  expired (`{result: "not_found"}` also when the requester is no longer
+  active). `device.pair.approve` is `bad_request` for a pairing whose
+  handshake has begun (`hs.init`) but not reached `hs.fin`;
+  `device.pair.reject` accepts that one and ends it.
+  `device.pair.reject` on an invite whose link was never opened cancels
+  it (the open token's `jti` is denylisted and the claim deleted, §7.4)
+  and answers `{}`; `device.pair.approve` answers `not_found` for it
+  (0.83.0; not yet built in the vault, which answers `not_found`).
+- **`device.list` values.** `kind` is `app`, `desktop` or `agent`;
+  `state` is `active` or `stale`. A device whose pairing is not yet
+  approved is not listed: it appears in `pending.list` (§10.4.2) as a
+  `pairing`.
 - A held request that is approved is executed when the decision arrives,
   so `approval.decide` answers with its outcome; the requester gets the
   request's own response.
@@ -8324,7 +8383,7 @@ hold is gone after a lock, a hold or a restart. Most asks can be read
 back (`grant.list` `pending`, `critical-secret-use.list` `incoming`,
 `intro.list` `received`; the open decisions of `share.pending.list`,
 which are not asks). Five kinds arrived only as events and were lost;
-`pending.list` returns them:
+`pending.list` returns them (0.83.0 adds a sixth, `pairing`):
 
 | Type | Request body | Response body |
 |---|---|---|
@@ -8337,6 +8396,7 @@ which are not asks). Five kinds arrived only as events and were lost;
 | `approval` | `approval.pending`: `{approval_id, device_id, role, name, type, body, exp, flags?}` | §6.8 |
 | `action` | `action.pending`: `{invocation_id, connection_id, action_id, sensitivity, params, exp}` | §10.14 |
 | `location` | `location.request.pending`: `{request_id, connection_id, note?, exp}` | §10.16 |
+| `pairing` (0.83.0; not yet built in the vault) | `device.pair.pending`: `{pairing_id, role, exp, pending_id?, name?, sas?}` | §6.7 |
 
 - **What is listed.** Every ask of these kinds that the vault would
   still accept a decision on: received, not yet decided by any device,
@@ -8346,47 +8406,68 @@ which are not asks). Five kinds arrived only as events and were lost;
   §10.4.1, was never sent and is never listed). The `body` is the event's body as the
   vault sent it, including any member a later release adds to that
   event; an app parses it as it parses the event. An entry carries no
-  member the event did not.
+  member the event did not. The `pairing` kind is the exception: its
+  body adds `exp`, and it is listed before its event is sent (below).
+- **The `pairing` kind** (0.83.0; not yet built in the vault). It is
+  listed once the new device has sent `hs.init` (§6.3) and until the
+  pairing is approved, rejected or expired. An invite whose link was
+  never opened is not listed: `device.pair.reject` on an invite whose
+  link was never opened cancels it (the open token's `jti` is denylisted
+  and the claim deleted, §7.4) and answers `{}`; `device.pair.approve`
+  answers `not_found` for it (0.83.0; not yet built in the vault, which
+  answers `not_found`). Its body has the members of the
+  `device.pair.pending` event (§10.3), which the vault sends once
+  `hs.fin` has checked out, so `pending_id`, `name` and `sas` are absent
+  until then and the app cannot approve it yet (`bad_request`, §10.3).
+  `exp` is not in the event: it is when the vault drops the pairing, 10
+  minutes after its `hs.init` (§6.7); the `exp` of `device.pair.create`
+  is that of the link. A transfer is not listed (§15 item 44). A
+  `pairing` has no closing event the app can match (`device.paired`
+  carries `device_id`, not `pairing_id`): the app drops the entry at its
+  `exp`, and a decision on one that ended elsewhere is `not_found`.
 - **Pages.** Sorted by `exp`, then by the ask's id (`request_id`,
-  `approval_id` or `invocation_id`), soonest first. The limits are per
-  connection or per device (4 received challenges and 8 open
-  invocations per connection, one session request and 8 held approvals
-  per device, 16 location requests), so the list is paged like
-  `message.list` (§8.1, §10.5.2): a page holds at most `limit` entries
-  and at most 131,072 bytes, and always at least one entry (an entry is
-  never split or dropped; a single entry fits, as its event did).
-  `next` is an opaque cursor for `after`, present while entries remain;
-  a cursor that no longer names a position starts again from the
-  beginning.
-- **Who may ask.** Apps, which receive and decide all five kinds, and
+  `approval_id`, `invocation_id` or `pairing_id`), soonest first. The
+  limits are per connection or per device (4 received challenges and 8
+  open invocations per connection, one session request and 8 held
+  approvals per device, 16 location requests, and for a `pairing` no
+  fixed cap: one per invite, each dropped 10 minutes after its
+  `hs.init`, §6.7), so the list is paged like `message.list` (§8.1,
+  §10.5.2): a page holds at most `limit` entries and at most 131,072
+  bytes, and always at least one entry (an entry is never split or
+  dropped; a single entry fits, as its event did). `next` is an opaque
+  cursor for `after`, present while entries remain; a cursor that no
+  longer names a position starts again from the beginning.
+- **Who may ask.** Apps, which receive and decide all six kinds, and
   (owner decision 2026-10-28) desktops, within their access session
   (§6.8), which get only the three kinds they receive and may answer:
-  `authenticate`, `action` and `location` (never `session` or
-  `approval`), as every other ask list is (app, desktop). Agents:
-  `forbidden`.
+  `authenticate`, `action` and `location` (never `session`,
+  `approval` or `pairing`), as every other ask list is (app,
+  desktop). Agents: `forbidden`.
 - **When.** It is an owner-device request like the other lists: while
   the vault is held (§3.6) it is refused like them (`owner_check_required`),
   so the app reads it after the unlock and again after a passed owner
   check, where it already reads `grant.list`. It changes nothing in the
   vault: reading the list neither extends nor ends an ask, writes no
   audit entry and sends nothing to the asker.
-- **The app.** It reads every page, then replaces its in-memory
-  entries of these kinds with the list (an entry not in it is gone:
-  decided elsewhere, expired or withdrawn), merging by the ask's id.
-  Since events arrive in no particular order (§8.4), it then applies
-  only events whose inner `ts` is later than the first page's response
-  `ts`: a creation event as old as that or older is ignored (the list
-  already says whether the ask is open), and a closing event
-  (`sync.event` `connection.authenticate.decided` (with or without
-  `withdrawn`), `approval.decided`,
-  `action.decided`, each by its id; `device.session`, by `device_id`,
-  since a device has at most one session request; and
-  `location.request.closed`) for an ask not in the list does nothing. A
-  decision on a listed ask is the same
-  request as on the event (`connection.authenticate.approve`,
+- **The app.** It reads every page, then replaces its in-memory entries
+  of these kinds with the list (an entry not in it is gone: decided
+  elsewhere, expired or withdrawn), merging by the ask's id. Since
+  events arrive in no particular order (§8.4), it then applies only
+  events whose inner `ts` is later than the first page's response `ts`:
+  a creation event as old as that or older is ignored (the list already
+  says whether the ask is open), and a closing event (`sync.event`
+  `connection.authenticate.decided` (with or without `withdrawn`),
+  `approval.decided`, `action.decided`, each by its id;
+  `device.session`, by `device_id`, since a device has at most one
+  session request; and `location.request.closed`) for an ask not in the
+  list does nothing. A decision on a listed ask is the same request as
+  on the event (`connection.authenticate.approve`,
   `device.session.approve`, `approval.decide`, `action.respond`, or
-  `location.share.start` with the `request_id`, §10.16), with the same errors when another device decided
-  first.
+  `location.share.start` with the `request_id`, §10.16), with the same
+  errors when another device decided first. A `pairing` the app holds
+  only from its event is kept until 10 minutes after the event arrived,
+  whatever the list says, on a vault that has not returned the `pairing`
+  kind; a stale one is answered `not_found`.
 - **A desktop** reads the list when its access session starts and
   again after a passed owner check, and merges it the same way.
 - **Older vaults.** A vault before the release that carries it answers
@@ -10617,7 +10698,8 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
 - Kinds the vault creates: `connection.request` (`ref` = `pending_id`),
   `connection.request.peer_declined` (`ref` = `pending_id` or
   `connection_id`, the latter always after activation; 0.10.5, 0.10.6), `connection.added`, `connection.removed`, `connection.stale`,
-  `device.pair.pending`, `device.paired`, `device.unlinked`,
+  `device.pair.pending` (`ref` = `pending_id`, 0.83.0),
+  `device.paired`, `device.unlinked`,
   `message.received` (`ref` = `message_id`), (0.32.0, release
   A) `message.attachment_failed` (an outgoing attachment failed:
   `unsupported`, `refused`, `missing` or `unconfirmed`) and
@@ -11697,7 +11779,9 @@ bounded per agent:
   high-priority feed item (`leash.agent.suspended`) and
   `sync.event{leash.agent.suspended}`. An app ends it with
   `leash.agent.resume{agent_id}`, which also clears the cooldowns and
-  counts. Thirty is above what the cooldown lets one scope reach in an
+  counts and sends `sync.event{leash.agent.suspended}` with
+  `suspended: false` (0.83.0).
+  Thirty is above what the cooldown lets one scope reach in an
   hour (about 19), so an agent that only retries a refused request is
   slowed, not suspended; one that keeps sending while throttled, or
   probes many scopes, is suspended within minutes.
@@ -11737,6 +11821,11 @@ agents (§3.5).
   value's UTF-8 bytes as the key over `data` (1–16,384 bytes, base64),
   answered `{item_id, field_id, action, result}` (32 bytes); recorded as
   `leash.item.used`. An `address` field cannot be used (`not_found`).
+  (0.83.0) The result is HMAC-SHA-256 keyed by the value over data the
+  agent chooses, so a short or guessable value (a PIN, a dictionary
+  password) can be found offline from one result; an `auto` rule
+  allows that without asking, within the rate limits. Share only
+  long, random values (API keys) for this use.
   HTTP requests made by the vault with an injected secret need egress
   beyond the relay and are not offered (§15).
 
@@ -12353,6 +12442,8 @@ other.
   false`, not gaining the rule). A
   desktop's request for an agent subject is answered `forbidden` at once
   (the delegation needs the credential key, §6.8).
+  (0.83.0) A `dry_run: true` call for an agent subject changes nothing
+  and needs no unlock window; from a desktop it is still `forbidden`.
 - `share.rule.list` is sorted by `rule_id` and paged like `item.list`:
   `limit` 1–500 (default 50), at most 131,072 bytes, `next`.
 - `share.pending` is sent for each batch of items that became pending
@@ -16993,11 +17084,13 @@ not the optional features of §11.10.8, which the channel file chooses.
 | `recovery_r` | §11.14: the phone-held unlock secret in enrollment, unlock and a transfer's `hs.init`, the recovery open, and none of the recovery of §11.11.5. Listed whatever `recovery_offered` says (§11.14.13) | release R |
 | `recovery_offered` | The release offers recovery: its channel file's `recovery_offered` is `true` (§11.14.13). **Listed only then**; a release with `recovery_r` and without this name refuses every recovery request `not_offered`, and the app hides recovery for its vaults (it does not offer to start one and says, where the member looks for it, "This vault's release does not offer recovery", §11.14.13) | release R |
 | `attachments` | Message attachments (§7.3, §10.5.1) | listed from release R; release A implements them without saying so |
+| `item_ways` | The ways to use a secret (§10.11): each item an agent's rules include has its ways (`leash.item.set`, `leash.item.list`), and `item.get` is answered only for an item whose ways hold `reveal` (0.83.0; no release lists it yet) | the release that ships AGENT-PLAN AV9 |
 
 A name is added to this table only with the release that implements it,
-and a release that lists a name implements it fully. A release before R
-lists nothing, whatever it implements. Apps ignore names they do not
-know.
+or ahead of it by owner decision with that release in **From**
+(`item_ways`, 0.83.0); a release that lists a name implements it fully.
+A release before R lists nothing, whatever it implements. Apps ignore
+names they do not know.
 
 **The time scale (0.43.0, approved by the owner 2026-10-18;
 STAGING-TIME-SCALE §5.2).** From the release that ships `time_scale`
@@ -24566,11 +24659,12 @@ Follow-ups:
     after the unlock and after a passed owner check. Vault in a staging
     release after 24; then Android and iOS. Desktops read the three
     kinds they receive (`authenticate`, `action`, `location`), within
-    their access session (owner, 2026-10-28). **Open:** pairing and transfer confirmations
-    (`device.pair.pending`, `device.transfer.pending`, §6.7) are not
-    listed: each is a short flow on its own screen with a SAS, which
-    the new device starts again, and a transfer is approved even while
-    held (§3.6.3), which this list is not; whether a restarted old phone
+    their access session (owner, 2026-10-28). **Open:** pairings are
+    listed from 0.83.0 (`pending.list` kind `pairing`, item 49);
+    transfer confirmations (`device.transfer.pending`, §6.7) are not:
+    each is a short flow on its own screen with a SAS, which the new
+    device starts again, and a transfer is approved even while held
+    (§3.6.3), which this list is not; whether a restarted old phone
     should get a pending transfer back is a separate decision.
 
 45. **Reconnect after a restore (0.72.0; owner decision 2026-10-28,
@@ -25041,6 +25135,28 @@ Follow-ups:
     unchanged) and the vault (implemented at ac9f8f5). **New member-facing
     text:** `vote_conflict_after_verified` (approved).
 
+49. **The device flows' gaps are closed (0.83.0; owner decision
+    2026-10-20, ANDROID-PLAN §9 decisions 14 and 17(d)).** A restarted
+    app lost the pairings, access requests and approvals waiting for the
+    member, the SAS and each request's `body`. Decided: a new kind of
+    `pending.list`, `pairing` (§10.4.2, apps only), lists the pairings,
+    by owner decision 2026-11-02 (option a): access requests and
+    approvals were already listed there since 0.70.0, so no new op is
+    added; the pairing feed item's `ref` is the `pending_id`, which
+    approving or rejecting accepts; the approve answer carries the new
+    `device_id`; an ended request is `not_found`; the values of
+    `device.list`'s `kind` and `state`, `leash.item.changed`,
+    `location.request.closed`, the resumption event, the
+    offline-guessing risk of `item.use` and the capability `item_ways`
+    are written down. `audit.list` keeps its filters (search by name
+    works). **Needs:** the vault for the `pairing` kind, the approve
+    answer's `device_id` and cancelling an unopened invite (owner
+    decision 2026-11-02), and for `leash.item.changed` and `item_ways`
+    the release with the ways to use a secret; the rest is what the
+    vault already does (`5e1f888`). §8.6 (erratum, from the desktop
+    relay client's review, lead 2026-11-02): a retried open-token
+    `hs.init` answered `token_used` or `token_revoked` waits for
+    `hs.resp` until `exp` + 60 s.
 
 ## 16. Test vectors
 
