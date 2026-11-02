@@ -32,30 +32,38 @@ changelog:
     a); needs a vault change. **`device.session.end` may name the
     session it ends.** Both forms take an optional `session_id` (the
     app's `{device_id, session_id?}`, a desktop's or agent's
-    `{session_id?}`). When it is present and is not the target device's
-    current, unexpired access session (or the device has none), the
-    vault answers `{}` and changes nothing: the session, the pending
-    session request and the held requests stay, and nothing is audited
-    or sent. Without it, the end applies to all of the device's access,
-    pending request included, as before. A sender includes it only to
-    end a specific session it holds or approved; the member's End access
-    and "Deny and end access now" send `{device_id}` alone. The answer
-    `{}` does not say whether anything ended; a sender that needs to
-    know reads `vault.status`'s `session` (a desktop or agent) or
-    `device.list`'s `session_expires_at` (the app). A device does not
-    send `device.session.request` until its `device.session.end` is
-    answered (or, if no answer comes after its retries, until
-    `vault.status`'s `session` reads `null`). Messages arrive in no
-    order (§8.4), so an end of session A delayed, or sent again under a
-    new `id`, could otherwise end a newer session B. A vault before this
-    change ignores the member (§10.1: unknown members are ignored) and
-    ends the current session: the race remains there, erring toward
-    ending access, and the answer does not tell the two apart. The vault
-    change also returns `session` in `vault.status` to desktops and
-    agents as 0.41.0 specifies (a device whose session was granted at
-    pairing learns its `session_id` only there). Sections changed: §6.8
-    (step 3, "Ending", the hold paragraph), §3.6.3 (the hold's allow
-    list), §10.3 (the `device.session.end` row).
+    `{session_id?}`). When it is the device's current session, or is
+    absent, the end is as before: the session ends, held requests are
+    answered `denied`, the pending request is dropped, and it is audited
+    and sent. When it is present and is not the device's current,
+    unexpired access session (a session suspended by the hold is
+    current), the vault answers `{}` and changes nothing: the session,
+    the pending request and the held requests stay, and nothing is
+    audited or sent (nothing changed). A sender includes it only for an
+    end it makes on its own of a specific session it holds or approved;
+    the member's End access, "Deny and end access now", and a desktop's
+    or agent's end at a person's request (its own End access, signing
+    out, an operator's stop) send none, and so does a device that does
+    not know its `session_id`. The answer `{}` does not say whether
+    anything ended; a sender that needs to know reads `vault.status`'s
+    `session` (a desktop or agent) or `device.list`'s
+    `session_expires_at` (the app). A device does not send
+    `device.session.request` until its `device.session.end` is answered;
+    if no answer comes after its retries it reads `vault.status`'s
+    `session`: `null` lets it request, a named session gets the end
+    again under a new `id` with that `session_id`, and no `session`
+    member (a vault before this change) lets it request once its retries
+    are spent. Messages arrive in no order (§8.4), so an end of session
+    A delayed, or sent again under a new `id`, could otherwise end a
+    newer session B. A vault before this change ignores the member
+    (§10.1: unknown members are ignored) and ends the current session:
+    the race remains there, erring toward ending access, and the answer
+    does not tell the two apart. The vault change also returns `session`
+    in `vault.status` to desktops and agents as 0.41.0 specifies (a
+    device whose session was granted at pairing learns its `session_id`
+    only there). Sections changed: §6.8 (step 3, "Ending", the hold
+    paragraph), §3.6.3 (the hold's allow list), §10.3 (the
+    `device.session.end` row).
   - 0.82.4: erratum, 2026-11-01, from the review of the vault
     implementation (vettid-vault #180); no change for apps. §10.18
     "Setting and lowering", "Raising and removing", "Twin wallets" and
@@ -6534,33 +6542,45 @@ device (`limit` beyond that):
 `device.session.end{}`. Held requests of the device are answered
 `denied`, its pending request is dropped, and the device is told
 `device.session.ended{reason: "ended"}` when an app ended it. (0.82.5)
-Either form may carry `session_id`, naming the session it ends. If that
-is not the device's current, unexpired access session (a newer one
-replaced it, it has expired, or the device has none), the vault answers
-`{}` and changes nothing: no session ends, the pending request and the
-held requests stay, and nothing is audited or sent. Messages arrive in
-no order (§8.4), so without it an end of an earlier session that is
-delayed, or sent again under a new `id` (a retry with the same `id` is
-absorbed by §8.2), can end a newer one. A sender includes `session_id`
-only to end a specific session it holds or approved: a desktop or agent
-knows its own from `device.session.granted` or `vault.status`'s
-`session` (the only source for a session granted at pairing), and the
-app knows the id only of a session it approved with
+Either form may carry `session_id`, naming the session it ends. When
+`session_id` is the device's current session, or is absent, the end is
+the one described above: the session ends, held requests are answered
+`denied`, the pending request is dropped, and it is audited and sent as
+an end. If `session_id` is not the device's current, unexpired access
+session (a newer one replaced it, it has expired, or the device has
+none; a session suspended by the hold, §3.6.3, is current), the vault
+answers `{}` and changes nothing: no session ends, the pending request
+and the held requests stay, and nothing is audited or sent (nothing
+changed, so there is nothing for the audit log or the owner's other
+devices). Messages arrive in no order (§8.4), so without it an end of an
+earlier session that is delayed, or sent again under a new `id` (a retry
+with the same `id` is absorbed by §8.2), can end a newer one. A sender
+includes `session_id` only to end a specific session it holds or
+approved: a desktop or agent knows its own from `device.session.granted`
+or `vault.status`'s `session` (the only source for a session granted at
+pairing), and the app knows the id only of a session it approved with
 `device.session.approve`. Without `session_id` the end applies to all of
-the device's access, its pending request included, as before; the
+the device's access, its pending request included, as before. The
 member's End access and "Deny and end access now" (step 3) send no
-`session_id`. The answer `{}` does not say whether anything ended: a
-sender that needs to know reads `vault.status`'s `session` (a desktop or
-agent) or `device.list`'s `session_expires_at` (the app). A `session_id`
-that is not a non-empty string is `bad_request` (`null` is absent); in
-the app's form an unknown `device_id` is still `not_found`, first. A
-device does not send `device.session.request` until its
-`device.session.end` is answered (or, when the answer does not come
-after the retries of §8.6, until `vault.status`'s `session` reads
-`null`, sending the end again under a new `id` if it does not), so that
-a reordered end cannot drop that request or end the session it starts.
-Unlinking (§7.4) ends everything of the device. Access sessions also
-simply expire; the device knows `expires_at`.
+`session_id`; nor does a desktop or agent ending its access at a
+person's request (its own End access, signing out, an operator's stop):
+it includes one only for an end it makes on its own, such as before it
+requests a new session. A device that does not know its session's
+`session_id` sends none. The answer `{}` does not say whether anything
+ended: a sender that needs to know reads `vault.status`'s `session` (a
+desktop or agent) or `device.list`'s `session_expires_at` (the app). A
+`session_id` that is not a non-empty string is `bad_request` (`null` is
+absent); in the app's form an unknown `device_id` is still `not_found`,
+first. A device does not send `device.session.request` until its
+`device.session.end` is answered (or, when no answer comes after the
+retries of §8.6, until `vault.status`'s `session` reads `null`. If it
+names a session, the device sends the end again under a new `id` with
+that session's `session_id`. If `vault.status` has no `session` member,
+which means a vault before this change, the device sends the request
+once its retries are spent), so that a reordered end cannot drop that
+request or end the session it starts. Unlinking (§7.4) ends everything
+of the device. Access sessions also simply expire; the device knows
+`expires_at`.
 
 Every grant, end and decision is audited (§10.9), and the owner's other
 devices learn of it as `sync.event` (§10.1) (0.77.0, spelled out):
@@ -7508,7 +7528,7 @@ device belongs to the unlock it ends.
 | `device.session.approve` (app) | `{request_id, seconds?}` | `{device_id, session_id, expires_at}` |
 | `device.session.deny` (app) | `{request_id}` | `{}` |
 | `device.session.granted` (to the device) | — | `{session_id, expires_at}` |
-| `device.session.end` (app: `{device_id}`; desktop, agent: `{}`, its own; (0.82.5) either may add `session_id`) | as left | `{}`; (0.82.5) also `{}`, with nothing changed, when `session_id` is not the device's current, unexpired session; `bad_request` for a `session_id` that is not a non-empty string (§6.8 "Ending") |
+| `device.session.end` (app: `{device_id}`; desktop, agent: `{}`, its own; (0.82.5) either may add `session_id`) | as left | `{}`; (0.82.5) also `{}`, with nothing changed, when `session_id` is not the device's current, unexpired session (a session suspended by the hold, §3.6.3, is current); `bad_request` for a `session_id` that is not a non-empty string (§6.8 "Ending") |
 | `device.session.ended` (to the device) | — | `{reason: "denied" \| "ended"}` |
 | `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history` (§10.11) |
 | `approval.waiting` (to the requester) | — | `{approval_id, request_id, exp}` |
