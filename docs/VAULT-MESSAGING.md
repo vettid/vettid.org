@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.82.7
+version: 0.83.0
 date: 2026-11-02
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,29 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.83.0: owner decision 2026-10-20 (ANDROID-PLAN §9 decisions 14 and
+    17(d)): the specification gaps of the device flows. §10.3: the new
+    type `device.pending.list` (app) lists the pairings (with `sas`
+    once known), access requests and held approvals waiting for the
+    member, so a restarted app gets back what the events gave it; the
+    `device.pair.pending` feed item's `ref` is the request's
+    `pending_id`, which `device.pair.approve` and `.reject` accept in
+    place of `pairing_id`; `device.pair.approve` answers `{device_id}`;
+    `not_found` for a pairing, access request or approval that is
+    unknown, ended or expired, and `bad_request` for a pairing whose
+    SAS is not known yet; the `kind` and `state` values of
+    `device.list`. §10.1: `leash.item.changed` and
+    `location.request.closed` in the `sync.event` table. §10.11:
+    `leash.agent.resume` sends `sync.event{leash.agent.suspended}`
+    with `suspended: false`; what `item.use` gives away of a short or
+    guessable value. §10.12: a dry run of `share.rule.set` for an agent
+    subject needs no unlock window. §11.10.9: the capability
+    `item_ways`. `device.pending.list` and the `device_id` in the
+    approve answer need a vault change; `leash.item.changed` and
+    `item_ways` come with the ways to use a secret (AGENT-PLAN AV9);
+    the rest states what the vault already does (vettid-vault
+    `5e1f888`). Not changed: `audit.list` has no device filter
+    (decision 14e). §15 item 49.
   - 0.82.7: owner decision 2026-11-02 (VAULT-PLAN §8 follow-up 1,
     dropped): grants carry no retention hint. §10.12 "Keeping a fetched
     value" states what the phone apps already do: a fetched value is
@@ -7427,6 +7450,7 @@ an answer to an unknown or expired id is dropped.
   | `leash.grant.changed` | `grant_id`, `agent_id`, `version` (§10.11) |
   | `leash.grant.revoked` | `grant_id`, `agent_id` (§10.11) |
   | `leash.agent.suspended` | `agent_id`, `suspended` (§10.11) |
+  | `leash.item.changed` | `agent_id`, `item_id`, `version`: the ways to use an item changed (§10.11; sent from the release with the ways to use a secret, AGENT-PLAN AV9) |
   | `grant.changed` | `grant_id`, `state` (`active`, `used`, `expired`, `revoked`) (§10.12) |
   | `grant.request.decided` | `request_id`, `approved` (§10.12) |
   | `share.rule.changed` | `rule_id`, `version` (§10.12) |
@@ -7438,6 +7462,7 @@ an answer to an unknown or expired id is dropped.
   | `action.offers` | `connection_id`: the actions it offers changed (§10.14) |
   | `intro.changed` | `intro_id`, `state` (§10.15) |
   | `location.share.changed` | `share_id`, `state` (`active`, `ended`): an outgoing share (§10.16) |
+  | `location.request.closed` | `request_id`, `reason` (`answered`, `expired`): a request is no longer pending (§10.16) |
   | `location.history.changed` | `count`: positions were deleted from the location log (§10.16) |
   | `presence.changed` | `version` (§10.17) |
   | `wallet.changed` | `wallet_id`, `version` (§10.18; 0.56.0: also when caps are set or raised) |
@@ -7529,7 +7554,8 @@ device belongs to the unlock it ends.
 |---|---|---|
 | `device.pair.create` (app) | `{role: "desktop" \| "agent"}` | `{pairing_id, link, exp}`; `{role: "app"}` is answered `one_app` (§6.7) |
 | `device.pair.pending` (to apps) | — | `{pairing_id, pending_id, role, name, sas}`; `name` is the new device's self-asserted `profile.name` |
-| `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}`; `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window) | `{}` |
+| `device.pending.list` (app; 0.83.0; not yet built in the vault) | `{}` | `{pairings: [{pairing_id, pending_id?, role, name?, sas?}], sessions: [<device.session.pending>], approvals: [<approval.pending>]}` |
+| `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}`; `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window) | `{device_id}`, the new device's id, as on `device.paired` (0.83.0; not yet built in the vault, which answers `{}`) |
 | `device.pair.reject` (app) | `{pairing_id}` | `{}` |
 | `device.pair.rejected` (to the new device) | — | `{}`: the owner rejected the pairing or transfer after its `hs.fin` (0.10.5); sealed under the handshake's epoch, on the device's token from `hs.init`, as `device.paired`; the device stops waiting (§6.7) |
 | `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?, user_guid?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true`, the credential's `credential_version` and (0.17.0) the member's `user_guid`, which its unlocks need, for a transferred app only (§6.7.1) |
@@ -7554,6 +7580,35 @@ device belongs to the unlock it ends.
 - `last_active_at` is when the vault last processed a durable message from
   the principal, to the minute; `session_expires_at` is present while an
   access session lasts.
+- **Requests waiting for the member** (0.83.0; `device.pending.list`
+  is not yet built in the vault). An app that restarts, or that was
+  locked when an event arrived, reads them back. The body is empty.
+  `pairings` has an entry for each pairing of a desktop or agent that
+  is waiting: `pairing_id`, `role` and, once the handshake has reached
+  `hs.fin` (§6.3), `pending_id`, `name` and `sas`, with the members of
+  the `device.pair.pending` event; before that the entry has none of
+  the last three, and the app cannot approve it yet (below). A
+  transfer is not listed (§15 item 44). `sessions` holds the bodies of
+  `device.session.pending` and `approvals` those of `approval.pending`
+  (`body` and `flags` included), each as the event sent it, for the
+  requests the vault would still accept a decision on. Nothing else is
+  listed: a device that is paired is in `device.list`.
+- **The pairing feed item.** The `ref` of the `device.pair.pending`
+  feed item is the request's `pending_id`. `device.pair.approve` and
+  `device.pair.reject` accept it in place of `pairing_id`, so an app
+  that lost the pairing can reject it with that `ref`. The item has
+  no name: `device.pending.list` carries it.
+- **Ended requests.** `device.pair.approve` and `device.pair.reject`
+  answer `not_found` for a pairing that is unknown, rejected or
+  expired, and for a transfer's; `device.session.approve` and
+  `device.session.deny` for an access request that is unknown,
+  answered or expired (`device.session.approve` also when the device
+  is no longer active); `approval.decide` for an approval that is
+  unknown, decided or expired. `device.pair.approve` for a pairing
+  whose SAS is not known yet is `bad_request`.
+- **`device.list` values.** `kind` is `app`, `desktop` or `agent`;
+  `state` is `active` or `stale`. A device whose pairing is not yet
+  approved is not listed: it appears in `device.pending.list`.
 - A held request that is approved is executed when the decision arrives,
   so `approval.decide` answers with its outcome; the requester gets the
   request's own response.
@@ -11697,7 +11752,9 @@ bounded per agent:
   high-priority feed item (`leash.agent.suspended`) and
   `sync.event{leash.agent.suspended}`. An app ends it with
   `leash.agent.resume{agent_id}`, which also clears the cooldowns and
-  counts. Thirty is above what the cooldown lets one scope reach in an
+  counts and sends `sync.event{leash.agent.suspended}` with
+  `suspended: false` (0.83.0).
+  Thirty is above what the cooldown lets one scope reach in an
   hour (about 19), so an agent that only retries a refused request is
   slowed, not suspended; one that keeps sending while throttled, or
   probes many scopes, is suspended within minutes.
@@ -11737,6 +11794,11 @@ agents (§3.5).
   value's UTF-8 bytes as the key over `data` (1–16,384 bytes, base64),
   answered `{item_id, field_id, action, result}` (32 bytes); recorded as
   `leash.item.used`. An `address` field cannot be used (`not_found`).
+  (0.83.0) The result is HMAC-SHA-256 keyed by the value over data the
+  agent chooses, so a short or guessable value (a PIN, a dictionary
+  password) can be found offline from one result; an `auto` rule
+  allows that without asking, within the rate limits. Share only
+  long, random values (API keys) for this use.
   HTTP requests made by the vault with an injected secret need egress
   beyond the relay and are not offered (§15).
 
@@ -12353,6 +12415,8 @@ other.
   false`, not gaining the rule). A
   desktop's request for an agent subject is answered `forbidden` at once
   (the delegation needs the credential key, §6.8).
+  (0.83.0) A `dry_run: true` call for an agent subject changes nothing
+  and needs no unlock window; from a desktop it is still `forbidden`.
 - `share.rule.list` is sorted by `rule_id` and paged like `item.list`:
   `limit` 1–500 (default 50), at most 131,072 bytes, `next`.
 - `share.pending` is sent for each batch of items that became pending
@@ -16993,6 +17057,7 @@ not the optional features of §11.10.8, which the channel file chooses.
 | `recovery_r` | §11.14: the phone-held unlock secret in enrollment, unlock and a transfer's `hs.init`, the recovery open, and none of the recovery of §11.11.5. Listed whatever `recovery_offered` says (§11.14.13) | release R |
 | `recovery_offered` | The release offers recovery: its channel file's `recovery_offered` is `true` (§11.14.13). **Listed only then**; a release with `recovery_r` and without this name refuses every recovery request `not_offered`, and the app hides recovery for its vaults (it does not offer to start one and says, where the member looks for it, "This vault's release does not offer recovery", §11.14.13) | release R |
 | `attachments` | Message attachments (§7.3, §10.5.1) | listed from release R; release A implements them without saying so |
+| `item_ways` | The vault has the ways to use a secret (§10.11): an agent's item has its allowed ways, and `item.get` is answered only for an item whose ways hold `reveal` | the release that ships AGENT-PLAN AV9 |
 
 A name is added to this table only with the release that implements it,
 and a release that lists a name implements it fully. A release before R
@@ -25040,6 +25105,23 @@ Follow-ups:
     **Needs:** the apps (ANDROID-PLAN 0.1.108: items 2, 3 and 7; IOS-PLAN
     unchanged) and the vault (implemented at ac9f8f5). **New member-facing
     text:** `vote_conflict_after_verified` (approved).
+
+49. **The device flows' gaps are closed (0.83.0; owner decision
+    2026-10-20, ANDROID-PLAN §9 decisions 14 and 17(d)).** A restarted
+    app lost the pairings, access requests and approvals waiting for
+    the member, the SAS and each request's `body`. Decided: one new
+    type, `device.pending.list` (§10.3), lists them; the pairing feed
+    item's `ref` is the `pending_id`, which approving or rejecting
+    accepts; the approve answer carries the new `device_id`; an ended
+    request is `not_found`; the values of `device.list`'s `kind` and
+    `state`, `leash.item.changed`, `location.request.closed`, the
+    resumption event, the offline-guessing risk of `item.use` and the
+    capability `item_ways` are written down. `audit.list` keeps its
+    filters (search by name works). **Needs:** the vault for
+    `device.pending.list` and the approve answer's `device_id`, and
+    for `leash.item.changed` and `item_ways` the release with the ways
+    to use a secret; the rest is what the vault already does
+    (`5e1f888`).
 
 
 ## 16. Test vectors
