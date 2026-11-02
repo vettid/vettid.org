@@ -5,12 +5,12 @@ version: 0.1.58
 date: 2026-11-02
 changelog:
   - 0.1.58: erratum (owner 2026-11-02), as built (vettid-ios #198).
-    §4.15: the withdrawn notice offers the mute only while the
-    connection is in the list read, has a name and its asks are not
-    muted, as History does, so a connection of unknown kind is no longer
-    offered it and the iOS difference about confirming its mute is gone;
-    the notice's mute for a connection with no name, which Android
-    offers, is named as the iOS difference.
+    §4.15: the withdrawn notice, like History, offers the mute only
+    while the connection is in the list read, has a name and its asks
+    are not muted. A connection of unknown kind is no longer offered
+    the mute, so the iOS difference about confirming it is gone. The
+    new iOS difference: Android's notice also offers the mute for a
+    connection with no name.
   - 0.1.57: erratum (owner 2026-11-02), as built (vettid-ios #183,
     #184). §4.14 and §4.15 say built, not "Not built". §4.14: the
     spoken digits use `accessibilitySpeechSpellsOutCharacters`; the
