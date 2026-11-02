@@ -28,11 +28,12 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.82.6: erratum, as built (vettid-vault `credential.reset`): a
-    reset destroys every other app's UTKs, not the holder's. The
-    holder keeps its UTK pool, less the UTK the reset spent, and the
-    answer's `utks` refills it only when it is low (§3.5.5). §11.14.9
-    already said so; no change for apps or the vault.
+  - 0.82.6: erratum, 2026-11-02, as built (vettid-vault main
+    `5e1f888`, `holderReset`): a reset destroys every other app's
+    UTKs, not the holder's. The holder keeps its UTK pool, less the UTK
+    the reset spent, and the answer's `utks` refills it only when it is
+    low (§3.5.5, and the §10.6 row). §11.14.9 already said so; no change
+    for apps or the vault.
   - 0.82.5: erratum, owner decision 2026-11-01 (vettid.org #493, option
     a); needs a vault change. **`device.session.end` may name the
     session it ends.** Both forms take an optional `session_id` (the
@@ -9126,7 +9127,7 @@ for `credential`, `utk_id` and `sealed`.
 | `credential.rotate` | `{credential, utk_id, sealed{password}}` | `{credential, version, key, utks}`; the vault also rotates its relay key, `ik`, `kem` and wake key (§3.4, §3.5.5) |
 | `credential.password.change` | `{credential, utk_id, sealed{password, new_password}}`; (0.33.0, release R) `sealed{pin, password, new_password}` | `{credential, version, utks}`; (release R) `bad_pin`, `weak_password`, `busy`, `counter_unavailable`, `retry` (§11.14.9) |
 | `credential.recover` | `{utk_id, sealed{password}}` | `{credential, version, utks}` (§11.11.5). (0.33.0, release R) Removed: `forbidden`; a recovery completes in the open (§11.14.6). 0.9.0 removed the member-supplied `credential`; 0.16.0 removed `credential_lost`: a vault without a backup copy never gets this far (§11.11.1) |
-| `credential.reset` | the holder (0.15.2): `{credential, utk_id, sealed{pin, password, new_password}}` | `{credential, version, key, utks}`: a new credential; the old credential and every critical item are destroyed (§3.5.5). Answers as an owner check does (§3.6.1: `bad_pin`, `bad_password`, `backoff`, `credential_frozen`, `rotation_required`, …) and is refused while the vault is held (§3.6.3). 0.16.0 removed the recovering app's form `{utk_id, sealed{password}}`: `forbidden` |
+| `credential.reset` | the holder (0.15.2): `{credential, utk_id, sealed{pin, password, new_password}}` | `{credential, version, key, utks}`: a new credential; the old credential and every critical item are destroyed (§3.5.5); the holder keeps its UTK pool less the spent UTK, and `utks` refills it only when low (0.82.6). Answers as an owner check does (§3.6.1: `bad_pin`, `bad_password`, `backoff`, `credential_frozen`, `rotation_required`, …) and is refused while the vault is held (§3.6.3). 0.16.0 removed the recovering app's form `{utk_id, sealed{password}}`: `forbidden` |
 | `credential.alarm` (V→D, to the holder; durable) | — | `{alarm_id, kind: "clone", state: "frozen", at, presenter: "holder" \| "other", version}`: an urgent alert (§3.5.9) |
 | `credential.alarm.confirm` | `{alarm_id, mine: bool}` | `{state: "rotation_required"}`; `not_found` if no such alarm is open (§3.5.9) |
 | `pin.change` | `{pin, new_pin}` | `{}`; `bad_pin` if `pin` is wrong; `bad_request` if `new_pin` is not 6–32 digits (§11.3). (0.33.0, release R) The holder's credential operation `{credential, utk_id, sealed{pin, new_pin, password, new_unlock_secret}}`, answered `{credential, version, utks, epoch_advanced: true}` (§11.14.9) |
