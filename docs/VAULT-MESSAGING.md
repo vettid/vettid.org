@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.82.4
+version: 0.82.5
 date: 2026-11-01
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,25 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.82.5: owner decision 2026-11-01 (vettid.org #493, option a).
+    **`device.session.end` may name the session it ends.** Both forms
+    take an optional `session_id` (the app's `{device_id, session_id?}`,
+    a desktop's or agent's `{session_id?}`). When it is present and is
+    not the target device's current access session (or the device has
+    none), the vault answers `{}` and changes nothing: the session, the
+    pending session request and the held requests stay, and nothing is
+    audited or sent. Without it, the end applies to whatever session the
+    device holds, as before. Messages arrive in no order (§8.4), so an
+    end of session A whose answer was late or lost could otherwise end a
+    newer session B. A desktop or agent knows its `session_id` from
+    `device.session.granted` and `vault.status.session`, and the app that
+    approved a session from `device.session.approve`; a sender that knows
+    it SHOULD send it. Backward compatible: older senders omit it, and a
+    vault before this change ignores the member (§10.1: unknown
+    members are ignored) and ends the current session. **Needs a vault
+    change** (vettid-vault `hSessionEnd`, a later release). Sections
+    changed: §6.8 ("Ending", the hold paragraph), §3.6.3 (the hold's
+    allow list), §10.3 (the `device.session.end` row).
   - 0.82.4: erratum, 2026-11-01, from the review of the vault
     implementation (vettid-vault #180); no change for apps. §10.18
     "Setting and lowering", "Raising and removing", "Twin wallets" and
@@ -4348,8 +4367,8 @@ every `drop.*` entry, §10.9). Allowed while held:
 |---|---|
 | The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); `push.register`, `push.confirm` (0.30.0) and `push.unregister` (0.24.0: the wakes for `vault.held` and the alarm depend on a current token, §14.2); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline; (0.37.0) `location.share.stop` (§10.16): ending a disclosure is always possible, as locking is |
 | A recovering app (§11.11.5) | Its own set, unchanged by the hold: `credential.utk.get`, `credential.recover`, `vault.status` (reduced) and the token and address types (0.16.0 removed `credential.reset` and `vault.delete` from it). A recovery completes while held and starts the clock (§3.6.1). (0.33.0, release R) No such app exists: a recovery completes in the open, and the phone is the holder from its first message (§11.14.6) |
-| A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session), `call.end` and `call.ice` of a call it answered before the deadline, (0.37.0) `location.share.stop` |
-| An agent | `vault.status`, `device.session.end{}` (its own session) |
+| A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session; `session_id` optional, 0.82.5), `call.end` and `call.ice` of a call it answered before the deadline, (0.37.0) `location.share.stop` |
+| An agent | `vault.status`, `device.session.end{}` (its own session; `session_id` optional, 0.82.5) |
 | Any device | The handshake (`hs.init`, `hs.resp`, `hs.fin`: rekeys and reconnects), `relay.token.issued`, `relay.token.refresh`, `relay.address.update` |
 
 In particular, while held there is no pairing approval (a pending
@@ -6502,7 +6521,19 @@ device (`limit` beyond that):
 `device.session.end{device_id}`; a desktop or agent ends its own with
 `device.session.end{}`. Held requests of the device are answered
 `denied`, its pending request is dropped, and the device is told
-`device.session.ended{reason: "ended"}` when an app ended it. Unlinking
+`device.session.ended{reason: "ended"}` when an app ended it.
+(0.82.5) Either form may carry `session_id`, naming the session it
+ends. If that is not the device's current access session (a newer one
+replaced it, or it has none), the vault answers `{}` and changes
+nothing: no session ends, the pending request and the held requests
+stay, and nothing is audited or sent (the end was meant for a session
+that is already over). Messages arrive in no order (§8.4), so without
+it an end of an earlier session that is delayed or retried can end a
+newer one. A desktop or agent knows its `session_id` from
+`device.session.granted` and `vault.status.session`, the app that
+approved a session from `device.session.approve`; a sender that knows
+it SHOULD send it. Without `session_id` the end applies to whatever
+session the device holds. Unlinking
 (§7.4) ends everything of the device. Access sessions also simply expire;
 the device knows `expires_at`.
 
@@ -6538,7 +6569,7 @@ apps re-read `pending.list` after the check (§10.4.2).
 
 **While the vault is held** (§3.6.3), access sessions are suspended: a
 desktop or agent may send only `vault.status`, `device.session.end{}`
-and the transport types (a desktop also `vault.lock`, and `call.end` and
+(with or without `session_id`, 0.82.5) and the transport types (a desktop also `vault.lock`, and `call.end` and
 `call.ice` of a call it answered before the deadline); everything else is answered
 `owner_check_required`. Held requests were answered
 `owner_check_required` when the hold began, and no app may grant a
@@ -7451,7 +7482,7 @@ device belongs to the unlock it ends.
 | `device.session.approve` (app) | `{request_id, seconds?}` | `{device_id, session_id, expires_at}` |
 | `device.session.deny` (app) | `{request_id}` | `{}` |
 | `device.session.granted` (to the device) | — | `{session_id, expires_at}` |
-| `device.session.end` (app: `{device_id}`; desktop, agent: `{}`, its own) | as left | `{}` |
+| `device.session.end` (app: `{device_id}`; desktop, agent: `{}`, its own; (0.82.5) either may add `session_id`) | as left | `{}`; (0.82.5) also `{}`, with nothing changed, when `session_id` is not the device's current session (§6.8 "Ending") |
 | `device.session.ended` (to the device) | — | `{reason: "denied" \| "ended"}` |
 | `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history` (§10.11) |
 | `approval.waiting` (to the requester) | — | `{approval_id, request_id, exp}` |
