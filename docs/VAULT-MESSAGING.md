@@ -29,8 +29,8 @@ related:
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.82.6: erratum, as built (vettid-vault `credential.reset`): a
-    reset destroys every other device's UTKs, not the holder's. The
-    holder keeps the rest of its UTK pool across the reset, and the
+    reset destroys every other app's UTKs, not the holder's. The
+    holder keeps its UTK pool, less the UTK the reset spent, and the
     answer's `utks` refills it only when it is low (§3.5.5). §11.14.9
     already said so; no change for apps or the vault.
   - 0.82.5: erratum, owner decision 2026-11-01 (vettid.org #493, option
@@ -3781,11 +3781,12 @@ item's values seals them to a **one-time reply key** instead:
   single operation and a single flush, so a vault that has had a
   credential is never without one:
   - it destroys the CEK, the recorded hash, the latest blob, every
-    other device's UTKs and every critical item (§10.7); blobs held by
-    apps can no longer be opened by anyone. The holder keeps the rest
-    of its UTK pool (0.82.6): its unspent UTKs still open operations
-    after the reset, and the answer's `utks` refills the pool only when
-    it is low, as `credential.create`'s does (§11.14.9);
+    other app's UTKs and every critical item (§10.7); blobs held by
+    apps can no longer be opened by anyone. The holder keeps its UTK
+    pool, less the UTK the reset spent (0.82.6): its unspent UTKs still
+    open operations after the reset, and the answer's `utks` refills
+    the pool only when it is low, as `credential.create`'s does
+    (§11.14.9);
   - it creates version 1 of a new credential under a new password, with
     a new credential key and no rotation statement, and starts the owner
     check's clock (§3.6.1);
