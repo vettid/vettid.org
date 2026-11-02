@@ -1,9 +1,24 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.114
+version: 0.1.115
 date: 2026-11-02
 changelog:
+  - 0.1.115: editorial, status as of 2026-11-02 (no rule changes): the
+    features below are marked built, with their vettid-android PRs.
+    Sign-in match code and withdrawn requests (#229); votes, member side
+    (#230, with #236); devices and agents AA1 (#196) and AA2 (#199), AA3
+    to AA5 still not built; calls C1 (#128); wallet W1 (#223, #234,
+    #235, #238, #239, #247, #248; the W0 spikes #217 and #219 were not
+    merged) and W2-1 and W2-2 (#252, #254), W2-3 (the transactions)
+    still not built. Left out by the PRs and noted in the text: the
+    Votes line of "What this service can ask"; "Unlock your vault to
+    call"; the "(connection lost)" on a conversation's call line; #196's
+    and #199's deferrals; the reset of unreadable wallet settings
+    (#248), which the plan did not have. §4 "Sign-in match code",
+    "Withdrawn requests", "Votes", "Devices & agents" and "Wallet,
+    presence, location and video", and the status text of §6, were
+    changed.
   - 0.1.114: erratum (wallet W2-2, vettid-android #254; owner decisions
     of 2026-11-02). (1) "Sending" step 6 said that of two sends "only
     one can ever confirm". That holds only while the phone still has the
@@ -4147,18 +4162,19 @@ the title, the priority or the channel; titles without a name.
 ### Wallet, presence, location and video (0.1.42)
 
 *Approved by the owner (2026-10-17, 0.1.42; the wording stays open to
-the owner's rewording). The app's side of VAULT-MESSAGING
-0.34.0 §10.18 Wallet (with §10.7 critical items), §10.17 Presence and
-§10.16 Location, and of CALLS-PLAN 0.1.3 §4, §6.4 and §7 C4 for video.
-The vault side of the first three is built (vettid-vault `main`,
-features `wallet`, `presence` and `location`, on in staging and off in
-production, VAULT-MESSAGING §11.10.8) but has never been used from a
-phone. Nothing here is built in the app. The owner decided on
-2026-10-17 the wallet's networks on staging, that the chain source is
-the member's choice, and the order (D8); the other choices are open
-(§9, questions 16–27), each with a recommendation. The texts are
-drafts for the owner's wording. Vault code read at vettid-vault
-`2c3fe13`.*
+the owner's rewording). The app's side of VAULT-MESSAGING 0.34.0 §10.18
+Wallet (with §10.7 critical items), §10.17 Presence and §10.16 Location,
+and of CALLS-PLAN 0.1.3 §4, §6.4 and §7 C4 for video. The vault side of
+the first three is built (vettid-vault `main`, features `wallet`,
+`presence` and `location`, on in staging and off in production,
+VAULT-MESSAGING §11.10.8) but has never been used from a phone. Of this
+section, only the wallet is built in the app so far (W1 to W2-2; the W0
+spikes were not merged, see its PRs below); presence, location and video
+are not. The owner decided on 2026-10-17 the wallet's networks on
+staging, that the chain source is the member's choice, and the order
+(D8); the other choices are open (§9, questions 16–27), each with a
+recommendation. The texts are drafts for the owner's wording. Vault code
+read at vettid-vault `2c3fe13`.*
 
 **Order** (D8). Wallet (W0–W2), then presence (P1), then location
 (L1–L3), each on staging under STAGING-DEVELOPMENT-PLAN §2 and promoted
@@ -4671,6 +4687,20 @@ creation step (the vault's caps come first). W2: send (building, inspect, approv
 broadcast) and the transactions. Each against the dev stack first,
 then staging.
 
+**Built (status as of 2026-11-02; vettid-android).** W0: the spikes,
+#217 and #219 (not merged, as above). W1: the library behind
+`:core:chain` and its conformance with the vault (#223); the chain
+source (#234); the wallet core, no screens (#235); the screens for the
+list, new wallet, recovery phrase and check (#238) and for the wallet
+detail (balance, receive, chain server, details, delete; #239); the
+spending limits at creation and import, Import a wallet and the PIN for
+a capped phrase (#247, W1d-1); and the Spending limits screen with a
+reset of unreadable wallet settings on the phone (#248, W1d-2; the reset
+is not in the text above). W2: the core of sending, no screens (#252,
+W2-1) and the send screens (#254, W2-2), with the note on confirmed
+payments of "Recent payments". **W2-3 (the transactions list and the
+transaction detail) is not built.**
+
 #### Presence
 
 **What it is.** Whether a connection is around, on demand
@@ -5092,7 +5122,7 @@ has no Call, message or share rows; an unknown `peer_kind` is a person; a
 ### Sign-in match code (0.1.100)
 
 *Owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0 §10.4, §15 item
-46). Draft texts for the owner. Not built; needs the vault release.*
+46). Draft texts for the owner. Built (vettid-android #229).*
 A sign-in challenge (`purpose: "signin"`) may carry `match_code`, 2 or
 3 digits that the service's sign-in screen shows too.
 
@@ -5144,13 +5174,13 @@ the notification text carries no code; the block has no check mark or success st
 
 ### Withdrawn requests (0.1.101)
 
-*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0 §10.4
-"Withdrawing a challenge", §15 item 47; vettid.org #465). Texts approved by
-the owner, 2026-10-30. Not built; needs the vault release.* A service that no longer
-accepts a sign-in or approval challenge (a sign-in superseded by a newer
-one, an approval decided or cancelled) tells the member's vault, which
-closes the ask. The member must see that it closed, not a request that
-silently vanishes or fails.
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0 §10.4 "Withdrawing
+a challenge", §15 item 47; vettid.org #465). Texts approved by the
+owner, 2026-10-30. Built (vettid-android #229).* A service that no
+longer accepts a sign-in or approval challenge (a sign-in superseded by
+a newer one, an approval decided or cancelled) tells the member's vault,
+which closes the ask. The member must see that it closed, not a request
+that silently vanishes or fails.
 
 - **On `sync.event{kind: "connection.authenticate.decided", request_id,
   approved: false, withdrawn: true}`** the app treats the ask as closed,
@@ -5211,7 +5241,15 @@ error colour.
 
 ### Votes (0.1.102)
 
-*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §6.4 "Votes", §10.19, §15 item 48; BALLOT-PROTOCOL 0.11.1). Every member-facing text below was **approved by the owner on 2026-10-30**. Not built. Vault: staging release 25 (`features/vote`); until the vault answers `vote.list`, nothing here shows.*
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §6.4 "Votes",
+§10.19, §15 item 48; BALLOT-PROTOCOL 0.11.1). Every member-facing text
+below was **approved by the owner on 2026-10-30**. Built (vettid-android
+#230, 0.1.102 to 0.1.108; #236 follows: one malformed item in the votes
+site's data no longer stops the rest). Left out of #230: the addition to
+"What this service can ask" (the Service connections screens are not
+built); and the unlock window prompt is built for votes only (AA3's
+other uses come later). Vault: staging release 25 (`features/vote`);
+until the vault answers `vote.list`, nothing here shows.*
 
 A service (VAULT-MESSAGING §1.1) can put a **proposal** to its members. The member chooses once; the vault signs and sends the vote; the service records it and later publishes the results; the vault checks them. The vault does every check and signature (§10.19.4 to §10.19.6); the app shows, asks and hands over public documents.
 
@@ -5384,7 +5422,16 @@ The History category is "Connections" (with the service's name); no entry shows 
 
 *Approved by the owner (2026-10-20), with the recommendations of
 "Decisions" as written (AGENT-PLAN §7.2 AA1–AA5, §7.4).
-Not built. Read against VAULT-MESSAGING 0.50.0 §6.7, §6.8, §10.1, §10.3, §10.9,
+Built: AA1 (vettid-android #196) and AA2 (#199); AA3, AA4 and AA5 are
+not built. #196 leaves out the Pair an agent button (it came with AA2),
+the "What it may use" and "Other permissions" cards, the Paused banner
+with **Resume**, the Approvals for access requests and agent requests,
+and the move of `leash.agent.suspended` and `leash.referrals_limited` to
+the Security-alarms channel. In #199, **Choose what it may use** opens
+the new agent's device page (the list when its id is unknown) until the
+share-rule editor (AA4) exists, and the Approvals entry for a pending
+pairing with its "can't be checked" text (AA5) is not built.
+Read against VAULT-MESSAGING 0.50.0 §6.7, §6.8, §10.1, §10.3, §10.9,
 §10.11 and §10.12, AGENT-PLAN 0.1.7 and vettid-android master
 `bfefaab4`. The agent connector's staging phase (AGENT-PLAN A6) waits
 for AA1–AA5 on staging. The ways to use a secret (AA7, AA8) and the
@@ -6868,14 +6915,19 @@ allow.
 | A6 | Hardening and polish: accessibility pass, notifications (0.1.23: the Notifications screen and N1 below), offline behaviour, error states, Play pre-launch report | Internal testing track build | Partly: the audit (#117) and its fixes (#119 to #122, #127), the privacy settings (#120); the notifications screen (#99); (0.1.80, 2026-10-24) the A6 audit's findings N1 to N3 are merged (#185 to #187; the audit document #188), and #184 scrubs crash messages; the accessibility pass, offline behaviour and the Play pre-launch report are not recorded as done |
 | N1–N4 | 0.1.23, notification modes (§4 Notification modes, 10): N1 app (setting, channels, on-phone service, FCM stubbed); N2 spec (`push.register`); N3 vault (push ops, wakes); N4 gateway with FCM credentials, then FCM on | N1: notifications in the background on both test phones without Google; N4: FCM wakes on the Pixel 7 | N1 done (#99, #100, #105). N2 is the specification (PUSH-GATEWAY, VAULT-MESSAGING §14). N3 done on the vault (vettid-vault #59, merged 2026-10-10; wakes in staging release S9). N4: the app's Google push mode is built (#109, #111, #112, #129) and the staging gateway has been deployed since 2026-10-11, but no platform is enabled yet (it waits for Firebase and APNs credentials) |
 
-Status (2026-10-23, with additions of 2026-10-26), after v1: **calls**
-C1 is partly built (#124 to #126, #175, #178 merged; #128, the call
-screens, open since 2026-10-12 and conflicting with master on
-2026-10-26); **release R** (recovery and unlock) is built (#134 to
-#143); the **staging time scale** (#145, #146, #153, #154), **photo
-attachments** (#131 to #133) and the **notification sounds** (#180) are
-built; **devices and agents** (AA1 to AA5), **wallet, presence and
-location** are not started in the app. (2026-10-26) Merged since
+Status (2026-10-23, with additions of 2026-10-26 and 2026-11-02),
+after v1: **calls** C1 is built (#124 to #126, #175, #178 and #128, the
+call screens, merged 2026-10-27; #128 leaves out "Unlock your vault to
+call" and shows the conversation line "Call, 4 min 12 s" without
+"(connection lost)", which the vault's call history cannot tell;
+production release APKs still carry no call code); **release R**
+(recovery and unlock) is built (#134 to #143); the **staging time
+scale** (#145, #146, #153, #154), **photo attachments** (#131 to #133)
+and the **notification sounds** (#180) are built; **devices and agents**
+AA3 to AA5 (apart from the unlock window prompt for votes, #230),
+**presence and location** are not built in the app (AA1 and AA2, and the
+wallet, are built: see 2026-11-02 below).
+(2026-10-26) Merged since
 2026-10-23: **release L** in the app (#190 the lock bound to its
 unlock and the pending lock that survives the process, #191 the idle
 lock, #193 the lock-again rebind; they ship in staging release 23, with
@@ -6884,6 +6936,14 @@ vettid-vault V1 to V3, V5 and the durable app key writes, #148 and
 erases on no answer, the 11-minute wait, the token renewal before the
 approval); the **deletion rules** of 0.1.77 and 0.1.78 (#192, #194);
 and **a phone that could not tell** (#195, merged 2026-10-26).
+(2026-11-02) Merged since 2026-10-26: **devices and agents** AA1 (#196:
+list, device page, End access, Remove) and AA2 (#199: pair an agent);
+AA3 to AA5 are not built. **Sign-in match code** and **withdrawn
+requests** (#229); **votes**, member side (#230, with #236); the
+**wallet** W1 (#223, #234, #235, #238, #239, #247, #248; the W0 spikes
+#217 and #219 were not merged) and W2-1 and W2-2 (#252, #254). The
+wallet's W2-3, the transactions, is not built. §4 "Wallet, presence,
+location and video" lists each PR.
 
 Calls, devices/agents/LEASH, wallet, presence and location follow v1 in
 that order (D8 puts presence before location), each as its own phase. (0.1.53) Devices & agents is AA1–AA5
