@@ -39,8 +39,8 @@ changelog:
     place of `pairing_id`; `device.pair.approve` answers `{device_id}`;
     `not_found` for a pairing, access request or approval that is
     unknown, ended or expired, and `bad_request` for a pairing whose
-    handshake has not reached `hs.fin`; the `kind` and `state` values of
-    `device.list`. §10.1: `leash.item.changed` and
+    handshake has begun (`hs.init`) but not reached `hs.fin`; the `kind`
+    and `state` values of `device.list`. §10.1: `leash.item.changed` and
     `location.request.closed` in the `sync.event` table. §10.11:
     `leash.agent.resume` sends `sync.event{leash.agent.suspended}` with
     `suspended: false`; what `item.use` gives away of a short or
@@ -51,9 +51,10 @@ changelog:
     come with the ways to use a secret (AGENT-PLAN AV9); the rest states
     what the vault already does (vettid-vault `5e1f888`). Not changed:
     `audit.list` has no device filter (decision 14e). §15 item 49. §8.6
-    (erratum): a retried open-token `hs.init` answered `409 token_used`
-    is treated as possibly delivered, and the client waits for `hs.resp`
-    until the token's `exp` before it restarts first contact.
+    (erratum): a retried open-token `hs.init` answered `token_used` or
+    `token_revoked` is treated as possibly delivered, and the client
+    waits for `hs.resp` until the token's `exp` plus 60 s before it
+    restarts first contact.
   - 0.82.7: owner decision 2026-11-02 (VAULT-PLAN §8 follow-up 1,
     dropped): grants carry no retention hint. §10.12 "Keeping a fetched
     value" states what the phone apps already do: a fetched value is
@@ -6964,8 +6965,8 @@ How each error is handled:
 | Error | Handling |
 |---|---|
 | `token_expired` | Refresh the token, or reconnect (§6.6). |
-| `token_revoked` | Terminal. Stop sending to that mailbox. |
-| `token_used` | The open token is already spent. Restart first contact; except that (0.83.0) when the client retried its own `hs.init` with that token after a lost or failed answer, the first attempt may have been delivered: it treats the `hs.init` as possibly delivered and waits for `hs.resp` until the token's `exp`, and restarts first contact only then. |
+| `token_revoked` | Terminal. Stop sending to that mailbox (0.83.0: for a retried open-token `hs.init`, see `token_used`). |
+| `token_used` | The open token is already spent. Restart first contact; except that (0.83.0) when the client retried its own `hs.init` with that token after a lost or failed answer, `token_used` and `token_revoked` both mean the first attempt may have been delivered: it waits for `hs.resp` until the token's `exp` plus 60 s, and restarts first contact only then. |
 | `mailbox_unknown` | Re-resolve the address, or mark the connection `stale`. |
 | `quota_exceeded` (0.32.0) | Not retried at once, and handled by what is used up (RELAY-PROTOCOL 0.9.2 §7.1 `quota`): **`token`**: a peer vault MAY ask for a fresh token (§7.2) and retries once with it; **`mailbox` or `mailbox_blobs` or `sender_blobs`**: a fresh token does not help; a deposit waits in the outbox and is retried with backoff, and a blob upload is not retried: the vault waits until the recipient asks for it (§10.5.1 "Delivery to the peer"). A relay that sends no `quota` is read as `token` the first time and as the mailbox after a fresh token. A device does not upload again on its own: it tells the member and retries later. |
 
