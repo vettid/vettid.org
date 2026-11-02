@@ -1,9 +1,22 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.56
+version: 0.1.57
 date: 2026-11-02
 changelog:
+  - 0.1.57: erratum (owner 2026-11-02), as built (vettid-ios #183,
+    #184). §4.14 and §4.15 say built, not "Not built". §4.14: the
+    spoken digits use `accessibilitySpeechSpellsOutCharacters`; the
+    code is kept only when it is 2 or 3 ASCII digits on a `signin`
+    challenge; with a code the "From" line is dropped and the warning
+    moves under the note; "Their note" is the existing heading, shown
+    over every challenge note; the texts are still drafts. §4.15: a
+    withdrawn ask's own notification goes with its feed item (0.1.56),
+    and a batch's is not posted again; the wait after `not_found` and
+    the History mute are described as built, and the confirmation on a
+    connection of unknown kind is named as an iOS difference for the
+    owner. §6.7: every item notification is also removed when the app
+    lock covers the app (vettid-ios #197).
   - 0.1.56: owner decision of 2026-11-02 (option a), built in
     vettid-ios #197. **Local notifications for feed items before
     Apple push**, posted only while the app is open, as ANDROID-PLAN §4
@@ -1622,37 +1635,96 @@ protocol.
 ### 4.14 Sign-in match code (0.1.50)
 
 *Owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0 §10.4, §15 item
-46). Draft texts for the owner. Not built.* The same as ANDROID-PLAN §4
-"Sign-in match code (0.1.100)", carried here by reference and not to be
-changed on one platform alone. On iOS: the "Match code" block sits under
-the title of the sign-in approval screen, the digits in a large
-monospaced-digit Dynamic Type style (scaling, never truncated), the
-VoiceOver label "Match code 4 2", the digits spoken one by one
-(`accessibilitySpeechSpellOut` on the digits, as the Android plan's
-`TtsSpan` digits), and no code in the notification text. The
-instruction line is its own text. The block has no check mark, success
-colour or "verified" wording: a match does not show that the screen is
-the real service (ANDROID-PLAN, "No 'verified' look"). A challenge without a valid
-`match_code` shows today's screen; the app never reads digits from
-`context`. Draft texts as ANDROID-PLAN's table: "Match code", "Check
-that the sign-in screen shows the same number: %@", "Match code %@"
-(spoken digit by digit), "Their note".
+46). Draft texts for the owner. Built (vettid-ios #183).*
+The same as ANDROID-PLAN §4 "Sign-in match code (0.1.100)", carried
+here by reference and not to be changed on one platform alone. On iOS:
+
+- **Reading the code:** `match_code` is kept only when it is a JSON
+  string of exactly 2 or 3 ASCII digits on a challenge with
+  `purpose: "signin"`, and as written ("07" stays "07"). Anything else
+  (a number, `null`, one or four digits, signs, spaces, other scripts'
+  digits, a code on an approval or on a challenge without a purpose) is
+  ignored, not refused, and the challenge shows today's screen. The app
+  never reads digits from `context`.
+- **The screen:** the "Match code" block sits directly under the title
+  of the sign-in approval screen, the digits in a large bold
+  monospaced-digit Dynamic Type style (`largeTitle`, scaling, never
+  truncated). The instruction line is its own text under the digits.
+  The note ("Their note") follows, then the warning "Only approve if
+  you are signing in right now.", then **Approve** and **Not me**. With
+  a code the "From" line is dropped, because the title already names
+  the connection (or reads "a connection"); without a code the screen
+  is unchanged, "From" first and the warning under the title.
+- **VoiceOver:** the block is one element with the label "Match code
+  4 2", the digits spoken one by one
+  (`accessibilitySpeechSpellsOutCharacters` on each digit, not on the
+  spaces between them, as the Android plan's `TtsSpan` digits). No code
+  is in the notification text.
+- **No "verified" look:** the block has no check mark, shield, success
+  colour or "verified" wording: a match does not show that the screen is
+  the real service (ANDROID-PLAN, "No 'verified' look").
+- **Texts** as ANDROID-PLAN's table: "Match code", "Check that the
+  sign-in screen shows the same number: %@", "Match code %@" (spoken
+  digit by digit). "Their note" is the heading iOS already shows over
+  every challenge note, with or without a code; it is not a separate
+  text added for a code.
 
 ### 4.15 Withdrawn requests (0.1.51)
 
 *Owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0 §10.4, §15 item
-47). Texts approved by the owner, 2026-10-30. Not built.* The same as ANDROID-PLAN §4
-"Withdrawn requests (0.1.101)", carried here by reference and not to be
-changed on one platform alone. On iOS: a
-`sync.event{connection.authenticate.decided, approved: false,
-withdrawn: true}` removes the ask from Approvals, updates the approvals
-indicator and removes the delivered notification; a showing screen keeps
-its place, with the notice "%@ withdrew this request. You don't need to
-answer it." and a **Close** button in place of the actions, in a
-neutral style (no error colour, never "declined"); History shows
-`connection.authenticate.withdrawn` as "Request withdrawn" with "%@ withdrew
-this request before it was answered." Without the flag, the ask closes
-as today. Batches, the `not_found` rule and the "Mute requests from %@" offer (a secondary action, confirmed on a service connection), the late-flag switch and the progress wait are as ANDROID-PLAN's. Texts as ANDROID-PLAN's table (approved by the owner, 2026-10-30).
+47). Texts approved by the owner, 2026-10-30. Built (vettid-ios #184).*
+The same as ANDROID-PLAN §4 "Withdrawn requests (0.1.101)", carried
+here by reference and not to be changed on one platform alone. On iOS:
+
+- **The ask closes:** a `connection.authenticate.decided` sync event
+  with `approved: false` and `withdrawn: true` removes the ask from
+  Approvals and updates the approvals indicator, as for a decision on
+  another device.
+  A late `.pending`, a replayed event or a list read begun before the
+  withdrawal does not bring it back. A flag for an unknown request
+  changes nothing on screen. Without the flag, the ask closes as today.
+  The app remembers the last 512 withdrawn asks for a showing screen,
+  and forgets them when the vault locks.
+- **Notifications:** an ask's local notification (§6.7, while the
+  app is open) goes with its feed item: a withdrawn ask's own item is
+  marked read, which removes its notification, and a batch's goes when
+  the batch's last open ask closes (below). Android's re-post of a
+  batch's notification after one of its asks is withdrawn is not
+  built.
+- **A showing screen** keeps its place, with the notice "%@ withdrew
+  this request. You don't need to answer it." in a neutral info style
+  (no error colour, never "declined") and a **Close** button in place
+  of the actions; the countdown stops and any decision error is
+  cleared. With no connection name the notice says "A connection".
+- **`not_found`:** a member authentication that the vault answers
+  `not_found` while approve or deny is in flight keeps its progress for
+  about 2 seconds, waiting for the flag; then it shows the withdrawn
+  notice, or the existing "Already decided" screen (ANDROID-PLAN: its
+  own existing "This request is no longer waiting."). A flag that
+  comes later still switches the screen to the notice. Nothing else
+  waits, because only a member authentication can be withdrawn.
+- **Mute:** "Mute requests from %@" is a secondary action on the notice
+  and on the History entry (`connection.asks.mute`), with its own
+  progress state, so the screen stays withdrawn while it runs. It is
+  confirmed first on a service connection; a person's is muted at once.
+  One iOS difference, for the owner: the request screen also confirms
+  when the connection's kind is not known (the connection is not in the
+  list read), where ANDROID-PLAN confirms "on a service connection
+  only". The confirmation's title is the action's own text. History
+  offers the action only while the connection exists, has a name and is
+  not muted. The connection gains `peer_kind` and `isService` for this
+  (VAULT-MESSAGING §6.4: only `"service"` counts).
+- **Batches and the feed:** a withdrawn ask's own feed item, one that
+  stands for that ask alone, is marked read. A batch's item is kept
+  while another ask of the batch is open; when the withdrawn ask was the
+  batch's first, the item is marked read once the batch's last open ask
+  closes (here, on another device, or because a complete list no longer
+  has it). The phone groups asks into a batch by its own arrival times:
+  the same connection, within 10 minutes of the first ask.
+- **History:** `connection.authenticate.withdrawn` shows as "Request
+  withdrawn" with "%@ withdrew this request before it was answered."
+  (the detail line is left out when the connection has no name).
+  Texts as ANDROID-PLAN's table (approved by the owner, 2026-10-30).
 
 ### 4.16 Votes (0.1.52)
 
@@ -2266,9 +2338,11 @@ Apple push this works only while the app is open:
   the vault locks or is held, at a wipe, when the choice is narrowed
   (to Nothing, or from Names and message text to Names), **when the
   app goes to the background** (owner decision of 2026-11-02: iOS
-  gives a suspended app no chance to remove a name later), and at
-  launch for any left by an ended process. Notifications that are not
-  a feed item's are left alone (the app posts no others yet).
+  gives a suspended app no chance to remove a name later), **when the
+  app lock covers the app** ("Lock now" included, so no name shows
+  over it), and at launch for any left by an ended process.
+  Notifications that are not a feed item's are left alone (the app
+  posts no others yet).
 - **A tap** goes through the app lock, unlock and daily check first
   and never acts behind them. It marks the item read and opens what
   the item opens from the Notifications list (a drawer destination or
