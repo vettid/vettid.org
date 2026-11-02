@@ -1,9 +1,12 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.14
-date: 2026-10-26
+version: 0.1.15
+date: 2026-11-02
 changelog:
+  - 0.1.15: owner decision 2026-11-02: §8 follow-up 1 (a retention hint
+    on grants) dropped and closed; VAULT-MESSAGING 0.82.7 §10.12 states
+    that the apps keep a fetched value in memory only
   - 0.1.14: owner decision 2026-10-26 (VAULT-MESSAGING 0.64.0 §1.1): a
     note under the port table: services (B2C) and votes, removed in the
     port, are reopened for later work against new designs
@@ -598,6 +601,10 @@ From the vettid.dev archive review (2026-10-03):
    retention sweep did. Decide whether grants carry a retention hint that
    apps honour (delete cached values on expiry, revocation or removal),
    and specify it in §10.12.
+   *Status (2026-11-02): dropped by the owner. Grants carry no hint,
+   since the apps already keep a fetched value in memory only and
+   another connection's software could ignore one; VAULT-MESSAGING
+   0.82.7 §10.12 "Keeping a fetched value" states the rule.*
 2. **One app per vault, holding the credential** (owner decision,
    2026-10-03): a second or stale copy is refused, alerted and freezes
    credential operations until a forced rotation; direct transfer between
