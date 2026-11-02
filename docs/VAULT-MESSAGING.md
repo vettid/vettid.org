@@ -30,10 +30,11 @@ related:
 changelog:
   - 0.82.7: owner decision 2026-11-02 (VAULT-PLAN §8 follow-up 1,
     dropped): grants carry no retention hint. §10.12 "Keeping a fetched
-    value" states the rule the apps already follow: a fetched value is
-    kept in memory only, on the screen that opened it, and forgotten
-    when that screen closes, at a lock and when the app leaves the
-    foreground. No change to the protocol, the vault or the apps.
+    value" states what the apps already do: a fetched value is kept in
+    memory only, on the screen that opened it, and forgotten when that
+    screen closes, at a lock and when the app leaves the foreground; a
+    revocation by the connection is not yet acted on. No change to the
+    protocol, the vault or the apps.
   - 0.82.6: erratum, 2026-11-02, as built (vettid-vault main
     `5e1f888`, `holderReset`): a reset destroys every other app's
     UTKs, not the holder's. The holder keeps its UTK pool, less the UTK
@@ -12648,18 +12649,6 @@ grant: { "grant_id": "<ULID>", "connection_id": "<id>", "direction": "given|rece
   within its access session (§6.8); it never sees the value. The
   `reply_key`'s private half lives only in that device's memory, for
   that fetch.
-- **Keeping a fetched value** (0.82.7; owner decision of 2026-11-02,
-  VAULT-PLAN §8 follow-up 1). A grant carries no retention hint. Once a
-  value is sealed to a device the member's vault cannot reach it:
-  `uses`, the expiry, revocation and removal end further fetches, not
-  copies already made. The VettID apps (ANDROID-PLAN, IOS-PLAN) keep a
-  fetched value in memory only, in the state of the screen that opened
-  it, never on disk or in saved screen state, and wipe the decrypted
-  bytes once they have read them. It is forgotten when that screen
-  closes, when the vault locks and when the app leaves the foreground; a
-  revoked grant's value leaves the screen at once. A connection's own
-  software is not bound by this, and nothing in the protocol can make it
-  so.
 - **Per-connection catalog.** A connection's catalog is what the member
   made visible to it: one entry per active grant given to it (rule or
   one-off: `grant_id`, the granted fields' labels, `uses_left` when
@@ -12688,6 +12677,20 @@ grant: { "grant_id": "<ULID>", "connection_id": "<id>", "direction": "given|rece
   is withdrawn and gains the rule again.
 - **Removal.** Removing or blocking a connection drops its grants, both
   ways, its pending requests and its fetches, without notice (§7.4).
+- **Keeping a fetched value** (0.82.7; owner decision of 2026-11-02,
+  VAULT-PLAN §8 follow-up 1). A grant carries no retention hint. Once a
+  value is sealed to a device, the member's vault cannot reach it:
+  `uses`, the expiry, revocation and removal end further fetches, not
+  copies already made. The VettID apps (ANDROID-PLAN, IOS-PLAN) keep a
+  fetched value in memory only, in the state of the screen that opened
+  it, never on disk or in saved screen state, and wipe the decrypted
+  bytes once they have read them. It is forgotten when that screen
+  closes, when the vault locks and when the app leaves the foreground. A
+  grant the member gives up leaves the screen at once; the apps do not
+  yet act on a revocation by the connection (`grant.event`,
+  `grant.changed`), whose value stays until one of those. A connection's
+  own software is not bound by this, and nothing in the protocol can
+  make it so.
 - **Audit and feed.** `grant.requested` (both sides), `grant.issued`,
   `grant.denied`, `grant.received`, `grant.fetched` (each use, on the
   member's side), `grant.revoked`; an incoming request is a feed item
