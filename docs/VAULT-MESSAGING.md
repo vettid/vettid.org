@@ -46,16 +46,17 @@ changelog:
     `suspended: false`; what `item.use` gives away of a short or
     guessable value. §10.12: a dry run of `share.rule.set` for an agent
     subject needs no unlock window. §11.10.9: the capability
-    `item_ways`. The `pairing` kind and the `device_id` in the approve
-    answer need a vault change; `leash.item.changed` and `item_ways`
-    come with the ways to use a secret (AGENT-PLAN AV9); the rest states
-    what the vault already does (vettid-vault `5e1f888`). Not changed:
-    `audit.list` has no device filter (decision 14e). §15 item 49. §8.6
-    (erratum, from the desktop relay client's review, lead 2026-11-02):
-    a retried open-token `hs.init` answered `token_used` or
-    `token_revoked` is treated as possibly delivered, and the client
-    waits for `hs.resp` until the token's `exp` plus 60 s before it
-    restarts first contact.
+    `item_ways`. The `pairing` kind, the `device_id` in the approve
+    answer and cancelling an unopened invite with `device.pair.reject`
+    (owner decision 2026-11-02) need a vault change;
+    `leash.item.changed` and `item_ways` come with the ways to use a
+    secret (AGENT-PLAN AV9); the rest states what the vault already does
+    (vettid-vault `5e1f888`). Not changed: `audit.list` has no device
+    filter (decision 14e). §15 item 49. §8.6 (erratum, from the desktop
+    relay client's review, lead 2026-11-02): a retried open-token
+    `hs.init` answered `token_used` or `token_revoked` is treated as
+    possibly delivered, and the client waits for `hs.resp` until the
+    token's `exp` plus 60 s before it restarts first contact.
   - 0.82.7: owner decision 2026-11-02 (VAULT-PLAN §8 follow-up 1,
     dropped): grants carry no retention hint. §10.12 "Keeping a fetched
     value" states what the phone apps already do: a fetched value is
@@ -7595,16 +7596,19 @@ device belongs to the unlock it ends.
   that lost the pairing can reject it with that `ref`. The item has
   no name: the `pairing` entry of `pending.list` carries it.
 - **Ended requests.** `device.pair.approve` and `device.pair.reject`
-  answer `not_found` for a pairing that is unknown, rejected or
-  expired, and for a transfer's; `device.session.approve` and
-  `device.session.deny` for an access request that is unknown,
-  answered or expired (`device.session.approve` also when the device
-  is no longer active); `approval.decide` for an approval that is
-  unknown, decided or expired (`{result: "not_found"}` also when the
-  requester is no longer active). `device.pair.approve` is
-  `bad_request` for a pairing whose handshake has begun (`hs.init`) but
-  not reached `hs.fin`; `device.pair.reject` accepts that one and ends
-  it. An invite whose link was never opened is `not_found` to both.
+  answer `not_found` for a pairing that is unknown, rejected or expired,
+  and for a transfer's; `device.session.approve` and
+  `device.session.deny` for an access request that is unknown, answered
+  or expired (`device.session.approve` also when the device is no longer
+  active); `approval.decide` for an approval that is unknown, decided or
+  expired (`{result: "not_found"}` also when the requester is no longer
+  active). `device.pair.approve` is `bad_request` for a pairing whose
+  handshake has begun (`hs.init`) but not reached `hs.fin`;
+  `device.pair.reject` accepts that one and ends it.
+  `device.pair.reject` on an invite whose link was never opened cancels
+  it (the open token's `jti` is denylisted and the claim deleted, §7.4)
+  and answers `{}`; `device.pair.approve` answers `not_found` for it
+  (0.83.0; not yet built in the vault, which answers `not_found`).
 - **`device.list` values.** `kind` is `app`, `desktop` or `agent`;
   `state` is `active` or `stale`. A device whose pairing is not yet
   approved is not listed: it appears in `pending.list` (§10.4.2) as a
@@ -8404,21 +8408,23 @@ which are not asks). Five kinds arrived only as events and were lost;
   event; an app parses it as it parses the event. An entry carries no
   member the event did not. The `pairing` kind is the exception: its
   body adds `exp`, and it is listed before its event is sent (below).
-- **The `pairing` kind** (0.83.0; not yet built in the vault). It
-  is listed once the new device has sent `hs.init` (§6.3) and until
-  the pairing is approved, rejected or expired. An invite whose link
-  was never opened is not listed (`device.pair.approve` and `.reject`
-  answer `not_found` for it). Its body has the members of the
+- **The `pairing` kind** (0.83.0; not yet built in the vault). It is
+  listed once the new device has sent `hs.init` (§6.3) and until the
+  pairing is approved, rejected or expired. An invite whose link was
+  never opened is not listed: `device.pair.reject` on an invite whose
+  link was never opened cancels it (the open token's `jti` is denylisted
+  and the claim deleted, §7.4) and answers `{}`; `device.pair.approve`
+  answers `not_found` for it (0.83.0; not yet built in the vault, which
+  answers `not_found`). Its body has the members of the
   `device.pair.pending` event (§10.3), which the vault sends once
-  `hs.fin` has checked out, so `pending_id`, `name` and `sas` are
-  absent until then and the app cannot approve it yet
-  (`bad_request`, §10.3). `exp` is not in the event: it is when the
-  vault drops the pairing, 10 minutes after its `hs.init` (§6.7);
-  the `exp` of `device.pair.create` is that of the link. A transfer
-  is not listed (§15 item 44). A `pairing` has no closing event the
-  app can match (`device.paired` carries `device_id`, not
-  `pairing_id`): the app drops the entry at its `exp`, and a decision
-  on one that ended elsewhere is `not_found`.
+  `hs.fin` has checked out, so `pending_id`, `name` and `sas` are absent
+  until then and the app cannot approve it yet (`bad_request`, §10.3).
+  `exp` is not in the event: it is when the vault drops the pairing, 10
+  minutes after its `hs.init` (§6.7); the `exp` of `device.pair.create`
+  is that of the link. A transfer is not listed (§15 item 44). A
+  `pairing` has no closing event the app can match (`device.paired`
+  carries `device_id`, not `pairing_id`): the app drops the entry at its
+  `exp`, and a decision on one that ended elsewhere is `not_found`.
 - **Pages.** Sorted by `exp`, then by the ask's id (`request_id`,
   `approval_id`, `invocation_id` or `pairing_id`), soonest first. The
   limits are per connection or per device (4 received challenges and 8
@@ -25143,8 +25149,9 @@ Follow-ups:
     `location.request.closed`, the resumption event, the
     offline-guessing risk of `item.use` and the capability `item_ways`
     are written down. `audit.list` keeps its filters (search by name
-    works). **Needs:** the vault for the `pairing` kind and the approve
-    answer's `device_id`, and for `leash.item.changed` and `item_ways`
+    works). **Needs:** the vault for the `pairing` kind, the approve
+    answer's `device_id` and cancelling an unopened invite (owner
+    decision 2026-11-02), and for `leash.item.changed` and `item_ways`
     the release with the ways to use a secret; the rest is what the
     vault already does (`5e1f888`). §8.6 (erratum, from the desktop
     relay client's review, lead 2026-11-02): a retried open-token
