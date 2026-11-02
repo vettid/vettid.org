@@ -9,12 +9,13 @@ changelog:
     Apple push**, posted only while the app is open, as ANDROID-PLAN §4
     Notification modes 7 and 8 (kinds, categories, texts and **Show in
     notifications**, word for word; the setting in Settings → App).
-    ID12, ID19, §4.12 (a request's local notification and its tap),
-    §4.16 (vote kinds on Vault activity), §6.7 (the rules, and sounds)
-    and §6.9 (the setting in UserDefaults; what is removed when) say
-    so, and §8 has row I2.6. Every item notification is removed when
-    the app goes to the background (owner decision of 2026-11-02), as
-    well as at lock, hold, wipe and a narrower choice.
+    ID12, ID19, §4 (the Settings → App row), §4.12 (a request's local
+    notification and its tap), §4.16 (vote kinds on Vault activity),
+    §6.7 (the rules, and sounds) and §6.9 (the setting in
+    UserDefaults; what is removed when) say so, and §8 has row I2.6.
+    Every item notification is removed when the app goes to the
+    background (owner decision of 2026-11-02), as well as at lock,
+    hold, wipe and a narrower choice.
   - 0.1.55: erratum (owner 2026-11-02), as built (vettid-ios #195).
     §4.16: the vote screen is a `ScrollView`, not a `List`. The vote
     feed kinds are in the Notifications screen and the Votes badge
@@ -2263,11 +2264,12 @@ Apple push this works only while the app is open:
   (to Nothing, or from Names and message text to Names), **when the
   app goes to the background** (owner decision of 2026-11-02: iOS
   gives a suspended app no chance to remove a name later), and at
-  launch for any left by an ended process. Other notifications (the
-  owner check's early warning, release notices) are kept.
+  launch for any left by an ended process. Notifications that are not
+  a feed item's are left alone (the app posts no others yet).
 - **A tap** goes through the app lock, unlock and daily check first
-  and never acts behind them. It marks the item read and opens its
-  screen over the current one, or the Notifications screen for an
+  and never acts behind them. It marks the item read and opens what
+  the item opens from the Notifications list (a drawer destination or
+  a screen over the current one), or the Notifications screen for an
   item with no screen of its own or not in the feed within
   10 seconds. A tap not taken up within 10 minutes (an unlock left
   for later) is dropped.
@@ -2473,7 +2475,7 @@ owner prerequisites of §10.
 | I2.3 | Approvals, the Notifications screen (feed), History with search and export | §10.4.1, §10.9, §10.12, §10.13 | `feature/approvals/*`, `feature/notifications/*`, `feature/history/*`, `core/data/…/feed/*`, `History*.kt` | Approvals of ANDROID-PLAN §4; export via Save to Files |
 | I2.4 | Photo attachments and the viewer | §5.5, §10.5.1; ANDROID-PLAN §4 "Photo attachments" | `core/media/*`, `feature/messages/Photo*.kt`, `core/data/…/social/Attachments.kt`, `core/vault/AttachmentApi.kt` | Metadata stripped (EXIF and GPS absent in the sent JPEG); bounded decoding refuses oversized and mistyped files; the memory cache is empty after lock; a data-directory scan finds no image |
 | I2.5 | Shared profile and the camera-only profile photo | §10.8 | `feature/settings/ProfileScreens.kt`, `PhotoCapture*.kt`, `PhotoCrop.kt` | JPEG ≤ 65,536 bytes without EXIF |
-| I2.6 | Local notifications for feed items before Apple push: the kinds, texts and "Show in notifications" as Android; posted only while the app is open; removed on read, lock, hold, wipe, a narrower choice and the app going to the background | IOS-PLAN §6.7; ANDROID-PLAN §4 Notification modes 7 and 8 | `core/notify/…/NotificationContent.kt`, `NotificationMapping.kt`, `FeedNotifier.kt` | A message or request arriving while the app is open on another screen shows a banner with Android's text, a Vault activity item goes to the list only; none on the Notifications list or the item's screen; none left after lock or background |
+| I2.6 | Local notifications for feed items before Apple push: the kinds, texts and "Show in notifications" as Android; posted only while the app is open; removed on read, lock, hold, wipe, a narrower choice and the app going to the background | IOS-PLAN §6.7; ANDROID-PLAN §4 Notification modes 7 and 8 | `core/notify/…/NotificationContent.kt`, `NotificationMapping.kt`, `FeedNotifier.kt` | A message or request arriving while the app is open on another screen shows a banner with Android's text; a Vault activity item goes to the list only; none on the Notifications list or the item's screen; none left after lock or background |
 
 **Exit I2** (iPhone, Staging): an iPhone and an Android phone connect,
 exchange messages and photos both ways, and approve each other's asks.
