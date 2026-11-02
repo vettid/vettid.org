@@ -30,7 +30,7 @@ related:
 changelog:
   - 0.82.7: owner decision 2026-11-02 (VAULT-PLAN §8 follow-up 1,
     dropped): grants carry no retention hint. §10.12 "Keeping a fetched
-    value" states what the apps already do: a fetched value is kept in
+    value" states what the phone apps already do: a fetched value is kept in
     memory only, on the screen that opened it, and forgotten when that
     screen closes, at a lock and when the app leaves the foreground; a
     revocation by the connection is not yet acted on. No change to the
@@ -12681,16 +12681,18 @@ grant: { "grant_id": "<ULID>", "connection_id": "<id>", "direction": "given|rece
   VAULT-PLAN §8 follow-up 1). A grant carries no retention hint. Once a
   value is sealed to a device, the member's vault cannot reach it:
   `uses`, the expiry, revocation and removal end further fetches, not
-  copies already made. The VettID apps (ANDROID-PLAN, IOS-PLAN) keep a
-  fetched value in memory only, in the state of the screen that opened
-  it, never on disk or in saved screen state, and wipe the decrypted
-  bytes once they have read them. It is forgotten when that screen
-  closes, when the vault locks and when the app leaves the foreground. A
-  grant the member gives up leaves the screen at once; the apps do not
-  yet act on a revocation by the connection (`grant.event`,
-  `grant.changed`), whose value stays until one of those. A connection's
-  own software is not bound by this, and nothing in the protocol can
-  make it so.
+  copies already made. The VettID phone apps (ANDROID-PLAN, IOS-PLAN)
+  keep a fetched value in memory only, in the state of the screen that
+  opened it, never on disk or in saved screen state. They wipe the
+  decrypted bytes once they have parsed them, and the parsed value is
+  kept only until it is forgotten: when that screen closes, when the
+  vault locks and when the app leaves the foreground. A grant the member
+  gives up leaves the screen at once; the apps do not yet act on a
+  revocation by the connection (`grant.event`, `grant.changed`), whose
+  value stays until one of those. The desktop app does not fetch grant
+  values yet; when it does, the same rule applies. A connection's own
+  software is not bound by this, and nothing in the protocol can make it
+  so.
 - **Audit and feed.** `grant.requested` (both sides), `grant.issued`,
   `grant.denied`, `grant.received`, `grant.fetched` (each use, on the
   member's side), `grant.revoked`; an incoming request is a feed item
