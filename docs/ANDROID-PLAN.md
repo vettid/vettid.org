@@ -4410,29 +4410,29 @@ and respect them.
    number, more than 8 decimals) or two amounts: nothing is filled in,
    and the address and amount fields are cleared ("This payment link has
    something VettID can't safely use, so nothing was filled in. Check it
-   with whoever sent it."). The app checks it for the wallet's network
-   first: a mainnet address in a test wallet (or the reverse) is
+   with whoever sent it."). The app checks the address for the wallet's
+   network first: a mainnet address in a test wallet (or the reverse) is
    refused, "This is a <network> address. This wallet is on <network>."
    The amount in BTC or sats, or **Send all**. One payee per send in W2.
-2. **Fee.** From the server's `/fee-estimates`: **Slow** (about a
-   day, 144 blocks), **Normal** (about an hour, 6), **Fast** (about 20
+2. **Fee.** From the server's `/fee-estimates`: **Slow** (about a day,
+   144 blocks), **Normal** (about an hour, 6), **Fast** (about 20
    minutes, 2), and **Custom** in sat/vB. Never below 1 sat/vB, never
    above 1,000 sat/vB (the vault's cap, `fee_rate`), and above twice the
    Fast rate the app asks "This fee is much higher than needed right
    now. Pay it anyway?". A fee above 10% of what the payee receives
    (0.1.114) asks too, naming the fee: "The fee, {fee} sats, is more
    than 10% of what you're sending. Pay it anyway?" (when both apply,
-   one question: this one). Before the build it is asked when the
-   rate times 110 vB (the smallest transaction) is already over 10%
-   of a typed amount, "The fee, at least {fee} sats, …". At the
-   review it is asked from the vault's fee (so also for **Send all**),
-   unless the member agreed to a 10% question before and the vault's
-   fee is at most 1.5 times the fee agreed to; changing the amount,
-   the fee, **Send all** or "Include unconfirmed coins" forgets that
-   agreement. **Cancel** at the review goes back to the form. The
-   transaction signals replacement (BIP125,
-   sequence `0xfffffffd`) so that a later version can raise a fee; W2
-   has no fee bump.
+   one question: this one). Before the build it is asked when the rate
+   times 110 vB (the smallest transaction) is already over 10% of a
+   typed amount, "The fee, at least {fee} sats, …". At the review it is
+   asked from the vault's fee (so also for **Send all**), unless the
+   member agreed to a 10% question before and the vault's fee is at most
+   1.5 times the fee agreed to; typing an amount, changing the fee,
+   **Send all** or "Include unconfirmed coins", or a refused link
+   forgets that agreement. **Cancel** at the review goes back to the
+   form. The transaction signals replacement (BIP125, sequence
+   `0xfffffffd`) so that a later version can raise a fee; W2 has no fee
+   bump.
 3. **Building.** Coin selection over both accounts' confirmed coins
    (unconfirmed coins only with "Include unconfirmed coins", off by
    default), branch and bound and then largest first; change to the
