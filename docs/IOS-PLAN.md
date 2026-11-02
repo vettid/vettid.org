@@ -528,7 +528,7 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.116) — the Android app; this plan mirrors it
+  - ANDROID-PLAN.md (0.1.102; §4.16 results check and choice labels from 0.1.116) — the Android app; this plan mirrors it
   - VAULT-MESSAGING.md (0.81.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
@@ -1783,8 +1783,9 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   texts; `pending` with reason `input` keeps the existing problem text.
   The reserved `abstain` is always shown as "Abstain" (the vote
   screen's list, the confirm sheet, the member's own choice, the Results
-  rows), and a real choice whose cleaned label equals "Abstain",
-  ignoring case, is shown by its choice id.
+  rows), and a real choice whose label, with control and
+  bidirectional-override characters removed and surrounding white space
+  trimmed, equals "Abstain", ignoring case, is shown by its choice id.
 - The credential password prompt is the existing one (§4, the unlock
   window), used before `vote.cast`.
 - **Notifications:** the feed items (`vote.open`, `vote.closing`,
