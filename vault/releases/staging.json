@@ -1040,18 +1040,21 @@
         "max_instances": 2
       },
       "log": {
-        "summary": "Release 26 adds spending limits for wallets, keeps approval requests from services through your daily check, and updates the enclave's kernel.",
+        "summary": "Release 26 adds spending limits for wallets, lets approval requests from services wait up to 24 hours, and updates the enclave's kernel.",
         "changes": [
-          "You can set spending limits on a wallet: the most per payment and the most in any 24 hours. Your vault refuses any payment above them, including a payment a connection asks for. Lowering a limit needs nothing more; raising or removing one needs your PIN and password.",
-          "Revealing the recovery phrase of a wallet with a spending limit now also needs your PIN, and so does a wallet that shares its recovery phrase with one.",
-          "An approval request from a service now waits up to 24 hours instead of 10 minutes, so you can still answer it after your daily check if your vault was held.",
-          "One malformed item on the votes site no longer stops your vault from checking the others.",
+          "You can set spending limits on a wallet: the most per payment and the most in any 24 hours (on staging, any hour). Your vault refuses any payment whose amount plus fee would go over them, including a payment a connection asks for.",
+          "Setting or lowering a spending limit needs nothing more; raising or removing one needs your PIN and password.",
+          "Revealing a wallet's recovery phrase now also needs your PIN when that wallet, or another wallet in your vault made from the same recovery phrase, has a spending limit, and whenever two wallets in your vault have the same keys.",
+          "You can no longer add a wallet whose keys are already in your vault. A wallet that shares its keys with another in your vault cannot have a spending limit until you delete the other.",
+          "Your History records a payment refused by a limit, and any limit raised or removed, without amounts.",
+          "A service can now give an approval request up to 24 hours to be answered instead of 10 minutes (at most two at a time per service; on staging too), so you can still answer it after your daily check if your vault was held. Services do not send these longer requests yet.",
+          "A proposal on the votes site that is too large or carries a malformed part no longer stops your vault from checking the other proposals.",
           "The enclave now runs Linux 6.6.161, built from source and reproduced as before.",
-          "If your vault were ever moved back to an older release, it would no longer enforce your spending limits.",
+          "If your vault were ever moved back to an older release, it would no longer enforce your spending limits or ask for your PIN to reveal a limited wallet's phrase, and it could drop the limits altogether.",
           "Built from vettid-vault commit 528bd90 (tag release/staging/26) and independently rebuilt on 2026-11-02 with a matching PCR0."
         ],
         "security": "recommended",
-        "security_text": "Release 26 updates the enclave's kernel to Linux 6.6.161, which fixes two faults in the link between your vault and its host: a check on where a connection comes from, and an error from an earlier connection being handed to a new one. We know of no use of either against any vault. Your PIN and credential password were not exposed."
+        "security_text": "Release 26 updates the enclave's kernel to Linux 6.6.161, which fixes three faults in the link between your vault and its host: data on an open connection was not checked to come from the other end of it, an error left by an earlier failed connection could make the vault refuse a new one, and a connection reset just as it opened could corrupt the kernel's memory. We know of no use of any of them against any vault. Your PIN and credential password were not exposed."
       }
     }
   ]
