@@ -13509,9 +13509,10 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     `version` that is not an integer from 1 or a member that is neither
     an integer 1–2,100,000,000,000,000 nor `null` is `bad_request`; no
     PIN or password is tried, and a readable `utk_id` is still spent.
-    (0.82.2) Then the checks of the request run in this order: a stale `version` is `conflict`, then
-    `duplicate_wallet` (0.82.3, "Twin wallets"), then the value rules
-    (`bad_request`), then the `payload_sha256` binding
+    (0.82.2) Then the checks of the request run in this order: a stale
+    `version` is `conflict`, then `duplicate_wallet` (0.82.3, "Twin
+    wallets"), then the value rules (`bad_request`), then the
+    `payload_sha256` binding
     (`bad_request`). All four run after `sealed` is opened (§3.5.3
     step 2) and before the backoff and the PIN and password (steps 4
     and 5), so a stale or invalid raise tries no PIN or password and
