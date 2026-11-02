@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.83.0
+version: 0.83.1
 date: 2026-11-02
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,15 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.83.1: erratum, 2026-11-02 (lead's decision; from the inner
+    must-reject vectors). §5.3: a receiver MUST reject an inner
+    plaintext that begins with a byte order mark, or that has a `\u`
+    escape of an unpaired surrogate (I-JSON, RFC 7493 §2.1), rather than
+    replace or keep it: parsers differ (one replaces it with U+FFFD, one
+    keeps it, one refuses it), so the same bytes could be one member
+    name or two. No sender in the system writes either. Needs: the
+    vault's parser for the surrogate; the apps as noted in the vault and
+    app tasks.
   - 0.83.0: owner decision 2026-10-20 (ANDROID-PLAN §9 decisions 14 and
     17(d)): the specification gaps of the device flows. §10.4.2: the new
     kind `pairing` of `pending.list` (apps only) lists the pairings
@@ -4920,9 +4929,17 @@ The inner plaintext is a UTF-8 JSON object, followed by padding:
   MUST reject non-canonical base64 and base64 containing CR or LF.
 - Unknown fields are ignored. Known fields MUST have exactly the type and
   form given here; receivers MUST reject anything else.
-- Receivers MUST reject an inner plaintext (including its `body`) that is
-  not valid UTF-8, that has duplicate member names at any depth, or that
-  has any data after the object. Member names are case-sensitive.
+- Receivers MUST reject an inner plaintext (including its `body`) that
+  is not valid UTF-8, that has duplicate member names at any depth, or
+  that has any data after the object. Member names are case-sensitive.
+  (0.83.1) They MUST also reject one that begins with a byte order mark
+  (EF BB BF), and one with a `\u` escape of a surrogate (U+D800 to
+  U+DFFF) that is not part of a pair: a high surrogate (U+D800 to
+  U+DBFF) not followed at once by a `\u` escape of a low one (U+DC00 to
+  U+DFFF), or a low surrogate without a high one before it (I-JSON, RFC
+  7493 §2.1). Such a value is not replaced (with U+FFFD) or kept: the
+  message is refused. Otherwise the same bytes could be one member name
+  on one platform and two on another.
 - Integers are plain JSON integers (no sign, fraction or exponent) no
   larger than 2^53 − 1.
 - `id` and `re` are canonical ULIDs: 26 upper-case Crockford base32
