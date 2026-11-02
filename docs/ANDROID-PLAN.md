@@ -4159,20 +4159,19 @@ the title, the priority or the channel; titles without a name.
 ### Wallet, presence, location and video (0.1.42)
 
 *Approved by the owner (2026-10-17, 0.1.42; the wording stays open to
-the owner's rewording). The app's side of VAULT-MESSAGING
-0.34.0 §10.18 Wallet (with §10.7 critical items), §10.17 Presence and
-§10.16 Location, and of CALLS-PLAN 0.1.3 §4, §6.4 and §7 C4 for video.
-The vault side of the first three is built (vettid-vault `main`,
-features `wallet`, `presence` and `location`, on in staging and off in
-production, VAULT-MESSAGING §11.10.8) but has never been used from a
-phone. Of this section, only the wallet is built in the app so far (W1
-to W2-2; the W0 spikes were not merged, see its PRs below); presence, location and video are not. The
-owner decided on
-2026-10-17 the wallet's networks on staging, that the chain source is
-the member's choice, and the order (D8); the other choices are open
-(§9, questions 16–27), each with a recommendation. The texts are
-drafts for the owner's wording. Vault code read at vettid-vault
-`2c3fe13`.*
+the owner's rewording). The app's side of VAULT-MESSAGING 0.34.0 §10.18
+Wallet (with §10.7 critical items), §10.17 Presence and §10.16 Location,
+and of CALLS-PLAN 0.1.3 §4, §6.4 and §7 C4 for video. The vault side of
+the first three is built (vettid-vault `main`, features `wallet`,
+`presence` and `location`, on in staging and off in production,
+VAULT-MESSAGING §11.10.8) but has never been used from a phone. Of this
+section, only the wallet is built in the app so far (W1 to W2-2; the W0
+spikes were not merged, see its PRs below); presence, location and video
+are not. The owner decided on 2026-10-17 the wallet's networks on
+staging, that the chain source is the member's choice, and the order
+(D8); the other choices are open (§9, questions 16–27), each with a
+recommendation. The texts are drafts for the owner's wording. Vault code
+read at vettid-vault `2c3fe13`.*
 
 **Order** (D8). Wallet (W0–W2), then presence (P1), then location
 (L1–L3), each on staging under STAGING-DEVELOPMENT-PLAN §2 and promoted
@@ -4693,10 +4692,10 @@ list, new wallet, recovery phrase and check (#238) and for the wallet
 detail (balance, receive, chain server, details, delete; #239); the
 spending limits at creation and import, Import a wallet and the PIN for
 a capped phrase (#247, W1d-1); and the Spending limits screen with a
-reset of unreadable wallet settings on the phone (#248, W1d-2; the
-reset is not in the text above). W2: the core of sending, no screens
-(#252, W2-1) and the send screens (#254, W2-2), with the note on
-confirmed payments of "Recent payments". **W2-3 (the transactions list and the
+reset of unreadable wallet settings on the phone (#248, W1d-2; the reset
+is not in the text above). W2: the core of sending, no screens (#252,
+W2-1) and the send screens (#254, W2-2), with the note on confirmed
+payments of "Recent payments". **W2-3 (the transactions list and the
 transaction detail) is not built.**
 
 #### Presence
@@ -5172,13 +5171,13 @@ the notification text carries no code; the block has no check mark or success st
 
 ### Withdrawn requests (0.1.101)
 
-*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0 §10.4
-"Withdrawing a challenge", §15 item 47; vettid.org #465). Texts approved by
-the owner, 2026-10-30. Built (vettid-android #229).* A service that no longer
-accepts a sign-in or approval challenge (a sign-in superseded by a newer
-one, an approval decided or cancelled) tells the member's vault, which
-closes the ask. The member must see that it closed, not a request that
-silently vanishes or fails.
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0 §10.4 "Withdrawing
+a challenge", §15 item 47; vettid.org #465). Texts approved by the
+owner, 2026-10-30. Built (vettid-android #229).* A service that no
+longer accepts a sign-in or approval challenge (a sign-in superseded by
+a newer one, an approval decided or cancelled) tells the member's vault,
+which closes the ask. The member must see that it closed, not a request
+that silently vanishes or fails.
 
 - **On `sync.event{kind: "connection.authenticate.decided", request_id,
   approved: false, withdrawn: true}`** the app treats the ask as closed,
@@ -5239,13 +5238,15 @@ error colour.
 
 ### Votes (0.1.102)
 
-*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §6.4 "Votes", §10.19, §15 item 48; BALLOT-PROTOCOL 0.11.1). Every member-facing text below was **approved by the owner on 2026-10-30**.
-Built (vettid-android #230, 0.1.102 to 0.1.108; #236 follows: one
-malformed item in the votes site's data no longer stops the rest). Left
-out of #230: the addition to "What this service can ask" (the Service
-connections screens are not built); and the unlock window prompt is built
-for votes only (AA3's other uses come later).
-Vault: staging release 25 (`features/vote`); until the vault answers `vote.list`, nothing here shows.*
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §6.4 "Votes",
+§10.19, §15 item 48; BALLOT-PROTOCOL 0.11.1). Every member-facing text
+below was **approved by the owner on 2026-10-30**. Built (vettid-android
+#230, 0.1.102 to 0.1.108; #236 follows: one malformed item in the votes
+site's data no longer stops the rest). Left out of #230: the addition to
+"What this service can ask" (the Service connections screens are not
+built); and the unlock window prompt is built for votes only (AA3's
+other uses come later). Vault: staging release 25 (`features/vote`);
+until the vault answers `vote.list`, nothing here shows.*
 
 A service (VAULT-MESSAGING §1.1) can put a **proposal** to its members. The member chooses once; the vault signs and sends the vote; the service records it and later publishes the results; the vault checks them. The vault does every check and signature (§10.19.4 to §10.19.6); the app shows, asks and hands over public documents.
 
