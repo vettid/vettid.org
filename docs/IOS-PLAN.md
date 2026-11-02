@@ -1,9 +1,20 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.58
+version: 0.1.59
 date: 2026-11-02
 changelog:
+  - 0.1.59: erratum, 2026-11-02 (owner decisions a, threads
+    01M6F1RDHN5VCQHFG4KVW89851, 01M6F2GFXDMDY1GC0QWEC1ZJNJ,
+    01M6EXXXE5RBG51H5MD1G0AV30, 01M6F1MB4ZCA0G02SRPD3JBS16;
+    ANDROID-PLAN 0.1.116, VAULT-MESSAGING 0.83.2). §4.16 follows
+    ANDROID-PLAN: the app sends `vote.results.submit` when the four
+    inputs the vault checks hold, even if the rest of its observer
+    check fails; with `verified` or `unconfirmed` it then shows the
+    state and the line `vote_results_dont_add_up` under it, once, and
+    leaves the Results section out (no number is shown); the reserved
+    `abstain` is always shown as "Abstain" and a real choice labelled
+    "Abstain" is shown by its choice id.
   - 0.1.58: erratum (owner 2026-11-02), as built (vettid-ios #198).
     §4.15: the withdrawn notice, like History, offers the mute only
     while the connection is in the list read, has a name and its asks
@@ -517,7 +528,7 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.102) — the Android app; this plan mirrors it
+  - ANDROID-PLAN.md (0.1.102; §4.16 results check and choice labels from 0.1.116) — the Android app; this plan mirrors it
   - VAULT-MESSAGING.md (0.81.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
@@ -1761,6 +1772,20 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   characters removed; Dynamic Type up to the accessibility sizes
   without clipping; the confirm sheet takes VoiceOver focus on the
   fixed disclosure first.
+- **Results check and choice labels** (0.1.59; ANDROID-PLAN 0.1.116):
+  the app sends `vote.results.submit` whenever the four inputs the
+  vault checks hold (VAULT-MESSAGING §10.19.6 step 1), even if the rest
+  of its observer check fails. With `verified` or `unconfirmed` and a
+  failed observer check it shows the state line and
+  `vote_results_dont_add_up` under it, once, and leaves the Results
+  section out: no number is shown (the choice counts, the turnout, the
+  quorum line and the unhandled line). `failed` shows only the failed
+  texts; `pending` with reason `input` keeps the existing problem text.
+  The reserved `abstain` is always shown as "Abstain" (the vote
+  screen's list, the confirm sheet, the member's own choice, the Results
+  rows), and a real choice whose label, with control and
+  bidirectional-override characters removed and surrounding white space
+  trimmed, equals "Abstain", ignoring case, is shown by its choice id.
 - The credential password prompt is the existing one (§4, the unlock
   window), used before `vote.cast`.
 - **Notifications:** the feed items (`vote.open`, `vote.closing`,
