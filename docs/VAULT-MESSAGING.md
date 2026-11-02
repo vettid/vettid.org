@@ -7450,7 +7450,7 @@ an answer to an unknown or expired id is dropped.
   | `leash.grant.changed` | `grant_id`, `agent_id`, `version` (§10.11) |
   | `leash.grant.revoked` | `grant_id`, `agent_id` (§10.11) |
   | `leash.agent.suspended` | `agent_id`, `suspended` (§10.11) |
-  | `leash.item.changed` | `agent_id`, `item_id`, `version`: the ways to use an item changed (§10.11; sent from the release with the ways to use a secret, AGENT-PLAN AV9) |
+  | `leash.item.changed` | `agent_id`, `item_id`, `version` (of `item_ways`; absent when the settings were deleted): the ways to use an item changed (§10.11; 0.42.0, not yet built in the vault, AGENT-PLAN AV9) |
   | `grant.changed` | `grant_id`, `state` (`active`, `used`, `expired`, `revoked`) (§10.12) |
   | `grant.request.decided` | `request_id`, `approved` (§10.12) |
   | `share.rule.changed` | `rule_id`, `version` (§10.12) |
@@ -7604,8 +7604,11 @@ device belongs to the unlock it ends.
   `device.session.deny` for an access request that is unknown,
   answered or expired (`device.session.approve` also when the device
   is no longer active); `approval.decide` for an approval that is
-  unknown, decided or expired. `device.pair.approve` for a pairing
-  whose SAS is not known yet is `bad_request`.
+  unknown, decided or expired (`{result: "not_found"}` also when the
+  requester is no longer active). `device.pair.approve` is
+  `bad_request` for a pairing whose handshake has begun (`hs.init`) but
+  not reached `hs.fin`; `device.pair.reject` accepts that one and ends
+  it. An invite whose link was never opened is `not_found` to both.
 - **`device.list` values.** `kind` is `app`, `desktop` or `agent`;
   `state` is `active` or `stale`. A device whose pairing is not yet
   approved is not listed: it appears in `device.pending.list`.
@@ -10672,7 +10675,8 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
 - Kinds the vault creates: `connection.request` (`ref` = `pending_id`),
   `connection.request.peer_declined` (`ref` = `pending_id` or
   `connection_id`, the latter always after activation; 0.10.5, 0.10.6), `connection.added`, `connection.removed`, `connection.stale`,
-  `device.pair.pending`, `device.paired`, `device.unlinked`,
+  `device.pair.pending` (`ref` = `pending_id`, 0.83.0),
+  `device.paired`, `device.unlinked`,
   `message.received` (`ref` = `message_id`), (0.32.0, release
   A) `message.attachment_failed` (an outgoing attachment failed:
   `unsupported`, `refused`, `missing` or `unconfirmed`) and
@@ -17057,12 +17061,13 @@ not the optional features of §11.10.8, which the channel file chooses.
 | `recovery_r` | §11.14: the phone-held unlock secret in enrollment, unlock and a transfer's `hs.init`, the recovery open, and none of the recovery of §11.11.5. Listed whatever `recovery_offered` says (§11.14.13) | release R |
 | `recovery_offered` | The release offers recovery: its channel file's `recovery_offered` is `true` (§11.14.13). **Listed only then**; a release with `recovery_r` and without this name refuses every recovery request `not_offered`, and the app hides recovery for its vaults (it does not offer to start one and says, where the member looks for it, "This vault's release does not offer recovery", §11.14.13) | release R |
 | `attachments` | Message attachments (§7.3, §10.5.1) | listed from release R; release A implements them without saying so |
-| `item_ways` | The vault has the ways to use a secret (§10.11): an agent's item has its allowed ways, and `item.get` is answered only for an item whose ways hold `reveal` | the release that ships AGENT-PLAN AV9 |
+| `item_ways` | The ways to use a secret (§10.11): each item an agent's rules include has its ways (`leash.item.set`, `leash.item.list`), and `item.get` is answered only for an item whose ways hold `reveal` (0.83.0; no release lists it yet) | the release that ships AGENT-PLAN AV9 |
 
 A name is added to this table only with the release that implements it,
-and a release that lists a name implements it fully. A release before R
-lists nothing, whatever it implements. Apps ignore names they do not
-know.
+or ahead of it by owner decision with that release in **From**
+(`item_ways`, 0.83.0); a release that lists a name implements it fully.
+A release before R lists nothing, whatever it implements. Apps ignore
+names they do not know.
 
 **The time scale (0.43.0, approved by the owner 2026-10-18;
 STAGING-TIME-SCALE §5.2).** From the release that ships `time_scale`
