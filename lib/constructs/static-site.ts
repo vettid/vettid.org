@@ -44,14 +44,22 @@ export interface StaticSiteProps {
   readonly notFoundPage?: string;
   /**
    * Edge gate: requests under `pathPrefix` without `cookie` are redirected
-   * (302) to `redirectTo`. UX only — the API enforces the real session.
+   * (302) to `redirectTo`, except those under one of `except` (pages that
+   * answer a signed-out visitor themselves). UX only — the API enforces the
+   * real session.
    */
-  readonly requireCookie?: { pathPrefix: string; cookie: string; redirectTo: string };
+  readonly requireCookie?: { pathPrefix: string; cookie: string; redirectTo: string; except?: string[] };
   /**
    * JSON documents published under /.well-known/ (RFC 8615), by file name,
    * e.g. `{ 'assetlinks.json': [...] }`. Generated here rather than kept in
    * sourceDir, whose dot-directories are never published (SITE_EXCLUDE).
    * Served as application/json, revalidated on every request.
+   *
+   * The one extensionless name allowed is `apple-app-site-association`
+   * (Apple's Universal Links file): it is deployed on its own with an
+   * explicit `Content-Type: application/json` (S3 would guess
+   * octet-stream), and the edge function passes its path through untouched
+   * (no `/index.html` appended, no redirect).
    */
   readonly wellKnown?: Record<string, unknown>;
   /**
@@ -75,6 +83,9 @@ function sitePaths(dir: string): string[] {
     .filter((p) => !isExcludedSitePath(p.slice(1)))
     .sort();
 }
+
+/** The only extensionless file under /.well-known/ (Apple's Universal Links file). */
+export const EXTENSIONLESS_WELL_KNOWN = 'apple-app-site-association';
 
 const FUNCTION_CODE_LIMIT = 10 * 1024; // CloudFront Functions hard limit
 
@@ -183,8 +194,10 @@ export class StaticSite extends Construct {
 
     const wellKnown = Object.entries(props.wellKnown ?? {});
     for (const [name] of wellKnown) {
-      if (!/^[a-z0-9][a-z0-9.-]*\.json$/.test(name)) throw new Error(`${props.hostName}: wellKnown name ${name} must be a plain *.json file name`);
+      if (name !== EXTENSIONLESS_WELL_KNOWN && !/^[a-z0-9][a-z0-9.-]*\.json$/.test(name)) throw new Error(`${props.hostName}: wellKnown name ${name} must be a plain *.json file name`);
     }
+    const wellKnownJson = wellKnown.filter(([name]) => name !== EXTENSIONLESS_WELL_KNOWN);
+    const wellKnownRaw = wellKnown.filter(([name]) => name === EXTENSIONLESS_WELL_KNOWN);
     const wellKnownPaths = wellKnown.map(([name]) => `/.well-known/${name}`);
     const files = Object.entries(props.files ?? {});
     for (const [path] of files) {
@@ -225,21 +238,25 @@ var NOT_FOUND = ${JSON.stringify(page)};
     }
     const [decls, check] = notFound ? notFound.split('@@CHECK@@') : ['', ''];
     const gate = props.requireCookie
-      ? `var GATE = ${JSON.stringify({ prefix: props.requireCookie.pathPrefix, cookie: props.requireCookie.cookie, to: props.requireCookie.redirectTo })};`
+      ? `var GATE = ${JSON.stringify({ prefix: props.requireCookie.pathPrefix, cookie: props.requireCookie.cookie, to: props.requireCookie.redirectTo, except: props.requireCookie.except ?? [] })};`
       : 'var GATE = null;';
+    const raw = `var RAW = ${JSON.stringify(Object.fromEntries(wellKnownRaw.map(([name]) => [`/.well-known/${name}`, 1])))};`;
     const rewriteCode = `${decls}
 ${gate}
+${raw}
 function handler(event) {
   var req = event.request;
 
   var uri = req.uri;
+  // Extensionless well-known files are served as they are, never as /x/index.html.
+  if (RAW[uri]) { return req; }
   if (uri.endsWith('/')) {
     uri = uri + 'index.html';
   } else if (uri.lastIndexOf('.') < uri.lastIndexOf('/') + 1) {
     uri = uri + '/index.html';
   }
   // Gate on the normalized path, so /account and /account/ are both covered.
-  if (GATE && uri.indexOf(GATE.prefix) === 0 && !(req.cookies && req.cookies[GATE.cookie])) {
+  if (GATE && uri.indexOf(GATE.prefix) === 0 && !(req.cookies && req.cookies[GATE.cookie]) && !GATE.except.some(function (p) { return uri.indexOf(p) === 0; })) {
     return { statusCode: 302, statusDescription: 'Found', headers: { location: { value: GATE.to }, 'cache-control': { value: 'no-store' } } };
   }${check}
   req.uri = uri;
@@ -309,11 +326,13 @@ function handler(event) {
     // scopes its pruning to its own files. config.json rides in the
     // revalidating pass so it is never stale and never pruned.
     const revalidate = ['*.html', '*.json', '*.txt', '*.xml'];
+    const rawKeys = wellKnownRaw.map(([name]) => `.well-known/${name}`);
     const content = s3deploy.Source.asset(props.sourceDir, { exclude: SITE_EXCLUDE });
     new s3deploy.BucketDeployment(this, 'DeployAssets', {
       sources: [content],
       destinationBucket: this.bucket,
-      exclude: revalidate,
+      // The extensionless well-known file has its own deployment below.
+      exclude: [...revalidate, ...rawKeys],
       cacheControl: [s3deploy.CacheControl.fromString('public, max-age=604800')],
       distribution: this.distribution,
       distributionPaths: ['/*'],
@@ -322,7 +341,7 @@ function handler(event) {
       sources: [
         content,
         ...(props.runtimeConfig ? [s3deploy.Source.jsonData('config.json', props.runtimeConfig)] : []),
-        ...wellKnown.map(([name, doc]) => s3deploy.Source.jsonData(`.well-known/${name}`, doc)),
+        ...wellKnownJson.map(([name, doc]) => s3deploy.Source.jsonData(`.well-known/${name}`, doc)),
         ...files.map(([path, body]) => s3deploy.Source.data(path, body)),
       ],
       destinationBucket: this.bucket,
@@ -332,5 +351,21 @@ function handler(event) {
       distribution: this.distribution,
       distributionPaths: ['/*'],
     });
+
+    // Apple fetches /.well-known/apple-app-site-association (no extension):
+    // S3 would label it binary/octet-stream, so this deployment sets
+    // application/json explicitly. Revalidated on every request.
+    if (wellKnownRaw.length) {
+      new s3deploy.BucketDeployment(this, 'DeployWellKnownRaw', {
+        sources: wellKnownRaw.map(([name, doc]) => s3deploy.Source.jsonData(`.well-known/${name}`, doc)),
+        destinationBucket: this.bucket,
+        exclude: ['*'],
+        include: rawKeys,
+        contentType: 'application/json',
+        cacheControl: [s3deploy.CacheControl.fromString('no-cache, must-revalidate')],
+        distribution: this.distribution,
+        distributionPaths: wellKnownRaw.map(([name]) => `/.well-known/${name}`),
+      });
+    }
   }
 }

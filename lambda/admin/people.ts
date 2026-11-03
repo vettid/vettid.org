@@ -33,8 +33,10 @@ import { sendMail } from '../shared/mail';
 import { MemberItem, MemberView, SubscriptionItem, toMemberView } from '../shared/model';
 import { pushAccountSnapshot } from '../shared/account-snapshot';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
-import type { MemberVaults, StartOverCancel } from '../jobs/cleanup';
+import type { StartOverCancel } from '../jobs/cleanup';
+import { requestMemberVaults } from '../shared/member-vaults';
 import { scaledMail } from '../shared/time-scale';
+import { deletionCancelledMail, disableUnlessActive, enableIfActive } from '../shared/account-deletion';
 
 const PAGE = 50;
 const memberPoolId = () => env('MEMBER_POOL_ID');
@@ -76,7 +78,14 @@ async function view(m: MemberItem): Promise<MemberView> {
 }
 
 /** Conditional state transition; `expect` guards against racing admins. */
-async function update(guid: string, expect: Partial<MemberItem>, set: Partial<MemberItem>, remove: string[] = []): Promise<MemberItem> {
+async function update(
+  guid: string,
+  expect: Partial<MemberItem>,
+  set: Partial<MemberItem>,
+  remove: string[] = [],
+  /** A further condition the expectations cannot say (a nested attribute), with its own `:values`. */
+  also?: { expr: string; values?: Record<string, unknown> },
+): Promise<MemberItem> {
   const names: Record<string, string> = {};
   const values: Record<string, unknown> = {};
   const sets = Object.entries({ ...set, updated_at: nowIso() }).map(([k, v], i) => {
@@ -99,9 +108,9 @@ async function update(guid: string, expect: Partial<MemberItem>, set: Partial<Me
         TableName: table.members(),
         Key: { user_guid: guid },
         UpdateExpression: `SET ${sets.join(', ')}${rem.length ? ` REMOVE ${rem.join(', ')}` : ''}`,
-        ConditionExpression: ['attribute_exists(user_guid)', ...conds].join(' AND '),
+        ConditionExpression: ['attribute_exists(user_guid)', ...conds, ...(also ? [also.expr] : [])].join(' AND '),
         ExpressionAttributeNames: names,
-        ExpressionAttributeValues: values,
+        ExpressionAttributeValues: { ...values, ...(also?.values ?? {}) },
         ReturnValues: 'ALL_NEW',
       }),
     );
@@ -346,40 +355,12 @@ async function requestDeletionCancel(userGuid: string): Promise<StartOverCancel>
   return r as StartOverCancel;
 }
 
-/**
- * Ask the member API's member-vaults function (its task `member_vaults`;
- * its own role may only Query the vaults table and its user-index) which of the member's
- * vaults are not deleted. Anything but its own well-formed answer is an
- * error: Delete then answers 500 and changes nothing, so "no vault" is never
- * taken from a failure.
- */
-async function requestMemberVaults(userGuid: string): Promise<MemberVaults> {
-  const out = await lambdaClient.send(
-    new InvokeCommand({
-      FunctionName: env('MEMBER_VAULTS_FN'),
-      InvocationType: 'RequestResponse',
-      Payload: Buffer.from(JSON.stringify({ task: 'member_vaults', user_guid: userGuid })),
-    }),
-  );
-  let r: Partial<MemberVaults> | null = null;
-  try {
-    r = out.FunctionError || !out.Payload ? null : (JSON.parse(Buffer.from(out.Payload).toString('utf8')) as Partial<MemberVaults>);
-  } catch {
-    r = null;
-  }
-  if (!r || r.ok !== true || r.task !== 'member_vaults' || !Array.isArray(r.vaults)) {
-    console.error('member delete: the member-vaults function did not answer as expected', JSON.stringify({ user_guid: userGuid, function_error: out.FunctionError ?? null }));
-    throw new Error('member vaults check failed');
-  }
-  return r as MemberVaults;
-}
-
 /** Delete, while the member still has a vault (ADMIN-API "People"). */
 export const VAULT_EXISTS_MESSAGE =
   'Not deleted: this member still has a vault. Nothing was changed. ' +
   "An administrator's Delete does not delete a vault, and a vault without its member would be left behind. " +
-  'The vault goes when the member deletes it (in the app, or "Delete my vault and start over" on the account page), ' +
-  'or with the account 7 days after the member cancels it. Delete the member after that.';
+  'The vault goes when the member deletes it (in the app, or "Delete my vault and start over" on the account page). ' +
+  'Delete the member after that.';
 
 const epochIso = (s: number | null): string | null => (typeof s === 'number' ? new Date(s * 1000).toISOString() : null);
 
@@ -508,8 +489,64 @@ router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, body,
   }
   await cognito.send(new AdminUserGlobalSignOutCommand({ UserPoolId: memberPoolId(), Username: m.email }));
   await cognito.send(new AdminEnableUserCommand({ UserPoolId: memberPoolId(), Username: m.email }));
-  const updated = await update(m.user_guid, { account_status: m.account_status }, { account_status: 'active' }, ['suspend_reason', 'delete_after']);
-  await audit(actor, 'member.reinstate', m.user_guid, { email: m.email, from: m.account_status });
+  // MEMBER-API 2.14.0: reinstating a canceled account cancels its scheduled
+  // deletion. The write is conditional on the same deletion (or, for a row
+  // canceled without a record, on there still being none), and removes the
+  // record with everything in it (the cancel link's hash, the mail fields).
+  const canceled = m.account_status === 'canceled';
+  const deletion = canceled ? m.account_deletion : undefined;
+  let updated: MemberItem;
+  try {
+    updated = await update(
+      m.user_guid,
+      { account_status: m.account_status },
+      { account_status: 'active' },
+      ['suspend_reason', 'delete_after', ...(canceled ? ['account_deletion', 'deletion_code'] : [])],
+      !canceled ? undefined : deletion ? { expr: 'account_deletion.deletion_id = :did', values: { ':did': deletion.deletion_id } } : { expr: 'attribute_not_exists(account_deletion)' },
+    );
+  } catch (e) {
+    // Lost to the cleanup job or a change of the deletion: sign-in, enabled
+    // above, is disabled again unless the account is active by now.
+    if (canceled) {
+      await disableUnlessActive(m.user_guid, m.email).catch((err: Error) =>
+        console.error('reinstate: sign-in could not be disabled again', JSON.stringify({ user_guid: m.user_guid, error: err.name })));
+    }
+    throw e;
+  }
+  if (canceled) {
+    // Sign-in once more, before anything that can fail the call: the cleanup
+    // job may have disabled it between the enable above and the write (it
+    // read the row as canceled before). Only while the row is still active.
+    try {
+      await enableIfActive(m.user_guid, m.email);
+    } catch (e) {
+      console.error('reinstate: sign-in not enabled again', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
+    }
+  }
+  // member.reinstate is the one step after the status write that can fail
+  // the call (ADMIN-API); the deletion's cancel event and email are made
+  // whatever happens to it, and its failure is answered after them.
+  let reinstateAudit: unknown = null;
+  try {
+    await audit(actor, 'member.reinstate', m.user_guid, { email: m.email, from: m.account_status });
+  } catch (e) {
+    reinstateAudit = e;
+  }
+  if (canceled) {
+    try {
+      // No address in it (ACCOUNT-ADMIN-PLAN §5.4.5): member.reinstate's record carries it.
+      await audit(actor, 'member.deletion_cancel', m.user_guid, { deletion_id: deletion?.deletion_id ?? null, via: 'admin' });
+    } catch (e) {
+      console.error('reinstate: the deletion cancel not audited', JSON.stringify({ user_guid: m.user_guid, deletion_id: deletion?.deletion_id ?? null, error: (e as Error).name }));
+    }
+    const mail = deletionCancelledMail('admin');
+    try {
+      await sendMail(m.email, mail.subject, mail.text);
+    } catch (e) {
+      console.error('account deletion cancel notice failed', (e as Error).name);
+    }
+  }
+  if (reinstateAudit) throw reinstateAudit;
   await pushAccountSnapshot(m.user_guid); // the vault's account snapshot (MEMBER-API 2.0.0)
   return view(updated);
 });
@@ -533,7 +570,7 @@ router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, body,
  */
 router.on('DELETE', '/admin/members/{user_guid}', async ({ params, actor }) => {
   const m = await getMember(params.user_guid);
-  const { vaults } = await requestMemberVaults(m.user_guid);
+  const { vaults } = await requestMemberVaults(m.user_guid, 'member delete');
   if (vaults.length) {
     console.warn('member delete refused: the member has a vault', JSON.stringify({ user_guid: m.user_guid, vaults: vaults.length })); // never the address
     throw new HttpError(409, 'vault_exists', VAULT_EXISTS_MESSAGE, { vaults: vaults.map((v) => ({ vault_id: v.vault_id, state: v.state })) });

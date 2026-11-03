@@ -3961,6 +3961,76 @@ operator does, and does not have to do.
   SES identities are never deleted by a removal (and IAM would refuse
   it), so a withdrawn test request leaves its identity, as before.
 
+### Account deletions held
+
+MEMBER-API 2.14.0 ("Deleting the account") and ACCOUNT-ADMIN-PLAN §5.4
+are the specification. A member deletes their account on
+`https://account.vettid.org/account/delete/`: the account is `canceled`
+at once (sign-in disabled, sessions ended), its row carries
+`account_deletion` (`deletion_id`, `deletes_at`, `mailing_list`, and,
+from the members-stream mailer, `cancel_hash`, `mail_claimed_at`,
+`mailed_at`), and the daily cleanup run (07:00 UTC) deletes it at the
+first run from `deletes_at` (7 days). The confirmation email's link
+(`/account/delete/cancel/#t=…`) or an admin's **Reinstate** cancels
+it until then. Every run first disables sign-in and ends the sessions
+again for each canceled account, so a request whose Cognito steps
+failed is finished there (log `canceled account: sign-in not
+disabled`, by `user_guid`, if it fails again).
+
+The run **holds** a deletion that is due, at every run until the cause
+is gone: nothing is deleted, nothing is written to the member row, and
+the cancel link keeps working. Each hold is audited
+(`member.deletion_held`, actor `system`, with `reason` and, for a
+vault, `vault_ids`), logged (`canceled account: deletion held`,
+`user_guid` and `reason` only) and counted (`AccountDeletionsHeld`,
+EMF, alarm `account-deletions-held`).
+
+| `reason` | What it means | What the operator does |
+|---|---|---|
+| `mail` | The confirmation with the cancel link is not recorded as sent (`account_deletion.mailed_at` missing): the mailer's send failed 3 times (`account_deletion.mail_failures` is 3; each failure alarmed as `account-deletion-mail-failures`, log `account deletion mail failed`; after the third nothing tries again), the mailer stopped between its claim and the send (`mail_claimed_at` without `mailed_at`), SES accepted it but `mailed_at` could not be written (log `account deletion mail not recorded`: the member did get the link), or the row was canceled before 0.3.0 and has no `account_deletion` at all. The member may never have had the link, so the job never deletes such an account. | **Reinstate** the account on the admin site (it removes the deletion; the member gets the support email "Your VettID account was not deleted"), then write to the member that the deletion did not go ahead and that they can ask again on the account page. Do not add `mailed_at` by hand. |
+| `vault` | The member still has a vault that is not `deleted` (sealed; also one whose deletion was asked for and not yet reported). A canceled account cannot open its vault, so the member cannot delete it while the deletion is scheduled. The member was emailed once ("Your VettID account was not deleted yet") at the first run that held it. | Nothing by default: wait (a vault deletion already under way finishes by itself, and the next run deletes the account). If the member asks: **Reinstate**, the member deletes the vault (in the app, or "Delete my vault and start over"), then deletes the account again. |
+| `enrolling` | A vault row with a lease and no sealed release (an enrollment under way, or abandoned with its lease expired), or a never-sealed row that gained a lease or a release between the job's read and its conditional delete. | As for `vault`. An abandoned setup the member cannot finish: ask the vault on-call to end it (the row goes when its instance reports, or as a vault without a member after the account is gone); do not delete the row by hand while an instance may still report `enrolled`. |
+
+**Listing them:** the cleanup job's log lines of the last day (its log
+group has a generated name that starts with the stack's name and
+`CleanupJobLogs`):
+
+```bash
+G=$(aws logs describe-log-groups --log-group-name-prefix VettidOrgMemberApiStack-CleanupJobLogs \
+  --query 'logGroups[0].logGroupName' --output text)
+aws logs filter-log-events --log-group-name "$G" --start-time $(( ($(date +%s) - 86400) * 1000 )) \
+  --filter-pattern '"deletion held"' --query 'events[].message' --output text
+```
+
+and, for one member, the audit events by `subject` (`GET
+/admin/audit?subject=<user_guid>`, the admin site's Audit):
+`member.deletion_held` at each run, with its reason.
+
+The canceled accounts themselves are the members table's `canceled`
+rows (admin site, Members, status canceled). The audit events and log
+lines carry the `user_guid` only; the admin site shows the address.
+
+**The alarms** (both on `VettID/MemberApi`, one hour, at least 1, to
+the security-alerts topic in production):
+- `account-deletions-held` (`AccountDeletionsHeld`, the daily run):
+  at least one deletion is held. It stays on at every daily run until
+  the cause is gone.
+- `account-deletion-mail-failures` (`AccountDeletionMailFailures`, the
+  members-stream mailer): a confirmation could not be sent. It is tried
+  again (the stream's retry, or the record of the failure's own write) up
+  to 3 failed sends in all, counted on the row
+  (`account_deletion.mail_failures`); after the third nothing tries
+  again, and the account is held for `mail` at its due date.
+
+**After a deletion:** nothing is kept but the audit events (by
+`user_guid`; `member.delete_after_cancel` says `deletion_id`,
+`mailing_list: removed | kept | not_listed`, and what could not be
+removed in `incomplete`, alarmed as `RequestRemovalAbandoned`, see
+above). No email is sent after the deletion. The job never asks a
+vault to delete itself for an account deletion and never writes
+`account_deleted_at`; vaults asked before 2.14.0 keep being retried as
+before ("Vaults without a member").
+
 ## Mailing list
 
 - Flow: `POST /api/subscribe` → SES `CreateEmailIdentity` (SES's verification

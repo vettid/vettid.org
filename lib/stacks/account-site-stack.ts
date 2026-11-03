@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
-import { AppConfig, androidAssetLinks, hostName, releaseLogBaseUrl, resourceName, timeScaleEnv } from '../config';
+import { AppConfig, androidAssetLinks, appleAppSiteAssociation, hostName, releaseLogBaseUrl, resourceName, timeScaleEnv } from '../config';
 import { readRef } from '../constructs/ssm-refs';
 import { stageZone } from '../constructs/stage-zone';
 import { StaticSite } from '../constructs/static-site';
@@ -103,6 +103,12 @@ export class VettidOrgAccountSiteStack extends cdk.Stack {
     });
 
     const assetLinks = androidAssetLinks(config.stage);
+    const aasa = appleAppSiteAssociation(config.stage);
+    const wellKnown = {
+      ...(assetLinks ? { 'assetlinks.json': assetLinks } : {}),
+      // The iPhone app's Universal Link (extensionless; see StaticSite wellKnown).
+      ...(aasa ? { 'apple-app-site-association': aasa } : {}),
+    };
     new StaticSite(this, 'Site', {
       hostName: hostName(config, 'account'),
       hostedZone,
@@ -111,11 +117,14 @@ export class VettidOrgAccountSiteStack extends cdk.Stack {
       runtimeConfig: accountSiteConfig(config),
       // The same-device setup link opens in this stage's Android app (App
       // Links): production names com.vettid.app, staging com.vettid.app.staging.
-      ...(assetLinks ? { wellKnown: { 'assetlinks.json': assetLinks } } : {}),
+      ...(Object.keys(wellKnown).length ? { wellKnown } : {}),
       // Signed-out visitors never get the account page shell (see COOKIES.present).
       // The recovery cancel link (/vault/recovery/cancel) is outside it: it
-      // needs no session.
-      requireCookie: { pathPrefix: '/account/', cookie: 'vid_s', redirectTo: '/signin/' },
+      // needs no session. So are the account deletion's pages (MEMBER-API
+      // 2.14.0; their paths are stable, the apps open them): the cancel
+      // link's page is opened from the email by a member who cannot sign in,
+      // and /account/delete/ tells a signed-out visitor to sign in first.
+      requireCookie: { pathPrefix: '/account/', cookie: 'vid_s', redirectTo: '/signin/', except: ['/account/delete/'] },
       webAclArn: webAcl.attrArn,
       apiOriginDomain: readRef(this, config, 'member-api/domain'),
       apiOriginHeaders: {

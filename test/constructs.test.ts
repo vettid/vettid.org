@@ -198,7 +198,7 @@ describe('StaticSite branded 404', () => {
     sourceDir: 'test/fixtures/site',
     runtimeConfig: { a: 1 },
     notFoundPage: '404.html',
-    wellKnown: { 'assetlinks.json': [{ a: 1 }] },
+    wellKnown: { 'assetlinks.json': [{ a: 1 }], 'apple-app-site-association': { applinks: {} } },
   });
   const t = Template.fromStack(stack);
   const code = Object.values<any>(t.findResources('AWS::CloudFront::Function'))[0].Properties.FunctionCode as string;
@@ -214,6 +214,7 @@ describe('StaticSite branded 404', () => {
     ['/404.html', '/404.html'],
     ['/config.json', '/config.json'],
     ['/.well-known/assetlinks.json', '/.well-known/assetlinks.json'],
+    ['/.well-known/apple-app-site-association', '/.well-known/apple-app-site-association'],
   ])('known path %s is rewritten to %s and passed to S3', (uri, expected) => {
     const r = req(uri);
     expect(r.statusCode).toBeUndefined();
@@ -258,7 +259,7 @@ describe('StaticSite edge gate (requireCookie)', () => {
     hostedZone: zone,
     sourceDir: 'test/fixtures/site',
     notFoundPage: '404.html',
-    requireCookie: { pathPrefix: '/about/', cookie: 'vid_s', redirectTo: '/signin/' },
+    requireCookie: { pathPrefix: '/about/', cookie: 'vid_s', redirectTo: '/signin/', except: ['/about/open/'] },
   });
   const code = Object.values<any>(Template.fromStack(stack).findResources('AWS::CloudFront::Function'))[0].Properties.FunctionCode as string;
   // eslint-disable-next-line no-new-func
@@ -277,5 +278,13 @@ describe('StaticSite edge gate (requireCookie)', () => {
 
   test('paths outside the prefix are unaffected', () => {
     expect(req('/').uri).toBe('/index.html');
+  });
+
+  test.each(['/about/openx', '/about/opens/', '/about/', '/about'])('with `except` set, %s is still redirected', (uri) => {
+    expect(req(uri).statusCode).toBe(302);
+  });
+
+  test.each(['/about/open', '/about/open/', '/about/open/x/'])('an excepted path (%s) is served signed out', (uri) => {
+    expect(req(uri).statusCode).not.toBe(302); // served, or this fixture's 404: never the redirect
   });
 });
