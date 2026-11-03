@@ -513,8 +513,22 @@ router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, body,
     }
     throw e;
   }
+  // member.reinstate is the one step after the status write that can fail
+  // the call (ADMIN-API); what follows it is best effort.
+  await audit(actor, 'member.reinstate', m.user_guid, { email: m.email, from: m.account_status });
   if (canceled) {
-    await audit(actor, 'member.deletion_cancel', m.user_guid, { email: m.email, deletion_id: deletion?.deletion_id ?? null, via: 'admin' });
+    // Sign-in once more: the cleanup job may have disabled it between the
+    // enable above and the write (it read the row as canceled before).
+    try {
+      await cognito.send(new AdminEnableUserCommand({ UserPoolId: memberPoolId(), Username: m.email }));
+    } catch (e) {
+      console.error('reinstate: sign-in not enabled again', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
+    }
+    try {
+      await audit(actor, 'member.deletion_cancel', m.user_guid, { email: m.email, deletion_id: deletion?.deletion_id ?? null, via: 'admin' });
+    } catch (e) {
+      console.error('reinstate: the deletion cancel not audited', JSON.stringify({ user_guid: m.user_guid, deletion_id: deletion?.deletion_id ?? null, error: (e as Error).name }));
+    }
     const mail = deletionCancelledMail('admin');
     try {
       await sendMail(m.email, mail.subject, mail.text);
@@ -522,7 +536,6 @@ router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, body,
       console.error('account deletion cancel notice failed', (e as Error).name);
     }
   }
-  await audit(actor, 'member.reinstate', m.user_guid, { email: m.email, from: m.account_status });
   await pushAccountSnapshot(m.user_guid); // the vault's account snapshot (MEMBER-API 2.0.0)
   return view(updated);
 });

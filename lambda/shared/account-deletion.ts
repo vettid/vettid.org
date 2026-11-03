@@ -7,7 +7,7 @@
  *
  * Never log what this module makes: a code, a token, a link or an address.
  */
-import { AdminDisableUserCommand } from '@aws-sdk/client-cognito-identity-provider';
+import { AdminDisableUserCommand, AdminEnableUserCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { cognito, ddb, env, table } from './aws';
@@ -40,6 +40,8 @@ export interface AccountDeletion {
   mail_claimed_at?: string;
   /** When SES accepted the confirmation: the cleanup job deletes nothing without it. */
   mailed_at?: string;
+  /** Failed sends of the confirmation; at DELETION_MAIL_MAX_FAILURES the mailer stops trying. */
+  mail_failures?: number;
 }
 
 /** The email code on the member row: only its HMAC, never the code. */
@@ -86,6 +88,24 @@ export async function disableUnlessActive(userGuid: string, email: string): Prom
   }
 }
 
+/**
+ * The other side of the same race: after something disabled sign-in on a
+ * row it read as canceled (the cleanup job's re-disable), sign-in is
+ * enabled again if the row is active by now (a consistent read), because a
+ * cancel or a reinstate may have enabled it and written `active` in
+ * between. A user that is gone went with the account. Throws when it
+ * cannot be done.
+ */
+export async function enableIfActive(userGuid: string, email: string): Promise<void> {
+  const r = await ddb.send(new GetCommand({ TableName: table.members(), Key: { user_guid: userGuid }, ConsistentRead: true }));
+  if ((r.Item as MemberItem | undefined)?.account_status !== 'active') return;
+  try {
+    await cognito.send(new AdminEnableUserCommand({ UserPoolId: env('MEMBER_POOL_ID'), Username: email }));
+  } catch (e) {
+    if ((e as Error).name !== 'UserNotFoundException') throw e;
+  }
+}
+
 /** The cancel page; the token is in the fragment, so no server or log sees it. */
 export const deletionCancelLink = (accountHost: string, token: string): string => `https://${accountHost}/account/delete/cancel/#t=${token}`;
 
@@ -96,11 +116,26 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
  * `deletes_at`, written as "10 November 2026, 07:00 UTC".
  */
 export function deletionWhen(deletesAtIso: string): string {
-  const d = new Date(deletesAtIso);
-  const run = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 7, 0, 0));
-  if (run.getTime() < d.getTime()) run.setUTCDate(run.getUTCDate() + 1);
+  const run = new Date(firstDeletionRun(deletesAtIso));
   return `${run.getUTCDate()} ${MONTHS[run.getUTCMonth()]} ${run.getUTCFullYear()}, 07:00 UTC`;
 }
+
+/** The scheduled daily run (07:00 UTC) at or after `deletes_at`, in epoch ms (NaN for no date). */
+export function firstDeletionRun(deletesAtIso: string): number {
+  const d = new Date(deletesAtIso);
+  const run = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 7, 0, 0);
+  return run < d.getTime() ? run + 86_400_000 : run;
+}
+
+/** The scheduled daily run (07:00 UTC) a run started at `nowMs` belongs to: the last 07:00 UTC at or before it. */
+export function scheduledRun(nowMs: number): number {
+  const d = new Date(nowMs);
+  const run = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 7, 0, 0);
+  return run > nowMs ? run - 86_400_000 : run;
+}
+
+/** The confirmation is not tried again after this many failed sends (the cleanup job then holds the account, reason `mail`). */
+export const DELETION_MAIL_MAX_FAILURES = 3;
 
 // ---- emails (§5.4.6; plain text, no names) ------------------------------------------
 
@@ -158,8 +193,8 @@ export const TEXT = {
   tooMany: 'Too many tries. Wait a few minutes and try again.',
   codeNotSent: "We couldn't send the code. Nothing has changed. Try again in a few minutes, or write to support@vettid.org.",
   deletionFailed:
-    "Something went wrong, and your account may already be closed. Don't try again: check your email for the cancel link, " +
-    'or write to support@vettid.org. If no email comes within an hour, write to support@vettid.org.',
+    "Something went wrong, and your account may already be closed. Don't try again: check your email for the cancel link. " +
+    'If no email comes within an hour, write to support@vettid.org.',
   cancelFailed: "We couldn't cancel the deletion just now. Try the link again in a few minutes; it keeps working until your account is deleted.",
   vault:
     'You still have a vault. Your VettID account can be deleted only after your vault. Delete your vault in the VettID app, ' +

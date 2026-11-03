@@ -52,7 +52,7 @@ import { DeleteEmailIdentityCommand } from '@aws-sdk/client-sesv2';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { randomBytes } from 'node:crypto';
-import { deletionEmf, deletionHeldMail } from '../shared/account-deletion';
+import { deletionEmf, deletionHeldMail, enableIfActive, firstDeletionRun, scheduledRun } from '../shared/account-deletion';
 import { audit } from '../shared/audit';
 import { cognito, ddb, env, ses, table } from '../shared/aws';
 import { sendMail } from '../shared/mail';
@@ -1210,6 +1210,10 @@ export async function removeDeclined(nowMs: number): Promise<RemovalCounts> {
  * is finished by the next run. Only for the sign-in user that carries this
  * account's id (a user under the address with another id is somebody
  * else's); none at all is nothing to do. Both calls are safe to repeat.
+ * The row was read as canceled before the disable; a cancel link or a
+ * reinstate may have enabled sign-in and written `active` in between, so
+ * the row is read again (consistently) after it, and sign-in enabled again
+ * if the account is active by now.
  */
 async function disableOwnSignIn(m: MemberItem): Promise<void> {
   const UserPoolId = env('MEMBER_POOL_ID');
@@ -1220,14 +1224,17 @@ async function disableOwnSignIn(m: MemberItem): Promise<void> {
     await cognito.send(new AdminUserGlobalSignOutCommand({ UserPoolId, Username: m.email }));
   } catch (e) {
     if ((e as Error).name !== 'UserNotFoundException') throw e;
+    return;
   }
+  await enableIfActive(m.user_guid, m.email);
 }
 
 /**
  * Held (§5.4.3): nothing is deleted and nothing is written to the member
  * row; logged by id, audited at every run, counted by the caller
  * (AccountDeletionsHeld). For a vault or an unfinished setup, the member is
- * emailed at the one run less than 24 hours after `deletes_at`.
+ * emailed at one run only: the one scheduled (07:00 UTC) for the first run
+ * at or after `deletes_at`, whatever time it actually started.
  */
 async function holdDeletion(m: MemberItem, reason: 'vault' | 'enrolling' | 'mail', vaultIds: string[], nowMs: number): Promise<void> {
   console.warn('canceled account: deletion held', JSON.stringify({ user_guid: m.user_guid, reason })); // never the address
@@ -1236,8 +1243,8 @@ async function holdDeletion(m: MemberItem, reason: 'vault' | 'enrolling' | 'mail
   } catch (e) {
     console.error('canceled account: held, not audited', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
   }
-  const deletesAt = Date.parse(m.account_deletion?.deletes_at ?? '');
-  if (reason === 'mail' || !Number.isFinite(deletesAt) || nowMs < deletesAt || nowMs - deletesAt >= 86_400_000) return;
+  const firstRun = firstDeletionRun(m.account_deletion?.deletes_at ?? '');
+  if (reason === 'mail' || !Number.isFinite(firstRun) || scheduledRun(nowMs) !== firstRun) return;
   const mail = deletionHeldMail();
   try {
     await sendMail(m.email, mail.subject, mail.text);
@@ -1432,8 +1439,20 @@ export const handler = async (event?: { task?: string }) => {
             }),
           );
         } catch (e) {
-          if (conditionFailed(e)) lost = v.vault_id;
-          else {
+          let gone = false;
+          if (conditionFailed(e)) {
+            // Read again: a row already gone is done; one that gained a lease or
+            // a release, or that names another member, holds the account.
+            try {
+              gone = !(await consistentRow(v.vault_id));
+            } catch (e2) {
+              console.error('canceled account: a never-sealed vault row not read again', JSON.stringify({ user_guid: m.user_guid, vault_id: v.vault_id, error: (e2 as Error).name }));
+              failed = true;
+              break;
+            }
+            if (gone) continue;
+            lost = v.vault_id;
+          } else {
             console.error('canceled account: a never-sealed vault row not deleted', JSON.stringify({ user_guid: m.user_guid, vault_id: v.vault_id, error: (e as Error).name }));
             failed = true;
           }

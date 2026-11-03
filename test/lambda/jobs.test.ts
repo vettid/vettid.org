@@ -1,7 +1,7 @@
 import { mockClient } from 'aws-sdk-client-mock';
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { AdminDeleteUserCommand, AdminDisableUserCommand, AdminGetUserCommand, AdminUserGlobalSignOutCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
+import { AdminDeleteUserCommand, AdminDisableUserCommand, AdminEnableUserCommand, AdminGetUserCommand, AdminUserGlobalSignOutCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import { createHash } from 'node:crypto';
 import { DeleteEmailIdentityCommand, SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -1137,8 +1137,12 @@ describe('cleanup job: account deletions (MEMBER-API 2.14.0; ACCOUNT-ADMIN-PLAN 
     expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(0);
   };
 
+  // The daily run, as scheduled: 07:00 UTC (plus the seconds it takes to start).
+  const RUN = Date.parse('2026-11-10T07:00:30.000Z');
   beforeEach(() => {
+    jest.useFakeTimers({ now: RUN, doNotFake: ['nextTick', 'setImmediate', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask', 'hrtime', 'performance'] });
     order = [];
+    idp.on(AdminEnableUserCommand).callsFake(() => (order.push('enable'), {}));
     ddb.on(DeleteCommand).callsFake((i) => (order.push(`delete:${i.TableName}:${Object.values(i.Key)[0]}`), {}));
     ddb.on(TransactWriteCommand).callsFake(() => (order.push('transaction'), {}));
     ddb.on(PutCommand).callsFake((i) => (i.TableName === 'list' && order.push('list:marker'), {}));
@@ -1150,14 +1154,17 @@ describe('cleanup job: account deletions (MEMBER-API 2.14.0; ACCOUNT-ADMIN-PLAN 
     log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
 
   test('in order: read again, sign-in disabled and sessions ended, the vaults read, the never-sealed row deleted under its condition, row and marker under the guard, then the rest', async () => {
     setup(account(), [neverSealed], { email: 'gone@x.org', unsubToken: 'u1', status: 'confirmed' });
     const r = await cleanup.handler();
     expect(r).toMatchObject({ deleted: 1, failures: 0, incomplete: 0 });
     expect(order).toEqual([
-      'read', 'disable', 'sign_out',
+      'read', 'disable', 'sign_out', 'read',
       `delete:vaults:${B}`,
       'transaction',
       'user_delete', 'delete:subs:g1', 'delete:vaults:user#g1', 'delete:list:gone@x.org',
@@ -1183,7 +1190,7 @@ describe('cleanup job: account deletions (MEMBER-API 2.14.0; ACCOUNT-ADMIN-PLAN 
   test('not yet due: sign-in disabled and the sessions ended again (a request whose Cognito steps failed is finished), nothing else', async () => {
     setup(account({ delete_after: iso(3 * 24 * H), account_deletion: deletion({ deletes_at: iso(3 * 24 * H) }) }), [sealed]);
     await cleanup.handler();
-    expect(order).toEqual(['read', 'disable', 'sign_out']);
+    expect(order).toEqual(['read', 'disable', 'sign_out', 'read']);
     expect(idp.commandCalls(AdminDisableUserCommand).map((c) => c.args[0].input)).toEqual([{ UserPoolId: 'pool', Username: 'gone@x.org' }]);
     expect(ddb.commandCalls(QueryCommand).filter((c) => c.args[0].input.TableName === 'vaults')).toHaveLength(0);
     nothingDeleted();
@@ -1201,6 +1208,25 @@ describe('cleanup job: account deletions (MEMBER-API 2.14.0; ACCOUNT-ADMIN-PLAN 
     expect(order).toEqual(['read']);
     nothingDeleted();
     expect(audits()).toEqual([]);
+  });
+
+  test('the race: a cancel (or reinstate) enabled sign-in and wrote active after the job read the row as canceled: the job reads again after its disable and enables sign-in again; nothing deleted', async () => {
+    const notDue = account({ delete_after: iso(H), account_deletion: deletion({ deletes_at: iso(H) }) });
+    setup(notDue, [neverSealed]);
+    let reads = 0;
+    ddb.on(GetCommand, { TableName: 'members' } as any).callsFake(() => (order.push('read'), { Item: reads++ === 0 ? notDue : { ...notDue, account_status: 'active', account_deletion: undefined } }));
+    const r = await cleanup.handler();
+    expect(order).toEqual(['read', 'disable', 'sign_out', 'read', 'enable']);
+    expect(idp.commandCalls(AdminEnableUserCommand).map((c) => c.args[0].input)).toEqual([{ UserPoolId: 'pool', Username: 'gone@x.org' }]);
+    expect(ddb.commandCalls(GetCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'members').every((i) => i.ConsistentRead === true)).toBe(true);
+    expect(r).toMatchObject({ failures: 0 });
+  });
+
+  test('the race: still canceled on the second read: sign-in stays disabled', async () => {
+    setup(account({ delete_after: iso(H), account_deletion: deletion({ deletes_at: iso(H) }) }));
+    await cleanup.handler();
+    expect(order).toEqual(['read', 'disable', 'sign_out', 'read']);
+    expect(idp.commandCalls(AdminEnableUserCommand)).toHaveLength(0);
   });
 
   test('a sign-in user under the address with another id is not disabled; a missing one is nothing to do', async () => {
@@ -1231,7 +1257,7 @@ describe('cleanup job: account deletions (MEMBER-API 2.14.0; ACCOUNT-ADMIN-PLAN 
     setup(account(), [...vaults, neverSealed]);
     const r = await cleanup.handler();
     expect(r).toMatchObject({ deleted: 0, failures: 0 });
-    expect(order).toEqual(['read', 'disable', 'sign_out']);
+    expect(order).toEqual(['read', 'disable', 'sign_out', 'read']);
     nothingDeleted();
     expect(audits()).toEqual([expect.objectContaining({ actor: 'system', action: 'member.deletion_held', subject: 'g1', detail: { reason, vault_ids: ids } })]);
     expect(heldEmf()).toEqual([expect.objectContaining({ AccountDeletionsHeld: 1, _aws: expect.objectContaining({ CloudWatchMetrics: [expect.objectContaining({ Namespace: 'VettID/MemberApi' })] }) })]);
@@ -1239,11 +1265,38 @@ describe('cleanup job: account deletions (MEMBER-API 2.14.0; ACCOUNT-ADMIN-PLAN 
     expect(warn.mock.calls.map((c) => c.join(' '))).toContainEqual(`canceled account: deletion held {"user_guid":"g1","reason":"${reason}"}`);
   });
 
-  test('the held email goes only at the run less than 24 hours after deletes_at; later runs hold and audit without it', async () => {
+  test('the held email goes only at the run scheduled (07:00 UTC) for the first run at or after deletes_at; later runs hold and audit without it', async () => {
     setup(account({ delete_after: iso(-25 * H), account_deletion: deletion({ deletes_at: iso(-25 * H) }) }), [sealed]);
     await cleanup.handler();
     expect(audits().map((a) => a.action)).toEqual(['member.deletion_held']);
     expect(mails()).toEqual([]);
+  });
+
+  test('a run that starts late (07:40) is still the scheduled run: the email once; the next day not again, even within 24 hours of deletes_at', async () => {
+    const deletesAt = '2026-11-10T07:20:00.000Z'; // due at the run of the 11th; a late run on the 10th (07:40) already sees it due
+    jest.setSystemTime(Date.parse('2026-11-10T07:40:00.000Z'));
+    setup(account({ delete_after: deletesAt, account_deletion: deletion({ deletes_at: deletesAt }) }), [sealed]);
+    await cleanup.handler();
+    expect(mails()).toEqual([]); // the 10th's run is not the one scheduled for it
+    jest.setSystemTime(Date.parse('2026-11-11T07:00:05.000Z'));
+    ses.resetHistory();
+    await cleanup.handler();
+    expect(mails()).toEqual([{ to: 'gone@x.org', subject: 'Your VettID account was not deleted yet' }]);
+    jest.setSystemTime(Date.parse('2026-11-12T07:05:00.000Z'));
+    ses.resetHistory();
+    await cleanup.handler();
+    expect(mails()).toEqual([]);
+  });
+
+  test('deletes_at in the seconds after 07:00: two runs within 24 hours of it both hold, and only one mails (the old 24-hour window mailed at both)', async () => {
+    const deletesAt = '2026-11-10T07:00:10.000Z';
+    for (const [at, n] of [['2026-11-10T07:00:30.000Z', 0], ['2026-11-11T07:00:05.000Z', 1]] as const) {
+      jest.setSystemTime(Date.parse(at));
+      ses.resetHistory();
+      setup(account({ delete_after: deletesAt, account_deletion: deletion({ deletes_at: deletesAt }) }), [sealed]);
+      await cleanup.handler();
+      expect(mails()).toHaveLength(n);
+    }
   });
 
   test.each([
@@ -1275,15 +1328,39 @@ describe('cleanup job: account deletions (MEMBER-API 2.14.0; ACCOUNT-ADMIN-PLAN 
     expect(audits()).toEqual([]);
   });
 
-  test('a never-sealed row whose condition fails (a lease or a release appeared): the rest waits, held (enrolling)', async () => {
-    setup(account(), [neverSealed]);
-    ddb.on(DeleteCommand, { TableName: 'vaults' } as any).rejects(ccf());
+  test.each([
+    ['a lease appeared', { lease: { instance_id: 'i1', lease_expires_at: 1 } }],
+    ['a release appeared', { sealed_release: R }],
+    ['the row names another member now', { user_guid: 'g2' }],
+  ])('a never-sealed row whose condition fails (%s, read again consistently): the rest waits, held (enrolling)', async (_n, change) => {
+    const rows: Record<string, unknown>[] = [{ ...neverSealed }];
+    setup(account(), rows);
+    ddb.on(DeleteCommand, { TableName: 'vaults' } as any).callsFake(() => {
+      Object.assign(rows[0], change);
+      throw ccf();
+    });
     const r = await cleanup.handler();
     expect(r).toMatchObject({ deleted: 0, failures: 0 });
     expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
     expect(idp.commandCalls(AdminDeleteUserCommand)).toHaveLength(0);
     expect(audits()).toEqual([expect.objectContaining({ action: 'member.deletion_held', detail: { reason: 'enrolling', vault_ids: [B] } })]);
     expect(heldEmf()[0].AccountDeletionsHeld).toBe(1);
+  });
+
+  test('a never-sealed row already gone when its delete runs (the condition fails on a missing row): done, not a hold; the account goes', async () => {
+    const rows: Record<string, unknown>[] = [{ ...neverSealed }];
+    setup(account(), rows);
+    ddb.on(DeleteCommand, { TableName: 'vaults' } as any).callsFake(() => {
+      rows.length = 0;
+      throw ccf();
+    });
+    const r = await cleanup.handler();
+    expect(r).toMatchObject({ deleted: 1, failures: 0 });
+    expect(audits().map((a) => a.action)).toEqual(['member.delete_after_cancel']);
+    expect(heldEmf()[0].AccountDeletionsHeld).toBe(0);
+    const reread = ddb.commandCalls(QueryCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'vaults' && i.ExpressionAttributeValues?.[':id'] === B);
+    expect(reread.length).toBeGreaterThanOrEqual(2); // the vault check, and the read again after the failed condition
+    expect(reread.every((i) => i.ConsistentRead === true)).toBe(true);
   });
 
   test('a never-sealed delete that fails otherwise: nothing else deleted, counted as a failure, tried again next run', async () => {
@@ -1394,8 +1471,10 @@ describe('members stream mailer: the account deletion confirmation (ACCOUNT-ADMI
     expect(claim).toEqual({
       TableName: 'members', Key: { user_guid: row().user_guid },
       UpdateExpression: 'SET account_deletion.cancel_hash = :h, account_deletion.mail_claimed_at = :n',
-      ConditionExpression: 'account_status = :c AND account_deletion.deletion_id = :id AND attribute_not_exists(account_deletion.mail_claimed_at)',
-      ExpressionAttributeValues: { ':h': expect.stringMatching(/^[0-9a-f]{64}$/), ':n': expect.any(String), ':c': 'canceled', ':id': 'D1' },
+      ConditionExpression:
+        'account_status = :c AND account_deletion.deletion_id = :id AND attribute_not_exists(account_deletion.mail_claimed_at) AND ' +
+        '(attribute_not_exists(account_deletion.mail_failures) OR account_deletion.mail_failures < :max)',
+      ExpressionAttributeValues: { ':h': expect.stringMatching(/^[0-9a-f]{64}$/), ':n': expect.any(String), ':c': 'canceled', ':id': 'D1', ':max': 3 },
     });
     expect(mailed).toMatchObject({ UpdateExpression: 'SET account_deletion.mailed_at = :n', ConditionExpression: 'account_deletion.deletion_id = :id AND account_deletion.cancel_hash = :h', ExpressionAttributeValues: { ':h': claim.ExpressionAttributeValues![':h'], ':id': 'D1' } });
     const [mail] = sent();
@@ -1448,14 +1527,67 @@ describe('members stream mailer: the account deletion confirmation (ACCOUNT-ADMI
     expect(updates()).toHaveLength(2);
     expect(unclaim).toEqual({
       TableName: 'members', Key: { user_guid: row().user_guid },
-      UpdateExpression: 'REMOVE account_deletion.cancel_hash, account_deletion.mail_claimed_at',
+      UpdateExpression:
+        'SET account_deletion.mail_failures = if_not_exists(account_deletion.mail_failures, :zero) + :one ' +
+        'REMOVE account_deletion.cancel_hash, account_deletion.mail_claimed_at',
       ConditionExpression: 'account_deletion.deletion_id = :id AND account_deletion.cancel_hash = :h',
-      ExpressionAttributeValues: { ':id': 'D1', ':h': claim.ExpressionAttributeValues![':h'] },
+      ExpressionAttributeValues: { ':id': 'D1', ':h': claim.ExpressionAttributeValues![':h'], ':zero': 0, ':one': 1 },
     });
     expect(err.mock.calls.map((c) => c.join(' '))).toContainEqual(`account deletion mail failed {"user_guid":"${row().user_guid}","error":"TooManyRequestsException"}`);
     const metric = log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('AccountDeletionMailFailures')).map((l) => JSON.parse(l));
     expect(metric).toEqual([expect.objectContaining({ AccountDeletionMailFailures: 1, _aws: expect.objectContaining({ CloudWatchMetrics: [expect.objectContaining({ Namespace: 'VettID/MemberApi' })] }) })]);
     expect(JSON.stringify([log.mock.calls, err.mock.calls])).not.toContain('leaving@x.org');
+  });
+
+  test('failures are counted on the row: the take-off\'s own record and the stream\'s retries end after 3 sends; the account is then left for the job to hold (mail)', async () => {
+    // The live row, as DynamoDB would keep it; every write's new image is fed back as a record.
+    const live: any = row();
+    const images: any[] = [];
+    ddb.on(UpdateCommand).callsFake((i) => {
+      const d = live.account_deletion;
+      if (String(i.UpdateExpression).startsWith('SET account_deletion.cancel_hash')) {
+        if (d.mail_claimed_at || (d.mail_failures ?? 0) >= i.ExpressionAttributeValues[':max']) throw ccf();
+        live.account_deletion = { ...d, cancel_hash: i.ExpressionAttributeValues[':h'], mail_claimed_at: 'x' };
+      } else if (String(i.UpdateExpression).includes('mail_failures')) {
+        const { cancel_hash: _h, mail_claimed_at: _c, ...rest } = d;
+        live.account_deletion = { ...rest, mail_failures: (d.mail_failures ?? 0) + 1 };
+      }
+      images.push(JSON.parse(JSON.stringify(live)));
+      return {};
+    });
+    ses.on(SendEmailCommand).rejects(Object.assign(new Error('x'), { name: 'MessageRejected' }));
+    // The first record, retried by the stream 3 times, and every image the writes made.
+    const queue: any[] = [row(), row(), row(), row()];
+    let handled = 0;
+    while (queue.length && handled < 50) {
+      handled++;
+      const before = images.length;
+      await run(queue.shift()).catch(() => undefined);
+      queue.push(...images.slice(before));
+    }
+    expect(handled).toBeLessThan(50);
+    expect(sent()).toHaveLength(3);
+    expect(live.account_deletion).toEqual({ ...d, mail_failures: 3 });
+    // A record of the row now sends nothing and writes nothing.
+    ddb.resetHistory(); ses.resetHistory();
+    await run(live);
+    expect(updates()).toHaveLength(0);
+    expect(sent()).toHaveLength(0);
+  });
+
+  test('SES accepted but mailed_at could not be written: logged, not thrown; the claim stays, so no record sends again (and the job holds the account, reason mail)', async () => {
+    ddb.on(UpdateCommand).callsFake((i) => {
+      if (String(i.UpdateExpression).startsWith('SET account_deletion.mailed_at')) throw Object.assign(new Error('x'), { name: 'InternalServerError' });
+      return {};
+    });
+    await expect(run(row())).resolves.toBeUndefined();
+    expect(sent()).toHaveLength(1);
+    expect(err.mock.calls.map((c) => c.join(' '))).toContainEqual(`account deletion mail not recorded {"user_guid":"${row().user_guid}","error":"InternalServerError"}`);
+    // The claim's image (and any later one) without mailed_at: nothing sends.
+    ses.resetHistory(); ddb.resetHistory();
+    await run(row({ account_deletion: { ...d, cancel_hash: 'h', mail_claimed_at: 'x' } }));
+    expect(sent()).toHaveLength(0);
+    expect(updates()).toHaveLength(0);
   });
 
   test('a list read that fails fails the record before anything is claimed', async () => {

@@ -501,7 +501,21 @@ router.on('POST', '/api/account/deletion/cancel-link', async (req) => {
     if ((e as Error).name === 'ConditionalCheckFailedException') return { cancelled: false };
     throw e;
   }
-  await audit(memberActor(m.user_guid), 'member.deletion_cancel', m.user_guid, { deletion_id: d.deletion_id, via: 'link' });
+  // The account is active from here, and every step after is best effort:
+  // the answer says what happened (the cancel), whatever fails after it.
+  // Sign-in once more: the cleanup job may have disabled it between the
+  // enable above and the write (it read the row as canceled before).
+  try {
+    await cognito.send(new AdminEnableUserCommand({ UserPoolId: poolId(), Username: m.email }));
+  } catch (e) {
+    console.error('account deletion cancel: sign-in not enabled again', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
+  }
+  try {
+    await audit(memberActor(m.user_guid), 'member.deletion_cancel', m.user_guid, { deletion_id: d.deletion_id, via: 'link' });
+  } catch (e) {
+    // The log line is then the record of the cancel (ids only).
+    console.error('account deletion cancel: not audited', JSON.stringify({ user_guid: m.user_guid, deletion_id: d.deletion_id, error: (e as Error).name }));
+  }
   const mail = deletionCancelledMail('link');
   try {
     await sendMail(m.email, mail.subject, mail.text);

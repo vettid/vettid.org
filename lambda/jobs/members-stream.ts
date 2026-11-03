@@ -26,7 +26,7 @@ import { nowIso } from '../shared/ids';
 import { sendMail } from '../shared/mail';
 import type { MemberItem } from '../shared/model';
 import { adminNotice, newWithdrawToken, requestReceivedMail, withdrawLink } from '../shared/requests';
-import { deletionCancelLink, deletionConfirmationMail, deletionEmf, deletionWhen } from '../shared/account-deletion';
+import { DELETION_MAIL_MAX_FAILURES, deletionCancelLink, deletionConfirmationMail, deletionEmf, deletionWhen } from '../shared/account-deletion';
 
 type Image = Parameters<typeof unmarshall>[0];
 
@@ -79,9 +79,16 @@ export async function sendRequestReceived(m: Pick<MemberItem, 'user_guid' | 'ema
   }
 }
 
-/** A canceled row whose deletion's confirmation has not been claimed yet. */
+/**
+ * A canceled row whose deletion's confirmation has not been claimed yet and
+ * has not failed DELETION_MAIL_MAX_FAILURES times. A failed send's own
+ * take-off write is a new record of the row: the counter is what ends that.
+ */
 const deletionToMail = (m: MemberItem): boolean =>
-  m.account_status === 'canceled' && typeof m.account_deletion?.deletion_id === 'string' && !m.account_deletion.mail_claimed_at;
+  m.account_status === 'canceled' &&
+  typeof m.account_deletion?.deletion_id === 'string' &&
+  !m.account_deletion.mail_claimed_at &&
+  !(Number(m.account_deletion.mail_failures ?? 0) >= DELETION_MAIL_MAX_FAILURES);
 
 /**
  * The account deletion's confirmation (ACCOUNT-ADMIN-PLAN §5.4.3). The
@@ -90,9 +97,14 @@ const deletionToMail = (m: MemberItem): boolean =>
  * deletion, no claim yet), so a retry or a second record cannot send twice
  * and the token exists in the email alone. `mailed_at` is written only after
  * SES accepted the message: without it the cleanup job deletes nothing. A
- * failed send takes the claim and the hash off again, is logged by error
- * name and counted (AccountDeletionMailFailures), and throws, so that the
- * stream retries the record. A function that stops between the claim and
+ * failed send takes the claim and the hash off again and counts the failure
+ * on the row (`mail_failures`, in the same write), is logged by error name
+ * and counted (AccountDeletionMailFailures), and throws, so that the stream
+ * retries the record. After DELETION_MAIL_MAX_FAILURES failures (counted on
+ * the row, so the take-off's own record and the stream's retries share
+ * them) nothing tries again, and the cleanup job holds the account (reason
+ * `mail`). If the `mailed_at` write fails after SES accepted, the claim
+ * stays: nothing sends again, and the job holds the account all the same. A function that stops between the claim and
  * the send leaves the claim without `mailed_at`: nothing sends again by
  * itself, and the job holds the account (reason `mail`).
  */
@@ -108,8 +120,10 @@ export async function sendDeletionConfirmation(m: MemberItem): Promise<'sent' | 
         TableName: table.members(),
         Key: { user_guid: m.user_guid },
         UpdateExpression: 'SET account_deletion.cancel_hash = :h, account_deletion.mail_claimed_at = :n',
-        ConditionExpression: 'account_status = :c AND account_deletion.deletion_id = :id AND attribute_not_exists(account_deletion.mail_claimed_at)',
-        ExpressionAttributeValues: { ':h': hash, ':n': nowIso(), ':c': 'canceled', ':id': d.deletion_id },
+        ConditionExpression:
+          'account_status = :c AND account_deletion.deletion_id = :id AND attribute_not_exists(account_deletion.mail_claimed_at) AND ' +
+          '(attribute_not_exists(account_deletion.mail_failures) OR account_deletion.mail_failures < :max)',
+        ExpressionAttributeValues: { ':h': hash, ':n': nowIso(), ':c': 'canceled', ':id': d.deletion_id, ':max': DELETION_MAIL_MAX_FAILURES },
       }),
     );
   } catch (e) {
@@ -127,9 +141,11 @@ export async function sendDeletionConfirmation(m: MemberItem): Promise<'sent' | 
         new UpdateCommand({
           TableName: table.members(),
           Key: { user_guid: m.user_guid },
-          UpdateExpression: 'REMOVE account_deletion.cancel_hash, account_deletion.mail_claimed_at',
+          UpdateExpression:
+            'SET account_deletion.mail_failures = if_not_exists(account_deletion.mail_failures, :zero) + :one ' +
+            'REMOVE account_deletion.cancel_hash, account_deletion.mail_claimed_at',
           ConditionExpression: 'account_deletion.deletion_id = :id AND account_deletion.cancel_hash = :h',
-          ExpressionAttributeValues: { ':id': d.deletion_id, ':h': hash },
+          ExpressionAttributeValues: { ':id': d.deletion_id, ':h': hash, ':zero': 0, ':one': 1 },
         }),
       )
       .catch((err: Error) => console.error('account deletion mail un-claim failed', JSON.stringify({ user_guid: m.user_guid, error: err.name })));

@@ -414,7 +414,7 @@ describe('POST /api/account/deletion', () => {
     expect(r.cookies.some((c) => c.startsWith('vid_id=; '))).toBe(true);
     expect(logged.join('\n')).toContain('"step":');
     cleanLogs('123456');
-    expect(TEXT.deletionFailed).toBe("Something went wrong, and your account may already be closed. Don't try again: check your email for the cancel link, or write to support@vettid.org. If no email comes within an hour, write to support@vettid.org.");
+    expect(TEXT.deletionFailed).toBe("Something went wrong, and your account may already be closed. Don't try again: check your email for the cancel link. If no email comes within an hour, write to support@vettid.org.");
   });
 
   test('a canceled account (a session still alive after a failed sign-out) is refused before anything', async () => {
@@ -438,7 +438,8 @@ describe('POST /api/account/deletion/cancel-link (no session)', () => {
   test("in reinstate's order: a consistent read, sign-in enabled, the conditional write (still canceled, the same deletion and hash); audited; the member emailed; cancelled", async () => {
     const r = await call('POST', '/api/account/deletion/cancel-link', { token });
     expect(r).toMatchObject({ status: 200, body: { cancelled: true } });
-    expect(order).toEqual(['consistent_read', 'enable', 'write']);
+    // Sign-in enabled once more after the write: the cleanup job may have disabled it in between.
+    expect(order).toEqual(['consistent_read', 'enable', 'write', 'enable']);
     expect(memberHttp.requireSession).not.toHaveBeenCalled();
     expect(rlKeys()).toEqual([expect.stringMatching(/^account-deletion-link#203\.0\.113\.9#\d+$/)]);
     expect(memberUpdates()).toEqual([{
@@ -512,6 +513,32 @@ describe('POST /api/account/deletion/cancel-link (no session)', () => {
     expect((await call('POST', '/api/account/deletion/cancel-link', { token })).status).toBe(500);
     expect(memberUpdates()).toEqual([]);
     expect(TEXT.cancelFailed).toBe("We couldn't cancel the deletion just now. Try the link again in a few minutes; it keeps working until your account is deleted.");
+  });
+
+  test('the race: the cleanup job disabled sign-in between the enable and the write: the enable after the write makes the account usable again', async () => {
+    let enabled = false;
+    idp.on(AdminEnableUserCommand).callsFake(() => ((enabled = true), order.push('enable'), {}));
+    ddb.on(UpdateCommand, { TableName: 'members' }).callsFake(() => {
+      enabled = false; // the job's disable, landing just before the write
+      order.push('write');
+      return {};
+    });
+    expect((await call('POST', '/api/account/deletion/cancel-link', { token })).body).toEqual({ cancelled: true });
+    expect(enabled).toBe(true);
+  });
+
+  test.each([
+    ['the audit write', () => ddb.on(PutCommand, { TableName: 'audit' }).rejects(named('InternalServerError')), 'account deletion cancel: not audited'],
+    ['the enable after the write', () => idp.on(AdminEnableUserCommand).callsFake(() => {
+      order.push('enable');
+      if (order.filter((o) => o === 'enable').length > 1) throw named('TooManyRequestsException');
+      return {};
+    }), 'account deletion cancel: sign-in not enabled again'],
+  ])('%s fails after the cancel was written: still cancelled true (the account is active), logged by id', async (_n, arrange, line) => {
+    arrange();
+    expect(await call('POST', '/api/account/deletion/cancel-link', { token })).toMatchObject({ status: 200, body: { cancelled: true } });
+    expect(logged.join('\n')).toContain(line);
+    cleanLogs(token);
   });
 
   test('a cancel email that cannot be sent does not undo the cancel', async () => {
