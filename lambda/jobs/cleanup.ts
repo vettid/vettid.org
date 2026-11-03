@@ -29,11 +29,14 @@
  * request created it and the mailing list does not use it).
  *
  * Daily:
- *  - delete accounts canceled more than 7 days ago (Cognito user,
- *    subscription, member row + email marker; each vault is asked to delete
- *    itself, VAULT-MESSAGING 0.9.0 §12.5, and its row goes with the
- *    vault_deleted notice; the SES identity of the address goes under the
- *    14-day reclaim's rule; the audit trail stays)
+ *  - disable sign-in and end the sessions again for every canceled account,
+ *    then delete those whose deletion is due (MEMBER-API 2.14.0,
+ *    ACCOUNT-ADMIN-PLAN §5.4.3): held while a vault blocks it or its
+ *    confirmation was not sent; otherwise never-sealed vault rows
+ *    (conditionally), member row + email marker under the guard, then
+ *    Cognito user, subscription, pointer row, the mailing-list entry if the
+ *    member asked, and the SES identity under the 14-day reclaim's rule;
+ *    the audit trail stays. It never asks a vault to delete itself.
  *  - mark the vaults whose member row is gone, and that nobody asked yet;
  *    7 days after the mark, the member row still missing and no operator
  *    hold, ask them to delete themselves as for a canceled account (an
@@ -44,11 +47,15 @@
  *    exactly as a withdrawn one
  *  - mark subscriptions past their expiry as `expired`
  */
+import { AdminDisableUserCommand, AdminGetUserCommand, AdminUserGlobalSignOutCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { DeleteEmailIdentityCommand } from '@aws-sdk/client-sesv2';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { DeleteCommand, GetCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, GetCommand, PutCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { randomBytes } from 'node:crypto';
+import { deletionEmf, deletionHeldMail, enableIfActive, firstDeletionRun, scheduledRun } from '../shared/account-deletion';
 import { audit } from '../shared/audit';
-import { ddb, env, ses, table } from '../shared/aws';
+import { cognito, ddb, env, ses, table } from '../shared/aws';
+import { sendMail } from '../shared/mail';
 
 const STALE_DAYS = 14;
 import { deleteOwnSignInUser, leftBehind, ownEmailMarkerDelete, vaultPointerKey } from '../shared/members';
@@ -217,9 +224,10 @@ async function markAccountDeletedOrLog(v: VaultRowLite, nowS: number): Promise<v
 }
 
 /**
- * A canceled member's vaults: each is marked (2.11.0) and asked to delete
- * itself; the pointer row goes now (the member is gone). Response slots are
- * not used.
+ * The vaults of a member whose row is gone: each is marked (2.11.0) and
+ * asked to delete itself; the pointer row goes now. Response slots are not
+ * used. (2.14.0: only the "Vaults without a member" sweep calls this; the
+ * member's own account deletion is refused while a vault exists.)
  */
 async function deleteVaults(guid: string, nowS: number): Promise<string[]> {
   const ids: string[] = [];
@@ -852,8 +860,31 @@ async function memberVaultIds(userGuid: string): Promise<Set<string>> {
 export interface MemberVaults {
   ok: true;
   task: 'member_vaults';
-  /** The member's vaults that are not `deleted` (a deletion asked for and not yet reported included). */
-  vaults: { vault_id: string; state: string | null }[];
+  /**
+   * The member's vaults that are not `deleted` (a deletion asked for and not
+   * yet reported included). `never_sealed` (MEMBER-API 2.14.0): the row has
+   * no `sealed_release` and no lease; the admin's Delete counts it, the
+   * member's account deletion does not (ACCOUNT-ADMIN-PLAN §5.4.1).
+   */
+  vaults: { vault_id: string; state: string | null; never_sealed: boolean }[];
+}
+
+/** No `sealed_release` and no lease: a setup that never reached an instance's report (MEMBER-API "Vault deletion"). */
+export const neverSealed = (v: Pick<VaultRowLite, 'sealed_release' | 'lease'>): boolean => !v.sealed_release && !v.lease;
+
+/**
+ * A member's vault rows that are not deleted, each read again from the base
+ * table, consistently. A row that names another member is not this
+ * member's. Any failed read throws.
+ */
+async function liveMemberVaultRows(userGuid: string): Promise<VaultRowLite[]> {
+  const rows: VaultRowLite[] = [];
+  for (const id of await memberVaultIds(userGuid)) {
+    const v = (await consistentRow(id)) as VaultRowLite | null;
+    if (!v || v.user_guid !== userGuid || v.state === 'deleted') continue;
+    rows.push(v);
+  }
+  return rows;
 }
 
 /**
@@ -867,10 +898,8 @@ export interface MemberVaults {
 export async function memberVaults(userGuid: unknown): Promise<MemberVaults> {
   if (typeof userGuid !== 'string' || !USER_GUID_RE.test(userGuid)) throw new Error('member_vaults: user_guid is not an account id');
   const out: MemberVaults = { ok: true, task: 'member_vaults', vaults: [] };
-  for (const id of await memberVaultIds(userGuid)) {
-    const v = (await consistentRow(id)) as VaultRowLite | null;
-    if (!v || v.user_guid !== userGuid || v.state === 'deleted') continue;
-    out.vaults.push({ vault_id: v.vault_id, state: typeof v.state === 'string' ? v.state : null });
+  for (const v of await liveMemberVaultRows(userGuid)) {
+    out.vaults.push({ vault_id: v.vault_id, state: typeof v.state === 'string' ? v.state : null, never_sealed: neverSealed(v) });
   }
   return out;
 }
@@ -1173,6 +1202,155 @@ export async function removeDeclined(nowMs: number): Promise<RemovalCounts> {
   return removeRequests(due, 'rejected', nowMs);
 }
 
+// ---- canceled accounts: the member's account deletion (MEMBER-API 2.14.0) -----------
+
+/**
+ * Sign-in disabled and every session ended again for a canceled account
+ * (ACCOUNT-ADMIN-PLAN §5.4.3), so that a request whose Cognito steps failed
+ * is finished by the next run. Only for the sign-in user that carries this
+ * account's id (a user under the address with another id is somebody
+ * else's); none at all is nothing to do. Both calls are safe to repeat.
+ * The row was read as canceled before the disable; a cancel link or a
+ * reinstate may have enabled sign-in and written `active` in between, so
+ * the row is read again (consistently) after it, and sign-in enabled again
+ * if the account is active by now: whatever happened after the disable was
+ * tried (a sign-out that failed included). Answers 'enable_failed' when that
+ * last step could not be made (logged on its own line); throws when the
+ * disable or the sign-out failed.
+ */
+async function disableOwnSignIn(m: MemberItem): Promise<'ok' | 'enable_failed'> {
+  const UserPoolId = env('MEMBER_POOL_ID');
+  let tried = false;
+  let enable: 'ok' | 'enable_failed' = 'ok';
+  try {
+    const u = await cognito.send(new AdminGetUserCommand({ UserPoolId, Username: m.email }));
+    if (u.UserAttributes?.find((a) => a.Name === 'custom:user_guid')?.Value !== m.user_guid) return 'ok';
+    tried = true;
+    await cognito.send(new AdminDisableUserCommand({ UserPoolId, Username: m.email }));
+    await cognito.send(new AdminUserGlobalSignOutCommand({ UserPoolId, Username: m.email }));
+  } catch (e) {
+    if ((e as Error).name !== 'UserNotFoundException') throw e;
+  } finally {
+    if (tried) {
+      try {
+        await enableIfActive(m.user_guid, m.email);
+      } catch (e) {
+        console.error('canceled account: sign-in not enabled again', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name })); // never the address
+        enable = 'enable_failed';
+      }
+    }
+  }
+  return enable;
+}
+
+/**
+ * Held (§5.4.3): nothing is deleted and nothing is written to the member
+ * row; logged by id, audited at every run, counted by the caller
+ * (AccountDeletionsHeld). For a vault or an unfinished setup, the member is
+ * emailed at one run only: the one scheduled (07:00 UTC) for the first run
+ * at or after `deletes_at`, whatever time it actually started.
+ */
+async function holdDeletion(m: MemberItem, reason: 'vault' | 'enrolling' | 'mail', vaultIds: string[], nowMs: number): Promise<void> {
+  console.warn('canceled account: deletion held', JSON.stringify({ user_guid: m.user_guid, reason })); // never the address
+  // Once per scheduled run: a retried invoke, or a second run in the same
+  // 07:00 slot, finds this marker and neither audits nor mails again. It is
+  // in the ratelimits table (the job writes nothing to the member row) and
+  // expires by itself. If it cannot be written, the hold is still audited,
+  // but no email is sent (a second one would reach the member).
+  const slot = scheduledRun(nowMs);
+  let first: boolean | null = true;
+  try {
+    await ddb.send(
+      new PutCommand({
+        TableName: table.ratelimits(),
+        Item: { key: `${HELD_MARK_PREFIX}${m.user_guid}#${slot / 1000}`, expires_at: slot / 1000 + 2 * 86_400 },
+        ConditionExpression: 'attribute_not_exists(#k)',
+        ExpressionAttributeNames: { '#k': 'key' },
+      }),
+    );
+  } catch (e) {
+    if (conditionFailed(e)) first = false;
+    else {
+      console.error('canceled account: held, run marker not written', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
+      first = null;
+    }
+  }
+  if (first === false) return;
+  try {
+    await audit('system', 'member.deletion_held', m.user_guid, { reason, ...(reason === 'vault' && vaultIds.length ? { vault_ids: vaultIds } : {}) });
+  } catch (e) {
+    console.error('canceled account: held, not audited', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
+  }
+  const firstRun = firstDeletionRun(m.account_deletion?.deletes_at ?? '');
+  if (first !== true || reason === 'mail' || !Number.isFinite(firstRun) || slot !== firstRun) return;
+  const mail = deletionHeldMail();
+  try {
+    await sendMail(m.email, mail.subject, mail.text);
+  } catch (e) {
+    console.error('canceled account: held notice not sent', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
+  }
+}
+
+/** The held step's once-per-run marker in the ratelimits table (the only key the job may put there). */
+export const HELD_MARK_PREFIX = 'acctdel-held#';
+
+// The mailing list's own keys (lambda/signup/subscribe.mjs, whose
+// `removeSubscription` the removal below mirrors; duplicated, as that
+// module belongs to the signup stack): a release marker and the
+// confirm-link pointer.
+const LIST_RELEASE = 'release';
+const listReleaseKey = () => `#release#${randomBytes(16).toString('hex')}`;
+const listConfirmKey = (hash: string) => `#confirm#${hash}`;
+
+async function mailingListHas(email: string): Promise<boolean> {
+  const r = await ddb.send(new GetCommand({ TableName: env('TABLE_MAILING_LIST'), Key: { email }, ConsistentRead: true }));
+  return !!r.Item;
+}
+
+/**
+ * The address's mailing-list entry, removed as an unsubscribe removes it
+ * (ACCOUNT-ADMIN-PLAN §5.4.3.1): the row read consistently; a release
+ * marker first if the list created the address's SES identity
+ * (`ownsIdentity`); the row deleted only while it carries the `unsubToken`
+ * just read, so a new sign-up made meanwhile stays (`kept`; its marker then
+ * finds the row in use and keeps the identity); then an unconfirmed row's
+ * confirm-link pointer. Called only after the member row is gone.
+ */
+async function removeFromMailingList(email: string): Promise<'removed' | 'kept' | 'not_listed'> {
+  const TableName = env('TABLE_MAILING_LIST');
+  const row = (await ddb.send(new GetCommand({ TableName, Key: { email }, ConsistentRead: true }))).Item;
+  if (!row) return 'not_listed';
+  const token = row.unsubToken;
+  if (row.ownsIdentity === true) {
+    await ddb.send(new PutCommand({ TableName, Item: { email: listReleaseKey(), status: LIST_RELEASE, requestedAt: new Date().toISOString(), target: email, ownsIdentity: true } }));
+  }
+  let old: Record<string, unknown>;
+  try {
+    const res = await ddb.send(
+      new DeleteCommand({
+        TableName,
+        Key: { email },
+        ...(typeof token === 'string'
+          ? { ConditionExpression: 'unsubToken = :t', ExpressionAttributeValues: { ':t': token } }
+          : { ConditionExpression: 'attribute_exists(email) AND attribute_not_exists(unsubToken)' }),
+        ReturnValues: 'ALL_OLD',
+      }),
+    );
+    old = res.Attributes ?? {};
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return 'kept';
+    throw e;
+  }
+  if (typeof old.tokenHash === 'string') {
+    try {
+      await ddb.send(new DeleteCommand({ TableName, Key: { email: listConfirmKey(old.tokenHash) } }));
+    } catch (e) {
+      console.error('canceled account: the mailing list confirm pointer is left (its TTL removes it)', (e as Error).name);
+    }
+  }
+  return 'removed';
+}
+
 export const handler = async (event?: { task?: string }) => {
   // The five-minute schedule (MEMBER-API 2.1.0): start-overs only.
   if (event?.task === 'start_over') {
@@ -1225,17 +1403,117 @@ export const handler = async (event?: { task?: string }) => {
       return undefined;
     }
   };
+  // Canceled accounts (MEMBER-API 2.14.0 "Deleting the account";
+  // ACCOUNT-ADMIN-PLAN §5.4.3), in this order for each row, read again
+  // consistently: (1) sign-in disabled and the sessions ended again (every
+  // canceled row, due or not); then, for a row past its date, (2) a vault
+  // that blocks holds it, (3) a confirmation not recorded as sent holds it,
+  // (4) never-sealed vault rows go, each under its condition (a failed one
+  // holds it), (5) the row and its marker under the guard, (6) the rest,
+  // each step on its own. An account deletion never asks a vault to delete
+  // itself and never marks one (`deleteVaults` is the orphan sweep's).
   let deleted = 0;
+  let held = 0;
+  const nowMs = Date.now();
   for (const state of ['registered', 'member']) {
     for await (const item of query({
       TableName: table.members(),
       IndexName: 'state-index',
       KeyConditionExpression: '#s = :s',
-      FilterExpression: 'account_status = :c AND delete_after < :now',
+      FilterExpression: 'account_status = :c',
       ExpressionAttributeNames: { '#s': 'state' },
-      ExpressionAttributeValues: { ':s': state, ':c': 'canceled', ':now': now },
+      ExpressionAttributeValues: { ':s': state, ':c': 'canceled' },
     })) {
-      const m = item as MemberItem;
+      const guid = (item as MemberItem).user_guid;
+      let m: MemberItem | undefined;
+      try {
+        m = (await ddb.send(new GetCommand({ TableName: table.members(), Key: { user_guid: guid }, ConsistentRead: true }))).Item as MemberItem | undefined;
+      } catch (e) {
+        console.error('canceled account: not read', JSON.stringify({ user_guid: guid, error: (e as Error).name }));
+        failures++;
+        continue;
+      }
+      if (!m || m.account_status !== 'canceled') continue; // cancelled, reinstated or deleted meanwhile
+      // (1) A request whose Cognito steps failed is finished here.
+      try {
+        if ((await disableOwnSignIn(m)) === 'enable_failed') failures++;
+      } catch (e) {
+        console.error('canceled account: sign-in not disabled', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name })); // never the address
+        failures++;
+      }
+      // Due at the scheduled run (07:00 UTC) the confirmation named: the first
+      // one at or after delete_after, whatever time this run actually started.
+      // (The guard below, delete_after < now, then holds as well.)
+      if (!(typeof m.delete_after === 'string' && firstDeletionRun(m.delete_after) <= scheduledRun(nowMs))) continue;
+      // (2) The vaults, read again: any that is not never-sealed blocks.
+      let rows: VaultRowLite[];
+      try {
+        rows = await liveMemberVaultRows(m.user_guid);
+      } catch (e) {
+        console.error('canceled account: vaults not read, nothing deleted', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
+        failures++;
+        continue;
+      }
+      const blocking = rows.filter((v) => !neverSealed(v));
+      if (blocking.length) {
+        await holdDeletion(m, blocking.some((v) => !!v.sealed_release) ? 'vault' : 'enrolling', blocking.map((v) => v.vault_id), nowMs);
+        held++;
+        continue;
+      }
+      // (3) The member must have had the cancel link: no record, or no
+      // `mailed_at`, holds it (a row canceled without a record is treated
+      // as a deletion with mailing_list "keep", and held the same way).
+      const d = m.account_deletion;
+      if (!d || typeof d.deletion_id !== 'string' || !d.mailed_at) {
+        await holdDeletion(m, 'mail', [], nowMs);
+        held++;
+        continue;
+      }
+      // (4) Never-sealed rows, each only while it still has no release and no lease.
+      let lost: string | null = null;
+      let failed = false;
+      for (const v of rows) {
+        try {
+          await ddb.send(
+            new DeleteCommand({
+              TableName: table.vaults(),
+              Key: { vault_id: v.vault_id },
+              ConditionExpression: 'user_guid = :g AND attribute_not_exists(sealed_release) AND attribute_not_exists(lease)',
+              ExpressionAttributeValues: { ':g': m.user_guid },
+            }),
+          );
+        } catch (e) {
+          let gone = false;
+          if (conditionFailed(e)) {
+            // Read again: a row already gone is done; one that gained a lease or
+            // a release, or that names another member, holds the account.
+            try {
+              gone = !(await consistentRow(v.vault_id));
+            } catch (e2) {
+              console.error('canceled account: a never-sealed vault row not read again', JSON.stringify({ user_guid: m.user_guid, vault_id: v.vault_id, error: (e2 as Error).name }));
+              failed = true;
+              break;
+            }
+            if (gone) continue;
+            lost = v.vault_id;
+          } else {
+            console.error('canceled account: a never-sealed vault row not deleted', JSON.stringify({ user_guid: m.user_guid, vault_id: v.vault_id, error: (e as Error).name }));
+            failed = true;
+          }
+          break;
+        }
+      }
+      if (lost) {
+        // A lease or a release appeared since the read (a setup in flight), or the row changed hands.
+        await holdDeletion(m, 'enrolling', [lost], nowMs);
+        held++;
+        continue;
+      }
+      if (failed) {
+        failures++;
+        continue;
+      }
+      // (5) The row (with the cancel link's hash) and its marker, under the guard.
       let marker: 'deleted' | 'left';
       try {
         marker = await deleteRowAndOwnMarker(
@@ -1243,17 +1521,18 @@ export const handler = async (event?: { task?: string }) => {
           {
             TableName: table.members(),
             Key: { user_guid: m.user_guid },
-            ConditionExpression: 'account_status = :c AND delete_after < :now',
-            ExpressionAttributeValues: { ':c': 'canceled', ':now': now },
+            ConditionExpression: 'account_status = :c AND delete_after < :now AND account_deletion.deletion_id = :id',
+            ExpressionAttributeValues: { ':c': 'canceled', ':now': now, ':id': d.deletion_id },
           },
           'canceled account',
         );
       } catch (e) {
-        if (conditionFailed(e)) continue; // reinstated (or deleted by an admin) meanwhile: not ours
+        if (conditionFailed(e)) continue; // cancelled, reinstated (or deleted by an admin) meanwhile: not ours
         console.error('canceled account: not removed', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name })); // never the address
         failures++;
         continue;
       }
+      // (6) The rest, each on its own.
       const undone: string[] = [];
       const step = afterRow('canceled account', m, undone);
       // The sign-in user is named by the address, not by the account: it
@@ -1264,7 +1543,12 @@ export const handler = async (event?: { task?: string }) => {
         console.warn('canceled account: the sign-in user under its address carries another id and is left', JSON.stringify({ user_guid: m.user_guid })); // never the address
       }
       await step('subscription', () => ddb.send(new DeleteCommand({ TableName: table.subscriptions(), Key: { user_guid: m.user_guid } })));
-      const vaultIds = (await step('vaults', () => deleteVaults(m.user_guid, Math.floor(Date.now() / 1000)))) ?? [];
+      await step('vault_pointer', () => ddb.send(new DeleteCommand({ TableName: table.vaults(), Key: { vault_id: vaultPointerKey(m.user_guid) } })));
+      // The mailing-list entry, only if the member asked (5.4.3.1); now that the row is gone, the list's sweep finds no member using the address.
+      const list: 'removed' | 'kept' | 'not_listed' =
+        d.mailing_list === 'remove'
+          ? ((await step('mailing_list', () => removeFromMailingList(m.email))) ?? 'kept')
+          : await mailingListHas(m.email).then((on) => (on ? 'kept' : 'not_listed'), () => 'kept');
       // The address's SES identity, under the 14-day reclaim's rule, and only
       // while nothing else uses the address: its marker went with the row
       // and the sign-in user under it was this account's own or none. One
@@ -1274,7 +1558,9 @@ export const handler = async (event?: { task?: string }) => {
         ? await step('ses_identity', () => releaseIdentityOfGoneRow(m))
         : 'kept';
       await audit('system', 'member.delete_after_cancel', m.user_guid, {
-        ...(vaultIds.length ? { vault_ids: vaultIds } : {}),
+        deletion_id: d.deletion_id,
+        mailing_list: list,
+        ...(rows.length ? { vault_ids: rows.map((v) => v.vault_id) } : {}),
         ...(identity ? { identity } : {}),
         ...leftBehind(user, marker),
         ...(undone.length ? { incomplete: undone } : {}),
@@ -1342,6 +1628,8 @@ export const handler = async (event?: { task?: string }) => {
   // One alarm for "a removal is waiting" and one for "a removal ended
   // unfinished", whatever was being removed.
   console.log(removalEmf(declined.failures + failures, declined.abandoned + incomplete, Date.now()));
+  // Account deletions held (a vault, an unfinished setup, no confirmation sent): one line at every daily run, zeros too.
+  console.log(deletionEmf('AccountDeletionsHeld', held, Date.now()));
 
   // Vaults whose member row is gone and that nobody asked to delete: the
   // account deletion above stopped before its vault step finished, in this

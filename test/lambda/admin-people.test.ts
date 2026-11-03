@@ -340,12 +340,132 @@ describe("a member's pending vault deletion", () => {
     expect(mails()[0].text).not.toMatch(/reinstat/i);
   });
 
-  test('reinstate: from canceled too; with nothing pending it is as before (no cancel event, no mail)', async () => {
-    ddb.on(GetCommand).resolves({ Item: { ...member, account_status: 'canceled', delete_after: '2026-10-20T00:00:00Z' } });
+  // MEMBER-API 2.14.0: reinstating a canceled account cancels its scheduled deletion (ACCOUNT-ADMIN-PLAN §5.4.4).
+  const deletion = { deletion_id: '01JB2Z6V9K3M4N5P6Q7R8S9T0W', requested_at: '2026-10-13T00:00:00Z', deletes_at: '2026-10-20T00:00:00Z', mailing_list: 'remove', cancel_hash: 'h', mail_claimed_at: 'x', mailed_at: 'y' };
+  const canceledMember = { ...member, account_status: 'canceled', suspend_reason: undefined, delete_after: deletion.deletes_at, account_deletion: deletion };
+  /** The row reads canceled until the status write, active after it (what the second enable's read sees). */
+  const canceledUntilWritten = (after: Record<string, unknown> = { ...member, account_status: 'active' }) => {
+    let written = false;
+    ddb.on(GetCommand).callsFake(() => ({ Item: written ? after : canceledMember }));
+    ddb.on(UpdateCommand).callsFake(() => {
+      written = true;
+      order.push('update');
+      return { Attributes: { ...member, account_status: 'active' } };
+    });
+  };
+  const SUPPORT_TEXT = 'VettID support cancelled the deletion of your VettID account, as you asked. You can sign in again as before. If you did not ask for this, write to support@vettid.org.\n';
+
+  test('reinstate: from canceled, the scheduled deletion is cancelled: the record goes with delete_after under a condition on the same deletion; audited (via admin) and the member gets the support email', async () => {
+    canceledUntilWritten();
+    job(answer({}));
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(200);
+    // Sign-in once more after the write (the cleanup job may have disabled it in between).
+    expect(order).toEqual(['cancel', 'signout', 'enable', 'update', 'enable']);
+    const upd = ddb.commandCalls(UpdateCommand)[0].args[0].input;
+    expect(upd.ConditionExpression).toBe('attribute_exists(user_guid) AND #c0 = :c0 AND account_deletion.deletion_id = :did');
+    expect(upd.ExpressionAttributeValues).toMatchObject({ ':c0': 'canceled', ':did': deletion.deletion_id });
+    expect(upd.UpdateExpression).toMatch(/ REMOVE #r0, #r1, #r2, #r3$/);
+    expect(Object.entries(upd.ExpressionAttributeNames!).filter(([k]) => k.startsWith('#r')).map(([, v]) => v)).toEqual(['suspend_reason', 'delete_after', 'account_deletion', 'deletion_code']);
+    // member.reinstate first: the one step after the status write that fails the call (ADMIN-API).
+    expect(events().map((e) => [e.action, e.detail])).toEqual([
+      ['member.reinstate', { from: 'canceled' }],
+      ['member.deletion_cancel', { deletion_id: deletion.deletion_id, via: 'admin' }],
+    ]);
+    expect(mails()).toEqual([{ to: 'ada@example.org', subject: 'Your VettID account was not deleted', text: SUPPORT_TEXT }]);
+    expect(idp.commandCalls(AdminDisableUserCommand)).toHaveLength(0);
+  });
+
+  test('reinstate: a canceled row without a deletion record (before 0.3.0) is reinstated only while it still has none', async () => {
+    ddb.on(GetCommand).resolves({ Item: { ...canceledMember, account_deletion: undefined } });
+    job(answer({}));
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(200);
+    expect(ddb.commandCalls(UpdateCommand)[0].args[0].input.ConditionExpression).toBe('attribute_exists(user_guid) AND #c0 = :c0 AND attribute_not_exists(account_deletion)');
+    expect(events().map((e) => [e.action, e.detail])).toEqual([
+      ['member.reinstate', { from: 'canceled' }],
+      ['member.deletion_cancel', { deletion_id: null, via: 'admin' }],
+    ]);
+  });
+
+  test('reinstate from canceled: after the status write and member.reinstate, the deletion-cancel event and the second enable are best effort (200); member.reinstate failing is the 500 ADMIN-API describes', async () => {
+    canceledUntilWritten();
+    job(answer({}));
+    const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    ddb.on(PutCommand).callsFake((i) => {
+      if (i.TableName === 'audit' && i.Item.action === 'member.deletion_cancel') throw Object.assign(new Error('x'), { name: 'InternalServerError' });
+      return {};
+    });
+    let enables = 0;
+    idp.on(AdminEnableUserCommand).callsFake(() => {
+      order.push('enable');
+      if (++enables > 1) throw Object.assign(new Error('x'), { name: 'TooManyRequestsException' });
+      return {};
+    });
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(200);
+    expect(events().map((e) => e.action)).toEqual(['member.reinstate', 'member.deletion_cancel']); // the second was tried and failed
+    expect(mails().map((m) => m.subject)).toEqual(['Your VettID account was not deleted']);
+    expect(err.mock.calls.map((c) => String(c[0]))).toEqual(expect.arrayContaining(['reinstate: the deletion cancel not audited', 'reinstate: sign-in not enabled again']));
+    // member.reinstate itself failing: the second enable was made before it, the deletion's event and
+    // email are made all the same, and then the answer is 500.
+    canceledUntilWritten();
+    ddb.on(PutCommand).callsFake((i) => {
+      if (i.TableName === 'audit' && i.Item.action === 'member.reinstate') throw Object.assign(new Error('x'), { name: 'InternalServerError' });
+      return {};
+    });
+    idp.on(AdminEnableUserCommand).callsFake(() => (order.push('enable'), {}));
+    ses.resetHistory();
+    order = [];
+    ddb.resetHistory();
+    canceledUntilWritten();
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(500);
+    expect(order).toEqual(['cancel', 'signout', 'enable', 'update', 'enable']);
+    expect(events().map((e) => e.action)).toEqual(['member.reinstate', 'member.deletion_cancel']);
+    expect(mails().map((m) => m.subject)).toEqual(['Your VettID account was not deleted']);
+  });
+
+  test('reinstate from canceled: member.deletion_cancel carries no address and writes no address record (only member.reinstate does)', async () => {
+    canceledUntilWritten();
+    job(answer({}));
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(200);
+    const cancel = events().find((e) => e.action === 'member.deletion_cancel')!;
+    expect(JSON.stringify(cancel)).not.toContain('ada@example.org');
+    const addressRecords = audits().filter((a) => String(a.month).startsWith('addr#'));
+    const reinstate = events().find((e) => e.action === 'member.reinstate')!;
+    expect(addressRecords.map((a) => a.ts_id)).toEqual([reinstate.ts_id]);
+  });
+
+  test('reinstate from canceled: a suspension landing between the status write and the second enable is not undone (the row reads suspended: no enable)', async () => {
+    canceledUntilWritten({ ...member, account_status: 'suspended' });
     job(answer({}));
     expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(200);
     expect(order).toEqual(['cancel', 'signout', 'enable', 'update']);
-    expect(events().map((e) => [e.action, e.detail])).toEqual([['member.reinstate', { from: 'canceled' }]]);
+    expect(ddb.commandCalls(GetCommand).map((c) => c.args[0].input).pop()).toEqual({ TableName: 'members', Key: { user_guid: G1 }, ConsistentRead: true });
+  });
+
+  test('reinstate: the write of a canceled account lost (the cleanup job, or the member\'s link, came first): 409, sign-in disabled again unless active now; nothing audited, no email', async () => {
+    ddb.on(GetCommand).resolves({ Item: canceledMember });
+    job(answer({}));
+    ddb.on(UpdateCommand).rejects(Object.assign(new Error('c'), { name: 'ConditionalCheckFailedException' }));
+    idp.on(AdminDisableUserCommand).callsFake(() => (order.push('disable'), {}));
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(409);
+    expect(order).toEqual(['cancel', 'signout', 'enable', 'disable']);
+    expect(ddb.commandCalls(GetCommand).map((c) => c.args[0].input).pop()).toEqual({ TableName: 'members', Key: { user_guid: G1 }, ConsistentRead: true });
+    expect(events()).toEqual([]);
+    expect(mails()).toEqual([]);
+    // The member's link won: the row is active, sign-in stays enabled.
+    order = [];
+    let reads = 0;
+    ddb.on(GetCommand).callsFake(() => ({ Item: reads++ === 0 ? canceledMember : { ...member, account_status: 'active' } }));
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(409);
+    expect(order).toEqual(['cancel', 'signout', 'enable']);
+  });
+
+  test('reinstate: from suspended nothing of a deletion is touched (no condition on it, no event, no email)', async () => {
+    job(answer({}));
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(200);
+    const upd = ddb.commandCalls(UpdateCommand)[0].args[0].input;
+    expect(upd.ConditionExpression).toBe('attribute_exists(user_guid) AND #c0 = :c0');
+    expect(Object.values(upd.ExpressionAttributeNames!)).not.toContain('account_deletion');
+    expect(events().map((e) => e.action)).toEqual(['member.reinstate']);
     expect(mails()).toHaveLength(0);
   });
 

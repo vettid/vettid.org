@@ -1,8 +1,15 @@
 ---
 title: ACCOUNT-ADMIN-PLAN
 status: accepted — decisions recorded in §9
-version: 0.3.0
+version: 0.3.1
 changelog:
+  - 0.3.1: erratum, with the code, vettid.org#515 (§5.4.7): the
+    confirmation stops after 3 failed sends (`mail_failures`); due at the
+    07:00 run the email names; the held step once per run (a marker in
+    the ratelimits table) and its email at that run; the re-disable race;
+    the cleanup role's `AdminEnableUser`, `ses:SendEmail` and narrowed
+    `PutItem`s; `member.delete_after_cancel`'s `vault_ids` and
+    `incomplete`; the two alarms
   - 0.3.0: owner decisions of 2026-11-03 (§9 7): **deleting a VettID
     account** (§5.4), for the apps' "Delete my account" (Apple App Store
     rule 5.1.1(v)). The member's own deletion replaces the cancel: it
@@ -401,7 +408,7 @@ the member asks for a new one. A failure changes nothing else.
 | **The confirmation email** | Sent by the members-stream mailer from the row's change, as the request emails are (MEMBER-API "Request emails"). The mailer mints the cancel link's token (5.4.4) and claims the send in one conditional write: `account_deletion.cancel_hash` (the secret's SHA-256) and `account_deletion.mail_claimed_at`, only if the row is still `canceled` with this `account_deletion.deletion_id` and has no claim; so a retry or a second record cannot send twice, and the token exists in the email alone. It writes **`account_deletion.mailed_at` only after SES has accepted the message**. A failed send takes the claim and the hash off again, is logged by error name and counted (`AccountDeletionMailFailures`, alarmed), and the record is failed so that the stream retries it. A function that stops between the claim and the send leaves the claim without `account_deletion.mailed_at`: nothing sends again by itself. The cleanup job never deletes an account without `account_deletion.mailed_at`: it holds it (reason `mail`, alarmed), and the operator reinstates it and tells the member to ask again (RUNBOOK). So the member always has the cancel link before anything is deleted. |
 | **Until the account is deleted** | The account can't sign in. The cancel link, or an admin's reinstate, puts everything back as it was: sign-in enabled, `account_status: active`, the deletion record removed; the member is emailed. The link works until the cleanup job has deleted the account, not only until `deletes_at`: the job's guard and the cancel's condition are on the same row, so exactly one of them wins. |
 | **The first daily run at or after `deletes_at`** (07:00 UTC, so 7 to 8 days after the request) | In this order. (1) The member's vaults are read again; with one that blocks (5.4.1), the account is **held**. (2) Without `account_deletion.mailed_at`, it is **held**. (Before (1), every run disables sign-in and ends the sessions again for each `canceled` account it reads, so that a request whose Cognito steps failed is finished.) (3) The never-sealed vault rows are deleted, each conditional on still having no `sealed_release` and no lease; if a condition fails, the rest waits and the account is **held**. (The host's `enrolled` update must not recreate a row deleted here: the code PR checks that it is conditional on the row existing, VAULT-HOST-PROTOCOL, and opens a vettid-vault issue if it is not; until then such a row is a vault without a member, which the sweep for those marks and alarms on, MEMBER-API 2.6.5.) (4) The member row (with its cancel link's hash) and its email marker go in one transaction under the guard (still `canceled`, past `delete_after`, the same `deletion_id`). (5) Then each on its own, a failure skipping neither the next step nor the next row, as for a canceled account today (MEMBER-API "Retention", "The daily sweeps"): the sign-in user (if it is this account's own), the subscription, the pointer row `user#<guid>`, **the mailing-list entry** (5.4.3.1), and the SES identity under the existing rule (kept if the mailing list still uses the address, if the request did not create it, or if the address is the project's own). |
-| **Held** | Nothing is deleted; the account stays `canceled` and the cancel link keeps working. Logged by `user_guid` only, audited (`member.deletion_held`, with the reason), counted (`AccountDeletionsHeld`, alarmed) and tried again at every daily run. At the first run that holds it for a vault or an unfinished setup (`vault`, `enrolling`: the run less than 24 hours after `deletes_at`, so no mark is needed and the job writes nothing to the member row) the member is emailed (5.4.6): what blocks it, and how to go on. A canceled account cannot unlock its vault (the member API refuses its vault routes except lock and the two cancels), so the way on is the cancel link, then the vault's deletion, then a new account deletion. The RUNBOOK ("Account deletions held", written with the code) lists them; for reason `mail` the operator reinstates and tells the member, and for the others reinstates at the member's request. |
+| **Held** | Nothing is deleted; the account stays `canceled` and the cancel link keeps working. Logged by `user_guid` only, audited (`member.deletion_held`, with the reason), counted (`AccountDeletionsHeld`, alarmed) and tried again at every daily run. At the first run that holds it for a vault or an unfinished setup (`vault`, `enrolling`: the run scheduled for the first run at or after `deletes_at`, once, 5.4.7; the job writes nothing to the member row) the member is emailed (5.4.6): what blocks it, and how to go on. A canceled account cannot unlock its vault (the member API refuses its vault routes except lock and the two cancels), so the way on is the cancel link, then the vault's deletion, then a new account deletion. The RUNBOOK ("Account deletions held", written with the code) lists them; for reason `mail` the operator reinstates and tells the member, and for the others reinstates at the member's request. |
 | **Afterwards** | No tombstone is kept: once the email marker is gone, the address can request membership again like any other. Abuse is dealt with by suspension, before a deletion, not by remembering deleted addresses. Kept: the audit events (by `user_guid`, no address); an address record of an admin's earlier action expires 90 days after that action, as now. The `vdeleted#` records of vaults deleted before, for their 90 days. Short-lived records that name the `user_guid` and expire on their own (rate-limit counters, request-table items such as an earlier start-over's cancel link), within their TTLs. A copy of the address in a log or an audit address record is deleted within 90 days, and in AWS's own audit log (CloudTrail) within 400 days. The tables' point-in-time backups (35 days) and CloudTrail's record of the SES calls (400 days), as now. |
 
 No email is sent after the deletion: the confirmation said when it
@@ -623,6 +630,65 @@ to keep it, cancel the deletion." **Cancel the deletion**, then "Your
 account is open again. Sign in as before." or "This link no longer
 works: the deletion was already cancelled, or carried out." (The page
 knows nothing until the member clicks: the token is all it holds.)
+
+#### 5.4.7 Errata with the code (0.3.1)
+
+Found while building it (vettid.org#515). Where this section and the
+paragraphs above differ, this one is what the code does:
+
+- **Due at the run the email names.** A canceled account is due at the
+  scheduled daily run (07:00 UTC) that is the first at or after
+  `delete_after`, the `<when>` of the confirmation email, whatever time
+  that run actually starts. The guard of 5.4.3 (4) stays `delete_after`
+  in the past.
+- **Confirmation failures stop at three.** The write that takes a
+  failed send's claim and hash off again also counts the failure,
+  `account_deletion.mail_failures`; the mailer neither claims nor sends
+  once it is 3. (That write is itself a new record of the row, and the
+  stream retries the failed one: without the count, failures would
+  repeat without end.) The account is then held for reason `mail` at
+  its date. A `mailed_at` write that fails after SES accepted leaves the
+  claim: nothing is sent again, and the job holds the account (`mail`)
+  all the same.
+- **The held step once per run.** Before its audit and email the held
+  step puts a marker in the ratelimits table
+  (`acctdel-held#<user_guid>#<slot>`, conditional on not existing,
+  expiring after 2 days), so a retried invoke or a second run in the
+  same 07:00 slot neither audits nor mails again; the job still writes
+  nothing to the member row. The held email goes at the run scheduled
+  for the first run at or after `deletes_at` (instead of "less than 24
+  hours after"). If the marker cannot be written, the hold is audited
+  and no email is sent. `member.delete_after_cancel` cannot repeat: the
+  guard lets one transaction through.
+- **The re-disable race.** After its disable (5.4.3) the job reads the
+  row again, consistently, and enables sign-in if the row is active by
+  then (a cancel link or a reinstate made in between); the cancel link
+  and a reinstate enable sign-in once more after their own write, while
+  the row reads active. A never-sealed row already gone when its
+  conditional delete runs is done, not a hold.
+- **Rights.** The cleanup job's role gains, beyond 5.4.3's:
+  `AdminEnableUser` (the race above), `ses:SendEmail` (the held email),
+  `PutItem` on the ratelimits table for keys beginning `acctdel-held#`
+  only, and on the mailing list `PutItem` only for keys beginning
+  `#release#` (5.4.3.1's marker). The account function gains
+  `AdminEnableUser` (the cancel link) and invoking the member-vaults
+  function, whose answer gains `never_sealed` for each vault (the
+  admin's Delete still counts such a row). The account site's edge
+  gate lets `/account/delete/` through without the sign-in cookie: the
+  cancel page is opened by a member who cannot sign in.
+- **Audit.** `member.delete_after_cancel`'s `vault_ids` now names the
+  never-sealed vault rows the deletion removed (before 0.3.0: the vaults
+  it asked to delete themselves), and its `incomplete` can name
+  `sign_in_user`, `subscription`, `vault_pointer`, `mailing_list` and
+  `ses_identity` (no longer `vaults`). `member.deletion_held` has
+  `vault_ids` for reason `vault` only. `member.deletion_cancel` carries
+  no address, from an admin too (its `member.reinstate` does).
+- **Alarms.** `account-deletions-held` on `AccountDeletionsHeld` (the
+  cleanup job writes it at every daily run, 0 included) and
+  `account-deletion-mail-failures` on `AccountDeletionMailFailures` (the
+  mailer), both the sum over an hour, at least 1, to the
+  security-alerts topic in production (RUNBOOK "Account deletions
+  held").
 
 ## 6. Simplified admin
 

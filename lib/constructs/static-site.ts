@@ -44,9 +44,11 @@ export interface StaticSiteProps {
   readonly notFoundPage?: string;
   /**
    * Edge gate: requests under `pathPrefix` without `cookie` are redirected
-   * (302) to `redirectTo`. UX only — the API enforces the real session.
+   * (302) to `redirectTo`, except those under one of `except` (pages that
+   * answer a signed-out visitor themselves). UX only — the API enforces the
+   * real session.
    */
-  readonly requireCookie?: { pathPrefix: string; cookie: string; redirectTo: string };
+  readonly requireCookie?: { pathPrefix: string; cookie: string; redirectTo: string; except?: string[] };
   /**
    * JSON documents published under /.well-known/ (RFC 8615), by file name,
    * e.g. `{ 'assetlinks.json': [...] }`. Generated here rather than kept in
@@ -236,7 +238,7 @@ var NOT_FOUND = ${JSON.stringify(page)};
     }
     const [decls, check] = notFound ? notFound.split('@@CHECK@@') : ['', ''];
     const gate = props.requireCookie
-      ? `var GATE = ${JSON.stringify({ prefix: props.requireCookie.pathPrefix, cookie: props.requireCookie.cookie, to: props.requireCookie.redirectTo })};`
+      ? `var GATE = ${JSON.stringify({ prefix: props.requireCookie.pathPrefix, cookie: props.requireCookie.cookie, to: props.requireCookie.redirectTo, except: props.requireCookie.except ?? [] })};`
       : 'var GATE = null;';
     const raw = `var RAW = ${JSON.stringify(Object.fromEntries(wellKnownRaw.map(([name]) => [`/.well-known/${name}`, 1])))};`;
     const rewriteCode = `${decls}
@@ -254,7 +256,7 @@ function handler(event) {
     uri = uri + '/index.html';
   }
   // Gate on the normalized path, so /account and /account/ are both covered.
-  if (GATE && uri.indexOf(GATE.prefix) === 0 && !(req.cookies && req.cookies[GATE.cookie])) {
+  if (GATE && uri.indexOf(GATE.prefix) === 0 && !(req.cookies && req.cookies[GATE.cookie]) && !GATE.except.some(function (p) { return uri.indexOf(p) === 0; })) {
     return { statusCode: 302, statusDescription: 'Found', headers: { location: { value: GATE.to }, 'cache-control': { value: 'no-store' } } };
   }${check}
   req.uri = uri;

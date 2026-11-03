@@ -544,9 +544,73 @@ describe('VettidOrgMemberApiStack', () => {
       const all = actions(stmts);
       expect(all).toEqual(expect.arrayContaining(['dynamodb:DeleteItem', 'cognito-idp:AdminGetUser', 'cognito-idp:AdminDeleteUser', 'ses:DeleteEmailIdentity']));
       expect(stmts.some((s: any) => s.Effect === 'Deny' && [].concat(s.Action).includes('ses:DeleteEmailIdentity' as never))).toBe(true);
-      // The mailing list is only read (is the address on it?).
+      // The mailing list: read (is the address on it?), and (MEMBER-API 2.14.0) the account
+      // deletion's removal of its entry, as an unsubscribe: the row and its pointer, and a
+      // release marker, which is all it may put (its key starts with #release#).
       const list = stmts.filter((s: any) => JSON.stringify(s.Resource).includes('table/vettid-org-mailing-list'));
-      expect(actions(list)).toEqual(['dynamodb:GetItem']);
+      expect(list.map((x: any) => [[].concat(x.Action), x.Condition ?? null])).toEqual([
+        [['dynamodb:GetItem', 'dynamodb:DeleteItem'], null],
+        [['dynamodb:PutItem'], { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['#release#*'] } }],
+      ]);
+      expect(JSON.stringify(list.map((x: any) => x.Resource))).not.toContain('/index/');
+      // The same prefix the signup code's release markers use.
+      expect(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lambda', 'signup', 'subscribe.mjs'), 'utf8')).toContain('const releaseKey = () => `#release#${');
+      // MEMBER-API 2.14.0: the ratelimits table, only the held step's once-per-run marker.
+      const rl = stmts.filter((s: any) => JSON.stringify(s.Resource).includes('table/vettid-org-ratelimits'));
+      expect(rl.map((x: any) => [[].concat(x.Action), x.Condition ?? null])).toEqual([
+        [['dynamodb:PutItem'], { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['acctdel-held#*'] } }],
+      ]);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      expect(require('../lambda/jobs/cleanup').HELD_MARK_PREFIX).toBe('acctdel-held#');
+    });
+
+    describe('MEMBER-API 2.14.0: deleting the account', () => {
+      const fnEnv = (prefix: string) => Object.entries<any>(t.findResources('AWS::Lambda::Function')).find(([id]) => id.startsWith(prefix))![1].Properties.Environment.Variables;
+      const listStmts = (roleMatch: RegExp) => stmtsOf(roleMatch).filter((x: any) => JSON.stringify(x.Resource).includes('table/vettid-org-mailing-list'));
+
+      test('the cleanup job disables sign-in and ends the sessions again for every canceled account, and may send the "not deleted yet" email', () => {
+        const all = actions(stmtsOf(/vault-cleanup|Cleanup/));
+        // AdminEnableUser: when the row reads active again after that disable (a cancel or a reinstate in between).
+        expect(all).toEqual(expect.arrayContaining(['cognito-idp:AdminDisableUser', 'cognito-idp:AdminUserGlobalSignOut', 'cognito-idp:AdminEnableUser', 'ses:SendEmail']));
+      });
+
+      test('the account function: the member-vaults check (invoke, by name), the cancel link\'s AdminEnableUser, the mailing list read only', () => {
+        const fns = Object.entries<any>(t.findResources('AWS::Lambda::Function'));
+        const check = fns.find(([id]) => id.startsWith('MemberVaults'))!;
+        const fn = fns.find(([id]) => id.startsWith('Account'))!;
+        const roleId = fn[1].Properties.Role['Fn::GetAtt'][0];
+        const stmts = policies.filter((p) => JSON.stringify(p.Properties.Roles).includes(roleId)).flatMap((p) => p.Properties.PolicyDocument.Statement);
+        const invokes = stmts.filter((x: any) => [].concat(x.Action).includes('lambda:InvokeFunction' as never));
+        expect(JSON.stringify(invokes)).toContain(check[0]);
+        expect(fn[1].Properties.Environment.Variables).toMatchObject({ MEMBER_VAULTS_FN: { Ref: check[0] }, TABLE_MAILING_LIST: 'vettid-org-mailing-list' });
+        expect(actions(stmts)).toEqual(expect.arrayContaining(['cognito-idp:AdminEnableUser', 'cognito-idp:AdminDisableUser', 'cognito-idp:AdminUserGlobalSignOut']));
+        expect(actions(stmts.filter((x: any) => JSON.stringify(x.Resource).includes('table/vettid-org-mailing-list')))).toEqual(['dynamodb:GetItem']);
+      });
+
+      test('the members-stream mailer reads the mailing list (the confirmation\'s wording), and nothing else of it; its stream is not filtered', () => {
+        expect(actions(listStmts(/MembersStreamMailer/))).toEqual(['dynamodb:GetItem']);
+        expect(fnEnv('MembersStreamMailer')).toMatchObject({ TABLE_MAILING_LIST: 'vettid-org-mailing-list' });
+        const mappings = Object.values<any>(t.findResources('AWS::Lambda::EventSourceMapping')).filter((m) => JSON.stringify(m.Properties.FunctionName).includes('MembersStreamMailer'));
+        expect(mappings).toHaveLength(1);
+        expect(mappings[0].Properties.FilterCriteria).toBeUndefined();
+      });
+
+      test('alarms on a held deletion and on a confirmation that could not be sent, as the removal alarms', () => {
+        for (const [name, metric] of [['vettid-org-account-deletions-held', 'AccountDeletionsHeld'], ['vettid-org-account-deletion-mail-failures', 'AccountDeletionMailFailures']]) {
+          t.hasResourceProperties('AWS::CloudWatch::Alarm', {
+            AlarmName: name, Namespace: 'VettID/MemberApi', MetricName: metric, Statistic: 'Sum', Period: 3600,
+            EvaluationPeriods: 1, Threshold: 1, ComparisonOperator: 'GreaterThanOrEqualToThreshold', TreatMissingData: 'notBreaching',
+            AlarmDescription: Match.stringLikeRegexp('RUNBOOK "Account deletions held"'),
+          });
+        }
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { deletionEmf } = require('../lambda/shared/account-deletion');
+        for (const m of ['AccountDeletionsHeld', 'AccountDeletionMailFailures']) {
+          const emf = JSON.parse(deletionEmf(m, 2, 0));
+          expect(emf._aws.CloudWatchMetrics[0]).toEqual({ Namespace: 'VettID/MemberApi', Dimensions: [[]], Metrics: [{ Name: m, Unit: 'Count' }] });
+          expect(emf[m]).toBe(2);
+        }
+      });
     });
 
     test("the cleanup job reads a member's row (a start-over is carried out only for an active account); it can delete one, as before, and cannot put or update one", () => {
@@ -677,6 +741,10 @@ describe('VettidOrgMemberApiStack', () => {
       const orphans = Object.values<any>(p.findResources('AWS::CloudWatch::Alarm')).filter((a) => String(a.Properties.AlarmName).startsWith('vettid-org-orphan-vault'));
       expect(orphans.map((a) => a.Properties.AlarmName).sort()).toEqual(['vettid-org-orphan-vault-deletions', 'vettid-org-orphan-vaults-held', 'vettid-org-orphan-vaults-seen']);
       for (const a of orphans) expect(JSON.stringify(a.Properties.AlarmActions)).toContain(`:sns:us-east-1:${ORG.management}:vettid-org-security-alerts`);
+      // MEMBER-API 2.14.0: the account deletion's two.
+      const deletions = Object.values<any>(p.findResources('AWS::CloudWatch::Alarm')).filter((a) => String(a.Properties.AlarmName).startsWith('vettid-org-account-deletion'));
+      expect(deletions.map((a) => a.Properties.AlarmName).sort()).toEqual(['vettid-org-account-deletion-mail-failures', 'vettid-org-account-deletions-held']);
+      for (const a of deletions) expect(JSON.stringify(a.Properties.AlarmActions)).toContain(`:sns:us-east-1:${ORG.management}:vettid-org-security-alerts`);
     });
 
     test('function logs keep the retention they had (one month): not changed by 2.6.0', () => {
@@ -1040,6 +1108,15 @@ describe('VettidOrgAccountSiteStack', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { VettidOrgAccountSiteStack } = require('../lib/stacks/account-site-stack');
   const t = Template.fromStack(new VettidOrgAccountSiteStack(newApp(), 'AccountSite', { config, env }));
+
+  test('the edge gate (MEMBER-API 2.14.0): /account/delete/ and its cancel page are served signed out; the rest of /account/ is still redirected', () => {
+    const code = Object.values<any>(t.findResources('AWS::CloudFront::Function')).map((f) => f.Properties.FunctionCode as string).find((c) => c.includes('var GATE'))!;
+    // eslint-disable-next-line no-new-func
+    const handler = new Function(`${code}; return handler;`)() as (e: unknown) => any;
+    const status = (uri: string) => handler({ request: { uri, headers: {}, querystring: {}, cookies: {} } }).statusCode;
+    for (const uri of ['/account/', '/account', '/account/deletex', '/account/deletex/', '/account/vault/deletion/']) expect([uri, status(uri)]).toEqual([uri, 302]);
+    for (const uri of ['/account/delete/', '/account/delete', '/account/delete/cancel/']) expect(status(uri)).not.toBe(302);
+  });
 
   test('/api/* goes to the member API with the origin-verify header, uncached', () => {
     const dist = Object.values<any>(t.findResources('AWS::CloudFront::Distribution'))[0].Properties.DistributionConfig;

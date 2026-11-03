@@ -25,7 +25,6 @@ let subTypesState = 'idle';
 
 // Which inline form is open.
 let pinMode = null; // null | 'enable' | 'change' | 'disable'
-let cancelOpen = false;
 
 // ── Boot ────────────────────────────────────────────────────────────────
 
@@ -799,73 +798,16 @@ function renderPrefs() {
   );
 }
 
-// ── 6. Cancel account ───────────────────────────────────────────────────
+// ── 6. Delete account (MEMBER-API 2.14.0) ───────────────────────────────
+// The deletion has its own page (/account/delete/, which the apps open too):
+// the phrase, the PIN, the email code and the vault check live there.
 
 function renderCancel() {
-  const sec = $('sec-cancel');
-  const head = [
-    sectionHead('h-cancel', 'Cancel your account'),
-    el('p', {}, "If you cancel, your account is switched off right away and you'll be signed out."),
-    el('ul', {},
-      el('li', {}, 'Your account and personal information are permanently deleted after 7 days.'),
-      el('li', {}, 'Changed your mind? Email ', el('a', { href: 'mailto:support@vettid.org' }, 'support@vettid.org'), ' within those 7 days and we can restore it.'),
-      el('li', {}, "After 7 days, it can't be undone."),
-    ),
-  ];
-
-  if (!cancelOpen) {
-    const open = el('button', { type: 'button', class: 'btn btn-danger', 'aria-expanded': 'false' }, 'Cancel my account…');
-    open.addEventListener('click', () => {
-      cancelOpen = true;
-      renderCancel();
-      $('cancel-confirm')?.focus();
-    });
-    fill(sec, head, el('div', { class: 'actions' }, open));
-    return;
-  }
-
-  const typed = el('input', { type: 'text', id: 'cancel-confirm', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', maxlength: 16 });
-  const pin = me.pin_enabled ? ui.pinInput({ name: 'pin' }) : null;
-  const submit = el('button', { type: 'submit', class: 'btn btn-danger-solid', disabled: true }, 'Cancel my account');
-  const keep = el('button', { type: 'button', class: 'btn' }, 'Keep my account');
-  keep.addEventListener('click', () => {
-    cancelOpen = false;
-    renderCancel();
-    $('h-cancel').focus();
-  });
-  typed.addEventListener('input', () => {
-    submit.disabled = typed.value.trim() !== 'CANCEL';
-  });
-
-  const form = el('form', { class: 'subform form-grid', novalidate: true },
-    el('h3', {}, 'Are you sure?'),
-    ui.field('Type CANCEL to confirm', typed, { hint: 'In capital letters.' }),
-    pin ? ui.field('Your PIN', pin, { hint: 'Because your account has a PIN, we need it to confirm.' }) : null,
-    el('div', { class: 'actions' }, submit, keep),
+  fill($('sec-cancel'),
+    sectionHead('h-cancel', 'Delete your account'),
+    el('p', {}, 'Deleting your VettID account closes it at once and deletes it after 7 days. Until then you can cancel with the link we email you. Your vault must be deleted first.'),
+    el('div', { class: 'actions' }, el('a', { class: 'btn btn-danger', href: '/account/delete/' }, 'Delete my account…')),
   );
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (typed.value.trim() !== 'CANCEL') {
-      ui.fieldError(typed, 'Type CANCEL (in capital letters) to confirm.');
-      typed.focus();
-      return;
-    }
-    ui.fieldError(typed, '');
-    const body = { confirm: 'CANCEL' };
-    if (pin) {
-      const p = ui.checkPin(pin);
-      if (!p) {
-        pin.focus();
-        return;
-      }
-      body.pin = p;
-    }
-    const res = await ui.busy(form, () => post('/api/account/cancel', body), { busyLabel: 'Canceling…' });
-    if (res) location.replace('/signin/?canceled=1');
-  });
-
-  fill(sec, head, form);
 }
 
 boot();

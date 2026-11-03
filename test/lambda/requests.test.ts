@@ -796,6 +796,8 @@ describe('things named by the address (the email marker, the sign-in user) are d
       expect(res.statusCode).toBe(409);
       expect(JSON.parse(res.body)).toEqual({ error: 'vault_exists', message: people.VAULT_EXISTS_MESSAGE, vaults: [{ vault_id: 'a'.repeat(32), state: 'locked' }] });
       expect(people.VAULT_EXISTS_MESSAGE).toMatch(/^Not deleted: this member still has a vault\. Nothing was changed\./);
+      // MEMBER-API 2.14.0: a vault no longer goes with the account.
+      expect(people.VAULT_EXISTS_MESSAGE).not.toMatch(/with the account/);
       expect(idp.commandCalls(AdminGetUserCommand).filter((c) => c.args[0].input.UserPoolId !== 'us-east-1_admins')).toHaveLength(0);
       expect(userDeletes()).toEqual([]);
       expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
@@ -885,11 +887,18 @@ describe('things named by the address (the email marker, the sign-in user) are d
   // person who changed their mind), in one transaction with its own marker;
   // what comes after cannot be retried from the row, so it is recorded.
   describe('cleanup, daily run: a canceled account past its date', () => {
-    const canceled = { user_guid: G, email: ADDR, state: 'member', account_status: 'canceled', delete_after: '2020-01-01T00:00:00Z' };
+    // MEMBER-API 2.14.0: a deletion whose confirmation was sent (the job holds one that was not, jobs.test.ts).
+    const deletion = { deletion_id: 'D1', requested_at: '2019-12-25T00:00:00Z', deletes_at: '2020-01-01T00:00:00Z', mailing_list: 'keep', cancel_hash: 'h', mail_claimed_at: '2019-12-25T00:00:01Z', mailed_at: '2019-12-25T00:00:02Z' };
+    const canceled = { user_guid: G, email: ADDR, state: 'member', account_status: 'canceled', delete_after: '2020-01-01T00:00:00Z', account_deletion: deletion };
     const second = { ...canceled, user_guid: G2, email: 'second@example.net' };
-    const due = (...items: Record<string, unknown>[]) =>
+    // The query finds them; each row is then read again, consistently.
+    const due = (...items: Record<string, unknown>[]) => {
       ddb.on(QueryCommand).callsFake((input) => (input.ExpressionAttributeValues?.[':c'] === 'canceled' && input.ExpressionAttributeValues?.[':s'] === 'member' ? { Items: items } : { Items: [] }));
-    const ROW = { TableName: 'members', Key: { user_guid: G }, ConditionExpression: 'account_status = :c AND delete_after < :now', ExpressionAttributeValues: { ':c': 'canceled', ':now': expect.any(String) } };
+      ddb.on(GetCommand, { TableName: 'members' }).callsFake((input) => ({ Item: items.find((i) => i.user_guid === input.Key.user_guid) }));
+    };
+    const ROW = { TableName: 'members', Key: { user_guid: G }, ConditionExpression: 'account_status = :c AND delete_after < :now AND account_deletion.deletion_id = :id', ExpressionAttributeValues: { ':c': 'canceled', ':now': expect.any(String), ':id': 'D1' } };
+    /** What every `member.delete_after_cancel` here starts with (mailing_list keep, the address not on the list). */
+    const D = { deletion_id: 'D1', mailing_list: 'not_listed' };
     beforeEach(() => {
       due(canceled);
       ddb.on(DeleteCommand).resolves({});
@@ -899,7 +908,8 @@ describe('things named by the address (the email marker, the sign-in user) are d
       ses.on(DeleteEmailIdentityCommand).resolves({});
     });
     const identityDeletes = () => ses.commandCalls(DeleteEmailIdentityCommand).map((c) => c.args[0].input.EmailIdentity);
-    const listReads = () => ddb.commandCalls(GetCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'list');
+    // The first read of the list is for the audit (mailing_list keep: kept or not_listed); the identity's rule reads it again.
+    const listReads = () => ddb.commandCalls(GetCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'list').slice(1);
 
     test('row and its own marker go first, in one transaction under the row\'s guard; then its own sign-in user, subscription and vault pointer', async () => {
       memberUser(G);
@@ -909,7 +919,7 @@ describe('things named by the address (the email marker, the sign-in user) are d
       expect(memberDeletes()).toEqual([]); // nothing in the members table is deleted outside the transaction
       expect(userDeletes()).toEqual([{ UserPoolId: 'us-east-1_pool', Username: ADDR }]);
       expect(ddb.commandCalls(DeleteCommand).map((c) => c.args[0].input)).toEqual([{ TableName: 'subs', Key: { user_guid: G } }, { TableName: 'vaults', Key: { vault_id: `user#${G}` } }]);
-      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', subject: G, detail: { identity: 'deleted' } })]);
+      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', subject: G, detail: { ...D, identity: 'deleted' } })]);
       expect(emf()[0]).toMatchObject({ RequestRemovalFailures: 0, RequestRemovalAbandoned: 0 });
     });
 
@@ -918,7 +928,6 @@ describe('things named by the address (the email marker, the sign-in user) are d
       ddb.on(TransactWriteCommand).rejects(canceledTx('ConditionalCheckFailed', 'None'));
       const r = await cleanup.handler();
       expect(r).toMatchObject({ deleted: 0, failures: 0, incomplete: 0 });
-      expect(idp.commandCalls(AdminGetUserCommand)).toHaveLength(0);
       expect(userDeletes()).toEqual([]);
       expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
       expect(auditPuts()).toEqual([]);
@@ -931,7 +940,7 @@ describe('things named by the address (the email marker, the sign-in user) are d
       expect(r).toMatchObject({ deleted: 1, failures: 0, incomplete: 0 });
       expect(userDeletes()).toEqual([]);
       expect(memberDeletes()).toEqual([ROW]); // the row alone, still under its guard
-      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', subject: G, detail: { identity: 'kept', sign_in_user: 'left', email_marker: 'left' } })]);
+      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', subject: G, detail: { ...D, identity: 'kept', sign_in_user: 'left', email_marker: 'left' } })]);
       expect(logged.join('\n')).toContain('canceled account: the email marker belongs to another request and is left');
       expect(logged.join('\n')).toContain('canceled account: the sign-in user under its address carries another id and is left');
       expectCleanLogs();
@@ -942,7 +951,7 @@ describe('things named by the address (the email marker, the sign-in user) are d
       ddb.on(DeleteCommand, { TableName: 'members' }).rejects(ccf());
       const r = await cleanup.handler();
       expect(r).toMatchObject({ deleted: 0, failures: 0, incomplete: 0 });
-      expect(idp.commandCalls(AdminGetUserCommand)).toHaveLength(0);
+      expect(userDeletes()).toEqual([]);
       expect(auditPuts()).toEqual([]);
     });
 
@@ -953,28 +962,29 @@ describe('things named by the address (the email marker, the sign-in user) are d
         return { UserAttributes: [{ Name: 'custom:user_guid', Value: G2 }] };
       });
       const r = await cleanup.handler();
-      expect(r).toMatchObject({ deleted: 2, failures: 0, incomplete: 1 });
+      // The throttled read also failed that account's first step (sign-in disabled again): counted, and its deletion went on.
+      expect(r).toMatchObject({ deleted: 2, failures: 1, incomplete: 1 });
       expect(txs().map((t) => t.map((d) => d!.Key!.user_guid))).toEqual([[G, `email:${ADDR}`], [G2, 'email:second@example.net']]);
       // The first account's subscription and vault pointer were not skipped.
       expect(ddb.commandCalls(DeleteCommand).map((c) => c.args[0].input.Key)).toEqual(expect.arrayContaining([{ user_guid: G }, { vault_id: `user#${G}` }, { user_guid: G2 }, { vault_id: `user#${G2}` }]));
       expect(userDeletes().map((u) => u.Username)).toEqual(['second@example.net']);
       expect(events()).toEqual([
-        expect.objectContaining({ action: 'member.delete_after_cancel', subject: G, detail: { identity: 'kept', incomplete: ['sign_in_user'] } }),
-        expect.objectContaining({ action: 'member.delete_after_cancel', subject: G2, detail: { identity: 'deleted' } }),
+        expect.objectContaining({ action: 'member.delete_after_cancel', subject: G, detail: { ...D, identity: 'kept', incomplete: ['sign_in_user'] } }),
+        expect.objectContaining({ action: 'member.delete_after_cancel', subject: G2, detail: { ...D, identity: 'deleted' } }),
       ]);
-      expect(emf()[0]).toMatchObject({ RequestRemovalFailures: 0, RequestRemovalAbandoned: 1 });
+      expect(emf()[0]).toMatchObject({ RequestRemovalFailures: 1, RequestRemovalAbandoned: 1 });
       expect(logged.join('\n')).toContain('canceled account: removed, but not all of it');
       expect(logged.join('\n')).toContain('TooManyRequestsException');
       expectCleanLogs();
     });
 
-    test('a failing subscription or vault step is recorded the same way', async () => {
+    test('a failing subscription or vault pointer step is recorded the same way', async () => {
       memberUser(G);
       ddb.on(DeleteCommand).rejects(named('InternalServerError'));
       const r = await cleanup.handler();
       expect(r).toMatchObject({ deleted: 1, incomplete: 1 });
       expect(userDeletes()).toHaveLength(1);
-      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', detail: { identity: 'deleted', incomplete: ['subscription', 'vaults'] } })]);
+      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', detail: { ...D, identity: 'deleted', incomplete: ['subscription', 'vault_pointer'] } })]);
     });
 
     test("the address's SES identity is released with the account, under the 14-day reclaim's rule (the mailing list read consistently)", async () => {
@@ -997,7 +1007,7 @@ describe('things named by the address (the email marker, the sign-in user) are d
       const r = await cleanup.handler();
       expect(r).toMatchObject({ deleted: 1, incomplete: 0 });
       expect(identityDeletes()).toEqual([]);
-      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', detail: { identity: 'kept' } })]);
+      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', detail: { ...D, mailing_list: onList ? 'kept' : 'not_listed', identity: 'kept' } })]);
     });
 
     test('a row from before 2.6.0 (no owns_identity): its request created the identity, so it is released (the reclaim\'s rule)', async () => {
@@ -1023,11 +1033,11 @@ describe('things named by the address (the email marker, the sign-in user) are d
       memberUser(G);
       ses.on(DeleteEmailIdentityCommand).rejects(named('NotFoundException'));
       expect(await cleanup.handler()).toMatchObject({ deleted: 1, incomplete: 0 });
-      expect(events()[0].detail).toEqual({ identity: 'deleted' });
+      expect(events()[0].detail).toEqual({ ...D, identity: 'deleted' });
       ddb.resetHistory(); logged.length = 0;
       ses.on(DeleteEmailIdentityCommand).rejects(named('TooManyRequestsException'));
       expect(await cleanup.handler()).toMatchObject({ deleted: 1, incomplete: 1 });
-      expect(events()[0].detail).toEqual({ incomplete: ['ses_identity'] });
+      expect(events()[0].detail).toEqual({ ...D, incomplete: ['ses_identity'] });
       expect(emf()[0]).toMatchObject({ RequestRemovalAbandoned: 1 });
       expectCleanLogs();
     });
@@ -1041,7 +1051,8 @@ describe('things named by the address (the email marker, the sign-in user) are d
       });
       const r = await cleanup.handler();
       expect(r).toMatchObject({ deleted: 1, failures: 1, incomplete: 0, reclaimed: 0 });
-      expect(idp.commandCalls(AdminGetUserCommand).map((c) => c.args[0].input.Username)).toEqual(['second@example.net']);
+      // The first account's row stayed, so its sign-in user was read for the run's first step only, never deleted.
+      expect(userDeletes().map((u) => u.Username)).toEqual(['second@example.net']);
       expect(ddb.commandCalls(DeleteCommand).map((c) => c.args[0].input.Key)).not.toContainEqual({ user_guid: G });
       expect(events()).toEqual([expect.objectContaining({ subject: G2 })]);
       expect(emf()[0]).toMatchObject({ RequestRemovalFailures: 1, RequestRemovalAbandoned: 0 });
@@ -1283,7 +1294,12 @@ describe('audit: a person\'s address lives 90 days, the event stays', () => {
         }
       }
       expect(found.size).toBeGreaterThan(20);
-      expect([...found].filter((a) => !backfill.MEMBER_ACTIONS.has(a))).toEqual([]);
+      // MEMBER-API 2.14.0's member.deletion_* events were never written with an address (and an
+      // admin's reinstate writes member.deletion_cancel too): the script must not know them.
+      const since214 = ['member.deletion_cancel', 'member.deletion_code', 'member.deletion_request'];
+      expect(since214.filter((a) => found.has(a))).toEqual(since214);
+      expect(since214.filter((a) => backfill.MEMBER_ACTIONS.has(a))).toEqual([]);
+      expect([...found].filter((a) => !backfill.MEMBER_ACTIONS.has(a) && !since214.includes(a))).toEqual([]);
     });
   });
 });
