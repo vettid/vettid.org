@@ -5529,8 +5529,9 @@ Rules:
     does not, except that the vault processed the `hs.init`.
   - The **accepting** vault answers `hs.resp` with `hs.fin` at once and
     then knows the SAS. It answers `connection.invite.accept` before
-    that, with `state: "waiting"`, and sends the SAS to its apps and
-    desktops in `connection.request.outgoing` once it has it.
+    that, with `state: "waiting"`, and sends the SAS, with the peer's
+    `ik` (0.83.7), to its apps and desktops in
+    `connection.request.outgoing` once it has it.
   - The inviting vault knows the SAS once `hs.fin` checks out (§6.3) and
     only then tells its devices, with `connection.request.pending`. An
     `hs.init` that never gets its `hs.fin` is never shown and is dropped
@@ -5795,7 +5796,9 @@ keeps a service to the few things a service does today.
   can leave it out. It is a presentation hint and a limit on what the
   connection may do, never a proof of identity or a reason to trust the
   name; the SAS (§6.3) still decides whether the member is talking to the
-  party they mean. Verifying who runs a service (for example a domain
+  party they mean. The member can compare the `ik` fingerprint shown on
+  the request with one the service publishes (0.83.7, below); verifying
+  who runs a service automatically (for example a domain
   the service proves, or a service certificate signed by VettID) is not
   specified (§15 item 43, open).
 - **Auto-approval** (above) is for the inviter's side and never changes
@@ -5807,9 +5810,9 @@ names as before and, when `peer_kind` is `"service"`, that it is a
 service ("a service, not a person") on the connection request, beside the
 SAS, so that a person cannot pose as a service, or the reverse,
 unnoticed. Apps word it as a claim by the other side, not a fact
-(ANDROID-PLAN "Service connections"). On an outgoing request the app
-also shows the **fingerprint** of the peer's `ik` (§10.8) once the vault
-sends it with the SAS (0.83.7; `connection.request.outgoing`, §10.4). The
+(ANDROID-PLAN "Service connections"). On an outgoing request to a
+service the app also shows the **fingerprint** of the peer's `ik` (§10.8),
+and it MAY on any outgoing request, once the vault sends it with the SAS (0.83.7; `connection.request.outgoing`, §10.4). The
 SAS shows that no one is in between; it does not show who holds the
 key. A fingerprint that matches one the service publishes where the
 member already trusts it (its own website, say) does. A request without
@@ -10030,7 +10033,8 @@ The **profile object** holds the extras' display name and photo. Sent by
   otherwise shows a neutral placeholder, **"Name not shared yet"**; never
   a blank or "Unnamed connection". Connection details MUST show the
   **fingerprint** of the connection's pinned `ik`, and an outgoing
-  request shows the fingerprint of its `ik` (§6.4, 0.83.7) the same way:
+  request to a service shows the fingerprint of its `ik` (§6.4, 0.83.7;
+  any outgoing request MAY) the same way:
 
   ```
   fp = SHA-256("vettid/vms/2/ik-fp" || ik)    # ik: the 32 raw bytes
