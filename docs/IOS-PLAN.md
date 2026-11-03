@@ -1,9 +1,22 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.59
-date: 2026-11-02
+version: 0.1.60
+date: 2026-11-03
 changelog:
+  - 0.1.60: erratum, 2026-11-03 (owner decisions a, threads
+    01M6FT8PCK46FTKM42VFY348S5, 01M6FHES389JBHYZTN648MH3MG,
+    01M6FHNQ9XK4PDA3DK7R4C4ZDZ; the lead's decision of 2026-11-03 for
+    the app lock; ANDROID-PLAN 0.1.117, VAULT-MESSAGING 0.83.3). §4.16
+    carries ANDROID-PLAN "The results check: the app's rules" (the
+    choices of vettid-ios #202, `other_rows`, `rows_unavailable`, the
+    recheck on open and `vote_results_not_rechecked`). §6.6: the app
+    lock measures background time with `ContinuousClock` and locks on a
+    backward wall-clock step of more than 5 seconds; turning the lock
+    off or changing its method asks for the owner first. §6.6: the
+    daily check keeps and restores what the member entered, and
+    Messages and History show "on hold" notices while held (three
+    strings, as ANDROID-PLAN).
   - 0.1.59: erratum, 2026-11-02 (owner decisions a, threads
     01M6F1RDHN5VCQHFG4KVW89851, 01M6F2GFXDMDY1GC0QWEC1ZJNJ,
     01M6EXXXE5RBG51H5MD1G0AV30, 01M6F1MB4ZCA0G02SRPD3JBS16;
@@ -528,8 +541,8 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.102; §4.16 results check and choice labels from 0.1.116) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.81.0) — the app's contract with the vault
+  - ANDROID-PLAN.md (0.1.102; §4.16 results check and choice labels from 0.1.116; the results rules, app lock and held notices of 0.1.117) — the Android app; this plan mirrors it
+  - VAULT-MESSAGING.md (0.83.3) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -659,7 +672,7 @@ the Mac agent does not reopen them.
 | ID14 | **Navigation** | The Android drawer (Proton Mail's iOS app also uses a side menu), the same destinations and order (ANDROID-PLAN §4 "Drawer"); the system back gesture | A tab bar (diverges from Android and the texts) | I0.2 |
 | ID15 | **"Installed from" on iOS** | App Attest reports no signer and an iOS binding has none (VAULT-MESSAGING §11.7.1 "iOS"). Settings → Vault status shows "Installed from: Apple (App Store or TestFlight)" for the release and staging builds and "Installed from: Xcode (development)" for the others, from the build configuration, with the line "Apple App Attest confirms this is the VettID app" | No line | I1.7 |
 | ID16 | **Real iPhone on staging before VA2** | Wait for VA2 (a staging release that pins `<team>.com.vettid.app.staging`). Not recommended: pointing a `com.vettid.app` build at staging, which today's staging images would accept | — | I1 exit |
-| ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`); a UI gate only that protects no data at rest (0.1.44; 0.1.46, owner decision of 2026-10-28: **no data key**; a Secure Enclave key (`.biometryCurrentSet` or `.devicePasscode`) gates the prompt with a fresh challenge each time, as Android's prompt key does, so a new face or finger is noticed; the app keeps no vault content on the phone, §6.9), never in place of the PIN or the password | — | I1.6 |
+| ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`); a UI gate only that protects no data at rest (0.1.44; 0.1.46, owner decision of 2026-10-28: **no data key**; a Secure Enclave key (`.biometryCurrentSet` or `.devicePasscode`) gates the prompt with a fresh challenge each time, as Android's prompt key does, so a new face or finger is noticed; the app keeps no vault content on the phone, §6.9; the timeout and lock rules: §6.6 (0.1.60)), never in place of the PIN or the password | — | I1.6 |
 | ID18 | **Contact with Apple at attestation** | Say it in Help → Privacy: "When you set up, move or recover a vault, your iPhone asks Apple to vouch for the VettID app. Apple learns that VettID was set up on an iPhone, nothing about your vault." (`attestKey` reaches Apple's servers; assertions do not.) | Silence | I1.5 |
 | ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.12): a toolbar item beside the bell while something waits for the member's decision, with its count; time-critical from arrival (sign-ins shown neutral) for sign-in and approval challenges, session requests and `approval.pending`, else in the last 2 minutes, with the time left; a tap opens the Approvals list; a short banner with View for a new time-critical request while the app is open; from phase P a request's notification opens that request, `.timeSensitive` for approval challenges and session requests but not for sign-ins; a sign-in's countdown is neutral. Before APNs (ID12) the indicator, the banner and, while the app is open, a request's local notification are the only cues | — | I2.3 |
 
@@ -1783,9 +1796,28 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   texts; `pending` with reason `input` keeps the existing problem text.
   The reserved `abstain` is always shown as "Abstain" (the vote
   screen's list, the confirm sheet, the member's own choice, the Results
-  rows), and a real choice whose label, with control and
-  bidirectional-override characters removed and surrounding white space
-  trimmed, equals "Abstain", ignoring case, is shown by its choice id.
+  rows), and a real choice whose label, after removing
+  Default_Ignorable characters and U+2800 anywhere and then trimming
+  Unicode White_Space at both ends, equals "Abstain", ignoring case, is shown by its choice id
+  (0.1.60).
+- **The results check rules** (0.1.60; ANDROID-PLAN 0.1.117 "The results
+  check: the app's rules", the same on both apps, owner decision a,
+  2026-11-03, thread 01M6FT8PCK46FTKM42VFY348S5): the bounds and leaf
+  checks on `rows.json`, what stops a submission and what is only
+  reported, `other_rows` for a second ballot under the member's code
+  (`row_duplicate`), `rows_unavailable` for a row the app cannot get,
+  the plain `vote_results_dont_add_up` note and when numbers show, the
+  verdicts kept in memory only (a lock forgets them), the recheck when
+  a `verified` or `unconfirmed` vote opens with no verdict since the
+  vault opened (it never submits and stores nothing; if the site cannot
+  be reached the numbers stay hidden and `vote_results_not_rechecked`
+  shows: "VettID could not check the published results of this vote
+  again just now, so their numbers are not shown. It will try again
+  when you open this vote.", approved by the owner 2026-11-03), and the
+  "Abstain" matching (remove Default_Ignorable characters and U+2800
+  anywhere, then trim Unicode White_Space at both ends, then ignore case;
+  look-alike letters are out of scope). `other_rows` and `rows_unavailable` are sent only to a vault that lists the capability `vote_rows`. An extra row the app cannot make into a leaf is not sent: the member's row cannot be had (`rows_unavailable`). An invalid own-row `choice_id` is sent as `rows_unavailable` with `vote_rows`, and not submitted without it. Going to the background cancels
+  a recheck; it runs again on return.
 - The credential password prompt is the existing one (§4, the unlock
   window), used before `vote.cast`.
 - **Notifications:** the feed items (`vote.open`, `vote.closing`,
@@ -2308,7 +2340,34 @@ leaving the screen.
 - **Lock and app lock**: the app-lock timeout counts from the moment
   the scene went to the background, read on return; the vault's own
   locks (VAULT-LOCK, owner check) are the vault's and need nothing from
-  the app in the background.
+  the app in the background. (0.1.60, the lead's decision of
+  2026-11-03.) The time away is measured on a clock that cannot be set
+  back (`ContinuousClock`). A backward step of the wall clock of more
+  than 5 seconds since going to the background also locks: the wall
+  time elapsed is shorter than the monotonic time elapsed by more than
+  5 seconds. This is sticky until the return, so a date set back and
+  restored still locks. Detecting a step while the app is suspended is
+  best effort; the monotonic timeout always holds. A new process starts
+  locked. The background mark is always recorded, even while a prompt
+  is up; a prompt that succeeds while the app is still away does not
+  count as the return; a lock made right after a successful prompt does
+  not start the automatic prompt again (no loop); a prompt left open
+  does not hold back the notification cover. Turning the lock off, or
+  changing its method, asks for the owner first (the device passcode or
+  Face ID or Touch ID); a cancelled method change keeps the lock on with
+  the old method. The return is judged when the app comes back, and the wall-clock step is checked at the return and whenever the system reports a clock change. iOS keeps the original mark. The prompts use the existing "Unlock VettID" texts; no new string.
+- **Daily check and held screens** (0.1.60; owner decisions a,
+  2026-11-03, threads 01M6FHES389JBHYZTN648MH3MG and
+  01M6FHNQ9XK4PDA3DK7R4C4ZDZ; as ANDROID-PLAN §6 owner check items 3
+  and 4). When the daily check comes due, what the member entered (an
+  item being edited, a message draft) is kept and restored after the
+  check, with ANDROID-PLAN's `data_failure_owner_check_required`: "Your
+  daily check is due. What you entered is kept: the check opens when you
+  leave this screen." On
+  Messages and History a held vault shows an info notice with no "Try
+  again": `messages_held_title` "Messages are on hold",
+  `history_held_title` "History is on hold", and `held_list_body` "Your
+  daily check is due. They'll show again once it's done."
 - **Unlock and check in** (0.1.47; owner decision 2026-10-28,
   VAULT-MESSAGING 0.71.0 §3.6.5 "Ask only for what is used"): as
   ANDROID-PLAN §6 owner check item 6, with the same approved texts
