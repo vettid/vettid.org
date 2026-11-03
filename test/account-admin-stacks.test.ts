@@ -1187,6 +1187,7 @@ describe('VettidOrgAccountSiteStack', () => {
       expect(own[0].SystemMetadata['content-type']).toBe('application/json');
       expect(own[0].SystemMetadata['cache-control']).toBe('no-cache, must-revalidate');
       expect(own[0].Include).toEqual(['.well-known/apple-app-site-association']);
+      expect(JSON.stringify(own[0].DistributionPaths)).toBe('["/.well-known/apple-app-site-association"]');
       // No other pass touches (or prunes) the file, and none labels it with a type.
       const others = deps.filter((x) => x !== own[0]);
       for (const d of others) expect(JSON.stringify(d.Include ?? [])).not.toContain('apple-app-site-association');
@@ -1205,6 +1206,15 @@ describe('VettidOrgAccountSiteStack', () => {
         // Not a blanket exception: other extensionless paths still get the clean-URL rewrite.
         expect(handler({ request: { uri: '/.well-known/other', headers: {}, querystring: {}, cookies: {} } }).statusCode).toBe(404);
       }
+      const code = Object.values<any>(synth('prod').tpl.findResources('AWS::CloudFront::Function'))[0].Properties.FunctionCode as string;
+      // eslint-disable-next-line no-new-func
+      const handler = new Function(`${code}; return handler;`)() as (e: unknown) => any;
+      const at = (uri: string) => handler({ request: { uri, headers: {}, querystring: {}, cookies: {} } });
+      // Exact match only: a trailing slash or an encoded spelling is not the file.
+      expect(at(AASA + '/').uri).not.toBe(AASA);
+      expect(at(AASA + '/').statusCode).toBe(404);
+      expect(at('/.well-known/apple-app-site-associatio%6E').statusCode).toBe(404);
+      expect(at('/.well-known/apple%2Dapp-site-association').statusCode).toBe(404);
       const dist = Object.values<any>(synth('prod').tpl.findResources('AWS::CloudFront::Distribution'))[0].Properties.DistributionConfig;
       expect(dist.CustomErrorResponses).toBeUndefined();
       expect(dist.DefaultCacheBehavior.ViewerProtocolPolicy).toBe('redirect-to-https'); // http -> https, then the file itself

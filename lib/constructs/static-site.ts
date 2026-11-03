@@ -362,7 +362,7 @@ function handler(event) {
         contentType: 'application/json',
         cacheControl: [s3deploy.CacheControl.fromString('no-cache, must-revalidate')],
         distribution: this.distribution,
-        distributionPaths: ['/*'],
+        distributionPaths: wellKnownRaw.map(([name]) => `/.well-known/${name}`),
       });
     }
   }
