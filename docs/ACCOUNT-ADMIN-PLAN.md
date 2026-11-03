@@ -1,8 +1,16 @@
 ---
 title: ACCOUNT-ADMIN-PLAN
 status: accepted — decisions recorded in §9
-version: 0.2.2
+version: 0.3.0
 changelog:
+  - 0.3.0: owner decisions of 2026-11-03 (§9 7): **deleting a VettID
+    account** (§5.4), for the apps' "Delete my account" (Apple App Store
+    rule 5.1.1(v)). The member's own deletion replaces the cancel: it
+    is refused while the member has a vault, confirmed by an email code,
+    carried out 7 days later, and can be cancelled from a link in the
+    email; the mailing list entry goes too if the member leaves the box
+    ticked. An account deletion no longer asks a vault to delete itself.
+    With MEMBER-API 2.14.0
   - 0.2.2: owner decision 2026-10-26 (VAULT-MESSAGING 0.64.0 §1.1):
     governance voting is planned in the member vault with a service
     vault, specified later; §1 and §9 3a note it
@@ -13,7 +21,7 @@ changelog:
   - 0.2.0: decisions recorded; simplified membership lifecycle; magic link + PIN
     kept and fixed; subscriptions kept (free trial); SES sandbox opt-in
   - 0.1.0: initial draft
-date: 2026-10-26
+date: 2026-11-03
 owner: Al Liebl (Mesmer)
 component: vettid.org CDK — auth, account site, admin site
 related:
@@ -239,9 +247,13 @@ Orthogonal to the lifecycle:
   grant voting (§9 3a). Governance voting itself is upcoming.
 - **Account status:** `active` / `suspended` / `canceled` → deleted.
   *Suspend* (admin) disables the Cognito user and blocks sign-in, reversible.
-  *Cancel* (member) disables immediately and schedules deletion in 7 days
-  (restorable via support until then). *Delete* (admin, or the daily cleanup
-  job) removes the Cognito user and personal data, keeping only an audit stub.
+  *Delete my account* (member, §5.4; 0.3.0, it replaces *Cancel*)
+  disables immediately and schedules deletion in 7 days, which the member
+  can stop from the email's link (or support, by reinstating) until then;
+  it is refused while the member has a vault. *Delete* (admin, or the
+  daily cleanup job) removes the Cognito user and personal data, keeping
+  only an audit stub. The status `canceled` keeps its name: it is an
+  account whose deletion is scheduled.
 
 ### 5.2 Email under the SES sandbox
 
@@ -290,6 +302,195 @@ discovered:
 - **Frontend:** plain ES modules, Night Watch tokens, shares
   `website/shared/nav.css` and `/assets/fonts.css` so chrome matches the main
   site. No `innerHTML` with data; no third-party script or font loads.
+
+### 5.4 Deleting a VettID account (0.3.0)
+
+A member deletes their **VettID account**: the membership, the sign-in,
+the address and everything the account system holds about them. This is
+not the deletion of their **vault**, which has its own authorities and
+lifecycle (VAULT-MESSAGING §12.5; MEMBER-API "Vault deletion" and "Vault
+deletion: start over"). The apps' "Delete my account" (App Store rule
+5.1.1(v); IOS-PLAN, ANDROID-PLAN) opens the page of this section.
+
+**Owner decisions of 2026-11-03** (§9 7):
+1. **Vault first.** An account deletion is refused while the member has
+   a vault. The member deletes the vault first: in the app (the holder's
+   `vault.delete`, with the PIN and the password) or on the account site
+   with "Delete my vault and start over" (24 hours). An account deletion
+   never asks a vault to delete itself.
+2. **7 days, and a cancel link.** The account is disabled at once and
+   deleted 7 days later. The confirmation email carries a link that
+   cancels the deletion until then; support can also cancel it (an
+   admin's reinstate).
+3. **The mailing list: asked, ticked by default.** The page has a box
+   "Also remove me from the VettID mailing list", ticked; with it ticked
+   the address's mailing-list entry is deleted with the account.
+
+#### 5.4.1 Who can delete, and what blocks it
+
+- **Who.** A signed-in account (`registered` or `member`) whose
+  `account_status` is `active`. A suspended account cannot sign in;
+  its member asks support. A membership request that is not an account
+  yet is removed with its withdrawal link (MEMBER-API "Withdrawing a
+  request").
+- **A vault blocks it.** A vault counts if its row is not `deleted`,
+  whatever its other state (`locked`, `unlocked`), and also while its
+  deletion has been asked for and not yet reported (a start-over that
+  is `pending` or `executing`, or a vault deleting itself). This is the
+  check an admin's Delete makes (ADMIN-API "People", the member API's
+  `member_vaults` task), with one difference: a row that was **never
+  sealed** (no `sealed_release`: a setup that never finished, so no app
+  holds anything of it, MEMBER-API "Vault deletion", Never-sealed rows)
+  does not block, and the deletion removes it with its pointer row, as
+  the cleanup job already does for such rows. Any failed read fails the
+  check: "no vault" is never taken from an error.
+- **Checked twice.** When the code is asked for (so that no code is
+  sent for a deletion that cannot go ahead) and again when the
+  deletion is confirmed. The cleanup job checks a third time before it
+  deletes anything (5.4.3).
+
+#### 5.4.2 Confirming: phrase, PIN, email code
+
+The session (a magic link, maybe followed by the PIN, §5.3) can be old,
+or a browser left signed in. So the deletion asks for proof that is
+fresh and comes from the address:
+
+1. The member types the phrase **`delete my account`** (exact, as
+   `delete my vault` for the start-over).
+2. If a PIN is set, the PIN, checked as for every sensitive account
+   action (§5.3; its lockout applies).
+3. An **email code**: 6 digits, sent to the account's address when the
+   member asks for it, valid **15 minutes**, at most **5 attempts**,
+   single use. A new code replaces the old one. Stored only as an
+   HMAC-SHA-256 under the PIN pepper (over the `user_guid`, the code's
+   id and the code), on the member row with its expiry and attempt
+   count; a wrong code spends an attempt with a conditional update, so
+   two guesses cannot share one. At most **3 codes an hour** per
+   account, and the per-address mail limits of sign-in apply too.
+
+The order of checks when the deletion is confirmed: the session and
+`active`, the phrase, the PIN, the code, then the vault check. A failure
+of any changes nothing but the attempt counters.
+
+#### 5.4.3 What happens, and when
+
+| When | What |
+|---|---|
+| **The request** (the member confirms) | The member row records `account_status: canceled`, `delete_after` (now + 7 days) and `account_deletion {deletion_id, requested_at, deletes_at, mailing_list: "remove" \| "keep"}`. Sign-in is disabled and every session ended (Cognito `AdminDisableUser`, `AdminUserGlobalSignOut`), and this browser's cookies are cleared. The member is emailed (5.4.6) with the cancel link. Nothing is deleted yet. |
+| **Until `deletes_at`** | The account can't sign in. The cancel link, or an admin's reinstate, puts everything back as it was: sign-in enabled, `account_status: active`, the deletion record removed; the member is emailed. |
+| **The first daily run at or after `deletes_at`** (07:00 UTC, so 7 to 8 days after the request) | The cleanup job reads the member's vaults again. **With a vault** (one that appeared after the request's check, or an account cancelled before 0.3.0): nothing is deleted; the deletion is **held**, logged by `user_guid` only, counted (`AccountDeletionsHeldVault`, alarmed) and tried again at the next run; the RUNBOOK says what the operator does. **Without one**, as for a canceled account today (MEMBER-API "Retention", "The daily sweeps"): the member row and its email marker in one transaction under the guard (still `canceled`, past `delete_after`); then each on its own, a failure skipping neither the next step nor the next row: the sign-in user (if it is this account's own), the subscription, the never-sealed vault rows and the pointer row, **the mailing-list entry** (if `mailing_list` is `remove` and the entry is for this address), and the SES identity under the existing rule (kept if the mailing list still uses the address, if the request did not create it, or if the address is the project's own). |
+| **Afterwards** | Kept: the audit events (by `user_guid`, no address); an address record of an admin's earlier action expires 90 days after that action, as now. The `vdeleted#` records of vaults deleted before, for their 90 days. The tables' point-in-time backups (35 days) and CloudTrail's record of the SES calls (400 days), as now. Nothing else. |
+
+No email is sent after the deletion: the confirmation said when it
+would happen, and a mail afterwards would mean keeping the address.
+
+**What changes for the old cancel.** `POST /api/account/cancel` is
+withdrawn (`404`); the account page's Cancel becomes a link to this
+page. The cleanup job's `deleteVaults` step leaves the account
+deletion: the job no longer writes `account_deleted_at` on vault rows
+or sends the host's `delete` for an account (MEMBER-API "Vault
+deletion", Account cancellation). Vaults already asked before 0.3.0
+keep being retried until they report `deleted`, and their apps are
+still told `410 account_deleted`. The "Vaults without a member" sweep
+is unchanged: it is what finds a vault whose member row is gone for any
+other reason. The privacy notice's account paragraph
+(`website/privacy/`, "How long") changes in the same deploy: "If you
+delete your account" instead of "cancel", the vault no longer in the
+list (it is deleted first, by you), the cancel link, and the mailing
+list entry if you ask.
+
+#### 5.4.4 Member-API routes (MEMBER-API 2.14.0, "Deleting the account")
+
+All under the session of 5.4.1 except the cancel link. Answers as in
+MEMBER-API's Conventions.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET | `/api/account/deletion` | — | `{blocked_by: {vaults: [{vault_id, state}]} \| null, pin_required: boolean, mailing_list: boolean}`: what the page needs (whether a vault blocks it, whether the PIN is asked, whether the address is on the mailing list, so the box is shown only then) |
+| POST | `/api/account/deletion/code` | — | `202 {expires_at}`; the code is emailed. `409 vault_exists` `{vaults}`; `429 rate_limited` |
+| POST | `/api/account/deletion` | `{confirm: "delete my account", code, pin?, remove_from_mailing_list: boolean}` | `202 {deletion_id, requested_at, deletes_at}`; cookies cleared. `400 bad_request` (the phrase, a missing field); `401` with `message` (the PIN, as the PIN routes; the code: wrong, expired or used, with attempts left); `409 vault_exists` `{vaults}` |
+| POST | `/api/account/deletion/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}`; `404` from `deletes_at` on |
+
+- **The cancel link.** `https://account.vettid.org/account/delete/cancel/#t=<token>`:
+  32 random bytes, in the fragment (never sent to a server or a log,
+  as the sign-in link), stored as its SHA-256 in a request-table row
+  `acctdel#<hash>` naming the `user_guid` and `deletion_id`, which
+  expires at `deletes_at`. The page shows what it will do and POSTs only
+  on **Cancel the deletion**, so a mail scanner opening it does nothing.
+  The cancel is conditional on the row still being `canceled` with this
+  `deletion_id` and before `deletes_at`; it enables sign-in, writes
+  `active` and removes the record, emails the member, and answers
+  `{cancelled: true}`. The link is not used up: a later use answers
+  `{cancelled: false}`, as the start-over's link does. The per-network
+  limit of the public routes applies.
+- **Support.** An admin's reinstate of a `canceled` account cancels the
+  deletion the same way (ADMIN-API "People"), audited as now.
+- **The admin Delete's message** (ADMIN-API, `409 vault_exists`) no
+  longer says the vault goes with the account: the vault goes when the
+  member deletes it (in the app, or with "Delete my vault and start
+  over").
+
+#### 5.4.5 Audit and logs
+
+New events, none with an address (MEMBER-API "The audit log"):
+`member.deletion_code` (actor `member:<guid>`, nothing in detail),
+`member.deletion_request` (`deletion_id`, `deletes_at`, `mailing_list`),
+`member.deletion_cancel` (`deletion_id`, `via: "link" | "admin"`),
+`member.deletion_held` (actor `system`; `vault_ids`, at each run that
+holds). `member.delete_after_cancel` gains `mailing_list: "removed" |
+"kept" | "not_listed"`. `member.cancel` is no longer written. Logs carry
+ids and error names only, never an address, a code or a token.
+
+#### 5.4.6 Texts (drafts for the owner)
+
+All from `VettID <no-reply@<zone>>`, plain text, no names (MEMBER-API
+"Request emails").
+
+**The page, `/account/delete/`** (stable: the apps open it):
+- Not signed in: "**Delete your VettID account.** Sign in first, then
+  choose Delete my account on your account page." with **Sign in**.
+- With a vault: "**You still have a vault.** Your VettID account can be
+  deleted only after your vault. Delete your vault in the VettID app,
+  or here with **Delete my vault and start over**, which takes 24
+  hours. Then come back to this page." (The app's own label is the
+  apps' to name; the page links to the start-over section.)
+- Otherwise: "**Delete your VettID account.** This deletes your
+  membership, your sign-in, your subscription and your email address
+  from VettID. Your account is closed at once and deleted after 7 days.
+  Until then you can cancel with the link we email you. After that it
+  can't be undone. A record that your account existed, without your
+  email address, stays in our security log." Then the box "Also remove
+  me from the VettID mailing list" (ticked; shown only when the address
+  is on the list), "Type **delete my account** to confirm", the PIN if
+  one is set, **Email me a code**, the code field and **Delete my
+  account**.
+- Done: "**Your account is closed.** It will be deleted on <date>. We
+  sent the cancel link to your email address."
+
+**The code email.** Subject "Your VettID account deletion code". "Someone
+signed in to your VettID account asked to delete it. If it was you,
+enter this code on the page: <code>. It works for 15 minutes. If it
+wasn't you, don't share the code. Your account stays as it is, but
+someone may be able to sign in as you: write to support@vettid.org."
+
+**The confirmation email.** Subject "Your VettID account will be deleted
+on <date>". "Your VettID account is closed, and will be deleted on
+<date>. That deletes your membership, your sign-in, your subscription
+and your email address from VettID[, and removes you from the VettID
+mailing list]. To keep your account, use this link before then:
+<link>. If you didn't ask for this, use the link and write to
+support@vettid.org."
+
+**The cancel email.** Subject "Your VettID account was not deleted".
+"You cancelled the deletion of your VettID account. You can sign in
+again as before."
+
+**The cancel page, `/account/delete/cancel/`.** "**Keep your VettID
+account?** Someone asked, from your account, to delete it. If you want
+to keep it, cancel the deletion." **Cancel the deletion**, then "Your
+account is open again. Sign in as before." or "This link no longer
+works: the deletion was already cancelled, or carried out." (The page
+knows nothing until the member clicks: the token is all it holds.)
 
 ## 6. Simplified admin
 
@@ -365,6 +566,11 @@ Data & logic
 4. **Subscriptions:** kept, starting with free-trial types; payments later.
 5. **SES:** stay in the sandbox; verification-as-opt-in (§5.2).
 6. **Docs:** design docs and this plan are committed to the public repo.
+7. **Deleting a VettID account** (*owner decisions of 2026-11-03*, §5.4):
+   the vault first (an account deletion is refused while the member has
+   a vault, and never asks a vault to delete itself); 7 days, with a
+   cancel link in the email; the mailing list asked on the page, ticked
+   by default.
 
 ## 10. Phases
 
