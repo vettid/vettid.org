@@ -1213,20 +1213,34 @@ export async function removeDeclined(nowMs: number): Promise<RemovalCounts> {
  * The row was read as canceled before the disable; a cancel link or a
  * reinstate may have enabled sign-in and written `active` in between, so
  * the row is read again (consistently) after it, and sign-in enabled again
- * if the account is active by now.
+ * if the account is active by now: whatever happened after the disable was
+ * tried (a sign-out that failed included). Answers 'enable_failed' when that
+ * last step could not be made (logged on its own line); throws when the
+ * disable or the sign-out failed.
  */
-async function disableOwnSignIn(m: MemberItem): Promise<void> {
+async function disableOwnSignIn(m: MemberItem): Promise<'ok' | 'enable_failed'> {
   const UserPoolId = env('MEMBER_POOL_ID');
+  let tried = false;
+  let enable: 'ok' | 'enable_failed' = 'ok';
   try {
     const u = await cognito.send(new AdminGetUserCommand({ UserPoolId, Username: m.email }));
-    if (u.UserAttributes?.find((a) => a.Name === 'custom:user_guid')?.Value !== m.user_guid) return;
+    if (u.UserAttributes?.find((a) => a.Name === 'custom:user_guid')?.Value !== m.user_guid) return 'ok';
+    tried = true;
     await cognito.send(new AdminDisableUserCommand({ UserPoolId, Username: m.email }));
     await cognito.send(new AdminUserGlobalSignOutCommand({ UserPoolId, Username: m.email }));
   } catch (e) {
     if ((e as Error).name !== 'UserNotFoundException') throw e;
-    return;
+  } finally {
+    if (tried) {
+      try {
+        await enableIfActive(m.user_guid, m.email);
+      } catch (e) {
+        console.error('canceled account: sign-in not enabled again', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name })); // never the address
+        enable = 'enable_failed';
+      }
+    }
   }
-  await enableIfActive(m.user_guid, m.email);
+  return enable;
 }
 
 /**
@@ -1395,12 +1409,15 @@ export const handler = async (event?: { task?: string }) => {
       if (!m || m.account_status !== 'canceled') continue; // cancelled, reinstated or deleted meanwhile
       // (1) A request whose Cognito steps failed is finished here.
       try {
-        await disableOwnSignIn(m);
+        if ((await disableOwnSignIn(m)) === 'enable_failed') failures++;
       } catch (e) {
         console.error('canceled account: sign-in not disabled', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name })); // never the address
         failures++;
       }
-      if (!(typeof m.delete_after === 'string' && m.delete_after < now)) continue;
+      // Due at the scheduled run (07:00 UTC) the confirmation named: the first
+      // one at or after delete_after, whatever time this run actually started.
+      // (The guard below, delete_after < now, then holds as well.)
+      if (!(typeof m.delete_after === 'string' && firstDeletionRun(m.delete_after) <= scheduledRun(nowMs))) continue;
       // (2) The vaults, read again: any that is not never-sealed blocks.
       let rows: VaultRowLite[];
       try {

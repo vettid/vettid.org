@@ -432,14 +432,15 @@ describe('POST /api/account/deletion/cancel-link (no session)', () => {
     ({ token, hash } = newWithdrawToken(G));
     current = canceled();
     memberHttp.requireSession.mockRejectedValue(new HttpError(401, 'unauthorized', 'Not signed in'));
-    ddb.on(UpdateCommand, { TableName: 'members' }).callsFake(() => (order.push('write'), {}));
+    // The write makes the row active (what the read after it then sees).
+    ddb.on(UpdateCommand, { TableName: 'members' }).callsFake(() => ((current = { ...current, account_status: 'active', account_deletion: undefined }), order.push('write'), {}));
   });
 
   test("in reinstate's order: a consistent read, sign-in enabled, the conditional write (still canceled, the same deletion and hash); audited; the member emailed; cancelled", async () => {
     const r = await call('POST', '/api/account/deletion/cancel-link', { token });
     expect(r).toMatchObject({ status: 200, body: { cancelled: true } });
-    // Sign-in enabled once more after the write: the cleanup job may have disabled it in between.
-    expect(order).toEqual(['consistent_read', 'enable', 'write', 'enable']);
+    // Sign-in enabled once more after the write (the cleanup job may have disabled it in between), only while the row reads active.
+    expect(order).toEqual(['consistent_read', 'enable', 'write', 'consistent_read', 'enable']);
     expect(memberHttp.requireSession).not.toHaveBeenCalled();
     expect(rlKeys()).toEqual([expect.stringMatching(/^account-deletion-link#203\.0\.113\.9#\d+$/)]);
     expect(memberUpdates()).toEqual([{
@@ -520,11 +521,23 @@ describe('POST /api/account/deletion/cancel-link (no session)', () => {
     idp.on(AdminEnableUserCommand).callsFake(() => ((enabled = true), order.push('enable'), {}));
     ddb.on(UpdateCommand, { TableName: 'members' }).callsFake(() => {
       enabled = false; // the job's disable, landing just before the write
+      current = { ...current, account_status: 'active', account_deletion: undefined };
       order.push('write');
       return {};
     });
     expect((await call('POST', '/api/account/deletion/cancel-link', { token })).body).toEqual({ cancelled: true });
     expect(enabled).toBe(true);
+  });
+
+  test('a suspension landing between the write and the second enable is not undone: the row reads suspended, no second enable', async () => {
+    ddb.on(UpdateCommand, { TableName: 'members' }).callsFake(() => {
+      current = { ...current, account_status: 'suspended', account_deletion: undefined }; // the write, then an admin's suspend
+      order.push('write');
+      return {};
+    });
+    expect((await call('POST', '/api/account/deletion/cancel-link', { token })).body).toEqual({ cancelled: true });
+    expect(order).toEqual(['consistent_read', 'enable', 'write', 'consistent_read']);
+    expect(idp.commandCalls(AdminEnableUserCommand)).toHaveLength(1);
   });
 
   test.each([

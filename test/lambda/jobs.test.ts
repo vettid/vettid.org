@@ -379,7 +379,7 @@ describe('cleanup job: start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §1
   });
 
   test('MEMBER-API 2.14.0: a canceled account past its 7 days whose vault has a pending start-over: held (vault), its vault never asked by the account deletion', async () => {
-    const deletesAt = new Date(Date.now() - 3_600_000).toISOString();
+    const deletesAt = new Date(Date.now() - 2 * 86_400_000).toISOString(); // due at a run already scheduled
     member({ account_status: 'canceled', delete_after: deletesAt, account_deletion: { deletion_id: 'D1', deletes_at: deletesAt, mailing_list: 'keep', mailed_at: deletesAt } });
     const gone = { user_guid: 'g1', email: 'g1@x.org', state: 'member', account_status: 'canceled', delete_after: deletesAt };
     ddb.on(QueryCommand).callsFake((input) => {
@@ -1227,6 +1227,50 @@ describe('cleanup job: account deletions (MEMBER-API 2.14.0; ACCOUNT-ADMIN-PLAN 
     await cleanup.handler();
     expect(order).toEqual(['read', 'disable', 'sign_out', 'read']);
     expect(idp.commandCalls(AdminEnableUserCommand)).toHaveLength(0);
+  });
+
+  test('a sign-out that fails after the disable: the read again and the enable still run (the race is still covered), and it counts', async () => {
+    const notDue = account({ delete_after: iso(H), account_deletion: deletion({ deletes_at: iso(H) }) });
+    setup(notDue);
+    let reads = 0;
+    ddb.on(GetCommand, { TableName: 'members' } as any).callsFake(() => (order.push('read'), { Item: reads++ === 0 ? notDue : { ...notDue, account_status: 'active' } }));
+    idp.on(AdminUserGlobalSignOutCommand).callsFake(() => {
+      order.push('sign_out');
+      throw Object.assign(new Error('x'), { name: 'TooManyRequestsException' });
+    });
+    const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect((await cleanup.handler()).failures).toBe(1);
+    expect(order).toEqual(['read', 'disable', 'sign_out', 'read', 'enable']);
+    expect(err.mock.calls.map((c) => String(c[0]))).toContain('canceled account: sign-in not disabled');
+  });
+
+  test('the enable after the disable fails: its own log line, counted; the run goes on', async () => {
+    const notDue = account({ delete_after: iso(H), account_deletion: deletion({ deletes_at: iso(H) }) });
+    setup(notDue);
+    let reads = 0;
+    ddb.on(GetCommand, { TableName: 'members' } as any).callsFake(() => (order.push('read'), { Item: reads++ === 0 ? notDue : { ...notDue, account_status: 'active' } }));
+    idp.on(AdminEnableUserCommand).rejects(Object.assign(new Error('gone@x.org'), { name: 'TooManyRequestsException' }));
+    const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect((await cleanup.handler()).failures).toBe(1);
+    const lines = err.mock.calls.map((c) => c.join(' '));
+    expect(lines).toContainEqual('canceled account: sign-in not enabled again {"user_guid":"g1","error":"TooManyRequestsException"}');
+    expect(lines.some((l) => l.startsWith('canceled account: sign-in not disabled'))).toBe(false);
+    expect(JSON.stringify(err.mock.calls)).not.toContain('gone@x.org');
+  });
+
+  test('due by the scheduled run the confirmation named, not by the clock: deletes_at 07:00:03 and a run that starts at 07:00:05 deletes nothing (the email said the next day); the next day\'s run deletes it', async () => {
+    const deletesAt = '2026-11-10T07:00:03.000Z';
+    jest.setSystemTime(Date.parse('2026-11-10T07:00:05.000Z'));
+    setup(account({ delete_after: deletesAt, account_deletion: deletion({ deletes_at: deletesAt }) }), [neverSealed]);
+    await cleanup.handler();
+    expect(order).toEqual(['read', 'disable', 'sign_out', 'read']); // not due: only the re-disable
+    expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
+    expect(audits()).toEqual([]);
+    jest.setSystemTime(Date.parse('2026-11-11T07:00:01.000Z'));
+    order = [];
+    const r = await cleanup.handler();
+    expect(r.deleted).toBe(1);
+    expect(order).toContain('transaction');
   });
 
   test('a sign-in user under the address with another id is not disabled; a missing one is nothing to do', async () => {

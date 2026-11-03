@@ -42,6 +42,7 @@ import {
   deletionCancelledMail,
   deletionCodeMail,
   disableUnlessActive,
+  enableIfActive,
   hashDeletionCode,
   sameHex,
 } from '../shared/account-deletion';
@@ -504,9 +505,10 @@ router.on('POST', '/api/account/deletion/cancel-link', async (req) => {
   // The account is active from here, and every step after is best effort:
   // the answer says what happened (the cancel), whatever fails after it.
   // Sign-in once more: the cleanup job may have disabled it between the
-  // enable above and the write (it read the row as canceled before).
+  // enable above and the write (it read the row as canceled before). Only
+  // while the row is still active (a suspension made since is not undone).
   try {
-    await cognito.send(new AdminEnableUserCommand({ UserPoolId: poolId(), Username: m.email }));
+    await enableIfActive(m.user_guid, m.email);
   } catch (e) {
     console.error('account deletion cancel: sign-in not enabled again', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
   }

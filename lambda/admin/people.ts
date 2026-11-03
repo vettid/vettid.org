@@ -36,7 +36,7 @@ import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import type { StartOverCancel } from '../jobs/cleanup';
 import { requestMemberVaults } from '../shared/member-vaults';
 import { scaledMail } from '../shared/time-scale';
-import { deletionCancelledMail, disableUnlessActive } from '../shared/account-deletion';
+import { deletionCancelledMail, disableUnlessActive, enableIfActive } from '../shared/account-deletion';
 
 const PAGE = 50;
 const memberPoolId = () => env('MEMBER_POOL_ID');
@@ -513,17 +513,20 @@ router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, body,
     }
     throw e;
   }
+  if (canceled) {
+    // Sign-in once more, before anything that can fail the call: the cleanup
+    // job may have disabled it between the enable above and the write (it
+    // read the row as canceled before). Only while the row is still active.
+    try {
+      await enableIfActive(m.user_guid, m.email);
+    } catch (e) {
+      console.error('reinstate: sign-in not enabled again', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
+    }
+  }
   // member.reinstate is the one step after the status write that can fail
   // the call (ADMIN-API); what follows it is best effort.
   await audit(actor, 'member.reinstate', m.user_guid, { email: m.email, from: m.account_status });
   if (canceled) {
-    // Sign-in once more: the cleanup job may have disabled it between the
-    // enable above and the write (it read the row as canceled before).
-    try {
-      await cognito.send(new AdminEnableUserCommand({ UserPoolId: memberPoolId(), Username: m.email }));
-    } catch (e) {
-      console.error('reinstate: sign-in not enabled again', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
-    }
     try {
       await audit(actor, 'member.deletion_cancel', m.user_guid, { email: m.email, deletion_id: deletion?.deletion_id ?? null, via: 'admin' });
     } catch (e) {
