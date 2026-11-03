@@ -1796,9 +1796,10 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   texts; `pending` with reason `input` keeps the existing problem text.
   The reserved `abstain` is always shown as "Abstain" (the vote
   screen's list, the confirm sheet, the member's own choice, the Results
-  rows), and a real choice whose label, with control and
-  bidirectional-override characters removed and surrounding white space
-  trimmed, equals "Abstain", ignoring case, is shown by its choice id.
+  rows), and a real choice whose label, after trimming Unicode
+  White_Space and removing Default_Ignorable characters and U+2800
+  anywhere, equals "Abstain", ignoring case, is shown by its choice id
+  (0.1.60).
 - **The results check rules** (0.1.60; ANDROID-PLAN 0.1.117 "The results
   check: the app's rules", the same on both apps, owner decision a,
   2026-11-03, thread 01M6FT8PCK46FTKM42VFY348S5): the bounds and leaf
@@ -2360,10 +2361,12 @@ leaving the screen.
   01M6FHNQ9XK4PDA3DK7R4C4ZDZ; as ANDROID-PLAN §6 owner check items 3
   and 4). When the daily check comes due, what the member entered (an
   item being edited, a message draft) is kept and restored after the
-  check: "Your daily check is due. What you entered is kept: …". On
+  check, with ANDROID-PLAN's `data_failure_owner_check_required`: "Your
+  daily check is due. What you entered is kept: the check opens when you
+  leave this screen." On
   Messages and History a held vault shows an info notice with no "Try
-  again": `held_messages_title` "Messages are on hold",
-  `held_history_title` "History is on hold", and `held_body` "Your
+  again": `messages_held_title` "Messages are on hold",
+  `history_held_title` "History is on hold", and `held_list_body` "Your
   daily check is due. They'll show again once it's done."
 - **Unlock and check in** (0.1.47; owner decision 2026-10-28,
   VAULT-MESSAGING 0.71.0 §3.6.5 "Ask only for what is used"): as

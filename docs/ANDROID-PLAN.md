@@ -5321,7 +5321,7 @@ The app **never** says: that the vote is "secret" or "anonymous" without "the pu
 2. **A vote:**
    - title, the service's name with "Service" and "Name given by the service" (as in "Service connections"), and the proposal `text` as **plain text in the service's words** (control and bidirectional-override characters removed; no links, no markup; the whole text scrolls; never truncated), captioned "Written by <service>";
    - the quorum as the service states it, and whether it says the vote is binding (both as the service's claim); the closing time (and "The closing time was extended to …" after an extension);
-   - **Choose one:** the choices in the order sent, each with its label as sent (the reserved `abstain` is shown as "Abstain", in the app's own words, wherever a choice label appears: the choice list, the confirm sheet, the member's own choice and the Results rows; owner decision a, 2026-11-02, thread 01M6EXXXE5RBG51H5MD1G0AV30. The label "Abstain" is reserved: a real choice, not `abstain`, whose label, with control and bidirectional-override characters removed and surrounding white space trimmed, equals "Abstain", ignoring case, is shown by its choice id instead, for example "no"; owner decision a, 2026-11-02, thread 01M6F1MB4ZCA0G02SRPD3JBS16), as a radio group. **Cast your vote** is enabled once a choice is selected and `can_cast` is true; otherwise the reason is written where the button would be (`cannot_cast`, the table below), never only a disabled button.
+   - **Choose one:** the choices in the order sent, each with its label as sent (the reserved `abstain` is shown as "Abstain", in the app's own words, wherever a choice label appears: the choice list, the confirm sheet, the member's own choice and the Results rows; owner decision a, 2026-11-02, thread 01M6EXXXE5RBG51H5MD1G0AV30. The label "Abstain" is reserved: a real choice, not `abstain`, whose label, after trimming Unicode White_Space and removing Default_Ignorable characters and U+2800 anywhere, equals "Abstain", ignoring case, is shown by its choice id instead, for example "no"; owner decision a, 2026-11-02, thread 01M6F1MB4ZCA0G02SRPD3JBS16), as a radio group. **Cast your vote** is enabled once a choice is selected and `can_cast` is true; otherwise the reason is written where the button would be (`cannot_cast`, the table below), never only a disabled button.
 3. **Confirm sheet** ("Vote “<label>”?"): the fixed disclosure sentence, "Your vote can't be changed after you cast it.", **Cast vote** and **Back**. Then, unless the credential's unlock window is open, the existing **unlock window prompt** (§4 "The unlock window prompt", also used before `vote.cast`): "Confirm with your credential password", "Your vote is signed with your credential. Enter your credential password."; then `vote.cast`.
 4. **After the cast:** the vote screen shows the state in words: *Sending your vote to <service>…* (`sending`), *Waiting for <service> to confirm* with the line "Your vote is saved on your vault and is sent again until <service> answers" (`waiting` or a slow `sending`; never "failed"), *<service> recorded your vote. It can't be changed.* (`recorded`), and after the results check *The published results include your vote.* The member's own choice is shown (from `vote.get`, which alone carries it) beside the state. A `Check with the service` text button (`vote.check`) appears while the ballot is not recorded.
 5. **Results** (after `closed` and a passed check): "Results", each choice with its count, "<ballots> of <eligible> eligible members voted", the quorum line computed from the published numbers, and, if `counts.unhandled` is above 0, the line about messages that could not be read. Every number is from the verified results; before then, none is shown. When the app's observer check failed, no number is shown (the choice counts, the turnout, the quorum line and the unhandled line); `vote_results_dont_add_up` is shown in their place, once, under the state line (the Results section is left out) (owner decision a, 2026-11-02, thread 01M6F2GFXDMDY1GC0QWEC1ZJNJ).
@@ -5339,7 +5339,7 @@ The app **never** says: that the vote is "secret" or "anonymous" without "the pu
 - **The "don't add up" line** (`vote_results_dont_add_up`) is a plain note, with no error colour, shown under any `verified` check (and under `unconfirmed`). Numbers (the choice counts, the turnout, the quorum line and the unhandled line) are hidden whenever the flag is set, and shown only when the check is `verified` or `unconfirmed` and the app's own observer check passed. A refused or lost submission still sets the flag. An attempt that submits nothing clears the flag, but the last verdict still decides whether numbers show. Under `pending` with the vault's own reason (`clock`, `trust_root`, `service_list`), that reason's text stays.
 - **Reuse of verdicts.** Only a verdict from a recheck, or from a submission the vault answered, is reused. Verdicts are kept in memory only, and a lock forgets them.
 - **Recheck on open** (owner decision of 2026-11-02). When the screen of a `verified` or `unconfirmed` vote opens and there has been no verdict since the vault opened, the app fetches the published results and runs its observer check again. It never submits again and stores nothing on disk. If the site cannot be reached, the numbers stay hidden and `vote_results_not_rechecked` shows. Leaving the screen, a lock or the background cancels a recheck; it runs again on return.
-- **"Abstain" matching.** Trim white space (Unicode White_Space) and remove Default_Ignorable characters and U+2800 anywhere, then compare ignoring case. Look-alike letters (Cyrillic, fullwidth) are out of scope. This replaces the matching rule of the choice list above.
+- **"Abstain" matching.** Trim white space (Unicode White_Space) and remove Default_Ignorable characters and U+2800 anywhere, then compare ignoring case. Look-alike letters (Cyrillic, fullwidth) are out of scope.
 - **A second ballot under the member's code** (owner decision a, 2026-11-03, thread 01M6FT8PCK46FTKM42VFY348S5). When `rows.json` holds another row with the member's `record_tag` at a different index, the app adds that row and its inclusion proof to `rows_root` to `vote.results.submit` as `other_rows: [{row, proof}]` (at most 4). The vault verifies each proof. A second verifying row is a signed contradiction: the check is `failed` with reason `row_duplicate`, and the vote shows `vote_failed_title` and `vote_failed_body` with **Save the proof**.
 - **The member's row cannot be had** (same decision): `rows.json` has a root that does not match the signed `rows_root`, cannot be parsed within the bounds, or has no leaf for the member. The app submits with `rows_unavailable: true` and the results, signature and bundle. The vault holds the check `pending` with reason `rows_unavailable`, and gives up with the same reason after 7 days; the record stays in the problem set. The app shows the text for a problem with the published results.
 - **Not in this version:** a future `vote.get` field with the held `results_hash` would let the apps compare it with the published results.
@@ -5917,10 +5917,11 @@ role, name, seconds, exp}`):
 - A newer request from the same device replaces the older (§6.8): the
   app replaces the entry by `device_id`.
 - Answers: `{device_id, session_id, expires_at}` → "Access allowed
-  until 15:40". Any error (the request was replaced, decided on
-  another device or dropped after 10 minutes; §10.3 names no code,
-  decision 14, item c) → "This request is no longer waiting." and the
-  entry goes. `owner_check_required` → the owner-check screen.
+  until 15:40". `not_found` (the request was replaced, decided on
+  another device or dropped after 10 minutes; also when the device is no
+  longer active; VAULT-MESSAGING 0.83.0) → "This request is no longer
+  waiting." and the entry goes. Any other error keeps the entry and shows
+  the error. `owner_check_required` → the owner-check screen.
 - `sync.event{device.session}` and `{approval.decided}` from another
   device remove the entry (as today).
 - **Known only from its feed item** (the process ended since the
@@ -7043,8 +7044,9 @@ interval). Follow-ups, in A3 unless noted:
    (0.1.117, owner decision a, 2026-11-03, thread
    01M6FHES389JBHYZTN648MH3MG) When the check comes due, what the member
    entered (an item being edited, a message draft) is kept and restored
-   after the check, on both apps. The text is "Your daily check is due.
-   What you entered is kept: …".
+   after the check, on both apps. The text is `data_failure_owner_check_required`:
+   "Your daily check is due. What you entered is kept: the check opens
+   when you leave this screen."
 4. **Held screen**: no cached vault content (messages, items,
    connections, feed) while held; only the check, the `vault.held`
    counts ("3 new messages waiting") and the lock action. After the
@@ -7052,8 +7054,8 @@ interval). Follow-ups, in A3 unless noted:
    (0.1.117, owner decision a, 2026-11-03, thread
    01M6FHNQ9XK4PDA3DK7R4C4ZDZ, both apps) On Messages and History, a
    held vault (the daily check is due) shows an info notice with no
-   "Try again". New strings: `held_messages_title` "Messages are on
-   hold"; `held_history_title` "History is on hold"; `held_body` "Your
+   "Try again". New strings: `messages_held_title` "Messages are on
+   hold"; `history_held_title` "History is on hold"; `held_list_body` "Your
    daily check is due. They'll show again once it's done."
 5. **Early warning** (A6, with notifications): from 1 h before the
    deadline, a banner and a local notification with "check now".
