@@ -811,7 +811,7 @@ the delete.
 
 **The daily sweeps (a canceled account past its date, the 14-day
 reclaim) (2.6.2).** (2.14.0: for a canceled account, the vault check,
-the confirmation's `mailed_at` and the conditional deletes of
+the confirmation's `deletion_mailed_at` and the conditional deletes of
 never-sealed vault rows come before the row, ACCOUNT-ADMIN-PLAN §5.4.3;
 everything else is as here.) The row is deleted first, under its guard (still
 `canceled` and past `delete_after`; still `requested` and unverified),
@@ -988,7 +988,7 @@ set, changed, removed or locked.
 | POST | `/api/account/preferences` | `{email_updates?: boolean, pin_prompt_dismissed?: boolean}` (at least one) | `Me` |
 | GET | `/api/account/deletion` | — | 2.14.0: `{blocked_by: {vaults: [{vault_id, state}]} \| null, pin_required, mailing_list}` ("Deleting the account") |
 | POST | `/api/account/deletion/code` | — | 2.14.0: `202 {expires_at}`, a 6-digit code emailed; `409 vault_exists`; `429` |
-| POST | `/api/account/deletion` | `{confirm: "delete my account", code, pin?, remove_from_mailing_list}` | 2.14.0: `202 {deletion_id, requested_at, deletes_at}`. Account disabled now, deleted after 7 days; cookies cleared; `409 vault_exists` while the member has a vault |
+| POST | `/api/account/deletion` | `{confirm: "delete my account", code, pin?, remove_from_mailing_list}` | 2.14.0: `202 {deletion_id, requested_at, deletes_at}`. Account disabled now, deleted after 7 days; cookies cleared; `403` for a wrong PIN or code; `409 vault_exists` while the member has a vault |
 | POST | `/api/account/deletion/cancel-link` | `{token}` (no session) | 2.14.0: `200 {cancelled: boolean}`; `404` once the account is deleted; `429` |
 | POST | `/api/account/cancel` | — | Withdrawn in 2.14.0 (`404`): the deletion above replaces it |
 
@@ -1059,16 +1059,18 @@ and the texts are in **ACCOUNT-ADMIN-PLAN §5.4** (owner decisions of
 - **Carried out** by the daily cleanup job at the first run from
   `deletes_at` (7 days); until then the account is `canceled` (sign-in
   disabled, sessions ended). The **cancel link** in the confirmation
-  email (`/account/delete/cancel/#t=<token>`, rate-limited in the API,
-  no session) or an admin's reinstate puts it back, until the job has
+  email (`/account/delete/cancel/#t=<token>`, the withdrawal link's
+  token form, its hash on the member row; rate-limited in the API, no
+  session) or an admin's reinstate puts it back, until the job has
   deleted the account. The confirmation is sent by the members-stream
-  mailer with a claim on the row. The job checks the vaults once more
+  mailer, which mints the token with its claim on the row. The job checks the vaults once more
   and **holds** an account that has one (an unfinished setup included),
-  or whose confirmation is not recorded as sent (`mailed_at`, written
-  only after SES accepted it) (`member.deletion_held`,
+  or whose confirmation is not recorded as sent (`deletion_mailed_at`,
+  written only after SES accepted it) (`member.deletion_held`,
   `AccountDeletionsHeld`); a never-sealed vault row is deleted first
   under a condition, and a failed condition holds it too. The cancel
-  link's record has no TTL: it lasts as long as the deletion.
+  link lasts as long as the deletion. A suspended account cannot delete
+  itself; no tombstone is kept.
 - The **mailing-list entry** goes with the account when
   `remove_from_mailing_list` was true, as an unsubscribe removes it
   (with the list's release marker).
