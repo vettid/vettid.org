@@ -198,7 +198,7 @@ describe('StaticSite branded 404', () => {
     sourceDir: 'test/fixtures/site',
     runtimeConfig: { a: 1 },
     notFoundPage: '404.html',
-    wellKnown: { 'assetlinks.json': [{ a: 1 }] },
+    wellKnown: { 'assetlinks.json': [{ a: 1 }], 'apple-app-site-association': { applinks: {} } },
   });
   const t = Template.fromStack(stack);
   const code = Object.values<any>(t.findResources('AWS::CloudFront::Function'))[0].Properties.FunctionCode as string;
@@ -214,6 +214,7 @@ describe('StaticSite branded 404', () => {
     ['/404.html', '/404.html'],
     ['/config.json', '/config.json'],
     ['/.well-known/assetlinks.json', '/.well-known/assetlinks.json'],
+    ['/.well-known/apple-app-site-association', '/.well-known/apple-app-site-association'],
   ])('known path %s is rewritten to %s and passed to S3', (uri, expected) => {
     const r = req(uri);
     expect(r.statusCode).toBeUndefined();

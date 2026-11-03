@@ -479,6 +479,26 @@ export function androidAssetLinks(stage: string): unknown[] | null {
 }
 
 /**
+ * The iPhone app's same-device setup link: each stage's account site publishes
+ * /.well-known/apple-app-site-association so that
+ * https://account.<zone>/vault/enroll/... opens in that stage's app as a
+ * Universal Link. One app id per stage, never both (as for
+ * {@link androidAssetLinks}): `prod` (account.vettid.org) names
+ * `3X25CJ86MV.com.vettid.app`, `staging` (account.staging.vettid.org) names
+ * `3X25CJ86MV.com.vettid.app.staging` (team id 3X25CJ86MV). Served as
+ * application/json, over HTTPS, without a redirect. A stage with no entry
+ * publishes no file (null).
+ */
+export function appleAppSiteAssociation(stage: string): unknown | null {
+  const appIds: Record<string, string> = {
+    prod: '3X25CJ86MV.com.vettid.app',
+    staging: '3X25CJ86MV.com.vettid.app.staging',
+  };
+  if (!Object.prototype.hasOwnProperty.call(appIds, stage)) return null;
+  return { applinks: { details: [{ appIDs: [appIds[stage]], components: [{ '/': '/vault/enroll/*' }] }] } };
+}
+
+/**
  * Fixed IAM role names in the vault accounts. The host and retirement roles
  * are named in every release key's policy, which can never change: renaming
  * or deleting either role makes every key fail the enclave's check 8, and
