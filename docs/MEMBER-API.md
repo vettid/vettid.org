@@ -811,7 +811,7 @@ the delete.
 
 **The daily sweeps (a canceled account past its date, the 14-day
 reclaim) (2.6.2).** (2.14.0: for a canceled account, the vault check,
-the confirmation's `deletion_mailed_at` and the conditional deletes of
+the confirmation's `account_deletion.mailed_at` and the conditional deletes of
 never-sealed vault rows come before the row, ACCOUNT-ADMIN-PLAN §5.4.3;
 everything else is as here.) The row is deleted first, under its guard (still
 `canceled` and past `delete_after`; still `requested` and unverified),
@@ -1065,7 +1065,7 @@ and the texts are in **ACCOUNT-ADMIN-PLAN §5.4** (owner decisions of
   deleted the account. The confirmation is sent by the members-stream
   mailer, which mints the token with its claim on the row. The job checks the vaults once more
   and **holds** an account that has one (an unfinished setup included),
-  or whose confirmation is not recorded as sent (`deletion_mailed_at`,
+  or whose confirmation is not recorded as sent (`account_deletion.mailed_at`,
   written only after SES accepted it) (`member.deletion_held`,
   `AccountDeletionsHeld`); a never-sealed vault row is deleted first
   under a condition, and a failed condition holds it too. The cancel
