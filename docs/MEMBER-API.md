@@ -1,8 +1,18 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.14.0
+version: 2.14.1
 changelog:
+  - 2.14.1 (erratum, with the code, vettid.org#515; ACCOUNT-ADMIN-PLAN
+    0.3.1 §5.4.7): deleting the account. The confirmation stops after 3
+    failed sends (`account_deletion.mail_failures`); an account is due at
+    the 07:00 UTC run its email names; the held audit and email once per
+    run (a marker in the ratelimits table); the cleanup role gains
+    `AdminEnableUser`, `ses:SendEmail` and narrowed `PutItem`s;
+    `member_vaults` answers `never_sealed`; `member.delete_after_cancel`'s
+    `vault_ids` names the never-sealed rows removed and its `incomplete`
+    the steps after the row; alarms `account-deletions-held` and
+    `account-deletion-mail-failures`. No route changes
   - 2.14.0 (2026-11-03; **owner decisions of 2026-11-03**, with
     ACCOUNT-ADMIN-PLAN 0.3.0 §5.4): **deleting the account**. The routes
     `GET /api/account/deletion`, `POST /api/account/deletion/code`,
@@ -1074,6 +1084,11 @@ and the texts are in **ACCOUNT-ADMIN-PLAN §5.4** (owner decisions of
 - The **mailing-list entry** goes with the account when
   `remove_from_mailing_list` was true, as an unsubscribe removes it
   (with the list's release marker).
+- (2.14.1) **Errata with the code** (ACCOUNT-ADMIN-PLAN §5.4.7): the
+  confirmation is not tried again after 3 failed sends; an account is
+  due at the scheduled 07:00 UTC run its email names; a hold is audited
+  and mailed once per run; the job, the cancel link and a reinstate
+  close the race between the job's re-disable and a cancel.
 
 ## Vault (alternate channel)
 
