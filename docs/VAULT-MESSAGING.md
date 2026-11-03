@@ -33,9 +33,9 @@ changelog:
     named a session, got no answer, and `vault.status` then names a
     different session, the device does not end that other session (it
     replaced the session the end named, and the vault ignores an end of
-    a session that is not current); it stops waiting and may request. A resend
-    names the session shown only when the end named that session or
-    none. No vault change.
+    a session that is not current); it stops waiting and may request.
+    A resend names the session shown only when the end named that
+    session or none. No vault change.
   - 0.83.4: editorial, 2026-11-03, with ACCOUNT-ADMIN-PLAN 0.3.0 §5.4
     and MEMBER-API 2.14.0 (owner decisions of 2026-11-03): an account
     deletion no longer asks a vault to delete itself (it is refused
