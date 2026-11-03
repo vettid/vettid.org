@@ -9,8 +9,9 @@ changelog:
     01M6HB646D1T5ET1PEZD95SNVJ). §4 "Service connections (0.1.90)": the
     connection request shows no `ik` fingerprint, because the vault's
     request carries none; the match code binds the keys and the
-    fingerprint stays on the service's detail. The section's 11 texts
-    are approved as written.
+    fingerprint stays on the service's detail. The section's 10 texts
+    are approved as written (with `service_detail_can_ask_body_votes`
+    of §4 "Votes", approved on 2026-10-30).
   - 0.1.117: erratum, 2026-11-03 (owner decisions a, threads
     01M6FT8PCK46FTKM42VFY348S5, 01M6FHES389JBHYZTN648MH3MG,
     01M6FHNQ9XK4PDA3DK7R4C4ZDZ; the lead's decision of 2026-11-03 for
@@ -5093,9 +5094,10 @@ changes vault code here.
 ### Service connections (0.1.90)
 
 *Owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0 §6.4 "Service
-connections", §15 item 43). The texts were approved by the owner
-on 2026-11-03 (thread 01M6HB646D1T5ET1PEZD95SNVJ). Vault: a staging release after 24; until a vault sends
-`peer_kind`, nothing here shows.*
+connections", §15 item 43). The texts were approved by the owner on
+2026-11-03 (thread 01M6HB646D1T5ET1PEZD95SNVJ). Not built. Vault: a
+staging release after 24; until a vault sends `peer_kind`, nothing here
+shows.*
 
 A service (VAULT-MESSAGING §1.1) is a connection that declared itself a
 service in its invitation. The vault enforces what a service may do; the
@@ -5173,7 +5175,8 @@ service to have it marked.
 without shows neither; the Services section appears only with a service;
 a service is absent from Messages and the new-message picker; its detail
 has no Call, message or share rows; an unknown `peer_kind` is a person; a
-`forbidden` shows the text once and removes the action.
+`forbidden` shows the text once and removes the action; (0.1.118) a
+service request shows no `ik` fingerprint.
 
 ### Sign-in match code (0.1.100)
 
