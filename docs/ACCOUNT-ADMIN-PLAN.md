@@ -492,7 +492,7 @@ MEMBER-API's Conventions.
   `account-deletion-link#<ip>`, 20 per 15 minutes per IPv4 address or
   IPv6 /64 (the WAF's `/api/public/*` rule does not cover this path).
   In reinstate's order: a consistent read of the member row, which must
-  be `canceled` with a `account_deletion.cancel_hash` equal to the token's
+  be `canceled` with an `account_deletion.cancel_hash` equal to the token's
   (otherwise `{cancelled: false}`; `404` when the row is gone); sign-in enabled (idempotent); then the conditional write
   (still `canceled`, the same `account_deletion.deletion_id` and hash)
   to `active`, removing `account_deletion` and `delete_after`. If that write's condition
