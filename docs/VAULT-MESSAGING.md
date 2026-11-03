@@ -52,7 +52,7 @@ changelog:
     extra rows, and a future `results_hash` in `vote.get` (not part of
     this version). The `vote.check_failed` audit reasons gain
     `row_duplicate`; §10.19.10 has the tests. §10.12: proposed, not yet
-    built: shared content carries the item's `protection`. The
+    built: shared content carries the item's `sensitivity`. The
     `related:` entries for ANDROID-PLAN and IOS-PLAN are now 0.1.117
     and 0.1.60.
   - 0.83.2: erratum, 2026-11-02 (owner decision a, thread
@@ -12751,14 +12751,13 @@ grant: { "grant_id": "<ULID>", "connection_id": "<id>", "direction": "given|rece
   Every refusal is audited (`drop.grant_<error>`). The asking vault
   forwards a `grant.fetch` whatever its own record says: the member's
   vault decides.
-- **Shared content carries `protection`** (proposed, not yet built; 0.83.3,
-  from vettid-android #264's review). The sealed content also carries
-  the item's `protection`, `"secret"` or `"normal"` (VAULT-ITEMS names
-  the item's `sensitivity`, `data` or `secret`; it has no `protection`
-  member, and a `critical` item is never shared), so that a receiving
-  app masks **every** field of a shared secret item, not only the
-  password and one-time-code kinds. A shared one-time-code field should
-  show a current code rather than its seed; that is a follow-up.
+- **Shared content carries `sensitivity`** (proposed, not yet built;
+  0.83.3, from vettid-android #264's review). The sealed content also
+  carries the item's `sensitivity` (VAULT-ITEMS), `"data"` or
+  `"secret"`; a `critical` item is never shared. A receiving app masks
+  **every** field of a `secret` item, not only the password and
+  one-time-code kinds. A shared one-time-code field should show a
+  current code rather than its seed; that is a follow-up.
 - **Rate limits for connections** (0.23.0; owner decision of
   2026-10-09, §15 item 31). A connection rule may set `per_hour`
   (1–3,600) and `per_day` (1–86,400), the same ranges as an agent's
