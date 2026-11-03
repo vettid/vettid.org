@@ -19,15 +19,12 @@ let stopCooldown = null;
 
 // Notices passed by other pages, then tidy the address bar.
 const reasons = {
-  canceled:
-    'Your account has been canceled and you have been signed out. It will be permanently deleted in 7 days. ' +
-    'Changed your mind? Email support@vettid.org before then and we can restore it.',
   expired: 'Your session has ended. Please sign in again.',
   signedout: 'You have signed out.',
 };
 const reason = Object.keys(reasons).find((k) => param(k) === '1');
 if (reason) {
-  ui.showNotice(reasons[reason], reason === 'canceled' ? 'warn' : 'info');
+  ui.showNotice(reasons[reason], 'info');
   history.replaceState(null, '', location.pathname);
 } else if (hasSessionHint()) {
   // Already signed in? Skip the form.

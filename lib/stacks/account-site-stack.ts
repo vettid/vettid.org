@@ -120,8 +120,11 @@ export class VettidOrgAccountSiteStack extends cdk.Stack {
       ...(Object.keys(wellKnown).length ? { wellKnown } : {}),
       // Signed-out visitors never get the account page shell (see COOKIES.present).
       // The recovery cancel link (/vault/recovery/cancel) is outside it: it
-      // needs no session.
-      requireCookie: { pathPrefix: '/account/', cookie: 'vid_s', redirectTo: '/signin/' },
+      // needs no session. So are the account deletion's pages (MEMBER-API
+      // 2.14.0; their paths are stable, the apps open them): the cancel
+      // link's page is opened from the email by a member who cannot sign in,
+      // and /account/delete/ tells a signed-out visitor to sign in first.
+      requireCookie: { pathPrefix: '/account/', cookie: 'vid_s', redirectTo: '/signin/', except: ['/account/delete/'] },
       webAclArn: webAcl.attrArn,
       apiOriginDomain: readRef(this, config, 'member-api/domain'),
       apiOriginHeaders: {
