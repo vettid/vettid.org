@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.83.4
+version: 0.83.5
 date: 2026-11-03
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.83.5: erratum, 2026-11-03 (owner decision a, thread
+    01M6HGB6RC3CTXGKA9WSCR32R9). §6.8 "Ending": when a device's end
+    named a session, got no answer, and `vault.status` then names a
+    different session, the device does not end that other session (it
+    replaced the session the end named, and the vault ignores an end of
+    a session that is not current); it stops waiting and may request.
+    A resend names the session shown only when the end named that
+    session or none. No vault change.
   - 0.83.4: editorial, 2026-11-03, with ACCOUNT-ADMIN-PLAN 0.3.0 §5.4
     and MEMBER-API 2.14.0 (owner decisions of 2026-11-03): an account
     deletion no longer asks a vault to delete itself (it is refused
@@ -6707,7 +6715,12 @@ first. A device does not send `device.session.request` until its
 `device.session.end` is answered (or, when no answer comes after the
 retries of §8.6, until `vault.status`'s `session` reads `null`. If it
 names a session, the device sends the end again under a new `id` with
-that session's `session_id`. If `vault.status` has no `session` member,
+that session's `session_id`, except (0.83.5) when the unanswered end
+named a session and `vault.status` names a different one: that session
+replaced the one the end named, so the end can no longer do anything
+(the vault ignores an end of a session that is not current); the device
+stops waiting, leaves the other session as it is and may request. If
+`vault.status` has no `session` member,
 which means a vault before this change, the device sends the request
 once its retries are spent), so that a reordered end cannot drop that
 request or end the session it starts. Unlinking (§7.4) ends everything
