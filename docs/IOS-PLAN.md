@@ -1,9 +1,22 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.59
-date: 2026-11-02
+version: 0.1.60
+date: 2026-11-03
 changelog:
+  - 0.1.60: erratum, 2026-11-03 (owner decisions a, threads
+    01M6FT8PCK46FTKM42VFY348S5, 01M6FHES389JBHYZTN648MH3MG,
+    01M6FHNQ9XK4PDA3DK7R4C4ZDZ; the lead's decision of 2026-11-03 for
+    the app lock; ANDROID-PLAN 0.1.117, VAULT-MESSAGING 0.83.3). §4.16
+    carries ANDROID-PLAN "The results check: the app's rules" (the
+    choices of vettid-ios #202, `other_rows`, `rows_unavailable`, the
+    recheck on open and `vote_results_not_rechecked`). §6.6: the app
+    lock measures background time with `ContinuousClock` and locks on a
+    backward wall-clock step of more than 5 seconds; turning the lock
+    off or changing its method asks for the owner first. §6.6: the
+    daily check keeps and restores what the member entered, and
+    Messages and History show "on hold" notices while held (three
+    strings, as ANDROID-PLAN).
   - 0.1.59: erratum, 2026-11-02 (owner decisions a, threads
     01M6F1RDHN5VCQHFG4KVW89851, 01M6F2GFXDMDY1GC0QWEC1ZJNJ,
     01M6EXXXE5RBG51H5MD1G0AV30, 01M6F1MB4ZCA0G02SRPD3JBS16;
@@ -528,7 +541,7 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.102; §4.16 results check and choice labels from 0.1.116) — the Android app; this plan mirrors it
+  - ANDROID-PLAN.md (0.1.102; §4.16 results check and choice labels from 0.1.116; the results rules, app lock and held notices of 0.1.117) — the Android app; this plan mirrors it
   - VAULT-MESSAGING.md (0.81.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
@@ -1786,6 +1799,24 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   rows), and a real choice whose label, with control and
   bidirectional-override characters removed and surrounding white space
   trimmed, equals "Abstain", ignoring case, is shown by its choice id.
+- **The results check rules** (0.1.60; ANDROID-PLAN 0.1.117 "The results
+  check: the app's rules", the same on both apps, owner decision a,
+  2026-11-03, thread 01M6FT8PCK46FTKM42VFY348S5): the bounds and leaf
+  checks on `rows.json`, what stops a submission and what is only
+  reported, `other_rows` for a second ballot under the member's code
+  (`row_duplicate`), `rows_unavailable` for a row the app cannot get,
+  the plain `vote_results_dont_add_up` note and when numbers show, the
+  verdicts kept in memory only (a lock forgets them), the recheck when
+  a `verified` or `unconfirmed` vote opens with no verdict since the
+  vault opened (it never submits and stores nothing; if the site cannot
+  be reached the numbers stay hidden and `vote_results_not_rechecked`
+  shows: "VettID could not check the published results of this vote
+  again just now, so their numbers are not shown. It will try again
+  when you open this vote.", approved by the owner 2026-11-03), and the
+  "Abstain" matching (trim Unicode White_Space, remove
+  Default_Ignorable characters and U+2800 anywhere, ignore case;
+  look-alike letters are out of scope). Going to the background cancels
+  a recheck; it runs again on return.
 - The credential password prompt is the existing one (§4, the unlock
   window), used before `vote.cast`.
 - **Notifications:** the feed items (`vote.open`, `vote.closing`,
@@ -2308,7 +2339,32 @@ leaving the screen.
 - **Lock and app lock**: the app-lock timeout counts from the moment
   the scene went to the background, read on return; the vault's own
   locks (VAULT-LOCK, owner check) are the vault's and need nothing from
-  the app in the background.
+  the app in the background. (0.1.60, the lead's decision of
+  2026-11-03.) The time away is measured on a clock that cannot be set
+  back (`ContinuousClock`). A backward step of the wall clock of more
+  than 5 seconds since going to the background also locks: the wall
+  time elapsed is shorter than the monotonic time elapsed by more than
+  5 seconds. This is sticky until the return, so a date set back and
+  restored still locks. Detecting a step while the app is suspended is
+  best effort; the monotonic timeout always holds. A new process starts
+  locked. The background mark is always recorded, even while a prompt
+  is up; a prompt that succeeds while the app is still away does not
+  count as the return; a lock made right after a successful prompt does
+  not start the automatic prompt again (no loop); a prompt left open
+  does not hold back the notification cover. Turning the lock off, or
+  changing its method, asks for the owner first (the device passcode or
+  Face ID or Touch ID); a cancelled method change keeps the lock on with
+  the old method.
+- **Daily check and held screens** (0.1.60; owner decisions a,
+  2026-11-03, threads 01M6FHES389JBHYZTN648MH3MG and
+  01M6FHNQ9XK4PDA3DK7R4C4ZDZ; as ANDROID-PLAN §6 owner check items 3
+  and 4). When the daily check comes due, what the member entered (an
+  item being edited, a message draft) is kept and restored after the
+  check: "Your daily check is due. What you entered is kept: …". On
+  Messages and History a held vault shows an info notice with no "Try
+  again": `held_messages_title` "Messages are on hold",
+  `held_history_title` "History is on hold", and `held_body` "Your
+  daily check is due. They'll show again once it's done."
 - **Unlock and check in** (0.1.47; owner decision 2026-10-28,
   VAULT-MESSAGING 0.71.0 §3.6.5 "Ask only for what is used"): as
   ANDROID-PLAN §6 owner check item 6, with the same approved texts
