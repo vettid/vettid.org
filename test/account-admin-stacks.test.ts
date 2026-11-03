@@ -1147,6 +1147,80 @@ describe('VettidOrgAccountSiteStack', () => {
     });
   });
 
+  describe('apple-app-site-association per stage (iPhone setup Universal Link)', () => {
+    const AASA = '/.well-known/apple-app-site-association';
+    const PROD_AASA = '{"applinks":{"details":[{"appIDs":["3X25CJ86MV.com.vettid.app"],"components":[{"/":"/vault/enroll/*"}]}]}}';
+    const STAGING_AASA = '{"applinks":{"details":[{"appIDs":["3X25CJ86MV.com.vettid.app.staging"],"components":[{"/":"/vault/enroll/*"}]}]}}';
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('fs') as typeof import('fs');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const path = require('path') as typeof import('path');
+
+    function synth(stage: string) {
+      const app = new cdk.App({ context: { ...(stage === 'prod' ? {} : { stage }), 'aws:cdk:bundling-stacks': [] } });
+      const stack = new VettidOrgAccountSiteStack(app, 'AccountSite', { config: loadConfig(app.node), env });
+      const tpl = Template.fromStack(stack);
+      const out = app.synth().directory;
+      const bodies = fs.readdirSync(out)
+        .map((d: string) => path.join(out, d, '.well-known', 'apple-app-site-association'))
+        .filter((f: string) => fs.existsSync(f))
+        .map((f: string) => fs.readFileSync(f, 'utf8'));
+      return { tpl, bodies };
+    }
+
+    test.each([['prod', PROD_AASA], ['staging', STAGING_AASA]])('%s: the deployment carries the exact JSON', (stage, json) => {
+      expect(synth(stage).bodies).toEqual([json]);
+    });
+
+    test('a stage with no app publishes no file', () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { appleAppSiteAssociation } = require('../lib/config');
+      expect(appleAppSiteAssociation('dev')).toBeNull();
+      expect(appleAppSiteAssociation('constructor')).toBeNull();
+      expect(synth('dev').bodies).toEqual([]);
+    });
+
+    test.each(['prod', 'staging'])('%s: served as application/json, revalidated, in its own deployment', (stage) => {
+      const deps = Object.values<any>(synth(stage).tpl.findResources('Custom::CDKBucketDeployment')).map((r) => r.Properties);
+      const own = deps.filter((d) => JSON.stringify(d.Include ?? []).includes('apple-app-site-association'));
+      expect(own).toHaveLength(1);
+      expect(own[0].SystemMetadata['content-type']).toBe('application/json');
+      expect(own[0].SystemMetadata['cache-control']).toBe('no-cache, must-revalidate');
+      expect(own[0].Include).toEqual(['.well-known/apple-app-site-association']);
+      expect(JSON.stringify(own[0].DistributionPaths)).toBe('["/.well-known/apple-app-site-association"]');
+      // No other pass touches (or prunes) the file, and none labels it with a type.
+      const others = deps.filter((x) => x !== own[0]);
+      for (const d of others) expect(JSON.stringify(d.Include ?? [])).not.toContain('apple-app-site-association');
+      // The week-long asset pass (which would prune it) excludes it explicitly.
+      expect(others.filter((d) => JSON.stringify(d.Exclude ?? []).includes('apple-app-site-association'))).toHaveLength(1);
+    });
+
+    test('no CloudFront function rewrites, redirects or 404s the path', () => {
+      for (const stage of ['prod', 'staging']) {
+        const code = Object.values<any>(synth(stage).tpl.findResources('AWS::CloudFront::Function'))[0].Properties.FunctionCode as string;
+        // eslint-disable-next-line no-new-func
+        const handler = new Function(`${code}; return handler;`)() as (e: unknown) => any;
+        const r = handler({ request: { uri: AASA, headers: {}, querystring: {}, cookies: {} } });
+        expect(r.statusCode).toBeUndefined();
+        expect(r.uri).toBe(AASA);
+        // Not a blanket exception: other extensionless paths still get the clean-URL rewrite.
+        expect(handler({ request: { uri: '/.well-known/other', headers: {}, querystring: {}, cookies: {} } }).statusCode).toBe(404);
+      }
+      const code = Object.values<any>(synth('prod').tpl.findResources('AWS::CloudFront::Function'))[0].Properties.FunctionCode as string;
+      // eslint-disable-next-line no-new-func
+      const handler = new Function(`${code}; return handler;`)() as (e: unknown) => any;
+      const at = (uri: string) => handler({ request: { uri, headers: {}, querystring: {}, cookies: {} } });
+      // Exact match only: a trailing slash or an encoded spelling is not the file.
+      expect(at(AASA + '/').uri).not.toBe(AASA);
+      expect(at(AASA + '/').statusCode).toBe(404);
+      expect(at('/.well-known/apple-app-site-associatio%6E').statusCode).toBe(404);
+      expect(at('/.well-known/apple%2Dapp-site-association').statusCode).toBe(404);
+      const dist = Object.values<any>(synth('prod').tpl.findResources('AWS::CloudFront::Distribution'))[0].Properties.DistributionConfig;
+      expect(dist.CustomErrorResponses).toBeUndefined();
+      expect(dist.DefaultCacheBehavior.ViewerProtocolPolicy).toBe('redirect-to-https'); // http -> https, then the file itself
+    });
+  });
+
   describe('edge function with the real site tree', () => {
     const code = Object.values<any>(t.findResources('AWS::CloudFront::Function'))[0].Properties.FunctionCode as string;
     // eslint-disable-next-line no-new-func
