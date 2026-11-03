@@ -1,9 +1,29 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.116
-date: 2026-11-02
+version: 0.1.117
+date: 2026-11-03
 changelog:
+  - 0.1.117: erratum, 2026-11-03 (owner decisions a, threads
+    01M6FT8PCK46FTKM42VFY348S5, 01M6FHES389JBHYZTN648MH3MG,
+    01M6FHNQ9XK4PDA3DK7R4C4ZDZ; the lead's decision of 2026-11-03 for
+    the app lock; VAULT-MESSAGING 0.83.3). Votes: the choices of
+    vettid-ios #202 are the rule for both apps (new paragraph "The
+    results check: the app's rules"): the size, depth and leaf checks
+    on `rows.json`, what is only reported, the plain "don't add up"
+    note and when numbers show, the verdict kept in memory, the recheck
+    on opening a finished vote (new string `vote_results_not_rechecked`,
+    approved by the owner 2026-11-03), and "Abstain" matching. Two
+    results cases are shown as a problem: a second ballot under the
+    member's code (`other_rows`, `row_duplicate`) and a row the app
+    cannot get (`rows_unavailable`). App lock (D6): time in the
+    background is measured on a clock that cannot be set back, a date
+    set back locks, a prompt that spans the background does not skip the timeout, and turning the
+    lock off or changing its method asks for the owner first. AA5: only
+    `not_found` from `approval.decide` clears an entry. Fees: the 10%
+    question is asked again when the payee shrinks. The daily check
+    keeps what the member entered and restores it. Messages and History
+    show "on hold" notices when the vault is held (three new strings).
   - 0.1.116: erratum, 2026-11-02 (owner decision a, thread
     01M6F1RDHN5VCQHFG4KVW89851; VAULT-MESSAGING 0.83.2, §10.19.6 step
     1). When the app's observer check of the published results fails
@@ -1411,7 +1431,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.81.4) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.83.3) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -1459,7 +1479,7 @@ surface than the vettid.dev app and a layout modelled on Proton Mail.
 | D3 | **v1 scope**: enrollment, unlock, Protean Credential, settings (always), plus **connections + messaging** and **items** (data, secret and critical items per VAULT-ITEMS; originally "secrets + critical secrets"). Calls, desktop/agent pairing and LEASH, wallet, location and presence come later. |
 | D4 | **Minimum Android 12 (API 31)**; target the current API level. |
 | D5 | **Message search later** (not in v1). |
-| D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3). 0.1.91: it is a UI gate only and protects no data at rest (the app keeps no vault content on the phone, §5 "What the phone keeps"). The app lock may use a user-authentication-bound Keystore key for BiometricPrompt, but no data is encrypted under it. 0.1.19: called **App lock**, with the method Biometrics (as described) or Phone screen lock (the device credential only). It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
+| D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3). 0.1.91: it is a UI gate only and protects no data at rest (the app keeps no vault content on the phone, §5 "What the phone keeps"). The app lock may use a user-authentication-bound Keystore key for BiometricPrompt, but no data is encrypted under it. 0.1.19: called **App lock**, with the method Biometrics (as described) or Phone screen lock (the device credential only). It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). 0.1.117 (lead's decision, 2026-11-03): **time in the background is measured on a clock that cannot be set back** (`SystemClock.elapsedRealtime`). A backward step of the wall clock of more than 5 seconds since going to the background also locks: the wall time elapsed is shorter than the monotonic time elapsed by more than 5 seconds. This is sticky until the return, so a date set back and then restored still locks. Detecting a step while the app is suspended or cached is best effort; the monotonic timeout always holds. A new process starts locked. The background mark is always recorded, even while a prompt is up; a prompt that succeeds while the app is still away does not count as the return; a lock made right after a successful prompt does not start the automatic prompt again (no loop); a prompt left open does not hold back the notification cover. **Turning the lock off, or changing its method, asks for the owner first** (the device credential or a strong biometric); a cancelled method change keeps the lock on with the old method. The return is judged when the app comes back, and the wall-clock step is checked at the return and whenever the system reports a clock change. Android counts from the success when the prompt itself took the app away (the device-credential screen), with a 3 s grace. The prompts use the existing "Unlock VettID" texts; no new string. |
 | D7 | **Notification modes** (owner, 2026-10-09; 0.1.23): the member picks how notifications reach the phone: **On-phone service** (recommended, most private; the default), **Google push** (FCM through the VettID push gateway; offered once the gateway and FCM credentials exist) or **Off** (not recommended). Feed items raise notifications through the chosen mode (§4 Notification modes). Supersedes PUSH-GATEWAY 0.2.0 §11's default order (FCM first) for this app (PUSH-GATEWAY 0.3.0 follows it). No UnifiedPush (owner, 2026-10-09; 0.1.24; §9, question 10): the on-phone service is the path for phones without Google services. |
 | D8 | **Wallet, presence, location and video** (owner, 2026-10-17; 0.1.42; §4 "Wallet, presence, location and video"). All four are wanted, in the order **wallet, presence, location**, with **video after the calling service** (CALLS-PLAN C2 and C3). Wallet networks on staging: **signet and testnet4**; mainnet for production later. The wallet's **chain source is the member's choice**: the app reads balances and coins and broadcasts through a server the member can set. |
 | D9 | **A separate approvals indicator** (owner, 2026-10-27; 0.1.89; §4 "The approvals indicator"). What waits for the member's decision (sign-in and admin approvals, connection requests, share and ask approvals, transfer confirmations, device and agent approvals) has its own indicator in the top bar, apart from the bell (the record of what happened), shown only while something is open, with its count; time-critical entries (sign-in and approval challenges, session requests and `approval.pending` from arrival, sign-ins shown neutral; other asks with a deadline in their last 2 minutes) show the time left, highlighted, in the indicator and the row; the tap opens the Approvals list; a snackbar with View announces a new time-critical request while the app is open; a request's notification opens that request, counts down and goes when it is decided or expires; icon and badge on crowded or large screens; sign-ins show the time left in the neutral treatment (no error colour), the Requests channel stays unchanged, `approval.pending` is time-critical from arrival, and a location "Not now" is kept in the encrypted local store. Why: a sign-in lives minutes and was missed while a conversation was open |
@@ -4474,8 +4494,9 @@ and respect them.
    times 110 vB (the smallest transaction) is already over 10% of an
    amount entered (typed or from a link), "The fee, at least {fee} sats,
    …". At the review it is asked from the vault's fee (so also for
-   **Send all**), unless the member agreed to a 10% question before and
-   the vault's fee is at most 1.5 times the fee agreed to; typing an
+   **Send all**), unless the member agreed to a 10% question before, the
+   vault's fee is at most 1.5 times the fee agreed to and, with **Send
+   all**, what the payee receives has not shrunk since; typing an
    amount, a link that sets or clears the amount, a refused link, or
    changing the fee, **Send all** or "Include unconfirmed coins" forgets
    that agreement. **Cancel** at the review goes back to the form. The
@@ -5298,7 +5319,7 @@ The app **never** says: that the vote is "secret" or "anonymous" without "the pu
 2. **A vote:**
    - title, the service's name with "Service" and "Name given by the service" (as in "Service connections"), and the proposal `text` as **plain text in the service's words** (control and bidirectional-override characters removed; no links, no markup; the whole text scrolls; never truncated), captioned "Written by <service>";
    - the quorum as the service states it, and whether it says the vote is binding (both as the service's claim); the closing time (and "The closing time was extended to …" after an extension);
-   - **Choose one:** the choices in the order sent, each with its label as sent (the reserved `abstain` is shown as "Abstain", in the app's own words, wherever a choice label appears: the choice list, the confirm sheet, the member's own choice and the Results rows; owner decision a, 2026-11-02, thread 01M6EXXXE5RBG51H5MD1G0AV30. The label "Abstain" is reserved: a real choice, not `abstain`, whose label, with control and bidirectional-override characters removed and surrounding white space trimmed, equals "Abstain", ignoring case, is shown by its choice id instead, for example "no"; owner decision a, 2026-11-02, thread 01M6F1MB4ZCA0G02SRPD3JBS16), as a radio group. **Cast your vote** is enabled once a choice is selected and `can_cast` is true; otherwise the reason is written where the button would be (`cannot_cast`, the table below), never only a disabled button.
+   - **Choose one:** the choices in the order sent, each with its label as sent (the reserved `abstain` is shown as "Abstain", in the app's own words, wherever a choice label appears: the choice list, the confirm sheet, the member's own choice and the Results rows; owner decision a, 2026-11-02, thread 01M6EXXXE5RBG51H5MD1G0AV30. The label "Abstain" is reserved: a real choice, not `abstain`, whose label, after removing Default_Ignorable characters and U+2800 anywhere and then trimming Unicode White_Space at both ends, equals "Abstain", ignoring case, is shown by its choice id instead, for example "no"; owner decision a, 2026-11-02, thread 01M6F1MB4ZCA0G02SRPD3JBS16), as a radio group. **Cast your vote** is enabled once a choice is selected and `can_cast` is true; otherwise the reason is written where the button would be (`cannot_cast`, the table below), never only a disabled button.
 3. **Confirm sheet** ("Vote “<label>”?"): the fixed disclosure sentence, "Your vote can't be changed after you cast it.", **Cast vote** and **Back**. Then, unless the credential's unlock window is open, the existing **unlock window prompt** (§4 "The unlock window prompt", also used before `vote.cast`): "Confirm with your credential password", "Your vote is signed with your credential. Enter your credential password."; then `vote.cast`.
 4. **After the cast:** the vote screen shows the state in words: *Sending your vote to <service>…* (`sending`), *Waiting for <service> to confirm* with the line "Your vote is saved on your vault and is sent again until <service> answers" (`waiting` or a slow `sending`; never "failed"), *<service> recorded your vote. It can't be changed.* (`recorded`), and after the results check *The published results include your vote.* The member's own choice is shown (from `vote.get`, which alone carries it) beside the state. A `Check with the service` text button (`vote.check`) appears while the ballot is not recorded.
 5. **Results** (after `closed` and a passed check): "Results", each choice with its count, "<ballots> of <eligible> eligible members voted", the quorum line computed from the published numbers, and, if `counts.unhandled` is above 0, the line about messages that could not be read. Every number is from the verified results; before then, none is shown. When the app's observer check failed, no number is shown (the choice counts, the turnout, the quorum line and the unhandled line); `vote_results_dont_add_up` is shown in their place, once, under the state line (the Results section is left out) (owner decision a, 2026-11-02, thread 01M6F2GFXDMDY1GC0QWEC1ZJNJ).
@@ -5306,6 +5327,21 @@ The app **never** says: that the vote is "secret" or "anonymous" without "the pu
 7. **After a restore** (`vote.confirm`): a dialog names the service, the recorded choice and the title, and asks whether it is the member's vote.
 8. **Connect again to vote** (the `reconnect` list): a card on Votes, and on that person connection's detail: "<name> is registered with VettID as a service. This connection was made before it said it was a service, so it can't take part in votes. Remove it and connect again from a new invitation from <name>." with **Open the connection**. The app does not change the connection's kind or call it a service on its own (§6.4); the card says only what VettID's service list says.
 9. **Removing a service connection** that has an open vote or an unrecorded ballot first asks: "You have a vote with <name> that isn't finished. If you remove this connection you can't vote in it."
+
+**The results check: the app's rules** (0.1.117; owner decisions of 2026-11-02 and 2026-11-03, VAULT-MESSAGING 0.83.3 §10.19.6; the choices of vettid-ios #202, the same on both apps).
+
+- **Which `rows.json` rows are sent.** The app submits the first row with the member's `record_tag` and its proof. Another row under the same tag is not skipped (see "A second ballot" below).
+- **What stops a submission of a row.** The app does not submit a row if `rows.json` is larger than 512 bytes × `counts.eligible` + 4,096 (the download is capped the same way, and need not be JCS), is nested deeper than 4, or holds a row or ballot that cannot be made into a leaf: an own-row `choice_id` that is not a valid choice id (with `vote_rows`; without it nothing is submitted and the existing problem hint shows), a ballot that is not an object, a `record_tag` that is not 32 bytes of base64, or ballot members that are not base64 strings. It then sends `rows_unavailable` (below).
+- **What is only reported, and does not stop a submission:** a `rows.json` that is not exactly `{v: 1, proposal_id, rows}` or names another proposal, and a `results.json` that names another `proposal_id`. The app also requires the site's `tally` and `counts` to equal the vault's (`vote.get`, when it holds them); a difference counts as "doesn't add up" and the row is still submitted.
+- **The app's checks and the vault's.** "The signature verifies" in step 1 is the vault's check. The app checks only the form: a 64-byte signature, and the bundle an object.
+- **The "don't add up" line** (`vote_results_dont_add_up`) is a plain note, with no error colour, shown under any `verified` check (and under `unconfirmed`). Numbers (the choice counts, the turnout, the quorum line and the unhandled line) are hidden whenever the flag is set, and shown only when the check is `verified` or `unconfirmed` and the app's own observer check passed. A refused or lost submission still sets the flag. An attempt that submits nothing clears the flag, but the last verdict still decides whether numbers show. Under `pending` with the vault's own reason (`clock`, `trust_root`, `service_list`), that reason's text stays.
+- **Reuse of verdicts.** Only a verdict from a recheck, or from a submission the vault answered, is reused. Verdicts are kept in memory only, and a lock forgets them.
+- **Recheck on open** (owner decision of 2026-11-02). When the screen of a `verified` or `unconfirmed` vote opens and there has been no verdict since the vault opened, the app fetches the published results and runs its observer check again. It never submits again and stores nothing on disk. If the site cannot be reached, the numbers stay hidden and `vote_results_not_rechecked` shows. Leaving the screen, a lock or the background cancels a recheck; it runs again on return.
+- **"Abstain" matching.** Remove Default_Ignorable characters and U+2800 anywhere, then trim Unicode White_Space at both ends, then compare ignoring case. Look-alike letters (Cyrillic, fullwidth) are out of scope.
+- **A second ballot under the member's code** (owner decision a, 2026-11-03, thread 01M6FT8PCK46FTKM42VFY348S5). When `rows.json` holds another row with the member's `record_tag` at a different index, the app adds that row and its inclusion proof to `rows_root` to `vote.results.submit` as `other_rows: [{row, proof}]` (at most 4). The vault verifies each proof. An extra row the app cannot make into a leaf is not sent: the member's row cannot be had (below). A second verifying row is a signed contradiction: the check is `failed` with reason `row_duplicate`, and the vote shows `vote_failed_title` and `vote_failed_body` with **Save the proof**.
+- **The member's row cannot be had** (same decision): `rows.json` has a root that does not match the signed `rows_root`, cannot be parsed within the bounds, or has no leaf for the member. The app submits with `rows_unavailable: true` and the results, signature and bundle. The vault holds the check `pending` with reason `rows_unavailable`, and gives up with the same reason 7 days after the check was due; the record stays in the problem set. The app shows the text for a problem with the published results.
+- **Older vaults.** `other_rows` and `rows_unavailable` are sent only to a vault that lists the release capability `vote_rows` (VAULT-MESSAGING §11.10.9, 0.83.3); with an older vault the app sends neither and keeps 0.83.2's behaviour.
+- **Not in this version:** a future `vote.get` field with the held `results_hash` would let the apps compare it with the published results.
 
 **The app's work with the public site.** At unlock, whenever it opens, and then **every hour while it is open and unlocked** (the vault can be reached only then), the app fetches `services.json`, `services.json.sig` and the site's proposal index from votes.vettid.org with no session, no cookies and no identifier, and sends them in `vote.site.sync` (§10.19.8; 0.1.107: within the per-call limit (the encoded body at most 8,257,532 bytes, as one §5.5 claim-check blob to the app's own vault when over 245,760 bytes, inline otherwise; at most 8 lists and 1 when a list is over 1,048,576 bytes; `payload_too_large` leaves the held list); the app **splits a catch-up across calls**, in version order; it sends a list only when it differs from the vault's held one (`vote.list` gives `list_version` and `list_sha256`; otherwise a small `services_confirm: {version, sha256}`), and sends whatever the site serves up to the blob limit, the vault deciding. A request over 245,760 bytes is `{blob: {id, key, sha256, size}}` (the relay's `max_blob_bytes` less 41 bytes and the Padmé padding); the single blob slot is shared with attachment uploads, so the app serializes them or retries on the storage-full refusal); a pending results check is fetched the same way and sent in `vote.results.submit` after the app's own observer check (BALLOT-PROTOCOL §8.4). The app also fetches the vote's own documents (`p/<proposal_id>/…`) and the index when the member opens a vote screen, so that the vault can compare the proposal with the public copy before and after a cast (0.1.107: each entry is `{proposal_id, index?, document: found | absent | unreachable}`, with no time from the app; an HTTP `404` is `absent` and is fetched again at the next sync or screen open, because `unpublished` needs a second `404` at least 10 minutes after the first, after the close, judged by the vault's clock; the app never decides it, and fetches `p/<proposal_id>/proposal.json` for every held proposal the index does not list); **every request about one vote names its connection**: `vote.get`, `.cast`, `.check`, `.confirm`, `.release`, `.evidence` and `.results.submit` carry `connection_id` and `proposal_id` together, as `vote.list` gives them, and a vote is identified in the app by that pair (0.1.107); only a positive difference stops a cast, a site that cannot be reached or does not list the proposal yet only shows a warning (VAULT-MESSAGING §10.19.4). There is no background job: a locked vault cannot be handed anything, and the vault checks all of it again. The site sees the phone's address and the hour. If the site cannot be reached, the app says nothing unless a vote is waiting on it (`checking`, or a pending check), and then says so on that vote (below).
 
@@ -5377,6 +5413,7 @@ The History category is "Connections" (with the service's name); no entry shows 
 | `vote_state_in_results` | The published results include your vote. | only after the check |
 | `vote_choice_abstain` | Abstain | **owner decision a, 2026-11-02, thread 01M6EXXXE5RBG51H5MD1G0AV30**; the app's own words for the reserved `abstain` choice, wherever a choice label appears |
 | `vote_results_dont_add_up` | The rest of the published results don't add up. The service may have published them wrongly. | **owner decision a, 2026-11-02.** Under the `vote_state_in_results` line when the vault's check is `verified`, and under `vote_state_unconfirmed` (owner decision a, 2026-11-02, thread 01M6F2GFXDMDY1GC0QWEC1ZJNJ), but the app's observer check failed outside the four inputs (VAULT-MESSAGING §10.19.6 step 1); no number is shown (the choice counts, the turnout, the quorum line and the unhandled line), this line is shown once in their place; no error colour. `failed` shows only `vote_failed_title` and `vote_failed_body`; `pending` with reason `input` shows the existing problem text |
+| `vote_results_not_rechecked` | VettID could not check the published results of this vote again just now, so their numbers are not shown. It will try again when you open this vote. | **approved by the owner 2026-11-03.** Under the state line of a `verified` or `unconfirmed` vote whose recheck on open could not reach the site; no number is shown |
 | `vote_conflict_after_verified` | **Your vote is in the published results.** %s also once showed a different vote under your code. Save the proof and show it to the organisation. | **approved 2026-10-30.** `check` `verified` with `conflict_evidence: true`; under the `vote_state_in_results` line, with **Save the proof**, no error colour |
 | `vote_state_unconfirmed` | Not confirmed. %s sent no receipt for your vote, and the published results don't settle whether it counted. | |
 | `vote_state_didnt_vote` | You didn't vote in this one. | verified: no ballot under your code |
@@ -5879,10 +5916,11 @@ role, name, seconds, exp}`):
 - A newer request from the same device replaces the older (§6.8): the
   app replaces the entry by `device_id`.
 - Answers: `{device_id, session_id, expires_at}` → "Access allowed
-  until 15:40". Any error (the request was replaced, decided on
-  another device or dropped after 10 minutes; §10.3 names no code,
-  decision 14, item c) → "This request is no longer waiting." and the
-  entry goes. `owner_check_required` → the owner-check screen.
+  until 15:40". `not_found` (the request was replaced, decided on
+  another device or dropped after 10 minutes; also when the device is no
+  longer active; VAULT-MESSAGING 0.83.0) → "This request is no longer
+  waiting." and the entry goes. Any other error keeps the entry and shows
+  the vault's error text. `owner_check_required` → the owner-check screen.
 - `sync.event{device.session}` and `{approval.decided}` from another
   device remove the entry (as today).
 - **Known only from its feed item** (the process ended since the
@@ -5927,8 +5965,9 @@ or `"denied"` → "Approved, but <name>'s access ended first, so nothing
 was done." `"way_not_allowed"` → "Approved, but this item no longer
 allows that, so nothing was done." Any other `result` → "Approved, but
 your vault answered: <result>." An error answer to `approval.decide`
-itself (the approval expired or was decided elsewhere; no code is
-named, decision 14, item c) → "This request is no longer waiting."
+itself: `not_found` (the approval expired or was decided elsewhere;
+VAULT-MESSAGING 0.83.0) → "This request is no longer waiting." and the
+entry goes. Any other error keeps the entry and shows the vault's error text.
 
 **Asks the app cannot show.** `approval.pending` and
 `device.pair.pending` arrive once, as events; their feed items carry
@@ -7001,10 +7040,22 @@ interval). Follow-ups, in A3 unless noted:
    after the deadline, before any vault screen; never over an action in
    progress. A refused request keeps its input (drafts stay drafts) and
    the prompt follows when the member leaves the screen.
+   (0.1.117, owner decision a, 2026-11-03, thread
+   01M6FHES389JBHYZTN648MH3MG) When the check comes due, what the member
+   entered (an item being edited, a message draft) is kept and restored
+   after the check, on both apps. The text is `data_failure_owner_check_required`:
+   "Your daily check is due. What you entered is kept: the check opens
+   when you leave this screen."
 4. **Held screen**: no cached vault content (messages, items,
    connections, feed) while held; only the check, the `vault.held`
    counts ("3 new messages waiting") and the lock action. After the
    check, catch up (`sync.since`, `feed.list`, `message.list`).
+   (0.1.117, owner decision a, 2026-11-03, thread
+   01M6FHNQ9XK4PDA3DK7R4C4ZDZ, both apps) On Messages and History, a
+   held vault (the daily check is due) shows an info notice with no
+   "Try again". New strings: `messages_held_title` "Messages are on
+   hold"; `history_held_title` "History is on hold"; `held_list_body` "Your
+   daily check is due. They'll show again once it's done."
 5. **Early warning** (A6, with notifications): from 1 h before the
    deadline, a banner and a local notification with "check now".
 6. **Locked and past the deadline**: one screen for PIN and password;
