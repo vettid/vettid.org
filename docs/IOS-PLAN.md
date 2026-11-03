@@ -1654,8 +1654,8 @@ and back-stack rules.* Only these differ on iOS:
 *Owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0 §6.4, §15 item
 43). Texts approved by the owner on 2026-11-03; no `ik` fingerprint on
 the request (ANDROID-PLAN 0.1.118). Not built.* The same as
-ANDROID-PLAN §4 "Service connections (0.1.90)", carried here by reference and not to be
-changed on one platform alone: the connection request's line "This is a
+ANDROID-PLAN §4 "Service connections (0.1.90)", carried here by
+reference and not to be changed on one platform alone: the connection request's line "This is a
 service, not a person." with "The invitation says so. VettID has not
 checked who runs it."; a "Services" section of Connections and never in
 Messages; no Call, message or share rows on a service's detail, which
