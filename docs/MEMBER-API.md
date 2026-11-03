@@ -810,7 +810,10 @@ Cognito has no conditional delete, so its check is a read just before
 the delete.
 
 **The daily sweeps (a canceled account past its date, the 14-day
-reclaim) (2.6.2).** The row is deleted first, under its guard (still
+reclaim) (2.6.2).** (2.14.0: for a canceled account, the vault check,
+the confirmation's `mailed_at` and the conditional deletes of
+never-sealed vault rows come before the row, ACCOUNT-ADMIN-PLAN §5.4.3;
+everything else is as here.) The row is deleted first, under its guard (still
 `canceled` and past `delete_after`; still `requested` and unverified),
 in one transaction with its own marker. First, because the guard is
 what protects a person who changed their mind: an account an admin
@@ -1060,10 +1063,12 @@ and the texts are in **ACCOUNT-ADMIN-PLAN §5.4** (owner decisions of
   no session) or an admin's reinstate puts it back, until the job has
   deleted the account. The confirmation is sent by the members-stream
   mailer with a claim on the row. The job checks the vaults once more
-  and **holds** an account that has one, or whose confirmation was not
-  sent (`member.deletion_held`, `AccountDeletionsHeld`); a never-sealed
-  vault row is deleted first under a condition, and a failed condition
-  holds it too.
+  and **holds** an account that has one (an unfinished setup included),
+  or whose confirmation is not recorded as sent (`mailed_at`, written
+  only after SES accepted it) (`member.deletion_held`,
+  `AccountDeletionsHeld`); a never-sealed vault row is deleted first
+  under a condition, and a failed condition holds it too. The cancel
+  link's record has no TTL: it lasts as long as the deletion.
 - The **mailing-list entry** goes with the account when
   `remove_from_mailing_list` was true, as an unsubscribe removes it
   (with the list's release marker).

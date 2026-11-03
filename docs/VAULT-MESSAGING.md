@@ -31,7 +31,7 @@ changelog:
   - 0.83.4: editorial, 2026-11-03, with ACCOUNT-ADMIN-PLAN 0.3.0 §5.4
     and MEMBER-API 2.14.0 (owner decisions of 2026-11-03): an account
     deletion no longer asks a vault to delete itself (it is refused
-    while the member has a vault). §11.1, §12.5's table of
+    while the member has a vault). §11.1, §11.5's operations, §12.5's table of
     authorities and "The resume is not an authority" now name the
     vault without a member (MEMBER-API 2.6.5) instead of an account
     cancellation. No vault or app change: the host's `delete` is the
@@ -15299,7 +15299,8 @@ the app: the resume"); it erases nothing that the enclave can read as
 live, and the member API sends it only for rows with `deleting_at`. A
 release before 0.51.0 does not know it: its parent drops the message
 as it drops any unknown operation. The API
-sends `delete` for an account cancellation (MEMBER-API) and, since
+sends `delete` for a vault without a member (MEMBER-API 2.6.5; before
+MEMBER-API 2.14.0 also for an account cancellation, 0.83.4) and, since
 0.16.0, for a member's "delete my vault and start over" once its 24 h
 have passed (§11.11.9). The
 recovery operations are in §11.11; `recovery_register` carries a
