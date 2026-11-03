@@ -334,20 +334,24 @@ deletion: start over"). The apps' "Delete my account" (App Store rule
   yet is removed with its withdrawal link (MEMBER-API "Withdrawing a
   request").
 - **A vault blocks it.** A vault counts if its row is not `deleted`,
-  whatever its other state (`locked`, `unlocked`), and also while its
-  deletion has been asked for and not yet reported (a start-over that
-  is `pending` or `executing`, or a vault deleting itself). This is the
-  check an admin's Delete makes (ADMIN-API "People", the member API's
-  `member_vaults` task), with one difference: a row that was **never
-  sealed** (no `sealed_release`: a setup that never finished, so no app
-  holds anything of it, MEMBER-API "Vault deletion", Never-sealed rows)
-  does not block, and the deletion removes it with its pointer row, as
-  the cleanup job already does for such rows. Any failed read fails the
-  check: "no vault" is never taken from an error.
-- **Checked twice.** When the code is asked for (so that no code is
-  sent for a deletion that cannot go ahead) and again when the
-  deletion is confirmed. The cleanup job checks a third time before it
-  deletes anything (5.4.3).
+  whatever its other state (`locked`, `unlocked`, `enrolling`), and
+  also while its deletion has been asked for and not yet reported (a
+  start-over that is `pending` or `executing`, or a vault deleting
+  itself). This is the check an admin's Delete makes (ADMIN-API
+  "People", the member API's `member_vaults` task), with one
+  difference: a row that was **never sealed**, in MEMBER-API's sense
+  (no `sealed_release` **and** no lease: a setup that never reached an
+  instance's report, so no app holds anything of it; MEMBER-API "Vault
+  deletion", Never-sealed rows), does not block. A row with a lease and
+  no release is an enrollment under way, and it blocks. Any failed read
+  fails the check: "no vault" is never taken from an error.
+- **Checked three times.** When the code is asked for (so that no code
+  is sent for a deletion that cannot go ahead), when the deletion is
+  confirmed, and by the cleanup job before it deletes anything
+  (5.4.3). A canceled account cannot start or finish an enrollment
+  (`/api/vault/enroll` and the setup-code redeem need an active
+  account), so a vault can appear after the request only from a setup
+  already in flight, which the job's conditional deletes catch.
 
 #### 5.4.2 Confirming: phrase, PIN, email code
 
@@ -362,42 +366,75 @@ fresh and comes from the address:
 3. An **email code**: 6 digits, sent to the account's address when the
    member asks for it, valid **15 minutes**, at most **5 attempts**,
    single use. A new code replaces the old one. Stored only as an
-   HMAC-SHA-256 under the PIN pepper (over the `user_guid`, the code's
-   id and the code), on the member row with its expiry and attempt
-   count; a wrong code spends an attempt with a conditional update, so
-   two guesses cannot share one. At most **3 codes an hour** per
-   account, and the per-address mail limits of sign-in apply too.
+   HMAC-SHA-256 under the PIN pepper over a purpose label, the
+   `user_guid`, the code's id and the code (`"acctdel-code" || 0x00 ||
+   …`, so that it can never equal a PIN's HMAC), on the member row with
+   its expiry and attempt count; a wrong code spends an attempt with a
+   conditional update, so two guesses cannot share one. At most **3
+   codes an hour** per account, and the per-address mail limits of
+   sign-in apply too. With the session and the PIN in front of it, that
+   is at most about 15 guesses an hour, at one in a million each.
 
 The order of checks when the deletion is confirmed: the session and
-`active`, the phrase, the PIN, the code, then the vault check. A failure
-of any changes nothing but the attempt counters.
+`active`, the phrase, the PIN, the code, then the vault check. A correct
+code is spent when it is checked, even if the vault check then refuses:
+the member asks for a new one. A failure changes nothing else.
 
 #### 5.4.3 What happens, and when
 
 | When | What |
 |---|---|
-| **The request** (the member confirms) | The member row records `account_status: canceled`, `delete_after` (now + 7 days) and `account_deletion {deletion_id, requested_at, deletes_at, mailing_list: "remove" \| "keep"}`. Sign-in is disabled and every session ended (Cognito `AdminDisableUser`, `AdminUserGlobalSignOut`), and this browser's cookies are cleared. The member is emailed (5.4.6) with the cancel link. Nothing is deleted yet. |
-| **Until `deletes_at`** | The account can't sign in. The cancel link, or an admin's reinstate, puts everything back as it was: sign-in enabled, `account_status: active`, the deletion record removed; the member is emailed. |
-| **The first daily run at or after `deletes_at`** (07:00 UTC, so 7 to 8 days after the request) | The cleanup job reads the member's vaults again. **With a vault** (one that appeared after the request's check, or an account cancelled before 0.3.0): nothing is deleted; the deletion is **held**, logged by `user_guid` only, counted (`AccountDeletionsHeldVault`, alarmed) and tried again at the next run; the RUNBOOK says what the operator does. **Without one**, as for a canceled account today (MEMBER-API "Retention", "The daily sweeps"): the member row and its email marker in one transaction under the guard (still `canceled`, past `delete_after`); then each on its own, a failure skipping neither the next step nor the next row: the sign-in user (if it is this account's own), the subscription, the never-sealed vault rows and the pointer row, **the mailing-list entry** (if `mailing_list` is `remove` and the entry is for this address), and the SES identity under the existing rule (kept if the mailing list still uses the address, if the request did not create it, or if the address is the project's own). |
-| **Afterwards** | Kept: the audit events (by `user_guid`, no address); an address record of an admin's earlier action expires 90 days after that action, as now. The `vdeleted#` records of vaults deleted before, for their 90 days. The tables' point-in-time backups (35 days) and CloudTrail's record of the SES calls (400 days), as now. Nothing else. |
+| **The request** (the member confirms) | One conditional write (still `active`) records on the member row `account_status: canceled`, `delete_after` (now + 7 days) and `account_deletion {deletion_id, requested_at, deletes_at, mailing_list: "remove" \| "keep"}`, and the cancel link's row is written (5.4.4). Then sign-in is disabled and every session ended (Cognito `AdminDisableUser`, `AdminUserGlobalSignOut`), and this browser's cookies are cleared. Nothing is deleted. |
+| **The confirmation email** | Sent by the members-stream mailer from the row's change, as the request emails are (MEMBER-API "Request emails"): it claims the send on the row first (`account_deletion.mailed_at`), so a retry cannot send twice; a failed send takes the claim off again, is logged by error name and counted (`AccountDeletionMailFailures`, alarmed), and the stream retries it. The cleanup job never deletes an account whose confirmation was not sent: without `mailed_at` it holds it (below) and the operator resends it (RUNBOOK). So the member always has the cancel link before anything is deleted. |
+| **Until the account is deleted** | The account can't sign in. The cancel link, or an admin's reinstate, puts everything back as it was: sign-in enabled, `account_status: active`, the deletion record removed; the member is emailed. The link works until the cleanup job has deleted the account, not only until `deletes_at`: the job's guard and the cancel's condition are on the same row, so exactly one of them wins. |
+| **The first daily run at or after `deletes_at`** (07:00 UTC, so 7 to 8 days after the request) | In this order. (1) The member's vaults are read again; with one that blocks (5.4.1), the account is **held**. (2) Without `mailed_at`, it is **held**. (3) The never-sealed vault rows are deleted, each conditional on still having no `sealed_release` and no lease; if a condition fails, the rest waits and the account is **held**. (4) The member row and its email marker go in one transaction under the guard (still `canceled`, past `delete_after`, the same `deletion_id`). (5) Then each on its own, a failure skipping neither the next step nor the next row, as for a canceled account today (MEMBER-API "Retention", "The daily sweeps"): the sign-in user (if it is this account's own), the subscription, the pointer row `user#<guid>`, **the mailing-list entry** (5.4.3.1), the SES identity under the existing rule (kept if the mailing list still uses the address, if the request did not create it, or if the address is the project's own), and the cancel link's row. |
+| **Held** | Nothing is deleted; the account stays `canceled` and the cancel link keeps working. Logged by `user_guid` only, audited (`member.deletion_held`, with the reason), counted (`AccountDeletionsHeld`, alarmed) and tried again at every daily run. At the first hold for a vault the member is emailed (5.4.6): what blocks it, and that the link keeps the account. The RUNBOOK ("Account deletions held") lists them; the operator resends a missing confirmation, or, at the member's request, reinstates. |
+| **Afterwards** | Kept: the audit events (by `user_guid`, no address); an address record of an admin's earlier action expires 90 days after that action, as now. The `vdeleted#` records of vaults deleted before, for their 90 days. Short-lived records that name the `user_guid` and expire on their own (rate-limit counters, request-table items such as an earlier start-over's cancel link), within their TTLs. The tables' point-in-time backups (35 days) and CloudTrail's record of the SES calls (400 days), as now. |
 
 No email is sent after the deletion: the confirmation said when it
 would happen, and a mail afterwards would mean keeping the address.
 
-**What changes for the old cancel.** `POST /api/account/cancel` is
-withdrawn (`404`); the account page's Cancel becomes a link to this
-page. The cleanup job's `deleteVaults` step leaves the account
-deletion: the job no longer writes `account_deleted_at` on vault rows
-or sends the host's `delete` for an account (MEMBER-API "Vault
-deletion", Account cancellation). Vaults already asked before 0.3.0
-keep being retried until they report `deleted`, and their apps are
-still told `410 account_deleted`. The "Vaults without a member" sweep
-is unchanged: it is what finds a vault whose member row is gone for any
-other reason. The privacy notice's account paragraph
-(`website/privacy/`, "How long") changes in the same deploy: "If you
-delete your account" instead of "cancel", the vault no longer in the
-list (it is deleted first, by you), the cancel link, and the mailing
-list entry if you ask.
+##### 5.4.3.1 The mailing-list entry
+
+With `mailing_list: "remove"`, the entry for the account's address is
+removed **as an unsubscribe removes it** (`lambda/signup/subscribe.mjs`,
+`removeSubscription`): if the entry says the list created the address's
+SES identity (`ownsIdentity`), a release marker first, then the row, so
+that the list's 15-minute sweep releases the identity unless a member
+uses it. This runs after the member row is gone, so the sweep finds no
+member using the address. With `keep`, or with no entry, nothing on the
+list changes. It needs the cleanup job's role to write the list table
+(the row's delete and the marker's put only); the signup stack exports
+nothing new, since the table has a fixed name (§3.1, rule 4).
+
+##### 5.4.3.2 Accounts cancelled before 0.3.0
+
+None to carry over: VettID has no members yet (owner, 2026-11-03), so
+no account was cancelled under the old flow. Should a `canceled` row
+without an `account_deletion` record exist all the same (a staging
+account, say), the job treats it as this section's deletion with
+`mailing_list: "keep"`, and it is held like any other (reason `mail`,
+as it has no `mailed_at`), so nothing of it is deleted without an
+operator.
+
+##### 5.4.3.3 What changes for the old cancel
+
+`POST /api/account/cancel` is withdrawn (`404`); the account page's
+Cancel becomes a link to this page. For new deletions the cleanup job no
+longer writes `account_deleted_at` on vault rows or sends the host's
+`delete` because of an account (MEMBER-API "Vault deletion", Account
+cancellation). The mechanism itself stays: the "Vaults without a
+member" sweep still uses it for a vault whose member row is gone for
+another reason, and vaults already asked keep being retried until they
+report `deleted`, their apps still told `410 account_deleted`. In the
+same deploy as the code:
+- the privacy notice's account paragraph (`website/privacy/`, "How
+  long"): "If you delete your account" instead of "cancel", the vault
+  no longer in the list (you delete it first), the cancel link, and the
+  mailing-list entry if you ask;
+- the account guide's "Cancel any time" card
+  (`sites/account/guide/`): deletion, 7 days, the cancel link, and the
+  vault first.
 
 #### 5.4.4 Member-API routes (MEMBER-API 2.14.0, "Deleting the account")
 
@@ -409,22 +446,38 @@ MEMBER-API's Conventions.
 | GET | `/api/account/deletion` | — | `{blocked_by: {vaults: [{vault_id, state}]} \| null, pin_required: boolean, mailing_list: boolean}`: what the page needs (whether a vault blocks it, whether the PIN is asked, whether the address is on the mailing list, so the box is shown only then) |
 | POST | `/api/account/deletion/code` | — | `202 {expires_at}`; the code is emailed. `409 vault_exists` `{vaults}`; `429 rate_limited` |
 | POST | `/api/account/deletion` | `{confirm: "delete my account", code, pin?, remove_from_mailing_list: boolean}` | `202 {deletion_id, requested_at, deletes_at}`; cookies cleared. `400 bad_request` (the phrase, a missing field); `401` with `message` (the PIN, as the PIN routes; the code: wrong, expired or used, with attempts left); `409 vault_exists` `{vaults}` |
-| POST | `/api/account/deletion/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}`; `404` from `deletes_at` on |
+| POST | `/api/account/deletion/cancel-link` | `{token}` (**no session**: the account function answers it before its session check) | `200 {cancelled: boolean}`; `404` when the link names nothing (the account is deleted, or the token is unknown); `429 rate_limited` |
 
 - **The cancel link.** `https://account.vettid.org/account/delete/cancel/#t=<token>`:
   32 random bytes, in the fragment (never sent to a server or a log,
-  as the sign-in link), stored as its SHA-256 in a request-table row
-  `acctdel#<hash>` naming the `user_guid` and `deletion_id`, which
-  expires at `deletes_at`. The page shows what it will do and POSTs only
-  on **Cancel the deletion**, so a mail scanner opening it does nothing.
-  The cancel is conditional on the row still being `canceled` with this
-  `deletion_id` and before `deletes_at`; it enables sign-in, writes
-  `active` and removes the record, emails the member, and answers
+  as the sign-in link). It is stored as its SHA-256 in the
+  vault-requests table, as the start-over's link is (`dcancel#`):
+  `acctdel#<hash>`, naming the `user_guid` and `deletion_id`, kept until
+  the cleanup job deletes the account (its TTL, `deletes_at` + 30 days,
+  is only a backstop). The account function's role may write and read
+  only `acctdel#*` items there (`dynamodb:LeadingKeys`), and the cleanup
+  job's may delete them.
+- **The page** strips the fragment from the address bar on load (as
+  `/auth/` does), shows what it will do, and POSTs only on **Cancel the
+  deletion**, so a mail scanner opening it does nothing.
+- **The cancel.** Rate-limited in the API, as the start-over's link is:
+  `account-deletion-link#<ip>`, 20 per 15 minutes per IPv4 address or
+  IPv6 /64 (the WAF's `/api/public/*` rule does not cover this path).
+  In reinstate's order: a consistent read of the member row, which must
+  be `canceled` with this `deletion_id` (otherwise `{cancelled:
+  false}`); sign-in enabled (idempotent); then the conditional write
+  (still `canceled`, the same `deletion_id`) to `active`, removing
+  `account_deletion` and `delete_after`. If that write's condition
+  fails, sign-in is disabled again unless the row is now `active`, and
+  the answer is `{cancelled: false}`. Then the email (5.4.6) and
   `{cancelled: true}`. The link is not used up: a later use answers
-  `{cancelled: false}`, as the start-over's link does. The per-network
-  limit of the public routes applies.
+  `{cancelled: false}`, as the start-over's link does. Reinstate's rule
+  that anything making an account active first cancels a pending vault
+  deletion holds trivially: an account deleted under this section has
+  no vault.
 - **Support.** An admin's reinstate of a `canceled` account cancels the
-  deletion the same way (ADMIN-API "People"), audited as now.
+  deletion the same way (ADMIN-API "People"), audited as now, and the
+  member gets the support variant of the email.
 - **The admin Delete's message** (ADMIN-API, `409 vault_exists`) no
   longer says the vault goes with the account: the vault goes when the
   member deletes it (in the app, or with "Delete my vault and start
@@ -436,15 +489,18 @@ New events, none with an address (MEMBER-API "The audit log"):
 `member.deletion_code` (actor `member:<guid>`, nothing in detail),
 `member.deletion_request` (`deletion_id`, `deletes_at`, `mailing_list`),
 `member.deletion_cancel` (`deletion_id`, `via: "link" | "admin"`),
-`member.deletion_held` (actor `system`; `vault_ids`, at each run that
-holds). `member.delete_after_cancel` gains `mailing_list: "removed" |
-"kept" | "not_listed"`. `member.cancel` is no longer written. Logs carry
-ids and error names only, never an address, a code or a token.
+`member.deletion_held` (actor `system`; `reason: "vault" | "mail" |
+"enrolling"`, and `vault_ids` for a vault, at each run that holds).
+`member.delete_after_cancel` gains `deletion_id` and `mailing_list:
+"removed" | "kept" | "not_listed"`. `member.cancel` is no longer
+written. Logs carry ids and error names only, never an address, a code
+or a token.
 
 #### 5.4.6 Texts (drafts for the owner)
 
 All from `VettID <no-reply@<zone>>`, plain text, no names (MEMBER-API
-"Request emails").
+"Request emails"). `<when>` is the date and time in UTC, e.g. "10
+November 2026, 07:00 UTC".
 
 **The page, `/account/delete/`** (stable: the apps open it):
 - Not signed in: "**Delete your VettID account.** Sign in first, then
@@ -456,16 +512,16 @@ All from `VettID <no-reply@<zone>>`, plain text, no names (MEMBER-API
   apps' to name; the page links to the start-over section.)
 - Otherwise: "**Delete your VettID account.** This deletes your
   membership, your sign-in, your subscription and your email address
-  from VettID. Your account is closed at once and deleted after 7 days.
-  Until then you can cancel with the link we email you. After that it
-  can't be undone. A record that your account existed, without your
-  email address, stays in our security log." Then the box "Also remove
-  me from the VettID mailing list" (ticked; shown only when the address
-  is on the list), "Type **delete my account** to confirm", the PIN if
-  one is set, **Email me a code**, the code field and **Delete my
-  account**.
-- Done: "**Your account is closed.** It will be deleted on <date>. We
-  sent the cancel link to your email address."
+  from VettID (unless you stay on the mailing list). Your account is
+  closed at once and deleted after 7 days. Until then you can cancel
+  with the link we email you. After that it can't be undone. A record
+  that your account existed, without your email address, stays in our
+  security log." Then the box "Also remove me from the VettID mailing
+  list" (ticked; shown only when the address is on the list), "Type
+  **delete my account** to confirm", the PIN if one is set, **Email me
+  a code**, the code field and **Delete my account**.
+- Done: "**Your account is closed.** It will be deleted after <when>.
+  We're emailing you a link that cancels the deletion."
 
 **The code email.** Subject "Your VettID account deletion code". "Someone
 signed in to your VettID account asked to delete it. If it was you,
@@ -473,17 +529,27 @@ enter this code on the page: <code>. It works for 15 minutes. If it
 wasn't you, don't share the code. Your account stays as it is, but
 someone may be able to sign in as you: write to support@vettid.org."
 
-**The confirmation email.** Subject "Your VettID account will be deleted
-on <date>". "Your VettID account is closed, and will be deleted on
-<date>. That deletes your membership, your sign-in, your subscription
+**The confirmation email.** Subject "Your VettID account will be
+deleted". "Your VettID account is closed, and will be deleted after
+<when>. That deletes your membership, your sign-in, your subscription
 and your email address from VettID[, and removes you from the VettID
-mailing list]. To keep your account, use this link before then:
-<link>. If you didn't ask for this, use the link and write to
+mailing list][; your address stays on the mailing list]. To keep your
+account, use this link until then: <link>. If you didn't ask for this,
+use the link and write to support@vettid.org."
+
+**The held email** (once, at the first hold for a vault). Subject "Your
+VettID account was not deleted yet". "Your VettID account is closed and
+was due to be deleted, but a vault of yours still exists, so nothing
+has been deleted. Your account stays closed. To keep it, use the link
+from our earlier email. To go on with the deletion, write to
 support@vettid.org."
 
 **The cancel email.** Subject "Your VettID account was not deleted".
-"You cancelled the deletion of your VettID account. You can sign in
-again as before."
+From the link: "You cancelled the deletion of your VettID account. You
+can sign in again as before." From support: "VettID support cancelled
+the deletion of your VettID account, as you asked. You can sign in
+again as before. If you did not ask for this, write to
+support@vettid.org."
 
 **The cancel page, `/account/delete/cancel/`.** "**Keep your VettID
 account?** Someone asked, from your account, to delete it. If you want

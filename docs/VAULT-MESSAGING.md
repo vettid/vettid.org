@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.83.3
+version: 0.83.4
 date: 2026-11-03
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -12,8 +12,8 @@ related:
   - CALLING-SERVICE.md (0.2.2)
   - CALLS-PLAN.md (0.1.5) §6.1 V4, §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.5.1)
-  - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.13.2)
+  - ACCOUNT-ADMIN-PLAN.md (0.3.0)
+  - MEMBER-API.md (2.14.0)
   - ANDROID-PLAN.md (0.1.117)
   - IOS-PLAN.md (0.1.60; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
@@ -28,6 +28,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.83.4: editorial, 2026-11-03, with ACCOUNT-ADMIN-PLAN 0.3.0 §5.4
+    and MEMBER-API 2.14.0 (owner decisions of 2026-11-03): an account
+    deletion no longer asks a vault to delete itself (it is refused
+    while the member has a vault). §11.1, §12.5's table of
+    authorities and "The resume is not an authority" now name the
+    vault without a member (MEMBER-API 2.6.5) instead of an account
+    cancellation. No vault or app change: the host's `delete` is the
+    same operation
   - 0.83.3: erratum, 2026-11-03 (owner decision a, thread
     01M6FT8PCK46FTKM42VFY348S5, and the lead's choices from
     vettid-ios #202; ANDROID-PLAN 0.1.117, IOS-PLAN 0.1.60).
@@ -14419,7 +14427,7 @@ An account that is not active (cancelled by the member, or suspended)
 is refused every vault route at once except lock and the two cancels:
 of a pending vault deletion (session, app key or the email link) and of
 a pending recovery (session or the email link) (0.29.3; MEMBER-API 2.6.2
-"Access"). After a cancelled account's 7-day grace period the API deletes the member's vault rows, the
+"Access"). After a cancelled account's 7-day grace period (before MEMBER-API 2.14.0; from 2.14.0 an account deletion is refused while the member has a vault, and the same deletion applies to a vault without a member, MEMBER-API 2.6.5) the API deletes the member's vault rows, the
 stored encrypted state and headers (`vaults/<vault_id>/`), and the
 enclave's member index object (`users/<hex SHA-256("vettid/vms/2/user" ||
 0x00 || user_guid)>/vault`, which holds only a `vault_id`) (§11.5).
@@ -21610,7 +21618,7 @@ A vault is deleted on one of these authorities:
 |---|---|---|
 | The holder (§3.5.9) | `vault.delete` (§10.2) | the phrase `delete my vault`, the PIN and the credential password over the current blob, both UTK-sealed; checked in the order of §11.14.9 (the blob, then the PIN, then the password; 0.46.1); both backoffs apply, and a `bad_pin` or `bad_password` is a failed owner check (§3.6.4); refused (`credential_frozen`, `rotation_required`) while a clone alarm is open |
 | The enrolling app of a vault without a credential (§3.5.7) | `vault.delete` | the phrase and the PIN (a `bad_pin` is a failed owner check, §3.6.4; 0.46.1) |
-| The host | the queue operation `delete` (§11.5): account cancellation (MEMBER-API), or a member's start-over deletion (§11.11.9, 0.16.0) | the member API's own checks; for a start-over, the member's session, the phrase and 24 h without a cancel from the portal, the email link or the app |
+| The host | the queue operation `delete` (§11.5): a vault without a member (MEMBER-API 2.6.5; before MEMBER-API 2.14.0 also an account cancellation, 0.83.4), or a member's start-over deletion (§11.11.9, 0.16.0) | the member API's own checks; for a start-over, the member's session, the phrase and 24 h without a cancel from the portal, the email link or the app |
 
 0.16.0 removed the recovering app as an authority (it had deleted with
 the PIN alone when the backup was off). A member without the app or the
@@ -21755,8 +21763,9 @@ Deletion is idempotent.
   unchanged, and `vault.delete`'s `exp` is untouched: it bounds when a
   waiting request may first apply, while the resume only finishes a
   deletion the vault already marked. The host's `delete` (§11.5) stays
-  unconditional and is still sent only for an account cancellation and
-  a start-over; the member API never sends it because of `deleting_at`.
+  unconditional and is still sent only for a vault without a member
+  (before MEMBER-API 2.14.0, an account cancellation; 0.83.4) and a
+  start-over; the member API never sends it because of `deleting_at`.
 - **What the member API shows meanwhile: nothing different.** The
   mark is written by the host, which is not trusted, so it is never
   shown to members: a forged or faulty mark must not be able to make a

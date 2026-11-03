@@ -11,10 +11,12 @@ changelog:
     /api/account/cancel`, which is withdrawn. The deletion is refused
     while the member has a vault (`409 vault_exists`), is confirmed by
     the phrase, the PIN if set and an email code, waits 7 days, and can
-    be cancelled from the email's link. It never asks a vault to delete
-    itself: the cleanup job holds an account that still has one. The
+    be cancelled from the email's link until it is carried out. It never
+    asks a vault to delete itself: the cleanup job holds an account that
+    still has one, or whose confirmation email was not sent. The
     mailing-list entry goes with the account if the member asks.
-    Retention and "Vault deletion" (Account cancellation) say so
+    Retention and "Vault deletion" (its opening, Account cancellation,
+    Vaults without a member) say so
   - 2.13.2 (2026-10-26; **owner decision of 2026-10-26**, with
     VAULT-MESSAGING 0.63.1): the list of readable codes that prove no
     step 1 was stored now also names `attestation`. No API change
@@ -984,7 +986,7 @@ set, changed, removed or locked.
 | GET | `/api/account/deletion` | — | 2.14.0: `{blocked_by: {vaults: [{vault_id, state}]} \| null, pin_required, mailing_list}` ("Deleting the account") |
 | POST | `/api/account/deletion/code` | — | 2.14.0: `202 {expires_at}`, a 6-digit code emailed; `409 vault_exists`; `429` |
 | POST | `/api/account/deletion` | `{confirm: "delete my account", code, pin?, remove_from_mailing_list}` | 2.14.0: `202 {deletion_id, requested_at, deletes_at}`. Account disabled now, deleted after 7 days; cookies cleared; `409 vault_exists` while the member has a vault |
-| POST | `/api/account/deletion/cancel-link` | `{token}` (no session) | 2.14.0: `200 {cancelled: boolean}`; `404` from `deletes_at` |
+| POST | `/api/account/deletion/cancel-link` | `{token}` (no session) | 2.14.0: `200 {cancelled: boolean}`; `404` once the account is deleted; `429` |
 | POST | `/api/account/cancel` | — | Withdrawn in 2.14.0 (`404`): the deletion above replaces it |
 
 ```ts
@@ -1053,13 +1055,18 @@ and the texts are in **ACCOUNT-ADMIN-PLAN §5.4** (owner decisions of
   hour), checked in that order, then the vault again.
 - **Carried out** by the daily cleanup job at the first run from
   `deletes_at` (7 days); until then the account is `canceled` (sign-in
-  disabled, sessions ended), and the **cancel link** in the
-  confirmation email (`/account/delete/cancel/#t=<token>`) or an admin's
-  reinstate puts it back. The job checks the vaults once more and
-  **holds** an account that has one (`member.deletion_held`,
-  `AccountDeletionsHeldVault`).
+  disabled, sessions ended). The **cancel link** in the confirmation
+  email (`/account/delete/cancel/#t=<token>`, rate-limited in the API,
+  no session) or an admin's reinstate puts it back, until the job has
+  deleted the account. The confirmation is sent by the members-stream
+  mailer with a claim on the row. The job checks the vaults once more
+  and **holds** an account that has one, or whose confirmation was not
+  sent (`member.deletion_held`, `AccountDeletionsHeld`); a never-sealed
+  vault row is deleted first under a condition, and a failed condition
+  holds it too.
 - The **mailing-list entry** goes with the account when
-  `remove_from_mailing_list` was true.
+  `remove_from_mailing_list` was true, as an unsubscribe removes it
+  (with the list's release marker).
 
 ## Vault (alternate channel)
 
@@ -2969,8 +2976,10 @@ whatever the lease: `alarm = {kind: "credential_clone", alarm_id, at}`
 
 A vault is deleted by its app (`vault.delete` over the relay: the
 holder with the PIN and the password), by the member's start-over from
-the account site (2.1.0, below), or by the member API when an account is
-cancelled. 2.1.0 removed the recovering app's deletion (VAULT-MESSAGING
+the account site (2.1.0, below), or by the member API for a vault
+without a member (2.6.5, below) and, before 2.14.0, when an account was
+cancelled (2.14.0: an account deletion is refused while the member has
+a vault, "Deleting the account"). 2.1.0 removed the recovering app's deletion (VAULT-MESSAGING
 0.16.0). The vault deletes itself:
 notices and revocations, keys destroyed, every stored object erased.
 Its own audit log goes with it, so the member is told by email.
@@ -3017,12 +3026,14 @@ Its own audit log goes with it, so the member is told by email.
   The stamp is what keeps a row whose notice may still be retried (a
   failed send) from being removed. A row still pending is listed by
   RUNBOOK "Vault attachment sweep".
-- **Account cancellation.** (2.14.0: no longer for new deletions. An
-  account deletion is refused while the member has a vault and never
-  asks one to delete itself ("Deleting the account"); what follows is
-  kept for vaults asked before 2.14.0, which the daily retry carries on
-  asking until they report `deleted`, and whose apps are still told
-  `410 account_deleted`.) After the 7-day grace period the cleanup job
+- **Account cancellation.** (2.14.0: no longer started by a new account
+  deletion, which is refused while the member has a vault and never
+  asks one to delete itself ("Deleting the account"). The mechanism
+  stays live: the "Vaults without a member" sweep below uses it, the
+  daily retry carries on asking the vaults already asked until they
+  report `deleted`, and their apps are still told `410
+  account_deleted`. For accounts cancelled before 2.14.0, see
+  ACCOUNT-ADMIN-PLAN §5.4.3.2.) After the 7-day grace period the cleanup job
   enqueues the operation `delete` (§11.5 SQS message, no envelope) for
   each of the member's vaults not yet `deleted`, to the leaseholder or
   else a live instance of the vault's `sealed_release` (requesting a
@@ -3054,7 +3065,7 @@ Its own audit log goes with it, so the member is told by email.
     while the vault still exists.
   - When the member row is still missing 7 days or more after the
     mark of every one of that member's vaults, the run does what the
-    account deletion does: each vault is asked to delete itself as
+    account deletion did before 2.14.0: each vault is asked to delete itself as
     above, a never-sealed row and the pointer row are deleted, and the
     audit event `vault.orphan_deletion_requested` (actor `system`,
     subject the `user_guid`, detail `vault_ids`, `orphan_seen_at`) is
