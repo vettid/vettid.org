@@ -542,7 +542,7 @@ changelog:
 owner: Al Liebl (Mesmer)
 related:
   - ANDROID-PLAN.md (0.1.102; §4.16 results check and choice labels from 0.1.116; the results rules, app lock and held notices of 0.1.117) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.81.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.83.3) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -672,7 +672,7 @@ the Mac agent does not reopen them.
 | ID14 | **Navigation** | The Android drawer (Proton Mail's iOS app also uses a side menu), the same destinations and order (ANDROID-PLAN §4 "Drawer"); the system back gesture | A tab bar (diverges from Android and the texts) | I0.2 |
 | ID15 | **"Installed from" on iOS** | App Attest reports no signer and an iOS binding has none (VAULT-MESSAGING §11.7.1 "iOS"). Settings → Vault status shows "Installed from: Apple (App Store or TestFlight)" for the release and staging builds and "Installed from: Xcode (development)" for the others, from the build configuration, with the line "Apple App Attest confirms this is the VettID app" | No line | I1.7 |
 | ID16 | **Real iPhone on staging before VA2** | Wait for VA2 (a staging release that pins `<team>.com.vettid.app.staging`). Not recommended: pointing a `com.vettid.app` build at staging, which today's staging images would accept | — | I1 exit |
-| ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`); a UI gate only that protects no data at rest (0.1.44; 0.1.46, owner decision of 2026-10-28: **no data key**; a Secure Enclave key (`.biometryCurrentSet` or `.devicePasscode`) gates the prompt with a fresh challenge each time, as Android's prompt key does, so a new face or finger is noticed; the app keeps no vault content on the phone, §6.9), never in place of the PIN or the password | — | I1.6 |
+| ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`); a UI gate only that protects no data at rest (0.1.44; 0.1.46, owner decision of 2026-10-28: **no data key**; a Secure Enclave key (`.biometryCurrentSet` or `.devicePasscode`) gates the prompt with a fresh challenge each time, as Android's prompt key does, so a new face or finger is noticed; the app keeps no vault content on the phone, §6.9; the timeout and lock rules: §6.6 (0.1.60)), never in place of the PIN or the password | — | I1.6 |
 | ID18 | **Contact with Apple at attestation** | Say it in Help → Privacy: "When you set up, move or recover a vault, your iPhone asks Apple to vouch for the VettID app. Apple learns that VettID was set up on an iPhone, nothing about your vault." (`attestKey` reaches Apple's servers; assertions do not.) | Silence | I1.5 |
 | ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.12): a toolbar item beside the bell while something waits for the member's decision, with its count; time-critical from arrival (sign-ins shown neutral) for sign-in and approval challenges, session requests and `approval.pending`, else in the last 2 minutes, with the time left; a tap opens the Approvals list; a short banner with View for a new time-critical request while the app is open; from phase P a request's notification opens that request, `.timeSensitive` for approval challenges and session requests but not for sign-ins; a sign-in's countdown is neutral. Before APNs (ID12) the indicator, the banner and, while the app is open, a request's local notification are the only cues | — | I2.3 |
 
@@ -1796,9 +1796,9 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   texts; `pending` with reason `input` keeps the existing problem text.
   The reserved `abstain` is always shown as "Abstain" (the vote
   screen's list, the confirm sheet, the member's own choice, the Results
-  rows), and a real choice whose label, after trimming Unicode
-  White_Space and removing Default_Ignorable characters and U+2800
-  anywhere, equals "Abstain", ignoring case, is shown by its choice id
+  rows), and a real choice whose label, after removing
+  Default_Ignorable characters and U+2800 anywhere and then trimming
+  Unicode White_Space at both ends, equals "Abstain", ignoring case, is shown by its choice id
   (0.1.60).
 - **The results check rules** (0.1.60; ANDROID-PLAN 0.1.117 "The results
   check: the app's rules", the same on both apps, owner decision a,
@@ -1814,9 +1814,9 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   shows: "VettID could not check the published results of this vote
   again just now, so their numbers are not shown. It will try again
   when you open this vote.", approved by the owner 2026-11-03), and the
-  "Abstain" matching (trim Unicode White_Space, remove
-  Default_Ignorable characters and U+2800 anywhere, ignore case;
-  look-alike letters are out of scope). Going to the background cancels
+  "Abstain" matching (remove Default_Ignorable characters and U+2800
+  anywhere, then trim Unicode White_Space at both ends, then ignore case;
+  look-alike letters are out of scope). `other_rows` and `rows_unavailable` are sent only to a vault that lists the capability `vote_rows`. Going to the background cancels
   a recheck; it runs again on return.
 - The credential password prompt is the existing one (§4, the unlock
   window), used before `vote.cast`.
@@ -2355,7 +2355,7 @@ leaving the screen.
   does not hold back the notification cover. Turning the lock off, or
   changing its method, asks for the owner first (the device passcode or
   Face ID or Touch ID); a cancelled method change keeps the lock on with
-  the old method.
+  the old method. The return is judged when the app comes back, and the wall-clock step is checked at the return and whenever the system reports a clock change. iOS keeps the original mark. The prompts use the existing "Unlock VettID" texts; no new string.
 - **Daily check and held screens** (0.1.60; owner decisions a,
   2026-11-03, threads 01M6FHES389JBHYZTN648MH3MG and
   01M6FHNQ9XK4PDA3DK7R4C4ZDZ; as ANDROID-PLAN §6 owner check items 3
