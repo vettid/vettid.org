@@ -4,12 +4,15 @@ status: draft
 version: 0.1.118
 date: 2026-11-03
 changelog:
-  - 0.1.118: erratum, 2026-11-03 (owner decision a, thread
+  - 0.1.118: erratum, 2026-11-03 (owner decision b, thread
+    01M6HBS3NM6MSNRSEW648YXZX2, which replaces decision a of thread
     01M6HAAZYYVB2F360X8ZTAFVTH; texts approved in thread
     01M6HB646D1T5ET1PEZD95SNVJ). §4 "Service connections (0.1.90)": the
-    connection request shows no `ik` fingerprint, because the vault's
-    request carries none; the match code binds the keys and the
-    fingerprint stays on the service's detail. The section's 10 texts
+    connection request keeps the service's `ik` fingerprint, shown before
+    approving, because the match code does not prove who runs the
+    service. The vault's request carries no `ik` today, so the vault
+    adds it (a VAULT-MESSAGING change); until then the line is absent.
+    The section's 10 texts
     are approved as written (with `service_detail_can_ask_body_votes`
     of §4 "Votes", approved on 2026-10-30).
   - 0.1.117: erratum, 2026-11-03 (owner decisions a, threads
@@ -5115,11 +5118,15 @@ above the code: the line **"This is a service, not a person."** with
 the small print **"The invitation says so. VettID has not checked who runs it."**
 The member compares the code and approves as before. Beside the
 service's name the request says **"Name given by the service"**, never
-"the name on their VettID account". (0.1.118) The request shows no `ik`
-fingerprint: the vault's request carries no `ik` (VAULT-MESSAGING §6.2),
-the code already binds the keys, and the fingerprint shows on the
-service's detail once connected (owner decision a, 2026-11-03). A
-request without the marker shows nothing new.
+"the name on their VettID account", and shows the fingerprint of the
+service's `ik` (§10.8), labelled "Vault key fingerprint", which a member
+can compare with one the service publishes before approving. The match
+code proves that no one is in between, not who runs the service; the
+fingerprint is the check of who it is. (0.1.118) The request carries
+the service's `ik` once the vault sends it (a VAULT-MESSAGING change,
+owner decision b, 2026-11-03, thread 01M6HBS3NM6MSNRSEW648YXZX2); until
+then the fingerprint line is absent, and the service's detail shows it
+once connected. A request without the marker shows nothing new.
 
 **Lists.**
 
@@ -5176,7 +5183,8 @@ without shows neither; the Services section appears only with a service;
 a service is absent from Messages and the new-message picker; its detail
 has no Call, message or share rows; an unknown `peer_kind` is a person; a
 `forbidden` shows the text once and removes the action; (0.1.118) a
-service request shows no `ik` fingerprint.
+service request with the service's `ik` shows its fingerprint, and one
+without shows no fingerprint line.
 
 ### Sign-in match code (0.1.100)
 
