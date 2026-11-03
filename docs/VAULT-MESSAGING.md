@@ -5807,16 +5807,17 @@ keeps a service to the few things a service does today.
 
 **What the member sees before approving.** Apps show the requester's
 names as before and, when `peer_kind` is `"service"`, that it is a
-service ("a service, not a person") on the connection request, beside the
-SAS, so that a person cannot pose as a service, or the reverse,
+service ("a service, not a person") on the connection request, beside
+the SAS, so that a person cannot pose as a service, or the reverse,
 unnoticed. Apps word it as a claim by the other side, not a fact
 (ANDROID-PLAN "Service connections"). On an outgoing request to a
-service the app also shows the **fingerprint** of the peer's `ik` (§10.8),
-and it MAY on any outgoing request, once the vault sends it with the SAS (0.83.7; `connection.request.outgoing`, §10.4). The
-SAS shows that no one is in between; it does not show who holds the
-key. A fingerprint that matches one the service publishes where the
-member already trusts it (its own website, say) does. A request without
-`ik`, from a vault before 0.83.7, shows no fingerprint.
+service the app also shows the **fingerprint** of the peer's `ik`
+(§10.8), and it MAY on any outgoing request, once the vault sends it
+with the SAS (0.83.7; `connection.request.outgoing`, §10.4). The SAS
+shows that no one is in between; it does not show who holds the key. A
+fingerprint that matches one the service publishes where the member
+already trusts it (its own website, say) does. A request without `ik`,
+from a vault before 0.83.7, shows no fingerprint.
 
 **What the vault allows.** For a connection whose stored `peer_kind` is
 `"service"`:
