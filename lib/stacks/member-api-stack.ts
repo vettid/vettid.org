@@ -353,6 +353,13 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     // cancel or a reinstate made in between).
     cognitoActions(cleanup, ['AdminDeleteUser', 'AdminGetUser', 'AdminDisableUser', 'AdminUserGlobalSignOut', 'AdminEnableUser']);
     cleanup.addToRolePolicy(sesSend); // the account deletion's "not deleted yet" email (a vault holds it)
+    // The held step's once-per-run marker (lambda/jobs/cleanup.ts
+    // HELD_MARK_PREFIX): a conditional put of that key prefix only.
+    cleanup.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:PutItem'],
+      resources: [`arn:${this.partition}:dynamodb:${this.region}:${this.account}:table/${resourceName(config, 'ratelimits')}`],
+      conditions: { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['acctdel-held#*'] } },
+    }));
     new events.Rule(this, 'CleanupSchedule', {
       schedule: events.Schedule.cron({ minute: '0', hour: '7' }), // 07:00 UTC daily
       targets: [new targets.LambdaFunction(cleanup)],

@@ -555,6 +555,13 @@ describe('VettidOrgMemberApiStack', () => {
       expect(JSON.stringify(list.map((x: any) => x.Resource))).not.toContain('/index/');
       // The same prefix the signup code's release markers use.
       expect(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lambda', 'signup', 'subscribe.mjs'), 'utf8')).toContain('const releaseKey = () => `#release#${');
+      // MEMBER-API 2.14.0: the ratelimits table, only the held step's once-per-run marker.
+      const rl = stmts.filter((s: any) => JSON.stringify(s.Resource).includes('table/vettid-org-ratelimits'));
+      expect(rl.map((x: any) => [[].concat(x.Action), x.Condition ?? null])).toEqual([
+        [['dynamodb:PutItem'], { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['acctdel-held#*'] } }],
+      ]);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      expect(require('../lambda/jobs/cleanup').HELD_MARK_PREFIX).toBe('acctdel-held#');
     });
 
     describe('MEMBER-API 2.14.0: deleting the account', () => {
