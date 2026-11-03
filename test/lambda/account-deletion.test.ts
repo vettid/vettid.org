@@ -184,7 +184,8 @@ describe('POST /api/account/deletion/code', () => {
     // It can never equal a PIN's HMAC (`<guid>:<pin>`).
     expect(dc.hash).not.toBe(await hashPin(G, code));
     expect(events().map((e) => [e.actor, e.action, e.subject, e.detail])).toEqual([[`member:${G}`, 'member.deletion_code', G, {}]]);
-    expect(rlKeys()).toEqual([expect.stringMatching(new RegExp(`^acctdel-code#${G}#\\d+$`)), expect.stringMatching(/^link#email#leaving@example\.org#\d+$/), expect.stringMatching(/^link#global#\d+$/)]);
+    // The limits before the vault check; sign-in's per-address and global ones before this account's.
+    expect(rlKeys()).toEqual([expect.stringMatching(/^link#email#leaving@example\.org#\d+$/), expect.stringMatching(/^link#global#\d+$/), expect.stringMatching(new RegExp(`^acctdel-code#${G}#\\d+$`))]);
     cleanLogs(code);
   });
 
@@ -197,7 +198,7 @@ describe('POST /api/account/deletion/code', () => {
     expect(r).toEqual({ status: 409, body: { error: 'vault_exists', message, vaults: v.map(({ vault_id, state }) => ({ vault_id, state })) }, cookies: [] });
     expect(memberUpdates()).toEqual([]);
     expect(mails()).toEqual([]);
-    expect(rlKeys()).toEqual([]);
+    expect(rlKeys()).toHaveLength(3); // the limits come first
   });
 
   test('the texts of the vault refusals are those of the page', () => {
@@ -222,6 +223,9 @@ describe('POST /api/account/deletion/code', () => {
     expect(r).toMatchObject({ status: 429, body: { error: 'rate_limited', message, retry_after: expect.any(Number) } });
     expect(memberUpdates()).toEqual([]);
     expect(mails()).toEqual([]);
+    expect(lam.commandCalls(InvokeCommand)).toHaveLength(0); // before the member-vaults invoke
+    // The per-account counter is not spent when the address's or the global limit refuses.
+    if (prefix !== 'acctdel-code#') expect(rlKeys().some((k) => k.startsWith('acctdel-code#'))).toBe(false);
   });
 
   test("the email can't be sent: 500 with its text, and this code is taken off again (only this one)", async () => {

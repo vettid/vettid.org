@@ -524,11 +524,18 @@ router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, body,
     }
   }
   // member.reinstate is the one step after the status write that can fail
-  // the call (ADMIN-API); what follows it is best effort.
-  await audit(actor, 'member.reinstate', m.user_guid, { email: m.email, from: m.account_status });
+  // the call (ADMIN-API); the deletion's cancel event and email are made
+  // whatever happens to it, and its failure is answered after them.
+  let reinstateAudit: unknown = null;
+  try {
+    await audit(actor, 'member.reinstate', m.user_guid, { email: m.email, from: m.account_status });
+  } catch (e) {
+    reinstateAudit = e;
+  }
   if (canceled) {
     try {
-      await audit(actor, 'member.deletion_cancel', m.user_guid, { email: m.email, deletion_id: deletion?.deletion_id ?? null, via: 'admin' });
+      // No address in it (ACCOUNT-ADMIN-PLAN §5.4.5): member.reinstate's record carries it.
+      await audit(actor, 'member.deletion_cancel', m.user_guid, { deletion_id: deletion?.deletion_id ?? null, via: 'admin' });
     } catch (e) {
       console.error('reinstate: the deletion cancel not audited', JSON.stringify({ user_guid: m.user_guid, deletion_id: deletion?.deletion_id ?? null, error: (e as Error).name }));
     }
@@ -539,6 +546,7 @@ router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, body,
       console.error('account deletion cancel notice failed', (e as Error).name);
     }
   }
+  if (reinstateAudit) throw reinstateAudit;
   await pushAccountSnapshot(m.user_guid); // the vault's account snapshot (MEMBER-API 2.0.0)
   return view(updated);
 });

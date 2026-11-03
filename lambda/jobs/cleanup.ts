@@ -1252,13 +1252,37 @@ async function disableOwnSignIn(m: MemberItem): Promise<'ok' | 'enable_failed'> 
  */
 async function holdDeletion(m: MemberItem, reason: 'vault' | 'enrolling' | 'mail', vaultIds: string[], nowMs: number): Promise<void> {
   console.warn('canceled account: deletion held', JSON.stringify({ user_guid: m.user_guid, reason })); // never the address
+  // Once per scheduled run: a retried invoke, or a second run in the same
+  // 07:00 slot, finds this marker and neither audits nor mails again. It is
+  // in the ratelimits table (the job writes nothing to the member row) and
+  // expires by itself. If it cannot be written, the hold is still audited,
+  // but no email is sent (a second one would reach the member).
+  const slot = scheduledRun(nowMs);
+  let first: boolean | null = true;
   try {
-    await audit('system', 'member.deletion_held', m.user_guid, { reason, ...(vaultIds.length ? { vault_ids: vaultIds } : {}) });
+    await ddb.send(
+      new PutCommand({
+        TableName: table.ratelimits(),
+        Item: { key: `${HELD_MARK_PREFIX}${m.user_guid}#${slot / 1000}`, expires_at: slot / 1000 + 2 * 86_400 },
+        ConditionExpression: 'attribute_not_exists(#k)',
+        ExpressionAttributeNames: { '#k': 'key' },
+      }),
+    );
+  } catch (e) {
+    if (conditionFailed(e)) first = false;
+    else {
+      console.error('canceled account: held, run marker not written', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
+      first = null;
+    }
+  }
+  if (first === false) return;
+  try {
+    await audit('system', 'member.deletion_held', m.user_guid, { reason, ...(reason === 'vault' && vaultIds.length ? { vault_ids: vaultIds } : {}) });
   } catch (e) {
     console.error('canceled account: held, not audited', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
   }
   const firstRun = firstDeletionRun(m.account_deletion?.deletes_at ?? '');
-  if (reason === 'mail' || !Number.isFinite(firstRun) || scheduledRun(nowMs) !== firstRun) return;
+  if (first !== true || reason === 'mail' || !Number.isFinite(firstRun) || slot !== firstRun) return;
   const mail = deletionHeldMail();
   try {
     await sendMail(m.email, mail.subject, mail.text);
@@ -1266,6 +1290,9 @@ async function holdDeletion(m: MemberItem, reason: 'vault' | 'enrolling' | 'mail
     console.error('canceled account: held notice not sent', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name }));
   }
 }
+
+/** The held step's once-per-run marker in the ratelimits table (the only key the job may put there). */
+export const HELD_MARK_PREFIX = 'acctdel-held#';
 
 // The mailing list's own keys (lambda/signup/subscribe.mjs, whose
 // `removeSubscription` the removal below mirrors; duplicated, as that

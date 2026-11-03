@@ -1303,10 +1303,62 @@ describe('cleanup job: account deletions (MEMBER-API 2.14.0; ACCOUNT-ADMIN-PLAN 
     expect(r).toMatchObject({ deleted: 0, failures: 0 });
     expect(order).toEqual(['read', 'disable', 'sign_out', 'read']);
     nothingDeleted();
-    expect(audits()).toEqual([expect.objectContaining({ actor: 'system', action: 'member.deletion_held', subject: 'g1', detail: { reason, vault_ids: ids } })]);
+    // vault_ids for reason vault only.
+    expect(audits()).toEqual([expect.objectContaining({ actor: 'system', action: 'member.deletion_held', subject: 'g1', detail: reason === 'vault' ? { reason, vault_ids: ids } : { reason } })]);
     expect(heldEmf()).toEqual([expect.objectContaining({ AccountDeletionsHeld: 1, _aws: expect.objectContaining({ CloudWatchMetrics: [expect.objectContaining({ Namespace: 'VettID/MemberApi' })] }) })]);
     expect(mails()).toEqual([{ to: 'gone@x.org', subject: 'Your VettID account was not deleted yet' }]);
     expect(warn.mock.calls.map((c) => c.join(' '))).toContainEqual(`canceled account: deletion held {"user_guid":"g1","reason":"${reason}"}`);
+  });
+
+  const marks = () => ddb.commandCalls(PutCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'rl');
+
+  test('once per scheduled run: the hold writes a marker (conditional) before its audit and email; a retried invoke or a second run in the same slot finds it and neither audits nor mails again (still held and counted)', async () => {
+    setup(account(), [sealed]);
+    await cleanup.handler();
+    expect(marks()).toEqual([{
+      TableName: 'rl',
+      Item: { key: `acctdel-held#g1#${Date.parse('2026-11-10T07:00:00.000Z') / 1000}`, expires_at: Date.parse('2026-11-10T07:00:00.000Z') / 1000 + 2 * 86_400 },
+      ConditionExpression: 'attribute_not_exists(#k)',
+      ExpressionAttributeNames: { '#k': 'key' },
+    }]);
+    expect(audits().map((a) => a.action)).toEqual(['member.deletion_held']);
+    expect(mails()).toHaveLength(1);
+    // The same slot again (an EventBridge retry, 20 minutes later): the marker is there.
+    jest.setSystemTime(Date.parse('2026-11-10T07:20:00.000Z'));
+    ddb.resetHistory(); ses.resetHistory(); log.mockClear();
+    ddb.on(PutCommand, { TableName: 'rl' } as any).rejects(ccf());
+    const r = await cleanup.handler();
+    expect(r).toMatchObject({ deleted: 0, failures: 0 });
+    expect(audits()).toEqual([]);
+    expect(mails()).toEqual([]);
+    expect(heldEmf()[0].AccountDeletionsHeld).toBe(1);
+    nothingDeleted();
+  });
+
+  test('a marker that cannot be written: the hold is audited, but no email (a second one could reach the member)', async () => {
+    setup(account(), [sealed]);
+    ddb.on(PutCommand, { TableName: 'rl' } as any).rejects(Object.assign(new Error('x'), { name: 'InternalServerError' }));
+    const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    await cleanup.handler();
+    expect(audits().map((a) => a.action)).toEqual(['member.deletion_held']);
+    expect(mails()).toEqual([]);
+    expect(err.mock.calls.map((c) => c.join(' '))).toContainEqual('canceled account: held, run marker not written {"user_guid":"g1","error":"InternalServerError"}');
+  });
+
+  test('a retried run after a deletion finds no row: member.delete_after_cancel is written once (the guard lets one transaction through)', async () => {
+    setup(account(), []);
+    await cleanup.handler();
+    expect(audits().map((a) => a.action)).toEqual(['member.delete_after_cancel']);
+    ddb.resetHistory();
+    current = undefined; // the row went with the transaction
+    await cleanup.handler();
+    expect(audits()).toEqual([]);
+    // Two runs that both read it before either deleted it: the second transaction fails its guard.
+    ddb.resetHistory();
+    current = account();
+    ddb.on(TransactWriteCommand).rejects(Object.assign(new Error('t'), { name: 'TransactionCanceledException', CancellationReasons: [{ Code: 'ConditionalCheckFailed' }, { Code: 'None' }] }));
+    await cleanup.handler();
+    expect(audits()).toEqual([]);
   });
 
   test('the held email goes only at the run scheduled (07:00 UTC) for the first run at or after deletes_at; later runs hold and audit without it', async () => {
@@ -1387,7 +1439,7 @@ describe('cleanup job: account deletions (MEMBER-API 2.14.0; ACCOUNT-ADMIN-PLAN 
     expect(r).toMatchObject({ deleted: 0, failures: 0 });
     expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
     expect(idp.commandCalls(AdminDeleteUserCommand)).toHaveLength(0);
-    expect(audits()).toEqual([expect.objectContaining({ action: 'member.deletion_held', detail: { reason: 'enrolling', vault_ids: [B] } })]);
+    expect(audits()).toEqual([expect.objectContaining({ action: 'member.deletion_held', detail: { reason: 'enrolling' } })]);
     expect(heldEmf()[0].AccountDeletionsHeld).toBe(1);
   });
 

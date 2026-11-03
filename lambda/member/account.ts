@@ -391,12 +391,14 @@ router.on('GET', '/api/account/deletion', async (req) => {
 
 router.on('POST', '/api/account/deletion/code', async (req) => {
   const m = await loadMember(req);
-  // First, so that no code is sent for a deletion that cannot go ahead.
-  const vaults = await blockingVaults(m);
-  if (vaults.length) throw vaultExists(vaults);
-  await limit(`acctdel-code#${m.user_guid}`, DELETION_CODES_PER_HOUR, 3600, TEXT.codeLimit);
+  // The limits first (before the member-vaults invoke): sign-in's per-address
+  // and global mail limits, then this account's 3 an hour.
   await limit(`link#email#${m.email}`, SIGN_IN_MAILS_PER_ADDRESS_HOUR, 3600, TEXT.tooMany);
   await limit('link#global', SIGN_IN_MAILS_GLOBAL_HOUR, 3600, TEXT.tooMany);
+  await limit(`acctdel-code#${m.user_guid}`, DELETION_CODES_PER_HOUR, 3600, TEXT.codeLimit);
+  // Then the vault, so that no code is sent for a deletion that cannot go ahead.
+  const vaults = await blockingVaults(m);
+  if (vaults.length) throw vaultExists(vaults);
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
   const codeId = randomBytes(9).toString('base64url');
   const expiresAt = Math.floor(Date.now() / 1000) + DELETION_CODE_TTL_S;

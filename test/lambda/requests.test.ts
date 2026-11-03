@@ -1294,7 +1294,12 @@ describe('audit: a person\'s address lives 90 days, the event stays', () => {
         }
       }
       expect(found.size).toBeGreaterThan(20);
-      expect([...found].filter((a) => !backfill.MEMBER_ACTIONS.has(a))).toEqual([]);
+      // MEMBER-API 2.14.0's member.deletion_* events were never written with an address (and an
+      // admin's reinstate writes member.deletion_cancel too): the script must not know them.
+      const since214 = ['member.deletion_cancel', 'member.deletion_code', 'member.deletion_request'];
+      expect(since214.filter((a) => found.has(a))).toEqual(since214);
+      expect(since214.filter((a) => backfill.MEMBER_ACTIONS.has(a))).toEqual([]);
+      expect([...found].filter((a) => !backfill.MEMBER_ACTIONS.has(a) && !since214.includes(a))).toEqual([]);
     });
   });
 });

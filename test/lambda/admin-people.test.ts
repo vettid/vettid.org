@@ -404,7 +404,8 @@ describe("a member's pending vault deletion", () => {
     expect(events().map((e) => e.action)).toEqual(['member.reinstate', 'member.deletion_cancel']); // the second was tried and failed
     expect(mails().map((m) => m.subject)).toEqual(['Your VettID account was not deleted']);
     expect(err.mock.calls.map((c) => String(c[0]))).toEqual(expect.arrayContaining(['reinstate: the deletion cancel not audited', 'reinstate: sign-in not enabled again']));
-    // member.reinstate itself failing: 500, and nothing after it; the second enable was made before it.
+    // member.reinstate itself failing: the second enable was made before it, the deletion's event and
+    // email are made all the same, and then the answer is 500.
     canceledUntilWritten();
     ddb.on(PutCommand).callsFake((i) => {
       if (i.TableName === 'audit' && i.Item.action === 'member.reinstate') throw Object.assign(new Error('x'), { name: 'InternalServerError' });
@@ -413,9 +414,23 @@ describe("a member's pending vault deletion", () => {
     idp.on(AdminEnableUserCommand).callsFake(() => (order.push('enable'), {}));
     ses.resetHistory();
     order = [];
+    ddb.resetHistory();
+    canceledUntilWritten();
     expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(500);
     expect(order).toEqual(['cancel', 'signout', 'enable', 'update', 'enable']);
-    expect(mails()).toEqual([]);
+    expect(events().map((e) => e.action)).toEqual(['member.reinstate', 'member.deletion_cancel']);
+    expect(mails().map((m) => m.subject)).toEqual(['Your VettID account was not deleted']);
+  });
+
+  test('reinstate from canceled: member.deletion_cancel carries no address and writes no address record (only member.reinstate does)', async () => {
+    canceledUntilWritten();
+    job(answer({}));
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(200);
+    const cancel = events().find((e) => e.action === 'member.deletion_cancel')!;
+    expect(JSON.stringify(cancel)).not.toContain('ada@example.org');
+    const addressRecords = audits().filter((a) => String(a.month).startsWith('addr#'));
+    const reinstate = events().find((e) => e.action === 'member.reinstate')!;
+    expect(addressRecords.map((a) => a.ts_id)).toEqual([reinstate.ts_id]);
   });
 
   test('reinstate from canceled: a suspension landing between the status write and the second enable is not undone (the row reads suspended: no enable)', async () => {

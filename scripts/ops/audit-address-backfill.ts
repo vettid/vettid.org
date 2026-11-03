@@ -50,9 +50,6 @@ const STAGES = {
 export const MEMBER_ACTIONS = new Set([
   'member.accept_terms',
   'member.cancel',
-  'member.deletion_cancel',
-  'member.deletion_code',
-  'member.deletion_request',
   'member.pin_change',
   'member.pin_disable',
   'member.pin_enable',
