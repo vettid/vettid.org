@@ -12,9 +12,9 @@ changelog:
     approving, because the match code does not prove who runs the
     service. The vault's request carries no `ik` today, so the vault
     adds it (a VAULT-MESSAGING change); until then the line is absent.
-    The section's 10 texts
-    are approved as written (with `service_detail_can_ask_body_votes`
-    of §4 "Votes", approved on 2026-10-30).
+    The section's 10 texts are approved as written, and
+    `service_detail_can_ask_body_votes` of §4 "Votes" was approved on
+    2026-10-30.
   - 0.1.117: erratum, 2026-11-03 (owner decisions a, threads
     01M6FT8PCK46FTKM42VFY348S5, 01M6FHES389JBHYZTN648MH3MG,
     01M6FHNQ9XK4PDA3DK7R4C4ZDZ; the lead's decision of 2026-11-03 for
@@ -5119,14 +5119,16 @@ the small print **"The invitation says so. VettID has not checked who runs it."*
 The member compares the code and approves as before. Beside the
 service's name the request says **"Name given by the service"**, never
 "the name on their VettID account", and shows the fingerprint of the
-service's `ik` (§10.8), labelled "Vault key fingerprint", which a member
-can compare with one the service publishes before approving. The match
-code proves that no one is in between, not who runs the service; the
-fingerprint is the check of who it is. (0.1.118) The request carries
-the service's `ik` once the vault sends it (a VAULT-MESSAGING change,
-owner decision b, 2026-11-03, thread 01M6HBS3NM6MSNRSEW648YXZX2); until
-then the fingerprint line is absent, and the service's detail shows it
-once connected. A request without the marker shows nothing new.
+service's `ik` (§10.8), labelled as on the service's detail, which a
+member can compare before approving. The match code proves that no one
+is in between, not who runs the service; a fingerprint that matches one
+the service publishes where the member trusts it (its own website, say)
+is that check. (0.1.118) The app reads `ik` in
+`connection.request.outgoing` and the outgoing entries of
+`connection.request.list`, as VAULT-MESSAGING will specify (owner
+decision b, 2026-11-03, thread 01M6HBS3NM6MSNRSEW648YXZX2); until a
+vault sends it the fingerprint line is absent, and the service's detail
+shows it once connected. A request without the marker shows nothing new.
 
 **Lists.**
 
