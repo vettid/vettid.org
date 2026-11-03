@@ -1,9 +1,13 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.60
+version: 0.1.61
 date: 2026-11-03
 changelog:
+  - 0.1.61: erratum, 2026-11-03 (ANDROID-PLAN 0.1.118). §4.13: the
+    service texts are approved, and the connection request shows the
+    service's `ik` fingerprint before approving once the vault sends
+    it, as on Android.
   - 0.1.60: erratum, 2026-11-03 (owner decisions a, threads
     01M6FT8PCK46FTKM42VFY348S5, 01M6FHES389JBHYZTN648MH3MG,
     01M6FHNQ9XK4PDA3DK7R4C4ZDZ; the lead's decision of 2026-11-03 for
@@ -1649,7 +1653,9 @@ and back-stack rules.* Only these differ on iOS:
 ### 4.13 Service connections (0.1.43)
 
 *Owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0 §6.4, §15 item
-43). Draft texts for the owner. Not built.* The same as ANDROID-PLAN §4
+43). Texts approved by the owner on 2026-11-03; the request shows the
+service's `ik` fingerprint before approving once the vault sends it
+(ANDROID-PLAN 0.1.118). Not built.* The same as ANDROID-PLAN §4
 "Service connections (0.1.90)", carried here by reference and not to be
 changed on one platform alone: the connection request's line "This is a
 service, not a person." with "The invitation says so. VettID has not

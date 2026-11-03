@@ -1,9 +1,20 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.117
+version: 0.1.118
 date: 2026-11-03
 changelog:
+  - 0.1.118: erratum, 2026-11-03 (owner decision b, thread
+    01M6HBS3NM6MSNRSEW648YXZX2, which replaces decision a of thread
+    01M6HAAZYYVB2F360X8ZTAFVTH; texts approved in thread
+    01M6HB646D1T5ET1PEZD95SNVJ). §4 "Service connections (0.1.90)": the
+    connection request keeps the service's `ik` fingerprint, shown before
+    approving, because the match code does not prove who runs the
+    service. The vault's request carries no `ik` today, so the vault
+    adds it (a VAULT-MESSAGING change); until then the line is absent.
+    The section's 10 texts are approved as written, and
+    `service_detail_can_ask_body_votes` of §4 "Votes" was approved on
+    2026-10-30.
   - 0.1.117: erratum, 2026-11-03 (owner decisions a, threads
     01M6FT8PCK46FTKM42VFY348S5, 01M6FHES389JBHYZTN648MH3MG,
     01M6FHNQ9XK4PDA3DK7R4C4ZDZ; the lead's decision of 2026-11-03 for
@@ -5086,9 +5097,10 @@ changes vault code here.
 ### Service connections (0.1.90)
 
 *Owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0 §6.4 "Service
-connections", §15 item 43). The texts are drafts for the owner. Not
-built. Vault: a staging release after 24; until a vault sends
-`peer_kind`, nothing here shows.*
+connections", §15 item 43). The texts were approved by the owner on
+2026-11-03 (thread 01M6HB646D1T5ET1PEZD95SNVJ). Not built. Vault: a
+staging release after 24; until a vault sends `peer_kind`, nothing here
+shows.*
 
 A service (VAULT-MESSAGING §1.1) is a connection that declared itself a
 service in its invitation. The vault enforces what a service may do; the
@@ -5107,8 +5119,16 @@ the small print **"The invitation says so. VettID has not checked who runs it."*
 The member compares the code and approves as before. Beside the
 service's name the request says **"Name given by the service"**, never
 "the name on their VettID account", and shows the fingerprint of the
-service's `ik` (§10.8), which a member can compare with one the service
-publishes. A request without the marker shows nothing new.
+service's `ik` (§10.8), labelled as on the service's detail, which a
+member can compare before approving. The match code proves that no one
+is in between, not who runs the service; a fingerprint that matches one
+the service publishes where the member trusts it (its own website, say)
+is that check. (0.1.118) The app reads `ik` in
+`connection.request.outgoing` and the outgoing entries of
+`connection.request.list`, as VAULT-MESSAGING will specify (owner
+decision b, 2026-11-03, thread 01M6HBS3NM6MSNRSEW648YXZX2); until a
+vault sends it the fingerprint line is absent, and the service's detail
+shows it once connected. A request without the marker shows nothing new.
 
 **Lists.**
 
@@ -5136,7 +5156,7 @@ vault's rule for this release; it is revised with any contract.
 old build that still offers it): "Services can't do that." and nothing
 else; the app removes the action.
 
-**Draft texts** (all English; translations follow the usual way):
+**Texts** (all English; translations follow the usual way):
 
 | Key | Text |
 |---|---|
@@ -5164,7 +5184,9 @@ service to have it marked.
 without shows neither; the Services section appears only with a service;
 a service is absent from Messages and the new-message picker; its detail
 has no Call, message or share rows; an unknown `peer_kind` is a person; a
-`forbidden` shows the text once and removes the action.
+`forbidden` shows the text once and removes the action; (0.1.118) a
+service request with the service's `ik` shows its fingerprint, and one
+without shows no fingerprint line.
 
 ### Sign-in match code (0.1.100)
 
