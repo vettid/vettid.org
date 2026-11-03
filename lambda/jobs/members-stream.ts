@@ -14,15 +14,19 @@
  *    token, no mail) is never mailed from here, whatever is written to its
  *    row later (scripts/ops/request-mail-backfill.ts is the operator's
  *    choice for those).
+ *  - "Your VettID account will be deleted" (MEMBER-API 2.14.0,
+ *    ACCOUNT-ADMIN-PLAN §5.4.3): once per account deletion, with the
+ *    cancel link, whose token is minted here (sendDeletionConfirmation).
  */
 import type { DynamoDBStreamHandler } from 'aws-lambda';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb, env, table } from '../shared/aws';
 import { nowIso } from '../shared/ids';
 import { sendMail } from '../shared/mail';
 import type { MemberItem } from '../shared/model';
 import { adminNotice, newWithdrawToken, requestReceivedMail, withdrawLink } from '../shared/requests';
+import { deletionCancelLink, deletionConfirmationMail, deletionEmf, deletionWhen } from '../shared/account-deletion';
 
 type Image = Parameters<typeof unmarshall>[0];
 
@@ -75,11 +79,87 @@ export async function sendRequestReceived(m: Pick<MemberItem, 'user_guid' | 'ema
   }
 }
 
+/** A canceled row whose deletion's confirmation has not been claimed yet. */
+const deletionToMail = (m: MemberItem): boolean =>
+  m.account_status === 'canceled' && typeof m.account_deletion?.deletion_id === 'string' && !m.account_deletion.mail_claimed_at;
+
+/**
+ * The account deletion's confirmation (ACCOUNT-ADMIN-PLAN §5.4.3). The
+ * cancel link's token is minted here, and the send is claimed in one
+ * conditional write with the token's hash (still canceled, the same
+ * deletion, no claim yet), so a retry or a second record cannot send twice
+ * and the token exists in the email alone. `mailed_at` is written only after
+ * SES accepted the message: without it the cleanup job deletes nothing. A
+ * failed send takes the claim and the hash off again, is logged by error
+ * name and counted (AccountDeletionMailFailures), and throws, so that the
+ * stream retries the record. A function that stops between the claim and
+ * the send leaves the claim without `mailed_at`: nothing sends again by
+ * itself, and the job holds the account (reason `mail`).
+ */
+export async function sendDeletionConfirmation(m: MemberItem): Promise<'sent' | 'skipped'> {
+  const d = m.account_deletion!;
+  // The wording says what the mailing list does; read before the claim, so
+  // that a failed read leaves nothing to undo.
+  const listed = !!(await ddb.send(new GetCommand({ TableName: env('TABLE_MAILING_LIST'), Key: { email: m.email } }))).Item;
+  const { token, hash } = newWithdrawToken(m.user_guid);
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.members(),
+        Key: { user_guid: m.user_guid },
+        UpdateExpression: 'SET account_deletion.cancel_hash = :h, account_deletion.mail_claimed_at = :n',
+        ConditionExpression: 'account_status = :c AND account_deletion.deletion_id = :id AND attribute_not_exists(account_deletion.mail_claimed_at)',
+        ExpressionAttributeValues: { ':h': hash, ':n': nowIso(), ':c': 'canceled', ':id': d.deletion_id },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return 'skipped';
+    throw e;
+  }
+  const mail = deletionConfirmationMail(deletionWhen(d.deletes_at), listed ? d.mailing_list : 'none', deletionCancelLink(env('ACCOUNT_HOST'), token));
+  try {
+    await sendMail(m.email, mail.subject, mail.text);
+  } catch (e) {
+    console.error('account deletion mail failed', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name })); // never the address or the link
+    console.log(deletionEmf('AccountDeletionMailFailures', 1, Date.now()));
+    await ddb
+      .send(
+        new UpdateCommand({
+          TableName: table.members(),
+          Key: { user_guid: m.user_guid },
+          UpdateExpression: 'REMOVE account_deletion.cancel_hash, account_deletion.mail_claimed_at',
+          ConditionExpression: 'account_deletion.deletion_id = :id AND account_deletion.cancel_hash = :h',
+          ExpressionAttributeValues: { ':id': d.deletion_id, ':h': hash },
+        }),
+      )
+      .catch((err: Error) => console.error('account deletion mail un-claim failed', JSON.stringify({ user_guid: m.user_guid, error: err.name })));
+    throw e;
+  }
+  await ddb.send(
+    new UpdateCommand({
+      TableName: table.members(),
+      Key: { user_guid: m.user_guid },
+      UpdateExpression: 'SET account_deletion.mailed_at = :n',
+      ConditionExpression: 'account_deletion.deletion_id = :id AND account_deletion.cancel_hash = :h',
+      ExpressionAttributeValues: { ':n': nowIso(), ':id': d.deletion_id, ':h': hash },
+    }),
+  ).catch((e: Error) => {
+    // Sent, not recorded: the cleanup job holds the account (reason `mail`). A cancel meanwhile fails the condition.
+    if (e.name !== 'ConditionalCheckFailedException') console.error('account deletion mail not recorded', JSON.stringify({ user_guid: m.user_guid, error: e.name }));
+  });
+  return 'sent';
+}
+
 export const handler: DynamoDBStreamHandler = async (event) => {
   for (const rec of event.Records) {
     if (rec.eventName === 'REMOVE' || !rec.dynamodb?.NewImage) continue;
     const m = unmarshall(rec.dynamodb.NewImage as Image) as MemberItem;
     const old = rec.dynamodb.OldImage ? (unmarshall(rec.dynamodb.OldImage as Image) as Partial<MemberItem>) : null;
+
+    if (deletionToMail(m)) {
+      await sendDeletionConfirmation(m);
+      continue;
+    }
 
     // A request that has just become verified (or arrived verified).
     if (verifiedRequest(m) && !verifiedRequest(old) && !m.request_mail_at && !m.withdraw_token_hash) {
