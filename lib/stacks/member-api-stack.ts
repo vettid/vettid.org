@@ -178,7 +178,13 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     g(account, 'ratelimits', ['GetItem', 'PutItem', 'UpdateItem', 'DeleteItem']); // PIN lockout (atomic reserve)
     account.addToRolePolicy(sesSend); // PIN change / lockout notices
     g(account, 'audit', ['PutItem']);
-    cognitoActions(account, ['AdminAddUserToGroup', 'AdminDisableUser', 'AdminUserGlobalSignOut']);
+    // AdminEnableUser (MEMBER-API 2.14.0): the account deletion's cancel link
+    // enables sign-in again before it writes the row back to active.
+    cognitoActions(account, ['AdminAddUserToGroup', 'AdminDisableUser', 'AdminEnableUser', 'AdminUserGlobalSignOut']);
+    // The account deletion's page asks whether the address is on the mailing
+    // list (the signup stack's table, by its fixed name; read only).
+    tableGrant(this, config, account, 'mailing-list', ['GetItem']);
+    account.addEnvironment('TABLE_MAILING_LIST', resourceName(config, 'mailing-list'));
     account.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['s3:GetObject'],
@@ -324,14 +330,20 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     // run reads the member's row first (one consistent GetItem). The job
     // still cannot put or update a member row (it deletes them, above).
     g(cleanup, 'members', ['GetItem']);
-    // stale-request reclaim: keep identities the mailing list still uses
-    tableGrant(this, config, cleanup, 'mailing-list', ['GetItem']);
+    // stale-request reclaim: keep identities the mailing list still uses;
+    // MEMBER-API 2.14.0, the account deletion's mailing-list entry, removed as
+    // an unsubscribe removes it (the release marker, the row, its pointer)
+    tableGrant(this, config, cleanup, 'mailing-list', ['GetItem', 'PutItem', 'DeleteItem']);
     cleanup.addEnvironment('TABLE_MAILING_LIST', resourceName(config, 'mailing-list'));
     sesIdentity(cleanup, ['DeleteEmailIdentity']);
     cleanup.addToRolePolicy(denyDomainIdentityDelete);
     // AdminGetUser: a removed request's Cognito user (left by a failed code
     // registration) is deleted only if it carries that request's id.
-    cognitoActions(cleanup, ['AdminDeleteUser', 'AdminGetUser']);
+    // AdminDisableUser, AdminUserGlobalSignOut (MEMBER-API 2.14.0): each
+    // daily run disables sign-in and ends the sessions again for every
+    // canceled account, finishing a request whose own Cognito steps failed.
+    cognitoActions(cleanup, ['AdminDeleteUser', 'AdminGetUser', 'AdminDisableUser', 'AdminUserGlobalSignOut']);
+    cleanup.addToRolePolicy(sesSend); // the account deletion's "not deleted yet" email (a vault holds it)
     new events.Rule(this, 'CleanupSchedule', {
       schedule: events.Schedule.cron({ minute: '0', hour: '7' }), // 07:00 UTC daily
       targets: [new targets.LambdaFunction(cleanup)],
@@ -393,6 +405,18 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
         'OrphanVaultDeletions: the daily cleanup run asked the vaults of a member whose row has been gone for 7 days since the mark to delete themselves, as for a canceled account (audit vault.orphan_deletion_requested; RUNBOOK "Vaults without a member").'),
       orphanAlarm('OrphanVaultsHeld', 'orphan-vaults-held', 'OrphanVaultsHeld',
         'OrphanVaultsHeld: the daily cleanup run found vaults whose member row is gone and did not handle all of them: more members without a row than one run accepts (more than 5, or more than 15 % of the owners: a wrong members table, or one restored from an older backup, is more likely; held at every run until that is no longer so), a member row it could not read, or a write that failed. Nothing was deleted on doubt (RUNBOOK "Vaults without a member").'),
+    ];
+    // The member's account deletion (MEMBER-API 2.14.0, ACCOUNT-ADMIN-PLAN
+    // §5.4.3): an account the daily run holds (a vault, an unfinished setup,
+    // or no confirmation recorded as sent), and a confirmation email that
+    // could not be sent (EMF from the cleanup job and the members-stream
+    // mailer). Neither must be silent: the member may be waiting for a
+    // deletion that will not happen by itself (RUNBOOK "Account deletions held").
+    const deletionAlarms = [
+      orphanAlarm('AccountDeletionsHeld', 'account-deletions-held', 'AccountDeletionsHeld',
+        'AccountDeletionsHeld: the daily cleanup run held an account deletion that was due: the member still has a vault or an unfinished vault setup (reason vault, enrolling), or the confirmation email with the cancel link is not recorded as sent (reason mail). Nothing was deleted; it is held at every run until that changes. For mail, reinstate the account and tell the member to ask again (RUNBOOK "Account deletions held").'),
+      orphanAlarm('AccountDeletionMailFailures', 'account-deletion-mail-failures', 'AccountDeletionMailFailures',
+        'AccountDeletionMailFailures: the members-stream mailer could not send the confirmation email of an account deletion (with the cancel link); the stream retries it. If it never goes, the cleanup job holds the deletion (reason mail, AccountDeletionsHeld) (RUNBOOK "Account deletions held").'),
     ];
     // "Delete my vault and start over" (MEMBER-API 2.1.0, VAULT-MESSAGING
     // 0.16.0 §11.11.9): the same job, every 5 minutes, sends the host's
@@ -459,12 +483,21 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       description: "Lists one member's vaults that are not deleted, for the admin API's Delete (task member_vaults only)",
     }).fn;
     vaultGrants(memberVaults, 'member-vaults');
+    // The member's account deletion (MEMBER-API 2.14.0) is refused while a
+    // vault exists: the account function asks this function too, as the
+    // admin API does (it holds no right on the vault tables).
+    memberVaults.grantInvoke(account);
+    account.addEnvironment('MEMBER_VAULTS_FN', memberVaults.functionName);
 
     // "Account ready" and, 2.6.0, "we have your request" (with the
     // withdrawal link; UpdateItem stores the token's hash on the row).
     const mailer = job('MembersStreamMailer', 'lambda/jobs/members-stream.ts', cdk.Duration.seconds(30));
+    // 2.14.0: the account deletion's confirmation (the cancel link's hash and
+    // the claim on the row), worded by whether the address is on the list.
     g(mailer, 'members', ['UpdateItem']);
     mailer.addToRolePolicy(sesSend);
+    tableGrant(this, config, mailer, 'mailing-list', ['GetItem']);
+    mailer.addEnvironment('TABLE_MAILING_LIST', resourceName(config, 'mailing-list'));
     const membersTable = dynamodb.Table.fromTableAttributes(this, 'MembersTable', {
       tableName: resourceName(config, 'members'),
       tableStreamArn: readRef(this, config, 'data/members-stream-arn'),
@@ -601,6 +634,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       for (const a of removalAlarms) a.addAlarmAction(action);
       for (const a of startOverAlarms) a.addAlarmAction(action);
       for (const a of orphanAlarms) a.addAlarmAction(action);
+      for (const a of deletionAlarms) a.addAlarmAction(action);
       typedCeiling.addAlarmAction(action);
       pausedAlarms[0].addOkAction(action); // "resumed"; the 24 h alarm's OK would say it twice
       watchSilent.addAlarmAction(action);
