@@ -545,10 +545,16 @@ describe('VettidOrgMemberApiStack', () => {
       expect(all).toEqual(expect.arrayContaining(['dynamodb:DeleteItem', 'cognito-idp:AdminGetUser', 'cognito-idp:AdminDeleteUser', 'ses:DeleteEmailIdentity']));
       expect(stmts.some((s: any) => s.Effect === 'Deny' && [].concat(s.Action).includes('ses:DeleteEmailIdentity' as never))).toBe(true);
       // The mailing list: read (is the address on it?), and (MEMBER-API 2.14.0) the account
-      // deletion's removal of its entry, as an unsubscribe: the release marker, the row and its pointer.
+      // deletion's removal of its entry, as an unsubscribe: the row and its pointer, and a
+      // release marker, which is all it may put (its key starts with #release#).
       const list = stmts.filter((s: any) => JSON.stringify(s.Resource).includes('table/vettid-org-mailing-list'));
-      expect(actions(list)).toEqual(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem']);
+      expect(list.map((x: any) => [[].concat(x.Action), x.Condition ?? null])).toEqual([
+        [['dynamodb:GetItem', 'dynamodb:DeleteItem'], null],
+        [['dynamodb:PutItem'], { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['#release#*'] } }],
+      ]);
       expect(JSON.stringify(list.map((x: any) => x.Resource))).not.toContain('/index/');
+      // The same prefix the signup code's release markers use.
+      expect(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lambda', 'signup', 'subscribe.mjs'), 'utf8')).toContain('const releaseKey = () => `#release#${');
     });
 
     describe('MEMBER-API 2.14.0: deleting the account', () => {
@@ -557,8 +563,8 @@ describe('VettidOrgMemberApiStack', () => {
 
       test('the cleanup job disables sign-in and ends the sessions again for every canceled account, and may send the "not deleted yet" email', () => {
         const all = actions(stmtsOf(/vault-cleanup|Cleanup/));
-        expect(all).toEqual(expect.arrayContaining(['cognito-idp:AdminDisableUser', 'cognito-idp:AdminUserGlobalSignOut', 'ses:SendEmail']));
-        expect(all).not.toContain('cognito-idp:AdminEnableUser');
+        // AdminEnableUser: when the row reads active again after that disable (a cancel or a reinstate in between).
+        expect(all).toEqual(expect.arrayContaining(['cognito-idp:AdminDisableUser', 'cognito-idp:AdminUserGlobalSignOut', 'cognito-idp:AdminEnableUser', 'ses:SendEmail']));
       });
 
       test('the account function: the member-vaults check (invoke, by name), the cancel link\'s AdminEnableUser, the mailing list read only', () => {
@@ -1095,6 +1101,15 @@ describe('VettidOrgAccountSiteStack', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { VettidOrgAccountSiteStack } = require('../lib/stacks/account-site-stack');
   const t = Template.fromStack(new VettidOrgAccountSiteStack(newApp(), 'AccountSite', { config, env }));
+
+  test('the edge gate (MEMBER-API 2.14.0): /account/delete/ and its cancel page are served signed out; the rest of /account/ is still redirected', () => {
+    const code = Object.values<any>(t.findResources('AWS::CloudFront::Function')).map((f) => f.Properties.FunctionCode as string).find((c) => c.includes('var GATE'))!;
+    // eslint-disable-next-line no-new-func
+    const handler = new Function(`${code}; return handler;`)() as (e: unknown) => any;
+    const status = (uri: string) => handler({ request: { uri, headers: {}, querystring: {}, cookies: {} } }).statusCode;
+    for (const uri of ['/account/', '/account', '/account/deletex', '/account/deletex/', '/account/vault/deletion/']) expect([uri, status(uri)]).toEqual([uri, 302]);
+    for (const uri of ['/account/delete/', '/account/delete', '/account/delete/cancel/']) expect(status(uri)).not.toBe(302);
+  });
 
   test('/api/* goes to the member API with the origin-verify header, uncached', () => {
     const dist = Object.values<any>(t.findResources('AWS::CloudFront::Distribution'))[0].Properties.DistributionConfig;

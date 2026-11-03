@@ -333,7 +333,14 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     // stale-request reclaim: keep identities the mailing list still uses;
     // MEMBER-API 2.14.0, the account deletion's mailing-list entry, removed as
     // an unsubscribe removes it (the release marker, the row, its pointer)
-    tableGrant(this, config, cleanup, 'mailing-list', ['GetItem', 'PutItem', 'DeleteItem']);
+    tableGrant(this, config, cleanup, 'mailing-list', ['GetItem', 'DeleteItem']);
+    // The release marker only: its key is '#release#<random>' (releaseKey in
+    // lambda/signup/subscribe.mjs), so this role cannot put a list entry.
+    cleanup.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:PutItem'],
+      resources: [`arn:${this.partition}:dynamodb:${this.region}:${this.account}:table/${resourceName(config, 'mailing-list')}`],
+      conditions: { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['#release#*'] } },
+    }));
     cleanup.addEnvironment('TABLE_MAILING_LIST', resourceName(config, 'mailing-list'));
     sesIdentity(cleanup, ['DeleteEmailIdentity']);
     cleanup.addToRolePolicy(denyDomainIdentityDelete);
@@ -341,8 +348,10 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     // registration) is deleted only if it carries that request's id.
     // AdminDisableUser, AdminUserGlobalSignOut (MEMBER-API 2.14.0): each
     // daily run disables sign-in and ends the sessions again for every
-    // canceled account, finishing a request whose own Cognito steps failed.
-    cognitoActions(cleanup, ['AdminDeleteUser', 'AdminGetUser', 'AdminDisableUser', 'AdminUserGlobalSignOut']);
+    // canceled account, finishing a request whose own Cognito steps failed;
+    // AdminEnableUser when the row reads active again after that disable (a
+    // cancel or a reinstate made in between).
+    cognitoActions(cleanup, ['AdminDeleteUser', 'AdminGetUser', 'AdminDisableUser', 'AdminUserGlobalSignOut', 'AdminEnableUser']);
     cleanup.addToRolePolicy(sesSend); // the account deletion's "not deleted yet" email (a vault holds it)
     new events.Rule(this, 'CleanupSchedule', {
       schedule: events.Schedule.cron({ minute: '0', hour: '7' }), // 07:00 UTC daily
