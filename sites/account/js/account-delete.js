@@ -23,8 +23,8 @@ const root = $('acct-del');
 
 const TEXT = {
   deletionFailed:
-    "Something went wrong, and your account may already be closed. Don't try again: check your email for the cancel link, " +
-    'or write to support@vettid.org. If no email comes within an hour, write to support@vettid.org.',
+    "Something went wrong, and your account may already be closed. Don't try again: check your email for the cancel link. " +
+    'If no email comes within an hour, write to support@vettid.org.',
   codeNotSent: "We couldn't send the code. Nothing has changed. Try again in a few minutes, or write to support@vettid.org.",
   tooMany: 'Too many tries. Wait a few minutes and try again.',
 };

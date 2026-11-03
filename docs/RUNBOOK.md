@@ -3987,7 +3987,7 @@ EMF, alarm `account-deletions-held`).
 
 | `reason` | What it means | What the operator does |
 |---|---|---|
-| `mail` | The confirmation with the cancel link is not recorded as sent (`account_deletion.mailed_at` missing): SES refused it for every retry of the stream (alarm `account-deletion-mail-failures`, log `account deletion mail failed`), the mailer stopped between its claim and the send, or the row was canceled before 0.3.0 and has no `account_deletion` at all. The member may never have had the link, so the job never deletes such an account. | **Reinstate** the account on the admin site (it removes the deletion; the member gets the support email "Your VettID account was not deleted"), then write to the member that the deletion did not go ahead and that they can ask again on the account page. Do not add `mailed_at` by hand. |
+| `mail` | The confirmation with the cancel link is not recorded as sent (`account_deletion.mailed_at` missing): the mailer's send failed 3 times (`account_deletion.mail_failures` is 3; each failure alarmed as `account-deletion-mail-failures`, log `account deletion mail failed`; after the third nothing tries again), the mailer stopped between its claim and the send (`mail_claimed_at` without `mailed_at`), SES accepted it but `mailed_at` could not be written (log `account deletion mail not recorded`: the member did get the link), or the row was canceled before 0.3.0 and has no `account_deletion` at all. The member may never have had the link, so the job never deletes such an account. | **Reinstate** the account on the admin site (it removes the deletion; the member gets the support email "Your VettID account was not deleted"), then write to the member that the deletion did not go ahead and that they can ask again on the account page. Do not add `mailed_at` by hand. |
 | `vault` | The member still has a vault that is not `deleted` (sealed; also one whose deletion was asked for and not yet reported). A canceled account cannot open its vault, so the member cannot delete it while the deletion is scheduled. The member was emailed once ("Your VettID account was not deleted yet") at the first run that held it. | Nothing by default: wait (a vault deletion already under way finishes by itself, and the next run deletes the account). If the member asks: **Reinstate**, the member deletes the vault (in the app, or "Delete my vault and start over"), then deletes the account again. |
 | `enrolling` | A vault row with a lease and no sealed release (an enrollment under way, or abandoned with its lease expired), or a never-sealed row that gained a lease or a release between the job's read and its conditional delete. | As for `vault`. An abandoned setup the member cannot finish: ask the vault on-call to end it (the row goes when its instance reports, or as a vault without a member after the account is gone); do not delete the row by hand while an instance may still report `enrolled`. |
 
@@ -4016,9 +4016,11 @@ the security-alerts topic in production):
   at least one deletion is held. It stays on at every daily run until
   the cause is gone.
 - `account-deletion-mail-failures` (`AccountDeletionMailFailures`, the
-  members-stream mailer): a confirmation could not be sent. The stream
-  retries the record (3 times); if it never goes, the account is held
-  for `mail` at its due date.
+  members-stream mailer): a confirmation could not be sent. It is tried
+  again (the stream's retry, or the record of the failure's own write) up
+  to 3 failed sends in all, counted on the row
+  (`account_deletion.mail_failures`); after the third nothing tries
+  again, and the account is held for `mail` at its due date.
 
 **After a deletion:** nothing is kept but the audit events (by
 `user_guid`; `member.delete_after_cancel` says `deletion_id`,

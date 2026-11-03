@@ -280,6 +280,10 @@ describe('StaticSite edge gate (requireCookie)', () => {
     expect(req('/').uri).toBe('/index.html');
   });
 
+  test.each(['/about/openx', '/about/opens/', '/about/', '/about'])('with `except` set, %s is still redirected', (uri) => {
+    expect(req(uri).statusCode).toBe(302);
+  });
+
   test.each(['/about/open', '/about/open/', '/about/open/x/'])('an excepted path (%s) is served signed out', (uri) => {
     expect(req(uri).statusCode).not.toBe(302); // served, or this fixture's 404: never the redirect
   });

@@ -206,7 +206,7 @@ describe('/account/delete/', () => {
       code.value = '123456';
       post.mockRejectedValue(apiError(status, 'internal', 'Internal error'));
       await find('acct-del', (n) => n.tag === 'form')[0].on.submit({ preventDefault() {} });
-      expect(text('acct-del')).toContain("Something went wrong, and your account may already be closed. Don't try again: check your email for the cancel link, or write to support@vettid.org. If no email comes within an hour, write to support@vettid.org.");
+      expect(text('acct-del')).toContain("Something went wrong, and your account may already be closed. Don't try again: check your email for the cancel link. If no email comes within an hour, write to support@vettid.org.");
       expect(find('acct-del', (n) => n.tag === 'form')).toEqual([]);
     }
   });
