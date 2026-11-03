@@ -2,6 +2,7 @@
  * Membership records, shared by the admin API (Phase 1b) and the member API
  * (Phase 2). See docs/ACCOUNT-ADMIN-PLAN.md §5.1 and docs/ADMIN-API.md.
  */
+import type { AccountDeletion, DeletionCode } from './account-deletion';
 
 /**
  * `withdrawn` (MEMBER-API 2.6.0): the person withdrew the request with the
@@ -29,7 +30,7 @@ export interface MemberItem {
   pin_hash?: string; // never leaves the backend
   reject_reason?: string;
   suspend_reason?: string;
-  delete_after?: string; // set on cancel; cleanup job deletes after this
+  delete_after?: string; // set by the account deletion; the cleanup job deletes after this
   terms_sha256?: string; // hash of the accepted terms text
   email_updates?: boolean; // default true
   pin_prompt_dismissed?: boolean; // "skip for now" on the Getting started PIN step
@@ -58,6 +59,10 @@ export interface MemberItem {
   rejected_at?: string;
   /** `withdrawn` rows: when the person withdrew (the audit event says from which state). */
   withdrawn_at?: string;
+  /** MEMBER-API 2.14.0: the member's scheduled account deletion (`canceled` rows); lambda/shared/account-deletion.ts. */
+  account_deletion?: AccountDeletion;
+  /** MEMBER-API 2.14.0: the account deletion's email code (its HMAC only). */
+  deletion_code?: DeletionCode;
 }
 
 /** Row in vettid-org-subscriptions (one per member). */
