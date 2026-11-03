@@ -1816,7 +1816,7 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   when you open this vote.", approved by the owner 2026-11-03), and the
   "Abstain" matching (remove Default_Ignorable characters and U+2800
   anywhere, then trim Unicode White_Space at both ends, then ignore case;
-  look-alike letters are out of scope). `other_rows` and `rows_unavailable` are sent only to a vault that lists the capability `vote_rows`. Going to the background cancels
+  look-alike letters are out of scope). `other_rows` and `rows_unavailable` are sent only to a vault that lists the capability `vote_rows`. An extra row the app cannot make into a leaf is not sent: the member's row cannot be had (`rows_unavailable`). An invalid own-row `choice_id` is sent as `rows_unavailable` with `vote_rows`, and not submitted without it. Going to the background cancels
   a recheck; it runs again on return.
 - The credential password prompt is the existing one (§4, the unlock
   window), used before `vote.cast`.
