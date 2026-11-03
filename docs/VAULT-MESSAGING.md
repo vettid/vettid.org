@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.83.6
+version: 0.83.7
 date: 2026-11-03
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md (0.3.0)
   - MEMBER-API.md (2.14.0)
-  - ANDROID-PLAN.md (0.1.117)
-  - IOS-PLAN.md (0.1.60; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.118)
+  - IOS-PLAN.md (0.1.61; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -28,6 +28,18 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.83.7: 2026-11-03 (owner decision b, thread
+    01M6HBS3NM6MSNRSEW648YXZX2; ANDROID-PLAN 0.1.118, IOS-PLAN 0.1.61,
+    #514). §10.4: `connection.request.outgoing` and the outgoing entries
+    of `connection.request.list` carry `ik`, the invitation bundle's
+    `vault.ik` that `hs.resp`'s signature was checked against, only
+    together with `sas` (so not in the `connection.invite.accept` answer
+    or a `waiting` entry, which come before the check). §6.4 "What the
+    member sees before approving" and §10.8 "What apps show": apps show
+    its fingerprint on the request, beside the SAS. The SAS proves no
+    one is in between; it does not say who holds the key, which a
+    fingerprint the other side publishes where the member trusts it
+    does. Vault: a staging release after this.
   - 0.83.6: 2026-11-03 (ballot review, plan task
     01M6EW5FG3RKXT1D5AEMR1BWVD). §10.19.5 **Sizes that do not depend on
     the choice**: every JSON object a vote message carries with a
@@ -5549,8 +5561,9 @@ Rules:
     does not, except that the vault processed the `hs.init`.
   - The **accepting** vault answers `hs.resp` with `hs.fin` at once and
     then knows the SAS. It answers `connection.invite.accept` before
-    that, with `state: "waiting"`, and sends the SAS to its apps and
-    desktops in `connection.request.outgoing` once it has it.
+    that, with `state: "waiting"`, and sends the SAS, with the peer's
+    `ik` (0.83.7), to its apps and desktops in
+    `connection.request.outgoing` once it has it.
   - The inviting vault knows the SAS once `hs.fin` checks out (§6.3) and
     only then tells its devices, with `connection.request.pending`. An
     `hs.init` that never gets its `hs.fin` is never shown and is dropped
@@ -5815,7 +5828,9 @@ keeps a service to the few things a service does today.
   can leave it out. It is a presentation hint and a limit on what the
   connection may do, never a proof of identity or a reason to trust the
   name; the SAS (§6.3) still decides whether the member is talking to the
-  party they mean. Verifying who runs a service (for example a domain
+  party they mean. The member can compare the `ik` fingerprint shown on
+  the request with one the service publishes (0.83.7, below); verifying
+  who runs a service automatically (for example a domain
   the service proves, or a service certificate signed by VettID) is not
   specified (§15 item 43, open).
 - **Auto-approval** (above) is for the inviter's side and never changes
@@ -5824,10 +5839,17 @@ keeps a service to the few things a service does today.
 
 **What the member sees before approving.** Apps show the requester's
 names as before and, when `peer_kind` is `"service"`, that it is a
-service ("a service, not a person") on the connection request, beside the
-SAS, so that a person cannot pose as a service, or the reverse,
+service ("a service, not a person") on the connection request, beside
+the SAS, so that a person cannot pose as a service, or the reverse,
 unnoticed. Apps word it as a claim by the other side, not a fact
-(ANDROID-PLAN "Service connections").
+(ANDROID-PLAN "Service connections"). On an outgoing request to a
+service the app also shows the **fingerprint** of the peer's `ik`
+(§10.8), and it MAY on any outgoing request, once the vault sends it
+with the SAS (0.83.7; `connection.request.outgoing`, §10.4). The SAS
+shows that no one is in between; it does not show who holds the key. A
+fingerprint that matches one the service publishes where the member
+already trusts it (its own website, say) does. A request without `ik`,
+from a vault before 0.83.7, shows no fingerprint.
 
 **What the vault allows.** For a connection whose stored `peer_kind` is
 `"service"`:
@@ -7264,7 +7286,7 @@ an answer to an unknown or expired id is dropped.
 | | `account.get` | D→V | req | The member's account snapshot from the member API, display only (§11.13, 0.15.0) |
 | | `account.name.set` | D→V | req | Change the account's first and last name, with the PIN and the credential password; applied by the member API (§10.8, 0.18.0) |
 | Connections | `connection.invite.create`, `.list`, `.cancel`, `.accept` | D→V | req | Invitations (§6.4) |
-| | `connection.request.pending`, `connection.request.outgoing` | V→D | | An incoming request awaiting approval (profile, `sas`, `remote`); an outgoing one (`sas`) (§6.4) |
+| | `connection.request.pending`, `connection.request.outgoing` | V→D | | An incoming request awaiting approval (profile, `sas`, `remote`); an outgoing one (`sas`, `ik`) (§6.4) |
 | | `connection.request.list` | D→V | req | Pending incoming and outgoing requests with their SAS (§6.4) |
 | | `connection.approve`, `.decline`, `.list`, `.get`, `.remove`, `.update` | D→V | req | Approve or decline a request; manage connections; the owner's own metadata |
 | | `connection.rotation.resolve` | D→V (the holder) | req | (0.33.0, release R) Keep one of two successors of a connection's identity key after out-of-band verification (§3.4) |
@@ -7755,10 +7777,10 @@ device belongs to the unlock it ends.
 | `connection.invite.create` (app) | `{ttl_seconds: 600 \| 3600 \| 86400 \| 604800}` | `{invite_id, link, exp, remote}` |
 | `connection.invite.list` | `{}` | `{invites: [{invite_id, exp, remote}]}` |
 | `connection.invite.cancel` | `{invite_id}` | `{}` |
-| `connection.invite.accept` (app) | `{link}` (the bare payload, §6.4) | `{connection_id, state: "waiting", remote, exp, name?, peer_kind?}`: an outgoing request (§6.4); the SAS follows in `connection.request.outgoing` once the handshake has run (0.10.3); `name` is the bundle's `hint.name`; `peer_kind` (0.69.0) is `"service"` when the bundle declared it, else absent (§6.4 "Service connections"). `exists` with body `{connection_id}` for a vault already connected or requested; `blocked`, `limit`, `claim_unavailable`, `bad_request`, `accept_failed`; `internal` from a vault without the account's names (§10.8, 0.19.0) |
+| `connection.invite.accept` (app) | `{link}` (the bare payload, §6.4) | `{connection_id, state: "waiting", remote, exp, name?, peer_kind?}`: an outgoing request (§6.4); the SAS and the peer's `ik` follow in `connection.request.outgoing` once the handshake has run (0.10.3, 0.83.7; the answer carries no `ik`, since nothing has been checked against it yet); `name` is the bundle's `hint.name`; `peer_kind` (0.69.0) is `"service"` when the bundle declared it, else absent (§6.4 "Service connections"). `exists` with body `{connection_id}` for a vault already connected or requested; `blocked`, `limit`, `claim_unavailable`, `bad_request`, `accept_failed`; `internal` from a vault without the account's names (§10.8, 0.19.0) |
 | `connection.request.pending` (incoming, to apps and desktops) | — | `{pending_id, invite_id, sas, remote, state, exp, profile?, introduced_by?}`, once `hs.fin` has checked out; `state` is `pending`, or `approved` under in-person auto-approval (§6.4) |
-| `connection.request.outgoing` (to apps and desktops, the accepting device included) | — | `{connection_id, sas, remote, exp, name?, peer_kind?, introduced_by?}`, once the vault has sent `hs.fin` and knows the SAS (0.10.3), whichever device accepted or for an introduction (§10.15) |
-| `connection.request.list` | `{}` | `{incoming: [{pending_id, invite_id, sas, remote, state, peer_approved, created_at, exp, profile?, introduced_by?}], outgoing: [{connection_id, sas?, remote, state, peer_approved, created_at, exp, name?, peer_kind?, introduced_by?}]}` |
+| `connection.request.outgoing` (to apps and desktops, the accepting device included) | — | `{connection_id, sas, ik, remote, exp, name?, peer_kind?, introduced_by?}`, once the vault has sent `hs.fin` and knows the SAS (0.10.3), whichever device accepted or for an introduction (§10.15); `ik` (0.83.7) is the peer's identity key from the invitation bundle (`vault.ik`), against which `hs.resp`'s signature was checked, so it is sent only with `sas` |
+| `connection.request.list` | `{}` | `{incoming: [{pending_id, invite_id, sas, remote, state, peer_approved, created_at, exp, profile?, introduced_by?}], outgoing: [{connection_id, sas?, ik?, remote, state, peer_approved, created_at, exp, name?, peer_kind?, introduced_by?}]}`; an outgoing entry carries `sas` and `ik` together (0.83.7), both absent while it is `waiting` |
 | `connection.approved` (V↔V, session mode under the handshake's epoch) | — | `{token, reconnect_token}`: the standing and reconnect tokens for the peer (§6.4, §7.1); sent once, at the member's approval; ignored once the connection is active (0.10.4) |
 | `connection.declined` (V↔V, as `connection.approved`) | — | `{}`: the member declined (or blocked) the request; sent once, at the decline, when the vault holds the handshake's epoch and the peer's request token; the receiver ends the request (`peer_declined`), or removes the connection if it is already active (§6.4, 0.10.5) |
 | `connection.approve` (app), `.decline` (app, desktop) | `{pending_id}` (an incoming request) or `{connection_id}` (an outgoing one), exactly one | `{}`; `not_found` for an unknown or ended request; `bad_request` for an approval while the SAS is not yet known (0.10.3); a decline is accepted in any state, `waiting` included (0.10.4) |
@@ -10043,7 +10065,9 @@ The **profile object** holds the extras' display name and photo. Sent by
   it with the request's names if it has them (the inviter does) and
   otherwise shows a neutral placeholder, **"Name not shared yet"**; never
   a blank or "Unnamed connection". Connection details MUST show the
-  **fingerprint** of the connection's pinned `ik`:
+  **fingerprint** of the connection's pinned `ik`, and an outgoing
+  request to a service shows the fingerprint of its `ik` (§6.4, 0.83.7;
+  any outgoing request MAY) the same way:
 
   ```
   fp = SHA-256("vettid/vms/2/ik-fp" || ik)    # ik: the 32 raw bytes
