@@ -34,8 +34,10 @@ changelog:
     started a 7-day cooldown of the connection's approval challenges and
     counted toward a pause), so one rightful decline of a bogus request no
     longer blocks a service's real approval requests, admin-set repairs
-    included. The `approval` rate, the pending cap, mute and a pause from
-    other declines still apply. Needs a vault release; no app change.
+    included; a cooldown an earlier release recorded for an `approval`
+    challenge is ignored. The `approval` rate, the pending cap, mute and a
+    pause from other declines still apply. Needs a vault release; no app
+    change.
   - 0.83.9: 2026-11-04 (owner decision i, thread
     01M6KHZAKSX6AJCB7WF3ZQHKQA). §10.4 "Following a credential-key
     rotation": the receiver follows a chain from the first statement whose
@@ -24736,7 +24738,7 @@ Follow-ups:
     3. a rate bucket and a cooldown identity per purpose: `signin` 10
        per 24 hours, at most 2 waiting, a 1-hour cooldown, its declines
        not counted toward a pause; `approval` 5 per 24 hours with the
-       7-day cooldown; everything else unchanged;
+       7-day cooldown (superseded by 0.83.10: none); everything else unchanged;
     4. the app's screens: "Only approve if you are signing in right
        now", with "Approve" and "Not me".
     - *Not chosen:* leaving `purpose` unsigned (it changes only the
