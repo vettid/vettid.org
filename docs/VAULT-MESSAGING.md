@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.83.10
+version: 0.83.11
 date: 2026-11-04
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,22 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.83.11: 2026-11-04. Two corrections to the transfer's credential
+    key (§11.14.10, 0.68.0), from building it. (1) §11.14.10 and the
+    request tables: while a transfer's rotation statement K0→K1 is held
+    (before the new phone's first unlock from storage), nothing signed
+    with K1 reaches a peer: `connection.authenticate.approve` and a
+    LEASH grant signature (`leash.grant.issue`, the `grants` of
+    `device.pair.approve`) are refused `transfer_incomplete`, and the
+    challenge stays open; a vote cast is stored and its ballot sent after
+    the statement. A response signed with K1 then would reach a
+    connection with no chain from the key it pinned, which would read it
+    as a key change. (2) §10.4 "Failure": a chain whose last `new_key` is
+    the pinned key (a repeated delivery, or one overtaken by a response
+    that moved the pin to the same key) is ignored with no audit and no
+    key event; one that ends before the pinned key is still dropped and
+    audited (0.83.9 said both were audited). Needs a vault release; one
+    app text (proposed).
   - 0.83.10: 2026-11-04 (owner decision a, thread
     01M6KADBP4RVBN92ACPS6BG35Q). §10.4.1: a decline of an `approval`
     challenge starts no cooldown and is not counted toward a pause (it
@@ -7749,7 +7765,7 @@ device belongs to the unlock it ends.
 |---|---|---|
 | `device.pair.create` (app) | `{role: "desktop" \| "agent"}` | `{pairing_id, link, exp}`; `{role: "app"}` is answered `one_app` (§6.7) |
 | `device.pair.pending` (to apps) | — | `{pairing_id, pending_id, role, name, sas}`; `name` is the new device's self-asserted `profile.name` |
-| `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}` (`pairing_id` or the request's `pending_id`, 0.83.0); `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window) | `{device_id}`, the new device's id, as on `device.paired` (0.83.0; not yet built in the vault, which answers `{}`) |
+| `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}` (`pairing_id` or the request's `pending_id`, 0.83.0); `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window; `transfer_incomplete` while a transfer's credential-key statement is held, §11.14.10, 0.83.11) | `{device_id}`, the new device's id, as on `device.paired` (0.83.0; not yet built in the vault, which answers `{}`) |
 | `device.pair.reject` (app) | `{pairing_id}` (or the request's `pending_id`, 0.83.0) | `{}` |
 | `device.pair.rejected` (to the new device) | — | `{}`: the owner rejected the pairing or transfer after its `hs.fin` (0.10.5); sealed under the handshake's epoch, on the device's token from `hs.init`, as `device.paired`; the device stops waiting (§6.7) |
 | `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?, user_guid?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true`, the credential's `credential_version` and (0.17.0) the member's `user_guid`, which its unlocks need, for a transferred app only (§6.7.1) |
@@ -7928,7 +7944,7 @@ vault signs a fresh challenge with the member's **credential key**
 | `connection.authenticate.request` (app, desktop) | `{connection_id, context?, purpose?, match_code?}` | `{request_id, exp}` |
 | `connection.authenticate.challenge` (V↔V) | — | `{request_id, nonce, context?, purpose?, match_code?}`, with `exp` (up to 24 h for an `approval` from a service, 0.82.0) |
 | `connection.authenticate.pending` (V→D, apps and desktops) | — | `{connection_id, request_id, context?, purpose?, match_code?, exp}` |
-| `connection.authenticate.approve` (app) | `{request_id}` | `{}`; `credential_locked` outside the unlock window; `not_found` for an unknown, decided, expired or withdrawn `request_id` (named in 0.80.0) |
+| `connection.authenticate.approve` (app) | `{request_id}` | `{}`; `credential_locked` outside the unlock window; `not_found` for an unknown, decided, expired or withdrawn `request_id` (named in 0.80.0); `transfer_incomplete` while a transfer's credential-key statement is held, the challenge staying open (§11.14.10, 0.83.11) |
 | `connection.authenticate.deny` (app, desktop) | `{request_id}` | `{}`; `not_found` as for `.approve` |
 | `connection.authenticate.response` (V↔V) | — | `{request_id, status: "signed", key, sig, signed_at, purpose?, rotations?}` or `{request_id, status: "denied"}` |
 | `connection.authenticate.withdraw` (V↔V, challenger → responder; 0.80.0) | — | `{request_id}`: the challenger will no longer accept the challenge (below); nothing is sent back |
@@ -8112,11 +8128,13 @@ vault signs a fresh challenge with the member's **credential key**
     too long) changes nothing: it is dropped and audited
     (`connection.authenticate.rotation_rejected`), and the next
     authentication under the new key reports `key_changed: true`. A chain
-    that ends at or before the pinned key (a delivery repeated, or one
-    overtaken by a later, longer chain) also has no statement from the pin
-    and is dropped and audited the same way, but nothing has changed: the
-    next authentication is under the pinned key or a later one it leads
-    to, and reports `key_changed: false`. A
+    whose last `new_key` is the pinned key (a delivery repeated, or one
+    overtaken by a response that already moved the pin there) is ignored:
+    no audit and no key event (0.83.11). A chain that ends before the
+    pinned key (one overtaken by a later, longer chain) has no statement
+    from the pin and is dropped and audited as above, but nothing has
+    changed: the next authentication is under the pinned key or a later
+    one it leads to, and reports `key_changed: false`. A
     receiver with no pinned key ignores `rotated`.
 - **The screens per purpose** (0.65.0; app work, later). For `signin`
   the app titles the approval "Sign in to <name>?", shows `context`,
@@ -12461,7 +12479,7 @@ grant set carries a `grant_seq`:
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `leash.grant.issue` (app, within the unlock window) | `{agent_id, grant_id?, version?, scope, approval?, connections?, per_hour?, per_day?, expires_at?, status_ttl?}` (not `items.read`); without `grant_id` a new grant (`version` absent); with it, a replacement of that grant (`version` required; `conflict`); `credential_locked` outside the window | `<grant>`, with its `delegation` and `sig` |
+| `leash.grant.issue` (app, within the unlock window) | `{agent_id, grant_id?, version?, scope, approval?, connections?, per_hour?, per_day?, expires_at?, status_ttl?}` (not `items.read`); without `grant_id` a new grant (`version` absent); with it, a replacement of that grant (`version` required; `conflict`); `credential_locked` outside the window; `transfer_incomplete` while a transfer's credential-key statement is held (§11.14.10, 0.83.11) | `<grant>`, with its `delegation` and `sig` |
 | `leash.grant.revoke` (app, desktop) | `{grant_id}` | `{}` |
 | `leash.grant.list` (app, desktop: `{agent_id?}`; agent: `{}`, its own) | as left | apps and desktops: `{grants: [<grant>], suspended: [<agent_id>]}`; an agent: `{grants: [<grant>], suspended, grant_seq}` (0.41.0, "Grant-set sequence") |
 | `leash.grant.updated` (V→D, to the agent) | — | `{grants: [<grant>], suspended, grant_seq}`: all of its grants, after every change and at suspension and resumption; (0.41.0) `grant_seq` is the set's (above) |
@@ -21111,6 +21129,20 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   statement were never stored either, the old phone's blob is still the
   credential, and **nothing needs undoing**. The statement is not sent
   before the first unlock.
+- **Nothing signed with K1 reaches a peer while the statement is held**
+  (0.83.11). A response signed with K1 before the statement is sent
+  would reach a connection with no chain from the key it pinned, and
+  read as a key change. So, until the first unlock from storage, the
+  vault refuses `transfer_incomplete` for `connection.authenticate.approve`
+  (before signing; the challenge stays open, and the member approves it
+  after the move) and for every LEASH grant signature (`leash.grant.issue`,
+  an agent rule's grant, the `grants` of `device.pair.approve`). Uses of
+  the credential that sign nothing a peer sees (approving a critical
+  action, a wallet spend) are not refused. A vote cast (§10.19.5) is not
+  refused either: it is stored, and its ballot, signed with K1, waits in
+  the vault and is sent after the statement. The app says (proposed
+  text, for the owner's approval): "The move to this phone isn't
+  finished. Use Finish the move on this phone, then try again."
 - **The rest, after the new phone's first unlock.** At the then-current
   app's first successful unlock from the stored objects under the
   transfer's `dek_version` or a later one ("Finish the move"), the vault
