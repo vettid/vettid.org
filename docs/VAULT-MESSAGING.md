@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.83.9
+version: 0.83.10
 date: 2026-11-04
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.83.10: 2026-11-04 (owner decision a, thread
+    01M6KADBP4RVBN92ACPS6BG35Q). §10.4.1: a decline of an `approval`
+    challenge starts no cooldown and is not counted toward a pause (it
+    started a 7-day cooldown of the connection's approval challenges and
+    counted toward a pause), so one rightful decline of a bogus request no
+    longer blocks a service's real approval requests, admin-set repairs
+    included. The `approval` rate, the pending cap, mute and a pause from
+    other declines still apply. Needs a vault release; no app change.
   - 0.83.9: 2026-11-04 (owner decision i, thread
     01M6KHZAKSX6AJCB7WF3ZQHKQA). §10.4 "Following a credential-key
     rotation": the receiver follows a chain from the first statement whose
@@ -7986,7 +7994,7 @@ vault signs a fresh challenge with the member's **credential key**
   signature given to a sign-in can never be presented (to a service's
   other admins, or to anyone who checks its record of a decision) as
   an approval; and a challenger that labels an approval `signin` to
-  reach the member past the `approval` cooldown gets only sign-in
+  reach the member past the `approval` rate bucket gets only sign-in
   evidence for it. The member is protected from such a label by the
   screen, which says "signing in", not by the signature. A label of its
   own, rather than a member added to `m`, keeps every signature made
@@ -8158,7 +8166,7 @@ vault signs a fresh challenge with the member's **credential key**
     §10.4.1). A long-lived challenge holds one of the 8 pending asks
     (§10.4.1) and a received place for up to 24 hours, not 10 minutes.
     The `approval` rate bucket (5 per 24 hours) already counts a
-    challenge that reaches the member (a suppressed one does not, §10.4.1), and the 7-day decline cooldown is unchanged.
+    challenge that reaches the member (a suppressed one does not, §10.4.1); since 0.83.10 a declined approval challenge starts no cooldown.
     `connection.authenticate.withdraw` (below) frees the places as
     before; a lock or a hold keeps the challenge, under the rules for
     held asks (§3.6.3, §10.4.1). A challenge waiting in a locked vault's
@@ -8392,7 +8400,7 @@ all of the connection's asks. Since 0.65.0 a challenge's `purpose`
 | Challenge | Cooldown identity, after a decline | Rate bucket | Counts toward a pause |
 |---|---|---|---|
 | `purpose: "signin"` | `signin` challenges, 1 hour | its own: 10 per 24 hours, at most 2 waiting | no |
-| `purpose: "approval"` | `approval` challenges, 7 days | its own: 5 per 24 hours | yes |
+| `purpose: "approval"` | none (0.83.10) | its own: 5 per 24 hours | no (0.83.10) |
 | no purpose (or an unknown one) | challenges without a purpose, 7 days | the general bucket, 5 per 24 hours | yes |
 | every other ask | as point 3 below | the general bucket | yes |
 
@@ -8424,8 +8432,9 @@ field that is not suitable, an action not offered, the per-type caps;
    whatever its `fields`, or the same category); for a critical-item
    use, the same `item_id` and `field_id`, whatever the operation and
    payload; for an action, the same `action_id`; for authentication, any
-   challenge with the same `purpose` (since 0.65.0; `signin`,
-   `approval`, or none; a `signin` cooldown lasts 1 hour, not 7 days);
+   challenge with the same `purpose` (since 0.65.0; `signin` or none; a
+   `signin` cooldown lasts 1 hour, not 7 days; since 0.83.10 an
+   `approval` challenge has no cooldown);
    for an introduction, any offer from that introducer. A
    grant request in which only some entries are in cooldown reaches the
    member without those entries (the member's decision, and so the
@@ -8475,6 +8484,14 @@ declines. Each decline starts the cooldown of that ask (point 3).
 only the 1-hour cooldown of `signin` challenges and is **not counted**
 toward a pause: a member is expected to refuse sign-ins they did not
 start, and anyone who knows the member's address can start them.
+(0.83.10, owner decision of 2026-11-04) A decline of an `approval`
+challenge starts **no cooldown** and is **not counted** toward a pause:
+an admin who rightly declines a bogus approval request must not thereby
+silence that service's real approval requests for 7 days, the repairs
+of its admin set included. Approval requests stay bounded by the
+`approval` bucket's rate (5 per 24 hours), the pending cap, mute, and a
+pause started by other declines; the service's own limits bound how
+often it asks (BALLOT-PROTOCOL §3.4).
 
 **Pause.** When a connection's third decline (not counting `signin`
 declines, 0.65.0) falls within 30 days of the first of those three (the vault keeps the times of its last three
