@@ -1117,7 +1117,7 @@
           "Your vault now gives your phone the other side's key with a connection request you sent, so the app can show its fingerprint before you approve. The apps do not show it yet.",
           "If your vault were ever moved back to an older release, vote message sizes could again hint at your choice, vote records could be cleared before their results check out, a code listed twice in the results would go unnoticed, and desktops and agents could not name a session.",
           "Time scale: 1 day = 1 hour (staging)",
-          "Built from vettid-vault commit 569746d (tag release/staging/27)."
+          "Built from vettid-vault commit 569746d (tag release/staging/27) and independently rebuilt on 2026-11-04 with a matching PCR0."
         ],
         "security": "recommended",
         "security_text": "Release 27 fixes three weaknesses in voting. The size of some messages your vault sent about a vote could depend on the choice you picked, so VettID's relay, which sees only the size of each message, could in some cases have told choices apart. A service could make your vault clear away a vote's record before its published results had checked out: by withholding them for 7 days, or, for a vote you did not cast, before the check was due. And your vault did not look for published results that list your vote's code twice. In either of the last two cases, a ballot the service had added or changed in your name could have gone unnoticed. We know of no use of any of them against any vault. Your PIN and credential password were not exposed. Vaults on releases 25 and 26 are affected."
