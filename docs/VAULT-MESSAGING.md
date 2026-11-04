@@ -34,10 +34,11 @@ changelog:
     `old_key` is its pinned key, skipping statements before it. Before, the
     first statement had to start at the pinned key, so after a receiver
     followed one delivered chain the next one (which the sender starts at
-    the key it last signed with) was refused and read as a key change; a
-    transfer now rotates the credential key (§11.14.10), which made two
-    key changes without a sign-in between the common case. A chain that
-    never reaches the pin, or breaks after it, still fails. Needs a vault
+    the key it last signed with) was refused and read as a key change. A
+    transfer now rotates the credential key (§11.14.10), so two key
+    changes with no sign-in between are now common. A chain with no
+    statement whose `old_key` is the pinned key, or one that breaks after
+    it, still fails. Needs a vault
     release (vettid-vault `credwire.FollowChain`) and a service-vault
     update; no app change.
   - 0.83.8: 2026-11-04 (plan task "Spec: credential-key fingerprint";
@@ -8073,7 +8074,8 @@ vault signs a fresh challenge with the member's **credential key**
   MUST show a key change.
 - **Following a credential-key rotation.** A vault records, per
   connection, the credential key it last signed a response with (the key
-  that connection pinned).
+  that connection pinned, or one before it if the connection has since
+  followed a delivered chain).
   - At `credential.rotate` (§3.5.5) it sends every active connection with
     such a key `connection.authenticate.rotated` carrying its statements
     from that key to the new one, in order. (0.81.1) A service connection
@@ -8092,13 +8094,19 @@ vault signs a fresh challenge with the member's **credential key**
     sender records the key it last *signed* with and cannot know whether
     a chain it sent arrived (`rotated` is not acknowledged), so a chain
     from that key may start before the receiver's pin. Nothing is trusted
-    that the receiver did not verify from its own pin. On success it pins the last `new_key` and tells every owner
-    device with `connection.authenticate.key` (a delivered chain) or with
+    that the receiver did not verify from its own pin. On success it pins
+    the last `new_key` and tells every owner device with
+    `connection.authenticate.key` (a delivered chain) or with
     `key_changed: false` (a response).
   - **Failure.** A chain that does not verify (forged, unsigned, broken or
     too long) changes nothing: it is dropped and audited
     (`connection.authenticate.rotation_rejected`), and the next
-    authentication under the new key reports `key_changed: true`. A
+    authentication under the new key reports `key_changed: true`. A chain
+    that only ends at the pinned key (a delivery repeated, or one overtaken
+    by a later, longer chain) also has no statement from the pin and is
+    dropped and audited the same way, but nothing has changed: the next
+    authentication is under the pinned key and reports
+    `key_changed: false`. A
     receiver with no pinned key ignores `rotated`.
 - **The screens per purpose** (0.65.0; app work, later). For `signin`
   the app titles the approval "Sign in to <name>?", shows `context`,
