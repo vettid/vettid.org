@@ -14,6 +14,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { SIGNUP_ORIGIN_VERIFY_SECRET_NAME, UNSUBSCRIBE_API_PATH } from './signup-stack';
 import { WEBSITE_LOG_RETENTION_DAYS, websiteLogGroupRetention } from '../constructs/website-logs';
+import { EDGE_BLOCKLIST_V4 } from '../waf-blocklist';
 
 export interface VettidOrgStackProps extends cdk.StackProps {
   domainName: string;
@@ -341,14 +342,36 @@ function handler(event) {
     // requests; 300/5min only ever trips on tooling loops). The AWS
     // reputation lists run in count mode — observe first, decide from our
     // own logs whether they should block.
+    const blocklist = new wafv2.CfnIPSet(this, 'EdgeBlocklist', {
+      name: 'vettid-org-blocklist',
+      scope: 'CLOUDFRONT',
+      ipAddressVersion: 'IPV4',
+      addresses: [...EDGE_BLOCKLIST_V4],
+      description: 'Hostile source ranges blocked at the edge, see lib/waf-blocklist.ts',
+    });
+
     const webAcl = new wafv2.CfnWebACL(this, 'WebAcl', {
       name: 'vettid-org-telemetry',
       scope: 'CLOUDFRONT',
       defaultAction: { allow: {} },
       rules: [
         {
-          name: 'rate-limit-per-ip',
+          // Known hostile ranges (lib/waf-blocklist.ts), refused with 403
+          // before any other rule: a named IP set, so new ranges are only an
+          // append to that list.
+          name: 'blocklist',
           priority: 0,
+          action: { block: {} },
+          statement: { ipSetReferenceStatement: { arn: blocklist.attrArn } },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'vettid-org-blocklist',
+            sampledRequestsEnabled: true,
+          },
+        },
+        {
+          name: 'rate-limit-per-ip',
+          priority: 1,
           action: { block: { customResponse: { responseCode: 429 } } },
           statement: {
             rateBasedStatement: {
@@ -371,7 +394,7 @@ function handler(event) {
           // tree. Real visitors make ~zero such requests; wordlist
           // brute-forcers make hundreds.
           name: 'rate-limit-probe-paths',
-          priority: 1,
+          priority: 2,
           action: { block: { customResponse: { responseCode: 429 } } },
           statement: {
             rateBasedStatement: {
@@ -406,7 +429,7 @@ function handler(event) {
           // thousands of legit users, so revisit the threshold if launch
           // traffic 429s a mainstream fingerprint.
           name: 'rate-limit-per-ja4',
-          priority: 2,
+          priority: 3,
           action: { block: { customResponse: { responseCode: 429 } } },
           statement: {
             rateBasedStatement: {
@@ -431,7 +454,7 @@ function handler(event) {
           // the site-wide 300. A human submits the form once; 20/5min is
           // generous. Scoped to /api/ so it never touches page traffic.
           name: 'rate-limit-api',
-          priority: 3,
+          priority: 4,
           action: { block: { customResponse: { responseCode: 429 } } },
           statement: {
             rateBasedStatement: {
@@ -455,7 +478,7 @@ function handler(event) {
           // produce at current volume — revisit alongside the site-wide JA4
           // rule if launch traffic ever 429s a mainstream fingerprint.
           name: 'rate-limit-api-ja4',
-          priority: 4,
+          priority: 5,
           action: { block: { customResponse: { responseCode: 429 } } },
           statement: {
             rateBasedStatement: {
@@ -480,7 +503,7 @@ function handler(event) {
           // requests. Far above any real burst for a list this size, and
           // still a ceiling on someone guessing tokens (which are 256 bits).
           name: 'rate-limit-unsubscribe',
-          priority: 7,
+          priority: 8,
           action: { block: { customResponse: { responseCode: 429 } } },
           statement: {
             rateBasedStatement: {
@@ -498,7 +521,7 @@ function handler(event) {
         },
         {
           name: 'aws-ip-reputation',
-          priority: 5,
+          priority: 6,
           overrideAction: { count: {} },
           statement: {
             managedRuleGroupStatement: {
@@ -514,7 +537,7 @@ function handler(event) {
         },
         {
           name: 'aws-anonymous-ip',
-          priority: 6,
+          priority: 7,
           overrideAction: { count: {} },
           statement: {
             managedRuleGroupStatement: {
