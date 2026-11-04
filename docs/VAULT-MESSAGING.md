@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.83.8
+version: 0.83.9
 date: 2026-11-04
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,18 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.83.9: 2026-11-04 (owner decision i, thread
+    01M6KHZAKSX6AJCB7WF3ZQHKQA). §10.4 "Following a credential-key
+    rotation": the receiver follows a chain from the first statement whose
+    `old_key` is its pinned key, skipping statements before it. Before, the
+    first statement had to start at the pinned key, so after a receiver
+    followed one delivered chain the next one (which the sender starts at
+    the key it last signed with) was refused and read as a key change; a
+    transfer now rotates the credential key (§11.14.10), which made two
+    key changes without a sign-in between the common case. A chain that
+    never reaches the pin, or breaks after it, still fails. Needs a vault
+    release (vettid-vault `credwire.FollowChain`) and a service-vault
+    update; no app change.
   - 0.83.8: 2026-11-04 (plan task "Spec: credential-key fingerprint";
     ANDROID-PLAN 0.1.119, IOS-PLAN 0.1.62, BALLOT-PROTOCOL §3.4).
     §10.8, new item: the member's own **credential-key fingerprint**,
@@ -8070,10 +8082,17 @@ vault signs a fresh challenge with the member's **credential key**
   - A signed response whose `key` differs from the one recorded for that
     connection carries the same chain as `rotations`, so a requester that
     missed a delivery catches up.
-  - The receiver follows the chain from its pinned key: each statement's
-    `old_key` MUST equal the previous one's `new_key` (the first's the
-    pinned key), both signatures MUST verify, and the chain is at most 32
-    statements. On success it pins the last `new_key` and tells every owner
+  - The receiver follows the chain from its pinned key (0.83.9): it
+    starts at the first statement whose `old_key` is its pinned key,
+    skipping any statements before it, and from there each statement's
+    `old_key` MUST equal the previous one's `new_key`, both signatures
+    MUST verify, and the chain is at most 32 statements in all. A chain
+    with no statement whose `old_key` is the pinned key fails. The
+    skipped statements are links the receiver followed earlier: the
+    sender records the key it last *signed* with and cannot know whether
+    a chain it sent arrived (`rotated` is not acknowledged), so a chain
+    from that key may start before the receiver's pin. Nothing is trusted
+    that the receiver did not verify from its own pin. On success it pins the last `new_key` and tells every owner
     device with `connection.authenticate.key` (a delivered chain) or with
     `key_changed: false` (a response).
   - **Failure.** A chain that does not verify (forged, unsigned, broken or
