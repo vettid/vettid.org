@@ -8496,8 +8496,11 @@ pause started by other declines; the service's own limits bound how
 often it asks (BALLOT-PROTOCOL §3.4). It holds for every connection, so
 a member peer that labels its challenges `approval` can put up to 5
 prompts a day in front of the member that declines never stop; the
-remedy is to mute the connection or remove it. A vault ignores a
-cooldown an earlier release recorded for an `approval` challenge.
+remedy is to mute the connection or remove it. A vault ignores, and
+drops, a cooldown an earlier release recorded for an `approval`
+challenge. Declines recorded before 0.83.10 are not told apart from
+others: an earlier `approval` decline still counts toward a pause until
+it leaves the 30 days.
 
 **Pause.** When a connection's third decline (not counting `signin`
 declines, 0.65.0, or `approval` declines, 0.83.10) falls within 30 days of the first of those three (the vault keeps the times of its last three
