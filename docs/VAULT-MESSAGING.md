@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.83.7
-date: 2026-11-03
+version: 0.83.8
+date: 2026-11-04
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md (0.3.0)
   - MEMBER-API.md (2.14.0)
-  - ANDROID-PLAN.md (0.1.118)
-  - IOS-PLAN.md (0.1.61; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.119)
+  - IOS-PLAN.md (0.1.62; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -28,6 +28,16 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.83.8: 2026-11-04 (plan task "Spec: credential-key fingerprint";
+    ANDROID-PLAN 0.1.119, IOS-PLAN 0.1.62, BALLOT-PROTOCOL §3.4).
+    §10.8 "What apps show": the member's own **credential-key
+    fingerprint**, SHA-256("vettid/vms/2/ck-fp" || key) shown as 4
+    groups of 4 hex digits, in Settings → Vault status. It is the string
+    a member service already shows its admins in the `admin.repin` and
+    `admin_set.add` summaries, so the other admins can compare it with
+    what the admin reads from their own app before re-pinning them.
+    §16: its vector. No vault change: apps already get the key from
+    `credential.version`, `credential.rotate` and `credential.reset`.
   - 0.83.7: 2026-11-03 (owner decision b, thread
     01M6HBS3NM6MSNRSEW648YXZX2; ANDROID-PLAN 0.1.118, IOS-PLAN 0.1.61,
     #514). §10.4: `connection.request.outgoing` and the outgoing entries
@@ -10079,6 +10089,28 @@ The **profile object** holds the extras' display name and photo. Sent by
   chain verified (§3.4), as they do for a credential-key rotation
   (§10.4). Names use Unicode bidirectional isolation wherever an app
   shows them next to other text ("Showing received text", below).
+- **The member's own credential-key fingerprint** (0.83.8). Settings →
+  Vault status shows the fingerprint of the member's current credential
+  key (§3.5.1):
+
+  ```
+  ck_fp = SHA-256("vettid/vms/2/ck-fp" || key)    # key: the 32 raw bytes of its Ed25519 public key
+  ```
+
+  shown as its first 8 bytes in lowercase hex, in 4 groups of 4 digits
+  separated by spaces (vector in §16). The app takes `key` from
+  `credential.version`, and from the answer of a `credential.rotate` or
+  `credential.reset`, after which it shows the new fingerprint (§10.4).
+  This is the string a member service shows its admins for a credential
+  key: the `new key` of an `admin.repin` summary and the `cred key` of an
+  `admin_set.add` summary (BALLOT-PROTOCOL §3.4). An admin whose key
+  changed reads it from their own app, and the other admins compare it
+  with the summary before they approve. It is 64 bits, shorter than the
+  `ik` fingerprint, because people compare it by reading it to each
+  other, and it is never the only check: the re-pin still needs the
+  other admins' approval. A fingerprint is not secret: it reveals
+  nothing about the credential, and the app shows it without asking for
+  the PIN or the password.
 - **Showing received text** (0.76.0, owner decision 2026-10-29). Every
   string that reaches an app from another party (another member's vault,
   a service, an introducer, a paired desktop or agent, a phone being
@@ -25393,6 +25425,11 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
   ik     : the vault ik pk above
   SHA-256("vettid/vms/2/ik-fp" || ik) : 9a1fbb7d873eeafb494bef94f0727b2539c2faf27783d46d4e6862673f6216c3
   shown  : 9a1f bb7d 873e eafb 494b ef94 f072 7b25
+
+§10.8 credential-key fingerprint (0.83.8)
+  key    : 32 x 0x09 (base64 CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=)
+  SHA-256("vettid/vms/2/ck-fp" || key) : e939754d09aaa93a6bd164b82df791506a5224bdd42a19e1dc023176ee6fe9b5
+  shown  : e939 754d 09aa a93a
 
 §11 alternate channel                                           (altchan.json)
   ETK seed 32 x 0x06; descriptor bytes and user_data, devatt challenges

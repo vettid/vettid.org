@@ -1,9 +1,14 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.118
-date: 2026-11-03
+version: 0.1.119
+date: 2026-11-04
 changelog:
+  - 0.1.119: 2026-11-04 (VAULT-MESSAGING 0.83.8; plan task "Spec:
+    credential-key fingerprint"). §4 "Owner check and status": Settings
+    → Vault status shows the member's own credential-key fingerprint,
+    the string a member service shows its admins before a re-pin
+    (BALLOT-PROTOCOL §3.4). Its texts await the owner's approval.
   - 0.1.118: erratum, 2026-11-03 (owner decision b, thread
     01M6HBS3NM6MSNRSEW648YXZX2, which replaces decision a of thread
     01M6HAAZYYVB2F360X8ZTAFVTH; texts approved in thread
@@ -3410,6 +3415,17 @@ step of the "Recovery (new phone)" row).
   a recovery started by someone else, and until it ends you cannot
   change your PIN or password. This is a fault of the VettID service or
   an attack on it. Contact VettID."
+- (0.1.119, VAULT-MESSAGING 0.83.8 §10.8) Settings → Vault status gains
+  **Credential key**, the fingerprint of the member's current credential
+  key in 4 groups of 4 hex digits ("Credential key: e939 754d 09aa
+  a93a"), copyable, with the line "If you are an admin of a service,
+  the other admins may ask you to read this out after your key
+  changes. It is not a secret." (texts for the owner's approval). The key
+  comes from `credential.version` and the answers of
+  `credential.rotate` and `credential.reset`; the row shows the new
+  fingerprint after either, and "Credential key: not available" until
+  the vault has answered. `core/crypto` computes it beside the `ik`
+  fingerprint and passes the §16 vector.
 - History shows `recovery.attempt` entries: "Recovery attempt 3 of 10",
   at the counter's time, with "Successful." or "Not successful. If this
   was not you, change your PIN or your password now." and the outcome
