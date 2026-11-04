@@ -195,6 +195,22 @@ describe('VettidOrgStack', () => {
       expect(new Set(rules.map((r) => r.Priority)).size).toBe(rules.length);
     });
 
+    test('the edge blocklist is a named IP set, blocked with 403 before every other rule', () => {
+      const sets = template.findResources('AWS::WAFv2::IPSet');
+      const set = Object.values(sets).find((r: any) => r.Properties.Name === 'vettid-org-blocklist') as any;
+      expect(set.Properties).toMatchObject({ Scope: 'CLOUDFRONT', IPAddressVersion: 'IPV4' });
+      expect(set.Properties.Addresses).toContain('185.177.72.0/24');
+      const acl = Object.values(template.findResources('AWS::WAFv2::WebACL')).find((r: any) => r.Properties.Name === 'vettid-org-telemetry') as any;
+      const rules = acl.Properties.Rules;
+      const block = rules.find((r: any) => r.Name === 'blocklist');
+      expect(block.Priority).toBe(0);
+      expect(Math.min(...rules.map((r: any) => r.Priority))).toBe(0);
+      expect(block.Action).toEqual({ Block: {} });
+      expect(block.Statement.IPSetReferenceStatement.Arn['Fn::GetAtt'][1]).toBe('Arn');
+      // the rate limits stay as the catch-all
+      expect(rules.map((r: any) => r.Name)).toEqual(expect.arrayContaining(['rate-limit-per-ip', 'rate-limit-probe-paths', 'rate-limit-per-ja4']));
+    });
+
     test('the unsubscribe pages are not counted as probe traffic', () => {
       expect(JSON.stringify(template.findResources('AWS::WAFv2::WebACL'))).toContain('"SearchString":"/unsubscribe"');
     });
