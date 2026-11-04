@@ -1002,7 +1002,7 @@
     },
     {
       "release": 26,
-      "status": "active",
+      "status": "deprecated",
       "published_at": "2026-11-02T10:15:32Z",
       "pcr0": "067f83f975f71b6637417af147b0d14f6481f9cf45a6a2352d51eb2d07c554e7a07f0fc75273de22d25616c680f432af",
       "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
@@ -1060,7 +1060,8 @@
     },
     {
       "release": 27,
-      "status": "candidate",
+      "status": "active",
+      "published_at": "2026-11-04T00:00:00Z",
       "pcr0": "6fa87c5c02d14e95004769b2475a334a7cb1f23a5e1823ab87e3ffa2bfd6cb25dd01aed0ebdf48723ee400c8c2bcc699",
       "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
       "pcr2": "10a2d1f262de91f75be64a53e9cfbaaf4e1d57e81def4524937f0870756bd59efdfa1a0a856c0cd7f09fc1d9d5f4ad12",
