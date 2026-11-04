@@ -1447,7 +1447,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.83.3) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.83.8) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -3421,10 +3421,11 @@ step of the "Recovery (new phone)" row).
   a93a"), copyable, with the line "If you are an admin of a service,
   the other admins may ask you to read this out after your key
   changes. It is not a secret." (texts for the owner's approval). The key
-  comes from `credential.version` and the answers of
-  `credential.rotate` and `credential.reset`; the row shows the new
-  fingerprint after either, and "Credential key: not available" until
-  the vault has answered. `core/crypto` computes it beside the `ik`
+  comes from `credential.version`, asked each time Vault status opens and
+  after a transfer or a recovery completes, and from the answers of
+  `credential.create`, `credential.rotate` and `credential.reset`; the
+  row shows the new fingerprint after a rotation, a reset or a transfer,
+  and "Credential key: not available" until the vault has answered. `core/crypto` computes it beside the `ik`
   fingerprint and passes the §16 vector.
 - History shows `recovery.attempt` entries: "Recovery attempt 3 of 10",
   at the counter's time, with "Successful." or "Not successful. If this

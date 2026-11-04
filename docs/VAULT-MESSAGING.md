@@ -19,7 +19,7 @@ related:
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
-  - BALLOT-PROTOCOL.md (0.12.5; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at 06a3519, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.11.1, unchanged since)
+  - BALLOT-PROTOCOL.md (0.13.3; vettid/service-vault `docs/BALLOT-PROTOCOL.md`, service-vault #118, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.11.1, unchanged since)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.34; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
@@ -30,8 +30,8 @@ related:
 changelog:
   - 0.83.8: 2026-11-04 (plan task "Spec: credential-key fingerprint";
     ANDROID-PLAN 0.1.119, IOS-PLAN 0.1.62, BALLOT-PROTOCOL §3.4).
-    §10.8 "What apps show": the member's own **credential-key
-    fingerprint**, SHA-256("vettid/vms/2/ck-fp" || key) shown as 4
+    §10.8, new item "The member's own credential-key fingerprint": the
+    member's own **credential-key fingerprint**, SHA-256("vettid/vms/2/ck-fp" || key) shown as 4
     groups of 4 hex digits, in Settings → Vault status. It is the string
     a member service already shows its admins in the `admin.repin` and
     `admin_set.add` summaries, so the other admins can compare it with
@@ -10098,9 +10098,13 @@ The **profile object** holds the extras' display name and photo. Sent by
   ```
 
   shown as its first 8 bytes in lowercase hex, in 4 groups of 4 digits
-  separated by spaces (vector in §16). The app takes `key` from
-  `credential.version`, and from the answer of a `credential.rotate` or
-  `credential.reset`, after which it shows the new fingerprint (§10.4).
+  separated by spaces (vector in §16). The app asks `credential.version`
+  each time Vault status opens and after a transfer or a recovery
+  completes, and also takes `key` from the answers of
+  `credential.create`, `credential.rotate` and `credential.reset`,
+  showing the new fingerprint after any of them (§10.4). A transfer
+  changes the key (§11.14.10) with no answer that carries it, so the new
+  phone learns it only from `credential.version`.
   This is the string a member service shows its admins for a credential
   key: the `new key` of an `admin.repin` summary and the `cred key` of an
   `admin_set.add` summary (BALLOT-PROTOCOL §3.4). An admin whose key
@@ -10110,7 +10114,9 @@ The **profile object** holds the extras' display name and photo. Sent by
   other, and it is never the only check: the re-pin still needs the
   other admins' approval. A fingerprint is not secret: it reveals
   nothing about the credential, and the app shows it without asking for
-  the PIN or the password.
+  the PIN or the password. This covers the Ed25519 credential key of
+  suites up to 2; the fingerprint of a hybrid credential key is defined
+  with suite 3 (PQC-MIGRATION §7).
 - **Showing received text** (0.76.0, owner decision 2026-10-29). Every
   string that reaches an app from another party (another member's vault,
   a service, an introducer, a paired desktop or agent, a phone being
