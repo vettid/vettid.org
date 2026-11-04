@@ -37,8 +37,8 @@ changelog:
     `admin_set.add` summaries, so the other admins can compare it with
     what the admin reads from their own app before they approve. Apps
     ask `credential.version` when Vault status opens and after a
-    transfer or a recovery, since a transfer changes the key with no
-    answer that carries it. §16: its vector. No vault change: apps
+    transfer or a recovery, since §11.14.10's transfer makes a new key
+    with no answer that carries it (vaults to date keep it). §16: its vector. No vault change: apps
     already get the key from `credential.version`, `credential.create`,
     `credential.rotate` and `credential.reset`.
   - 0.83.7: 2026-11-03 (owner decision b, thread
@@ -10105,17 +10105,22 @@ The **profile object** holds the extras' display name and photo. Sent by
   each time Vault status opens and after a transfer or a recovery
   completes, and also takes `key` from the answers of
   `credential.create`, `credential.rotate` and `credential.reset`,
-  showing the new fingerprint after any of them (§10.4). A transfer
-  changes the key (§11.14.10) with no answer that carries it, so the new
-  phone learns it only from `credential.version`.
+  showing the new fingerprint after any of them (§10.4). §11.14.10 has a
+  transfer make a new credential key with no answer that carries it, so
+  once a vault does so, the new phone learns it only from
+  `credential.version` (vaults to date keep the key across a transfer
+  and rotate only the CEK).
   This is the string a member service shows its admins for a credential
   key: the `new key` of an `admin.repin` summary and the `cred key` of an
   `admin_set.add` summary (BALLOT-PROTOCOL §3.4). An admin whose key
   changed reads it from their own app, and the other admins compare it
   with the summary before they approve. It is 64 bits, shorter than the
   `ik` fingerprint, because people compare it by reading it to each
-  other, and it is never the only check: the re-pin still needs the
-  other admins' approval. A fingerprint is not secret: it reveals
+  other. That is enough here: to pass, someone else's key must match a
+  fingerprint already given, a second preimage of about 2^64 work for
+  each target, found before the approval is decided; a collision between
+  two keys of their own choosing does not help. A 128-bit form can come
+  with suite 3. A fingerprint is not secret: it reveals
   nothing about the credential, and the app shows it without asking for
   the PIN or the password. This covers the Ed25519 credential key of
   suites up to 2; the fingerprint of a hybrid credential key is defined

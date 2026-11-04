@@ -3419,13 +3419,18 @@ step of the "Recovery (new phone)" row).
   **Credential key**, the fingerprint of the member's current credential
   key in 4 groups of 4 hex digits ("Credential key: e939 754d 09aa
   a93a"), copyable, with the line "If you are an admin of a service,
-  the other admins may ask you to read this out after your key
-  changes. It is not a secret." (texts for the owner's approval). The key
+  the other admins may ask you to read this out when you become an
+  admin, or after you reset your credential. It is not a secret." (texts
+  for the owner's approval). The key
   comes from `credential.version`, asked each time Vault status opens and
   after a transfer or a recovery completes, and from the answers of
   `credential.create`, `credential.rotate` and `credential.reset`; the
-  row shows the new fingerprint after a rotation, a reset or a transfer,
-  and "Credential key: not available" until the vault has answered.
+  row shows the new fingerprint after a rotation, a reset or a transfer.
+  No blank row and no old value without saying so: while asking, the row
+  shows a progress line; on an error, a timeout or a locked vault,
+  "Credential key: cannot be checked right now." with **Retry** (as the
+  Recovery row's unknown state); with `exists: false`, "Credential key:
+  none yet" (texts for the owner's approval).
   `core/crypto` computes it beside the `ik` fingerprint and passes the
   §16 vector.
 - History shows `recovery.attempt` entries: "Recovery attempt 3 of 10",

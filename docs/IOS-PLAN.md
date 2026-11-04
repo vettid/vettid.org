@@ -6,7 +6,7 @@ date: 2026-11-04
 changelog:
   - 0.1.62: 2026-11-04 (ANDROID-PLAN 0.1.119, VAULT-MESSAGING 0.83.8).
     §4 Settings → Vault status: the credential-key fingerprint row, as
-    on Android.
+    on Android, with its loading, error and none-yet states.
   - 0.1.61: erratum, 2026-11-03 (ANDROID-PLAN 0.1.118). §4.13: the
     service texts are approved, and the connection request shows the
     service's `ik` fingerprint before approving once the vault sends
@@ -548,7 +548,7 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.102; §4.16 results check and choice labels from 0.1.116; the results rules, app lock and held notices of 0.1.117) — the Android app; this plan mirrors it
+  - ANDROID-PLAN.md (0.1.119, the credential-key row of §4 "Owner check and status"; 0.1.102; §4.16 results check and choice labels from 0.1.116; the results rules, app lock and held notices of 0.1.117) — the Android app; this plan mirrors it
   - VAULT-MESSAGING.md (0.83.8) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
