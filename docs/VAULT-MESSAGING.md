@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.83.10
+version: 0.83.11
 date: 2026-11-04
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,27 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.83.11: 2026-11-04. Two corrections to the transfer's credential
+    key (§11.14.10, 0.68.0), from building it. (1) §11.14.10 and the
+    request tables: while a transfer's rotation statement K0→K1 is held
+    (before the new phone's first unlock from storage), nothing signed
+    with K1 reaches a peer: `connection.authenticate.approve` and a
+    LEASH grant signature (`leash.grant.issue`, the `grants` of
+    `device.pair.approve`, an agent `share.rule.set`) are refused
+    `transfer_incomplete`, and the
+    challenge stays open; a vote cast is stored and its ballot sent after
+    the statement. A response signed with K1 then would reach a
+    connection with no chain from the key it pinned, which would read it
+    as a key change. (2) §10.4 "Failure": a chain whose last `new_key` is
+    the pinned key (a repeated delivery, or one overtaken by a response
+    that moved the pin to the same key) is ignored with no audit and no
+    key event; one that ends before the pinned key is still dropped and
+    audited (0.83.9 said both were audited). (3) §11.14.10, §3.5.5,
+    §10.19.5: what the vault already does with stored ballots at a
+    transfer (re-signed under K1 and kept aside until the statement
+    goes out), at a reset in the held window (the statement and the
+    copies kept aside dropped), and the chain before every ballot send.
+    Needs a vault release; one app text (proposed).
   - 0.83.10: 2026-11-04 (owner decision a, thread
     01M6KADBP4RVBN92ACPS6BG35Q). §10.4.1: a decline of an `approval`
     challenge starts no cooldown and is not counted toward a pause (it
@@ -3997,6 +4018,12 @@ item's values seals them to a **one-time reply key** instead:
   - (0.48.0) A reset whose answer is lost is decided as §11.14.9 "A lost
     answer to `credential.reset`" says, never sent again with a new
     request.
+  - (0.83.11) A reset while a transfer's credential-key statement is
+    held (§11.14.10) drops the statement, which is never sent (the new
+    credential has none), and every vote body kept aside under the held
+    key; a ballot that was only kept aside (cast while the statement was
+    held, never sent) is removed, so the member can cast again under the
+    new credential.
 - **No deletion on its own** (0.15.2, owner decision of 2026-10-06).
   There is no `credential.delete`: a credential is deleted only as the
   first step of the vault's deletion (`vault.delete`, §12.5). A member
@@ -7749,7 +7776,7 @@ device belongs to the unlock it ends.
 |---|---|---|
 | `device.pair.create` (app) | `{role: "desktop" \| "agent"}` | `{pairing_id, link, exp}`; `{role: "app"}` is answered `one_app` (§6.7) |
 | `device.pair.pending` (to apps) | — | `{pairing_id, pending_id, role, name, sas}`; `name` is the new device's self-asserted `profile.name` |
-| `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}` (`pairing_id` or the request's `pending_id`, 0.83.0); `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window) | `{device_id}`, the new device's id, as on `device.paired` (0.83.0; not yet built in the vault, which answers `{}`) |
+| `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}` (`pairing_id` or the request's `pending_id`, 0.83.0); `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window; `transfer_incomplete` while a transfer's credential-key statement is held, §11.14.10, 0.83.11) | `{device_id}`, the new device's id, as on `device.paired` (0.83.0; not yet built in the vault, which answers `{}`) |
 | `device.pair.reject` (app) | `{pairing_id}` (or the request's `pending_id`, 0.83.0) | `{}` |
 | `device.pair.rejected` (to the new device) | — | `{}`: the owner rejected the pairing or transfer after its `hs.fin` (0.10.5); sealed under the handshake's epoch, on the device's token from `hs.init`, as `device.paired`; the device stops waiting (§6.7) |
 | `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?, user_guid?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true`, the credential's `credential_version` and (0.17.0) the member's `user_guid`, which its unlocks need, for a transferred app only (§6.7.1) |
@@ -7928,7 +7955,7 @@ vault signs a fresh challenge with the member's **credential key**
 | `connection.authenticate.request` (app, desktop) | `{connection_id, context?, purpose?, match_code?}` | `{request_id, exp}` |
 | `connection.authenticate.challenge` (V↔V) | — | `{request_id, nonce, context?, purpose?, match_code?}`, with `exp` (up to 24 h for an `approval` from a service, 0.82.0) |
 | `connection.authenticate.pending` (V→D, apps and desktops) | — | `{connection_id, request_id, context?, purpose?, match_code?, exp}` |
-| `connection.authenticate.approve` (app) | `{request_id}` | `{}`; `credential_locked` outside the unlock window; `not_found` for an unknown, decided, expired or withdrawn `request_id` (named in 0.80.0) |
+| `connection.authenticate.approve` (app) | `{request_id}` | `{}`; `credential_locked` outside the unlock window; `not_found` for an unknown, decided, expired or withdrawn `request_id` (named in 0.80.0); `transfer_incomplete` while a transfer's credential-key statement is held, the challenge staying open (§11.14.10, 0.83.11) |
 | `connection.authenticate.deny` (app, desktop) | `{request_id}` | `{}`; `not_found` as for `.approve` |
 | `connection.authenticate.response` (V↔V) | — | `{request_id, status: "signed", key, sig, signed_at, purpose?, rotations?}` or `{request_id, status: "denied"}` |
 | `connection.authenticate.withdraw` (V↔V, challenger → responder; 0.80.0) | — | `{request_id}`: the challenger will no longer accept the challenge (below); nothing is sent back |
@@ -8112,11 +8139,13 @@ vault signs a fresh challenge with the member's **credential key**
     too long) changes nothing: it is dropped and audited
     (`connection.authenticate.rotation_rejected`), and the next
     authentication under the new key reports `key_changed: true`. A chain
-    that ends at or before the pinned key (a delivery repeated, or one
-    overtaken by a later, longer chain) also has no statement from the pin
-    and is dropped and audited the same way, but nothing has changed: the
-    next authentication is under the pinned key or a later one it leads
-    to, and reports `key_changed: false`. A
+    whose last `new_key` is the pinned key (a delivery repeated, or one
+    overtaken by a response that already moved the pin there) is ignored:
+    no audit and no key event (0.83.11). A chain that ends before the
+    pinned key (one overtaken by a later, longer chain) has no statement
+    from the pin and is dropped and audited as above, but nothing has
+    changed: the next authentication is under the pinned key or a later
+    one it leads to, and reports `key_changed: false`. A
     receiver with no pinned key ignores `rotated`.
 - **The screens per purpose** (0.65.0; app work, later). For `signin`
   the app titles the approval "Sign in to <name>?", shows `context`,
@@ -12461,7 +12490,7 @@ grant set carries a `grant_seq`:
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `leash.grant.issue` (app, within the unlock window) | `{agent_id, grant_id?, version?, scope, approval?, connections?, per_hour?, per_day?, expires_at?, status_ttl?}` (not `items.read`); without `grant_id` a new grant (`version` absent); with it, a replacement of that grant (`version` required; `conflict`); `credential_locked` outside the window | `<grant>`, with its `delegation` and `sig` |
+| `leash.grant.issue` (app, within the unlock window) | `{agent_id, grant_id?, version?, scope, approval?, connections?, per_hour?, per_day?, expires_at?, status_ttl?}` (not `items.read`); without `grant_id` a new grant (`version` absent); with it, a replacement of that grant (`version` required; `conflict`); `credential_locked` outside the window; `transfer_incomplete` while a transfer's credential-key statement is held (§11.14.10, 0.83.11) | `<grant>`, with its `delegation` and `sig` |
 | `leash.grant.revoke` (app, desktop) | `{grant_id}` | `{}` |
 | `leash.grant.list` (app, desktop: `{agent_id?}`; agent: `{}`, its own) | as left | apps and desktops: `{grants: [<grant>], suspended: [<agent_id>]}`; an agent: `{grants: [<grant>], suspended, grant_seq}` (0.41.0, "Grant-set sequence") |
 | `leash.grant.updated` (V→D, to the agent) | — | `{grants: [<grant>], suspended, grant_seq}`: all of its grants, after every change and at suspension and resumption; (0.41.0) `grant_seq` is the set's (above) |
@@ -12672,7 +12701,7 @@ other.
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `share.rule.set` (app; desktop: step-up; an agent subject: app within the unlock window) | `{rule_id?, version?, subject, tags, match?, access?, mode?, uses?, expires_at?, include_existing?, per_hour?, per_day?, status_ttl?, dry_run?}` | `<share_rule>` (an agent rule with its delegation, §10.11); with `dry_run`: `{matches: [{item_id, name, category, sensitivity, state?, outcome?, ask_rule_id?}], total}` (0.23.0: `outcome`, `ask_rule_id`) |
+| `share.rule.set` (app; desktop: step-up; an agent subject: app within the unlock window) | `{rule_id?, version?, subject, tags, match?, access?, mode?, uses?, expires_at?, include_existing?, per_hour?, per_day?, status_ttl?, dry_run?}` | `<share_rule>` (an agent rule with its delegation, §10.11); with `dry_run`: `{matches: [{item_id, name, category, sensitivity, state?, outcome?, ask_rule_id?}], total}` (0.23.0: `outcome`, `ask_rule_id`); for an agent subject (not a `dry_run`, which signs nothing), `transfer_incomplete` while a transfer's credential-key statement is held, since its delegation is signed then (§11.14.10, 0.83.11) |
 | `share.rule.list` (app, desktop) | `{connection_id? \| agent_id?, after?, limit?}` | `{rules: [<share_rule>], next?}` |
 | `share.rule.delete` (app, desktop) | `{rule_id}` | `{}` |
 | `share.pending` (V→D, apps and desktops) | — | `{rule_id, subject, items: [{item_id, name, category, sensitivity, ask_rule_id?, shared?}], reason: "rule" \| "tagged"}` (0.23.0: `ask_rule_id`, `shared`) |
@@ -14379,7 +14408,7 @@ The app fetches the document when it opens a vote screen (and for a proposal old
 While the vault is held every owner request is `owner_check_required` (§3.6.3). When all pass, the vault:
 
 1. builds `ballot_msg = proposal_hash ‖ record_tag ‖ lp(choice_id)`; signs `ballot_sig = Sign(vk, "vettid/vote/1/ballot\x00", ballot_msg)`; builds `ballot_leaf = record_tag ‖ lp(vk) ‖ lp(choice_id) ‖ lp(ballot_sig)`; and signs `cast_sig = Sign(credential key, "vettid/vote/1/cast\x00", proposal_hash ‖ H(ballot_leaf))` with the credential key (the use extends the window, §3.5.3). `lp(x)` is a 16-bit big-endian length and `x`. §16 pins every byte. The credential key signs for votes only these bytes under this label; the label is not a prefix of any other (§10.4 "Labels").
-2. stores the ballot and the exact `vote.cast` body, and **flushes before it sends**; a `connection.authenticate.rotated` statement still unsent to this connection (§10.4: a credential rotation tells each connection that pinned a key) is queued **first in the same outbox**, so the service follows the chain before it meets `cast_sig` (deposits to one mailbox stay in order, RELAY-PROTOCOL §6.2); audits `vote.cast` (`connection_id`, `ref` = `proposal_id`; **never the choice**);
+2. stores the ballot and the exact `vote.cast` body, and **flushes before it sends**; a `connection.authenticate.rotated` statement still unsent to this connection (§10.4: a credential rotation tells each connection that pinned a key) is queued **first in the same outbox**, so the service follows the chain before it meets `cast_sig` (deposits to one mailbox stay in order, RELAY-PROTOCOL §6.2); (0.83.11) the chain from the key last signed with to this connection is queued before **every** later send of the ballot too (the schedule below, the answer to a `bad_ballot`), and a service that already followed it ignores the repeat, which ends at its pin (§10.4); audits `vote.cast` (`connection_id`, `ref` = `proposal_id`; **never the choice**);
 3. answers the app `{proposal_id, ballot: {state: "sending"}}` and sends `vote.cast` (§6.4).
 
 **Sizes that do not depend on the choice** (0.83.6). The relay sees the padded size of every message (§5.4), and a `choice_id` is 1 to 32 bytes, so without this a longer choice id could move a message into the next 512-byte bucket. Every JSON object that a vote message carries with a `choice_id` in it also carries `pad`: a string of ASCII `0` characters whose length is **32 minus the byte length of that `choice_id`** (its decoded UTF-8 bytes, not its escaped JSON form), and empty for a foreign `choice_id` longer than 32 bytes. This covers **every** `choice_id` outside a copied site document: `vote.cast` to the service (the body); the service's `vote.status` answer and `already_voted` refusal (their `ballot` object, BALLOT-PROTOCOL §4.2); the app's `vote.cast` request and the `row.ballot` of its `vote.results.submit` and of each `other_rows` entry; and the vault's answers to the app: `vote.get`'s `vote` object (beside its `choice_id`) and `service_ballot`, and `vote.evidence`'s `member.ballot`, `other_ballot`, `other_ballot_latest`, results `row.ballot` and the extra rows of a `row_duplicate`. Where `vote.evidence` returns the service's own bytes verbatim (its answers and refusals), they keep a fixed size only because the service pads them (BALLOT-PROTOCOL §4.2). A site document copied into a message (`results.json`, `rows.json`, a proposal) is sent as it is: it is public and the same for every member. No signature's message covers `pad` (the signatures cover the binary messages of step 1, not the JSON), except a service refusal to a body too malformed to form them, which signs `H(the request body)` (BALLOT-PROTOCOL §4.2). **Senders MUST write `pad` exactly as above. A receiver does not check its type, value or length and does not require it, an exception to §5.3; §5.3's strict rules (no duplicate names, depth, UTF-8) still apply to it.** A sender without it still works, with the old sizes. As a result the `vote.cast` body is always 418 bytes (§16 pins one) and its padded inner plaintext always **1,024 bytes**, for every `choice_id` and every `seq` up to 2^53 − 1. `vote.confirm`'s `mine: true` and `mine: false` differ by one byte; the request is far below 512 bytes, so its padded size does not change.
@@ -21111,6 +21140,29 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   statement were never stored either, the old phone's blob is still the
   credential, and **nothing needs undoing**. The statement is not sent
   before the first unlock.
+- **Nothing signed with K1 reaches a peer while the statement is held**
+  (0.83.11). A response signed with K1 before the statement is sent
+  would reach a connection with no chain from the key it pinned, and
+  read as a key change. So, until the first unlock from storage, the
+  vault refuses `transfer_incomplete` for `connection.authenticate.approve`
+  (before signing; the challenge stays open, and the member approves it
+  after the move) and for every LEASH grant signature (`leash.grant.issue`,
+  an agent rule's grant, the `grants` of `device.pair.approve`). Uses of
+  the credential that sign nothing a peer sees (approving a critical
+  action, a wallet spend) are not refused. A vote cast (§10.19.5) is not
+  refused either: it is stored, and its ballot, signed with K1, waits in
+  the vault and is sent after the statement. **Ballots already stored**
+  that are not final are re-signed under K1 in the step-2 write, as at
+  `credential.rotate` (§3.5.5), but the K1 body is **kept aside**: the
+  K0 body stays in force (sent on the schedule of §10.19.5, and the
+  answer to a `bad_ballot`) until the statement goes out, and then the
+  K1 body is put in force and sent once, after the statement. A copy
+  kept aside is never sent and never the answer to a `bad_ballot`. A
+  second transfer before the first unlock holds a later key; each copy
+  kept aside is put in force only with the statement that leads to its
+  key, and the connections get one chain. The app says (proposed
+  text, for the owner's approval): "The move to this phone isn't
+  finished. Use Finish the move on this phone, then try again."
 - **The rest, after the new phone's first unlock.** At the then-current
   app's first successful unlock from the stored objects under the
   transfer's `dek_version` or a later one ("Finish the move"), the vault
