@@ -8102,11 +8102,11 @@ vault signs a fresh challenge with the member's **credential key**
     too long) changes nothing: it is dropped and audited
     (`connection.authenticate.rotation_rejected`), and the next
     authentication under the new key reports `key_changed: true`. A chain
-    that only ends at the pinned key (a delivery repeated, or one overtaken
-    by a later, longer chain) also has no statement from the pin and is
-    dropped and audited the same way, but nothing has changed: the next
-    authentication is under the pinned key and reports
-    `key_changed: false`. A
+    that ends at or before the pinned key (a delivery repeated, or one
+    overtaken by a later, longer chain) also has no statement from the pin
+    and is dropped and audited the same way, but nothing has changed: the
+    next authentication is under the pinned key or a later one it leads
+    to, and reports `key_changed: false`. A
     receiver with no pinned key ignores `rotated`.
 - **The screens per purpose** (0.65.0; app work, later). For `signin`
   the app titles the approval "Sign in to <name>?", shows `context`,
