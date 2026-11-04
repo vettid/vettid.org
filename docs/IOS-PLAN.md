@@ -1,9 +1,12 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.61
-date: 2026-11-03
+version: 0.1.62
+date: 2026-11-04
 changelog:
+  - 0.1.62: 2026-11-04 (ANDROID-PLAN 0.1.119, VAULT-MESSAGING 0.83.8).
+    §4 Settings → Vault status: the credential-key fingerprint row, as
+    on Android, with its loading, error and none-yet states.
   - 0.1.61: erratum, 2026-11-03 (ANDROID-PLAN 0.1.118). §4.13: the
     service texts are approved, and the connection request shows the
     service's `ik` fingerprint before approving once the vault sends
@@ -545,8 +548,8 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.102; §4.16 results check and choice labels from 0.1.116; the results rules, app lock and held notices of 0.1.117) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.83.3) — the app's contract with the vault
+  - ANDROID-PLAN.md (0.1.119, the credential-key row of §4 "Owner check and status"; 0.1.102; §4.16 results check and choice labels from 0.1.116; the results rules, app lock and held notices of 0.1.117) — the Android app; this plan mirrors it
+  - VAULT-MESSAGING.md (0.83.8) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -722,7 +725,7 @@ Only these differ on iOS:
 | Settings → App → Allow screenshots | Turns off the secure layer of ID10 only; the app-switcher cover and capture hiding stay (they protect against what the member does not see). Same lifetime rules as Android (`core/data/…/lock/ScreenshotAllowance.kt`). |
 | Settings → App → Show in notifications | Android's choice, texts and default (ANDROID-PLAN §4 Notification modes 8), in Settings → App until phase P. |
 | Settings → Notifications | Two modes, **Apple push** and **Off** (PUSH-GATEWAY §11.2); until phase P, Apple push shows "Not available yet" (§14). No on-phone service exists on iOS. |
-| Settings → Vault status | ID15. |
+| Settings → Vault status | ID15; the credential-key fingerprint row, as on Android (ANDROID-PLAN §4 "Owner check and status", 0.1.119), computed in `VettIDCrypto` beside the `ik` fingerprint. |
 | Profile photo | **Camera only**, as on Android (ANDROID-PLAN §4 Settings → Privacy; row I2.5): the app's own AVFoundation camera screen, to memory; no photo picker and no other camera app. Camera access "not yet asked" asks; "denied" and "restricted" show `ios_settings_photo_capture_permission_blocked` (§14) with **Open settings**, which opens the app's page in Settings (Android's text names its phone's Permissions screen). |
 | Photo attachments | AVFoundation camera to memory; `PHPickerViewController` (no photo-library permission, like the Android Photo Picker); saving uses the add-only permission and only after the warning. |
 | History export | `fileExporter` ("Save to Files") in place of "Save to…". |
