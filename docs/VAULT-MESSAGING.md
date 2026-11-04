@@ -30,14 +30,17 @@ related:
 changelog:
   - 0.83.8: 2026-11-04 (plan task "Spec: credential-key fingerprint";
     ANDROID-PLAN 0.1.119, IOS-PLAN 0.1.62, BALLOT-PROTOCOL §3.4).
-    §10.8, new item "The member's own credential-key fingerprint": the
-    member's own **credential-key fingerprint**, SHA-256("vettid/vms/2/ck-fp" || key) shown as 4
-    groups of 4 hex digits, in Settings → Vault status. It is the string
-    a member service already shows its admins in the `admin.repin` and
+    §10.8, new item: the member's own **credential-key fingerprint**,
+    SHA-256("vettid/vms/2/ck-fp" || key) shown as 4 groups of 4 hex
+    digits, in Settings → Vault status. It is the string a member
+    service already shows its admins in the `admin.repin` and
     `admin_set.add` summaries, so the other admins can compare it with
-    what the admin reads from their own app before re-pinning them.
-    §16: its vector. No vault change: apps already get the key from
-    `credential.version`, `credential.rotate` and `credential.reset`.
+    what the admin reads from their own app before they approve. Apps
+    ask `credential.version` when Vault status opens and after a
+    transfer or a recovery, since a transfer changes the key with no
+    answer that carries it. §16: its vector. No vault change: apps
+    already get the key from `credential.version`, `credential.create`,
+    `credential.rotate` and `credential.reset`.
   - 0.83.7: 2026-11-03 (owner decision b, thread
     01M6HBS3NM6MSNRSEW648YXZX2; ANDROID-PLAN 0.1.118, IOS-PLAN 0.1.61,
     #514). §10.4: `connection.request.outgoing` and the outgoing entries

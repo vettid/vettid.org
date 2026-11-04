@@ -3425,8 +3425,9 @@ step of the "Recovery (new phone)" row).
   after a transfer or a recovery completes, and from the answers of
   `credential.create`, `credential.rotate` and `credential.reset`; the
   row shows the new fingerprint after a rotation, a reset or a transfer,
-  and "Credential key: not available" until the vault has answered. `core/crypto` computes it beside the `ik`
-  fingerprint and passes the §16 vector.
+  and "Credential key: not available" until the vault has answered.
+  `core/crypto` computes it beside the `ik` fingerprint and passes the
+  §16 vector.
 - History shows `recovery.attempt` entries: "Recovery attempt 3 of 10",
   at the counter's time, with "Successful." or "Not successful. If this
   was not you, change your PIN or your password now." and the outcome
