@@ -8371,7 +8371,7 @@ version may make them settings):
 
 | Constant | Value |
 |---|---|
-| Decline cooldown | 7 days |
+| Decline cooldown | 7 days (none for `approval` challenges, 0.83.10) |
 | Ask rate | 5 asks per connection per 24 hours (since 0.65.0 per rate bucket: the general bucket and the `approval` bucket each) |
 | Pending asks | 8 per connection, all kinds together; a withdrawn one frees its place (0.80.0); an `approval` challenge from a service holds its place for up to 24 hours (0.82.0) |
 | Long-lived approval challenges (0.82.0) | at most 2 per connection, within the 4 received challenges; more are clamped to 10 minutes |
@@ -8479,7 +8479,7 @@ ask: `grant.decide{approve: false}`, `critical-secret-use.deny`,
 `action.respond{approve: false}`, `connection.authenticate.deny`,
 `intro.decline`. An expiry, an approval of only some entries, a
 suppressed ask and a desktop's request that an app denied are not
-declines. Each decline starts the cooldown of that ask (point 3).
+declines. Each decline starts the cooldown of that ask (point 3), except as below.
 (0.65.0) A decline of a `signin` challenge ("Not me", §10.4) starts
 only the 1-hour cooldown of `signin` challenges and is **not counted**
 toward a pause: a member is expected to refuse sign-ins they did not
@@ -8491,10 +8491,14 @@ silence that service's real approval requests for 7 days, the repairs
 of its admin set included. Approval requests stay bounded by the
 `approval` bucket's rate (5 per 24 hours), the pending cap, mute, and a
 pause started by other declines; the service's own limits bound how
-often it asks (BALLOT-PROTOCOL §3.4).
+often it asks (BALLOT-PROTOCOL §3.4). It holds for every connection, so
+a member peer that labels its challenges `approval` can put up to 5
+prompts a day in front of the member that declines never stop; the
+remedy is to mute the connection or remove it. A vault ignores a
+cooldown an earlier release recorded for an `approval` challenge.
 
 **Pause.** When a connection's third decline (not counting `signin`
-declines, 0.65.0) falls within 30 days of the first of those three (the vault keeps the times of its last three
+declines, 0.65.0, or `approval` declines, 0.83.10) falls within 30 days of the first of those three (the vault keeps the times of its last three
 declines; this is a count of events, not of throughput, so it is a
 sliding 30 days), its asks are **paused**: later asks are suppressed
 until the member resumes them. The member gets **one** high-priority
@@ -24750,7 +24754,8 @@ Follow-ups:
       prompts a day in all, against 5 before); "Not me" stays the
       existing deny, so the service still cannot tell one refusal from
       another (§10.4.1); muting only a connection's sign-ins is left for
-      later app work; a single `approval` decline cools down all
+      later app work; (superseded by 0.83.10: no cooldown for
+      `approval`) a single `approval` decline cools down all
       approvals for 7 days, since a cooldown scoped to one decision
       would rest on the challenger's own wording.
     Follow-ups: vettid-vault (the peer wire: `purpose` in the challenge
