@@ -42,8 +42,12 @@ changelog:
     the pinned key (a repeated delivery, or one overtaken by a response
     that moved the pin to the same key) is ignored with no audit and no
     key event; one that ends before the pinned key is still dropped and
-    audited (0.83.9 said both were audited). Needs a vault release; one
-    app text (proposed).
+    audited (0.83.9 said both were audited). (3) §11.14.10, §3.5.5,
+    §10.19.5: what the vault already does with stored ballots at a
+    transfer (re-signed under K1 and kept aside until the statement
+    goes out), at a reset in the held window (the statement and the
+    copies kept aside dropped), and the chain before every ballot send.
+    Needs a vault release; one app text (proposed).
   - 0.83.10: 2026-11-04 (owner decision a, thread
     01M6KADBP4RVBN92ACPS6BG35Q). §10.4.1: a decline of an `approval`
     challenge starts no cooldown and is not counted toward a pause (it
@@ -4013,6 +4017,12 @@ item's values seals them to a **one-time reply key** instead:
   - (0.48.0) A reset whose answer is lost is decided as §11.14.9 "A lost
     answer to `credential.reset`" says, never sent again with a new
     request.
+  - (0.83.11) A reset while a transfer's credential-key statement is
+    held (§11.14.10) drops the statement, which is never sent (the new
+    credential has none), and every vote body kept aside under the held
+    key; a ballot that was only kept aside (cast while the statement was
+    held, never sent) is removed, so the member can cast again under the
+    new credential.
 - **No deletion on its own** (0.15.2, owner decision of 2026-10-06).
   There is no `credential.delete`: a credential is deleted only as the
   first step of the vault's deletion (`vault.delete`, §12.5). A member
@@ -14397,7 +14407,7 @@ The app fetches the document when it opens a vote screen (and for a proposal old
 While the vault is held every owner request is `owner_check_required` (§3.6.3). When all pass, the vault:
 
 1. builds `ballot_msg = proposal_hash ‖ record_tag ‖ lp(choice_id)`; signs `ballot_sig = Sign(vk, "vettid/vote/1/ballot\x00", ballot_msg)`; builds `ballot_leaf = record_tag ‖ lp(vk) ‖ lp(choice_id) ‖ lp(ballot_sig)`; and signs `cast_sig = Sign(credential key, "vettid/vote/1/cast\x00", proposal_hash ‖ H(ballot_leaf))` with the credential key (the use extends the window, §3.5.3). `lp(x)` is a 16-bit big-endian length and `x`. §16 pins every byte. The credential key signs for votes only these bytes under this label; the label is not a prefix of any other (§10.4 "Labels").
-2. stores the ballot and the exact `vote.cast` body, and **flushes before it sends**; a `connection.authenticate.rotated` statement still unsent to this connection (§10.4: a credential rotation tells each connection that pinned a key) is queued **first in the same outbox**, so the service follows the chain before it meets `cast_sig` (deposits to one mailbox stay in order, RELAY-PROTOCOL §6.2); audits `vote.cast` (`connection_id`, `ref` = `proposal_id`; **never the choice**);
+2. stores the ballot and the exact `vote.cast` body, and **flushes before it sends**; a `connection.authenticate.rotated` statement still unsent to this connection (§10.4: a credential rotation tells each connection that pinned a key) is queued **first in the same outbox**, so the service follows the chain before it meets `cast_sig` (deposits to one mailbox stay in order, RELAY-PROTOCOL §6.2); (0.83.11) the chain from the key last signed with to this connection is queued before **every** later send of the ballot too (the schedule below, the answer to a `bad_ballot`), and a service that already followed it ignores the repeat, which ends at its pin (§10.4); audits `vote.cast` (`connection_id`, `ref` = `proposal_id`; **never the choice**);
 3. answers the app `{proposal_id, ballot: {state: "sending"}}` and sends `vote.cast` (§6.4).
 
 **Sizes that do not depend on the choice** (0.83.6). The relay sees the padded size of every message (§5.4), and a `choice_id` is 1 to 32 bytes, so without this a longer choice id could move a message into the next 512-byte bucket. Every JSON object that a vote message carries with a `choice_id` in it also carries `pad`: a string of ASCII `0` characters whose length is **32 minus the byte length of that `choice_id`** (its decoded UTF-8 bytes, not its escaped JSON form), and empty for a foreign `choice_id` longer than 32 bytes. This covers **every** `choice_id` outside a copied site document: `vote.cast` to the service (the body); the service's `vote.status` answer and `already_voted` refusal (their `ballot` object, BALLOT-PROTOCOL §4.2); the app's `vote.cast` request and the `row.ballot` of its `vote.results.submit` and of each `other_rows` entry; and the vault's answers to the app: `vote.get`'s `vote` object (beside its `choice_id`) and `service_ballot`, and `vote.evidence`'s `member.ballot`, `other_ballot`, `other_ballot_latest`, results `row.ballot` and the extra rows of a `row_duplicate`. Where `vote.evidence` returns the service's own bytes verbatim (its answers and refusals), they keep a fixed size only because the service pads them (BALLOT-PROTOCOL §4.2). A site document copied into a message (`results.json`, `rows.json`, a proposal) is sent as it is: it is public and the same for every member. No signature's message covers `pad` (the signatures cover the binary messages of step 1, not the JSON), except a service refusal to a body too malformed to form them, which signs `H(the request body)` (BALLOT-PROTOCOL §4.2). **Senders MUST write `pad` exactly as above. A receiver does not check its type, value or length and does not require it, an exception to §5.3; §5.3's strict rules (no duplicate names, depth, UTF-8) still apply to it.** A sender without it still works, with the old sizes. As a result the `vote.cast` body is always 418 bytes (§16 pins one) and its padded inner plaintext always **1,024 bytes**, for every `choice_id` and every `seq` up to 2^53 − 1. `vote.confirm`'s `mine: true` and `mine: false` differ by one byte; the request is far below 512 bytes, so its padded size does not change.
@@ -21140,7 +21150,16 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   the credential that sign nothing a peer sees (approving a critical
   action, a wallet spend) are not refused. A vote cast (§10.19.5) is not
   refused either: it is stored, and its ballot, signed with K1, waits in
-  the vault and is sent after the statement. The app says (proposed
+  the vault and is sent after the statement. **Ballots already stored**
+  that are not final are re-signed under K1 in the step-2 write, as at
+  `credential.rotate` (§3.5.5), but the K1 body is **kept aside**: the
+  K0 body stays in force (sent on the schedule of §10.19.5, and the
+  answer to a `bad_ballot`) until the statement goes out, and then the
+  K1 body is put in force and sent once, after the statement. A copy
+  kept aside is never sent and never the answer to a `bad_ballot`. A
+  second transfer before the first unlock holds a later key; each copy
+  kept aside is put in force only with the statement that leads to its
+  key, and the connections get one chain. The app says (proposed
   text, for the owner's approval): "The move to this phone isn't
   finished. Use Finish the move on this phone, then try again."
 - **The rest, after the new phone's first unlock.** At the then-current
