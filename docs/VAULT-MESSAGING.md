@@ -12701,7 +12701,7 @@ other.
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `share.rule.set` (app; desktop: step-up; an agent subject: app within the unlock window) | `{rule_id?, version?, subject, tags, match?, access?, mode?, uses?, expires_at?, include_existing?, per_hour?, per_day?, status_ttl?, dry_run?}` | `<share_rule>` (an agent rule with its delegation, §10.11); with `dry_run`: `{matches: [{item_id, name, category, sensitivity, state?, outcome?, ask_rule_id?}], total}` (0.23.0: `outcome`, `ask_rule_id`); for an agent subject, `transfer_incomplete` while a transfer's credential-key statement is held, since its delegation is signed then (§11.14.10, 0.83.11) |
+| `share.rule.set` (app; desktop: step-up; an agent subject: app within the unlock window) | `{rule_id?, version?, subject, tags, match?, access?, mode?, uses?, expires_at?, include_existing?, per_hour?, per_day?, status_ttl?, dry_run?}` | `<share_rule>` (an agent rule with its delegation, §10.11); with `dry_run`: `{matches: [{item_id, name, category, sensitivity, state?, outcome?, ask_rule_id?}], total}` (0.23.0: `outcome`, `ask_rule_id`); for an agent subject (not a `dry_run`, which signs nothing), `transfer_incomplete` while a transfer's credential-key statement is held, since its delegation is signed then (§11.14.10, 0.83.11) |
 | `share.rule.list` (app, desktop) | `{connection_id? \| agent_id?, after?, limit?}` | `{rules: [<share_rule>], next?}` |
 | `share.rule.delete` (app, desktop) | `{rule_id}` | `{}` |
 | `share.pending` (V→D, apps and desktops) | — | `{rule_id, subject, items: [{item_id, name, category, sensitivity, ask_rule_id?, shared?}], reason: "rule" \| "tagged"}` (0.23.0: `ask_rule_id`, `shared`) |
