@@ -1,6 +1,6 @@
 ---
 title: AGENT-SEPARATE-ACCOUNT
-status: draft; design note for the owner's approval. Nothing here is built; AGENT-PLAN and the code follow once it is approved
+status: approved by the owner 2026-11-05 (§9); design note. Nothing here is built; AGENT-PLAN and the code follow
 version: 0.1.0
 date: 2026-11-05
 owner: Al Liebl (Mesmer)
@@ -283,9 +283,11 @@ and the service never takes another name.
   server's uid it reads (`SO_PEERCRED`, `getpeereid`) may be root, since
   with socket activation the uid that called `listen()` is systemd's or
   launchd's, so it accepts root or the connector's account.
-- **What crosses it**: MCP messages only, framed as on stdio. No file
-  descriptors and no handles are passed. The service never opens a path
-  the stub names except as a tool's argument (`cwd`, §6).
+- **What crosses it**: MCP messages, framed as on stdio, and (question
+  9) the contents of files handed in and out of a run, as length-framed
+  messages of their own (§6). No file descriptors and no handles are
+  passed. The service never opens a path the stub names except as a
+  tool's argument (`cwd`, §6).
 
 ## 5. Pairing, sessions and the service's life
 
@@ -405,9 +407,11 @@ cannot read the member's files**. This is the main cost.
       `gpg.program`, `http.proxy`, `http.sslVerify` true, and others on
       the profile's list).
     - **Its own credential helper.** Emptying `credential.helper` would
-      also remove the way the secret reaches git. So the profile sets
-      its own helper, which hands git the run's secret (from the `file`
-      secret) for the bound host only.
+      also remove the way the secret reaches git. So the profile first
+      resets the list (`-c credential.helper=`, which clears every
+      helper configured before it), then adds its own, which hands git
+      the run's secret (from the `file` secret) for the bound host
+      only.
     - `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` set to the null
       device (`/dev/null`; `NUL` on Windows), by the connector itself,
       not by the request (whose `GIT_` names stay refused). And
@@ -433,9 +437,11 @@ cannot read the member's files**. This is the main cost.
     program (VAULT-MESSAGING 0.85.3). A change sends the next run to the
     phone, saying which file changed. For git that means:
     - the resolved git folder's `config`, as a normalized projection:
-      every setting except those that change in everyday use
-      (`branch.<x>.*` tracking, for example). Otherwise every
-      `push -u` or `checkout -b` would ask;
+      every setting except exactly these, which change in everyday use:
+      `branch.<x>.remote`, `branch.<x>.merge`, `branch.<x>.rebase` and
+      `branch.<x>.description`. Otherwise every `push -u` or
+      `checkout -b` would ask. (`branch.<x>.pushRemote` stays pinned,
+      since it chooses where a push goes);
     - the common folder's `config` and `config.worktree` for a worktree;
     - every file pulled in by `include` or `includeIf`, resolved, or
       else includes are refused;
@@ -458,18 +464,56 @@ cannot read the member's files**. This is the main cost.
     ssh and curl come first, then the cloud and file tools agents use
     most (`aws`, `gcloud`, `az`, `rclone`). Their own configuration
     already comes from the runner's empty profile, never the member's.
+    Each profile also has two more lists:
+    - **Refused configuration steering:** the variables and flags that
+      point the program at other configuration, refused in the request
+      and in `argv`. Examples: `AWS_CONFIG_FILE` and
+      `AWS_SHARED_CREDENTIALS_FILE` (an AWS profile's `credential_process`
+      runs a command), `CLOUDSDK_CONFIG`, `AZURE_CONFIG_DIR`,
+      `RCLONE_CONFIG`, and `--config`/`--profile` flags that name a file.
+    - **An endpoint allowlist:** options that send the credential
+      elsewhere (`--endpoint-url`, `az rest --url`, gcloud's
+      `api_endpoint_overrides`, rclone's endpoint settings) are refused
+      unless the value is on the binding's list of hosts. They're handled
+      as git's `insteadOf` is.
+
     A program without a profile runs in `work/` as usual. In a shared
     folder, it is referred every run.
   - **Handing files in and out** (for agents that work on documents
-    rather than code). The request names input files. The connector
-    copies them read-only into the run's `work/` before the start, and
-    the phone shows their names and sizes. Outputs the run writes to
-    `work/out/` are copied back, after the run, to a folder the member
-    chose for that item. A run then reads the member's documents
-    without any shared folder, so the steering above doesn't arise:
-    what the run reads is a copy made before it started. This needs a
-    VAULT-MESSAGING change for `item.run` (the file names in the
-    request and the approval).
+    rather than code; question 9). A run then reads the member's
+    documents without any shared folder, so the steering above doesn't
+    arise: what the run reads is a copy made before it started. This
+    needs a VAULT-MESSAGING change for `item.run`: the file names and
+    sizes in the request and the approval.
+    - **Who moves the files: the stub.** It runs as the member, the only
+      account that can read and write the member's folders; the service
+      and the runners can't. It reads the inputs and sends their
+      contents over the channel (§4). After the run it receives the
+      outputs and writes them. Nothing is shared by ACL.
+    - **Inputs** add no new exposure: the agent can already read every
+      file it names. The service writes them read-only into the run's
+      `work/in/`. Caps: at most 16 files, 16 MiB each, 64 MiB in all.
+    - **Outputs**: the service reads `work/out/` after the run ends.
+      - It accepts only regular files owned by the slot's runner, with a
+        link count of 1, opened with `O_NOFOLLOW`, never a reparse point
+        or a symbolic link. A run can't link an output to the
+        connector's state, and macOS has no `protected_hardlinks`.
+      - Flat names only: no folders, no `..`, no absolute paths, no
+        stream names (`:`), and no reserved Windows names (`CON`, `NUL`,
+        `COM1` and the like).
+      - Caps: at most 16 files, 16 MiB each, 64 MiB in all; past them, the
+        rest is dropped, and the answer says so.
+    - **Writing them**: the stub writes into the folder the member chose
+      for that item (in the binding). It creates each file new
+      (`O_CREAT|O_EXCL`, `CREATE_NEW`) and never overwrites; a name taken
+      gets a numbered suffix. It never follows a link in the destination.
+    - **Redaction**: output files would bypass the redaction of standard
+      output, so a steered run could write the secret into `out/`. Each
+      output file is redacted the same way (AGENT-PLAN §4.9), over its
+      bytes, before it leaves the service. A binary file in which the
+      value happens to appear is changed by that, and the answer says
+      which files were redacted. The limit stays as for standard output:
+      an encoding the redaction doesn't know gets through.
   - **Not covered, said plainly:** file contents a program reads as data
     (a file the agent wrote that git then pushes, for example) still
     go where the command sends them. And a program with no profile, run
@@ -513,7 +557,29 @@ opened it leaves (§5).
   - "Another program took the connector's channel name, so the service did not start. Restart the computer; if it happens again, tell your administrator." (name taken);
   - "That folder is not shared with the connector for this item. Share it on your phone and with `vettid-agent share`." (`cwd_not_allowed`).
 
-## 9. Questions for the owner
+## 9. Owner decisions (2026-11-05)
+
+The owner answered "rec" to questions 1–8 (thread
+01M6PJBQ3EDEM96YVN5VETNT17) and "both" to questions 8 and 9 (thread
+01M6PJBE4MSPWMVSKD6CD8VX8M):
+
+- **1 a:** member folders per item, through an administrator-only
+  `share`, read-only offered first;
+- **2 a:** the same-account connector kept for `use`, the catalog and
+  reveal only;
+- **3 a:** three accounts (the connector and two runners) and a service
+  per pairing;
+- **4 c:** macOS runs and proxies wait for signed builds;
+- **5 b:** the service starts on demand;
+- **6 a:** two runner slots, a slot reused only once every process of
+  the previous run is confirmed gone;
+- **7 a:** `pair`, `forget` and `share` need an administrator;
+- **8 a:** hardened profiles plus pinned control files, as a general
+  mechanism for non-coding agents too;
+- **9 a:** handing files in and out, with the hardened copy-back of §6.
+
+The questions as they were asked follow, for the record.
+
 
 1. **Member folders for runs (§6).**
    - a (recommended): `folders` in the item's run binding, set on the phone, with a VAULT-MESSAGING change, shared by an administrator-only `share` with per-runner ACL entries, read-only offered first. Git works there only once a folder is marked `safe.directory`, which re-opens `.git/config`.
@@ -558,10 +624,7 @@ opened it leaves (§5).
      agent can shadow the command in the member's account.
    - b: no, run from the member's account (the agent can then pair a
      connector of its own and share any folder).
-8. **Steering through shared folders (§6).** *Owner's choice,
-   2026-11-05, given in the implementing session: a, with profiles as a
-   general mechanism for non-coding agents too; the lead agrees (thread
-   01M6PJBE4MSPWMVSKD6CD8VX8M).*
+8. **Steering through shared folders (§6).** *Decided: a (above).*
    - a (recommended): hardened profiles for git, ssh and curl
      (allowlisted subcommands and options, overrides, their own
      credential helper), plus pinned control files for git. Programs
@@ -573,8 +636,7 @@ opened it leaves (§5).
      catches them.
    - c: no shared folders at all (question 1 b). Runs use `work/` only,
      and the steering doesn't arise.
-9. **Handing files in and out (§6).** *Owner's choice, 2026-11-05,
-   given in the implementing session: a; the lead agrees (same thread).*
+9. **Handing files in and out (§6).** *Decided: a (above).*
    - a (recommended): yes. Input files are copied read-only into
      `work/`, outputs go back to a folder the member chose. Document and
      data agents then need no shared folder. This needs a VAULT-MESSAGING
