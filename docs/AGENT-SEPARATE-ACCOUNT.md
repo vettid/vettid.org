@@ -67,6 +67,19 @@ in this mode.
   the run ends, so nothing one run leaves steers the next. The
   connector starts each run as a free slot's account (below) and gives
   it only that run's secret.
+- **A run ends with everything it started.** A slot's account is used
+  again, so a process left over from one run (`setsid nohup`, a
+  scheduled task) could read the next run's secret or attach to it.
+  When a run ends, the slot is not used again until every process of
+  its account is gone: on Linux each run is its own cgroup (the run
+  helper's service with `Delegate=yes`), killed as a whole; on macOS
+  every process of the runner uid is killed and the kill confirmed; on
+  Windows the run's job refuses breakaway, and every process whose
+  token has the runner's SID is ended. Then the runner's scheduled
+  tasks, its Run keys, and its files in `/tmp`, `/var/tmp`, `/dev/shm`
+  and `C:\Users\Public` are removed. A slot whose cleanup cannot be
+  confirmed stays out of use, and `status` says so. Tests: a daemon
+  forked by one run is gone before the next run starts.
 - **What the separation gives.** The agent can still call every tool:
   reaching the tools is its job, and the vault's rules decide what it
   gets. It can no longer read the connector's keys or state, a run's
@@ -109,7 +122,15 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   the runner's token, the handle list limited to the run's standard
   handles (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), suspended, then the
   image check of AGENT-PLAN §4.9. The runner's token comes from
-  `LogonUser` (batch logon) with the password the connector keeps.
+  `LogonUser` (batch logon, `SeBatchLogonRight` granted to the runners
+  only) with the password the connector keeps. Its profile is never
+  loaded: resetting a profile and its registry hive needs an
+  administrator. Instead `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`,
+  `TEMP` and `TMP` point at fresh folders of that run, removed after
+  it. The run gets access to a window station and desktop of its own
+  (without it, programs that load user32 fail at start, 0xC0000142).
+  The service SID holds `SeAssignPrimaryTokenPrivilege`, granted at
+  install.
   POSIX: starting a process as another user needs root, which the
   connector never holds. On both Linux and macOS a small **run helper**
   does it: a root service installed with the connector, listening on a
@@ -120,7 +141,18 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   descriptor; the helper starts the program as the slot's runner uid in
   its own session, and reports its exit. It takes no path, no
   environment and no argument it does not pass on unchanged, and never
-  starts anything as root. Not `systemd-run`: polkit sees only the unit
+  starts anything as root. It reads the runner uids from root-owned
+  configuration, never from the connector; it resets supplementary
+  groups, sets `no_new_privs`, and starts the program with only the
+  environment the connector built (AGENT-PLAN §4.9), nothing of its
+  own. On macOS, which has no `fexecve`, the connector's copy of the
+  program goes into a root-owned folder of that run that the helper
+  makes, and the helper starts it from there.
+- **Where a run's files live.** A run's `work/`, `tmp/` and `secret/`
+  folders, and on macOS its program copy, are under the connector's
+  state folder, owned by the slot's runner for the run, never in a
+  folder the member's account can read. They are removed when the run
+  ends. Not `systemd-run`: polkit sees only the unit
   name and verb, so a rule for it would also let the connector start a
   unit as root, and a unit's environment and command line can be read
   by any local user (`systemctl show`). The helper is the one root
@@ -132,12 +164,16 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
     protected by LSA secrets, so any SYSTEM process can decrypt it. The
     roaming-profile and domain-account notices of §4.2 no longer apply.
   - macOS: the data protection keychain needs a logged-in user, which a
-    daemon user never has. The protector is the system keychain, with
-    an access list naming only the connector's binary, or the
-    passphrase protector (question 4).
-  - Linux: a system service cannot prompt. Use the TPM (the service
-    user in the `tss` group) or a `systemd-creds` credential
-    (`LoadCredential=`), not a passphrase typed at start.
+    daemon user never has (question 4). The system keychain may not
+    work for a daemon that is not root either (`/var/db/SystemKey` is
+    readable by root only); to be checked on a Mac before question 4
+    is settled.
+  - Linux: a system service cannot prompt. Prefer
+    `LoadCredentialEncrypted=` sealed to the TPM2 (systemd-creds) over
+    putting the service user in the `tss` group; never a passphrase
+    typed at start.
+  - The accounts are fixed system users made at install, not systemd's
+    `DynamicUser=` (whose uids change, which breaks ACL-based shares).
 - **One instance per pairing.** AG1a's "one pairing per MCP client"
   stays: `<n>` names a pairing, and each pairing has its own two
   accounts, service, state and channel. `vettid-agent install --name
@@ -154,10 +190,19 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   configuration. They live in the service's configuration file, which
   only an administrator can change, and the `--run-path` check of
   AGENT-PLAN §4.9 tests whether the **member's** account, the runner
-  account, or any non-administrator can change the folder.
-- **Uninstall** stops and removes the service, both accounts and the
-  state directory, after overwriting the state file. What is left
+  accounts, or any non-administrator can change the folder. So does the
+  "unchangeable program" fallback of AGENT-PLAN 0.1.10 for a program
+  with no pin yet. `--run-env` values come from that configuration too,
+  never from the service's own environment.
+- **Uninstall** stops and removes the service, the connector and runner
+  accounts and their processes, the logon rights granted, the shares'
+  ACL entries and the state directory, after overwriting the state
+  file. What is left
   behind is checked on Windows here and listed in the README.
+- **Program files** go in an administrator-only place: `Program Files`
+  on Windows (the service's `ImagePath` quoted), `/usr/local/libexec`
+  (root-owned) on Linux, `/Library` on macOS. The installer checks every
+  folder up the path, as the `--run-path` rule does.
 - **Upgrade** replaces the program files (administrator-only folders)
   and restarts the service; the state stays. The stub and the service
   exchange their versions on connect; a mismatch is refused with a
@@ -186,7 +231,7 @@ channel must stop is any other user reaching the tools, and anyone
 standing in for either end. Every failed check refuses the connection,
 and the service never takes another name.
 
-- **Windows**: a named pipe `\\.\pipe\vettid-agent-<n>`.
+- **Windows**: a named pipe `\\.\pipe\vettid-agent-<n>-<random>`.
   - The service creates it with `FILE_FLAG_FIRST_PIPE_INSTANCE`. If the
     name is taken (another user created it first, at boot or during a
     restart), the service does not start: it logs it and `status` says
@@ -198,39 +243,53 @@ and the service never takes another name.
     not `GENERIC_WRITE`). Only the service SID may create instances.
   - The service identifies each client from its token at
     identification level and compares it with the recorded member SID.
-    A client at anonymous level is refused.
+    A client at anonymous level, and an AppContainer token, are
+    refused. The client's process id (`GetNamedPipeClientProcessId`) is
+    never used for identity.
+  - The pipe is made with `PIPE_REJECT_REMOTE_CLIENTS`, and its DACL
+    denies NETWORK. Its name has a random suffix, kept in the
+    administrator-only configuration, so another user cannot take it
+    ahead of time.
   - The stub, `pair`, `status` and `forget` open the pipe with
     `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`, so a server that
     is not the service cannot act as the member. They check the server
     by the pipe object's owner SID, read through the open handle
     (`GetSecurityInfo`), which must be the service SID. This is not
     by process id, which can be reused.
-- **macOS and Linux**: a Unix socket in a directory owned by root and
-  0755 (`/var/run/vettid-agent/`; it is emptied at every boot, so it
-  is made again at boot, by a `tmpfiles.d` entry on Linux and by a
-  launchd job on macOS, not by systemd's `RuntimeDirectory=`, which
-  belongs to the service). The
-  socket is owned by the connector's account, group a group holding
-  only the member, mode 0660. The service checks the peer's uid
-  (`SO_PEERCRED`, `getpeereid`) against the recorded uid. The stub
-  checks that the socket's owner and the server's uid are the
-  connector's account.
+- **macOS and Linux**: a Unix socket made by the service manager, not
+  by the service (which could not create it in a root-owned folder):
+  systemd socket activation (`ListenStream=/run/vettid-agent/<n>.sock`,
+  `SocketUser=` the connector's account, `SocketGroup=` a group holding
+  only the member, `SocketMode=0660`), and launchd's `Sockets` with the
+  same owner and mode. The gate is the peer check, not the mode: the
+  service compares the peer's uid (`SO_PEERCRED`, `getpeereid`, never
+  the pid) with the recorded uid. The stub `lstat`s the socket (a
+  symbolic link is refused), checks that its owner is the connector's
+  account, and checks the server's uid the same way.
 - **What crosses it**: MCP messages only, framed as on stdio. No file
   descriptors and no handles are passed. The service never opens a path
   the stub names except as a tool's argument (`cwd`, §6).
 
 ## 5. Pairing, sessions and the service's life
 
-- `pair`, `status` and `forget` run in the member's account and talk to
-  the service over the channel. The SAS and the texts of AGENT-PLAN §11
-  are shown by the command, as today. The pairing code is passed once
-  over the channel and never stored or logged (AGENT-PLAN §4.7).
-- **When the service runs** (question 5). Proposed: always, as a
-  service. Then the connector reaches the vault while no client runs
-  it, and AGENT-PLAN §4.6 (catching up on start) and AG1a's "reaches
-  the vault only while a client runs it" change. The alternative is to
-  start it on demand when a stub connects and stop it a while after the
-  last one leaves.
+- **`pair`, `forget` and `share` need an administrator** (question 7).
+  The agent can shadow `vettid-agent` in the member's account (its
+  `PATH`, an alias, a shell rc file, an npm or brew copy) with a program
+  of its own. Its own connector would then show its own SAS, the member
+  would approve it, and that connector could ask for `item.run` itself.
+  So these three run elevated, from the administrator-only absolute
+  path (`sudo /usr/local/libexec/vettid-agent/vettid-agent pair`, or the
+  Start menu's elevated shortcut on Windows), and the README says to
+  start them only that way. `status` needs no elevation. The SAS and the
+  texts of AGENT-PLAN §11 are shown by the command, as today. The
+  pairing code is passed once over the channel and never stored or
+  logged (AGENT-PLAN §4.7).
+- **When the service runs** (question 5). Proposed: on demand. Socket
+  activation (or, on Windows, a service the stub starts) starts it when
+  a stub connects, and it stops a while after the last one leaves. So,
+  as AG1a has it today, the connector reaches the vault only while a
+  client runs it, and catches up on start (AGENT-PLAN §4.6). The
+  alternative is always running, which changes both.
 - **Locking the computer** does not end a stub (the agent app keeps
   running). Nothing changes: runs and proxies go on, and the vault's
   own lock and hold rules (AGENT-PLAN §4.4) still apply.
@@ -259,8 +318,16 @@ cannot read the member's files**. This is the main cost.
   the runner for that run.
 - **A member's folder** as `cwd` (question 1). Proposed: the item's run
   binding gains `folders` (absolute paths, at most 16), set on the
-  phone, and `vettid-agent share <folder>` in the member's account
-  grants the runner account access to a listed folder. A `cwd` outside
+  phone, and `vettid-agent share <folder>`, run as an administrator
+  (§5), grants the runner accounts access to a listed folder. A share
+  run from the member's account would let the agent share the whole
+  home folder, `~/.ssh` included. Shares are ACL entries for the
+  runners' own uids or SIDs, never `o+x` or a world-readable mode
+  (note that 0755 home folders on older Ubuntu already expose
+  world-readable files). A share can be read-only, which is offered
+  first. Files a runner writes in a shared folder get an inheritable
+  entry giving the member full control. `status` lists the shares,
+  and uninstall removes them. A `cwd` outside
   the shared folders is `cwd_not_allowed` (NEW code), plainly. The
   vault checks `cwd` against `folders` as it checks `program` against
   `programs`. This needs a VAULT-MESSAGING change.
@@ -281,9 +348,20 @@ cannot read the member's files**. This is the main cost.
   - A shared folder on a redirected network path is reached as the
     computer's account on Windows. Such folders are refused.
 
+  - Arguments steer too: `git -c core.sshCommand=…` runs a command
+    given in `argv`. The phone shows every argument, and a bound
+    program with `each: false` runs what the agent passes.
+  - The pin still matters: a shared folder may be one the agent can
+    write, so a program in it is caught when it changes.
+
   So a shared folder the agent can write remains a way to steer a run,
   as is any argument. A run is still for a member who reads the command
   (AGENT-PLAN §4.9, "The limit").
+- **What a runner cannot use, said plainly.** The member's own tool
+  installs (nvm, pyenv, cargo or rustup in the home folder), the
+  member's SSH agent, Git Credential Manager and `known_hosts`. A run
+  that needs them fails. The README says which programs work, and
+  how to install them for all users.
 - **The pin** (VAULT-MESSAGING 0.85.0) still applies, and is stronger
   here. A program in an administrator-only folder, run under an account
   the agent cannot touch, can no longer be attached to or read.
@@ -321,14 +399,14 @@ opened it leaves (§5).
 ## 9. Questions for the owner
 
 1. **Member folders for runs (§6).**
-   - a (recommended): `folders` in the item's run binding, set on the phone, with a VAULT-MESSAGING change. Git works there only once a folder is marked `safe.directory`, which re-opens `.git/config`.
+   - a (recommended): `folders` in the item's run binding, set on the phone, with a VAULT-MESSAGING change, shared by an administrator-only `share` with per-runner ACL entries, read-only offered first. Git works there only once a folder is marked `safe.directory`, which re-opens `.git/config`.
    - b: runs only in `work/`, no member folders. This is the simplest, but `git push` in the member's repository then does not work.
    - c: folders shared at install, not per item. No spec change, but coarser.
 2. **The same-account connector (§8).**
    - a (recommended): keep it for `use`, the catalog and reveal, with §2's statement that the vault cannot enforce the mode.
    - b: drop it, the service only.
 3. **One instance per pairing (§3).**
-   - a (recommended): two accounts and a service per pairing, as AG1a's one pairing per client.
+   - a (recommended): three accounts (the connector and two runners) and a service per pairing, as AG1a's one pairing per client.
    - b: one service and runner per member user, holding several pairings. Fewer accounts, but the pairings share them.
 4. **macOS keys (§3).** Neither choice is free.
    - a: the system keychain, with an access list naming the connector
@@ -342,8 +420,11 @@ opened it leaves (§5).
      exist, and then a. Until then macOS gets the same-account connector
      (§8) only.
 5. **When the service runs (§5).**
-   - a (recommended): always, as a service, catching up continuously.
-   - b: on demand, while a stub is connected.
+   - a: always, as a service, catching up continuously.
+   - b (recommended): on demand, started by socket activation (Windows:
+     a service the stub starts), stopped a while after the last stub
+     leaves. Closest to AG1a's "reaches the vault only while a client
+     runs it".
 6. **Runner accounts (§2).**
    - a (recommended): two per pairing, one per run slot, each profile
      made new after each run.
@@ -351,6 +432,14 @@ opened it leaves (§5).
      (Linux `DynamicUser=`-like; slower, and on Windows a profile is
      made for every run).
    - c: one per pairing, with one run at a time instead of two.
+
+   With a, a slot is used again only after every process of the
+   previous run is gone (§2).
+7. **Elevation for `pair`, `forget` and `share` (§5).**
+   - a (recommended): yes, from the administrator-only path, since the
+     agent can shadow the command in the member's account.
+   - b: no, run from the member's account (the agent can then pair a
+     connector of its own and share any folder).
 
 ## 10. What changes elsewhere, once approved
 
