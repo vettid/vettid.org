@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.85.0
+version: 0.85.1
 date: 2026-11-05
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,8 +28,16 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.85.0: 2026-11-05, DRAFT for owner decision (options in vettid.org
-    #536; #528 takes 0.84.1). New §3.4.1: which of a peer's identity and
+  - 0.85.1: 2026-11-05, owner decisions of 2026-11-05 on vettid.org #536:
+    O1a, O2a, O3a, O4a, O5b, O6c, O7a, O8a (#528 still takes 0.84.1).
+    Draft markers removed. §3.4 "A recovery's inherited key" (O5b, with
+    "rule 2"'s register-before-store exception). §3.4.1 "The gate" (O6c):
+    capability `relay_follow` in `features` (§10.8, now also to person
+    connections), §11.10.9 and the new `device.features`; `vault.status`
+    `relay_waiting`; 30-day deadline. O3a's feed item in §3.4.1, O7a in
+    §10.9, O8a in S1 (texts NEW).
+  - 0.85.0: 2026-11-05 (vettid.org #536; its options decided in 0.85.1;
+    #528 takes 0.84.1). New §3.4.1: which of a peer's identity and
     relay keys a message may come from, one `acceptFrom` with conflict
     checks first, Table A (relay-key state) and Table B (`ik` state),
     epochs after an `ik` link, rules C, U (signed relay links, the chain
@@ -3642,13 +3650,37 @@ create-only.
     pending key **refused** in the DEK state (a state write of its own,
     with the refusal's code), keeps the key, its tokens and its held
     updates, audits `identity.rotation_failed` with its feed item, and
-    **never generates another relay key on its own** ((0.85.0 draft) a
-    recovery's refused rotate is option O5 in vettid.org #536). It makes one
+    **never generates another relay key on its own**, except at a
+    recovery (0.85.1, next item). It makes one
     attempt at each unlock (the rotate, then the registration; no sooner
     retries), and one that succeeds leaves the state at the second
     write. While the state lasts the vault collects from the old mailbox
     if it still lives (a refused rotate), and otherwise (a refused
     registration, past the grace) it receives nothing.
+  - **A recovery's inherited key** (0.85.1; owner decisions of
+    2026-11-05, O5b and "rule 2"). A recovery's open completes a relay key
+    left pending by an earlier run in one attempt, before the phone gets
+    the vault's address, and on a definite refusal takes a fresh key at
+    once, **one time only** per recovery; if the fresh key is refused
+    too, it stays in the refused state and the vault generates no further
+    key on its own.
+    - **A refused rotate** (the old mailbox lives): the open goes on with
+      the live mailbox. In place of keeping the refused key with a
+      relay-key rotation owed (next item), the recovery's step-2 write
+      (§11.14.6, under the new DEK) discards it, with its tokens, held
+      updates and refused mark, and stores the recovery's own new relay
+      key as pending (meeting any relay-key rotation owed); the rotate
+      follows that write, store first, as above.
+    - **A refused registration** (past the grace: no live mailbox): the
+      vault generates a fresh key and **registers it before any state
+      holds it**; the step-2 write then stores it as current, with every
+      held token minted again (a `201`, above). This is the only relay
+      key not stored first: a write before step 2 would be under the DEK
+      the old copy holds and would hand it the key (§11.14.2). An open
+      that fails afterwards leaves an empty mailbox no key of the
+      vault's owns, never announced, within the relay's limit on new
+      mailboxes (RELAY-PROTOCOL §7.2 limit 3). If that registration is
+      refused too, the open fails and stores nothing.
   - **A rotation made while a relay key is pending** (a
     `credential.rotate`, a recovery's or a transfer's) rotates the other
     keys in its flush, keeps the pending relay key, its tokens and its
@@ -3721,7 +3753,7 @@ create-only.
     step 1: both mailboxes during the grace):
     never otherwise to collect, and never to rotate, delete or mint
     tokens on any mailbox, nor for an owner operation, with two
-    exceptions (0.85.0 draft), both only during the grace and only on its own
+    exceptions (0.85.0), both only during the grace and only on its own
     old mailbox: it revokes tokens that mailbox issued (§3.4.1 S7), and
     it mints the standing and reconnect tokens of a reconnect `hs.init`
     it deposits with the old key (§3.4.1 S1), for the old mailbox; the
@@ -3732,12 +3764,11 @@ create-only.
   - **The signal.** A recipient (each connection's vault, and each of
     the member's own devices and agents) has **acknowledged** the new
     address when the vault has received from it `relay.token.issued` for
-    the new `sub` (step 4). (0.85.0 draft) Nothing else counts, not even
+    the new `sub` (step 4). (0.85.0) Nothing else counts, not even
     a message deposited with a token the vault issued for the new `sub`;
-    until then the vault holds what it sends that recipient (§3.4.1 S1,
-    option O1 in vettid.org #536).
+    until then the vault holds what it sends that recipient (§3.4.1 S1).
   - **When the old key is deleted.** When every recipient has
-    acknowledged, or (0.85.0 draft) each recipient that has not acknowledged
+    acknowledged, or (0.85.0) each recipient that has not acknowledged
     has become `stale` (§3.4.1 S1), whichever is first, and not before
     the grace ends while a recipient that has not acknowledged may still
     be reached by a reconnect with the old key (§3.4.1 S1), **and not while a notice to a removed device is
@@ -3753,8 +3784,8 @@ create-only.
   - **(b) Resend at each unlock.** At each unlock, for each recipient
     that has not acknowledged and whose standing token for the old `sub`
     is still valid, the vault deposits `relay.address.update` again with
-    the old key and that **standing** token (the same address; (0.85.0
-    draft) with the links and tokens made again for the recipient's
+    the old key and that **standing** token (the same address; (0.85.0)
+    with the links and tokens made again for the recipient's
     current relay key, §3.4.1 S1, S3, deposited to its current mailbox
     with the newest standing token whose `sub` is the vault's key for
     it; a receiver that has followed it answers again, §3.4.1 rule U). A
@@ -3773,7 +3804,7 @@ create-only.
     address or an old `kem` does not grow.
   - **Limit.** A party that misses the update beyond the life of its
     tokens needs a new invite or pairing (§6.6 "Limits").
-- **Device relay key.** The device sends `relay.address.update`. (0.85.0 draft)
+- **Device relay key.** The device sends `relay.address.update`. (0.85.0)
   The device follows "The order of a relay-key rotation" above (store
   first, then rotate, retried with the same key) and §3.4.1 S1–S3 and S7
   as the rotating side; the vault receives it by §3.4.1 rule U and lets
@@ -3791,7 +3822,7 @@ create-only.
   1. The vault sends an `identity.rotate` statement, signed by both the old
      and the new `ik`, to every device and peer.
   2. It appends the statement to its **rotation chain**.
-  3. It rekeys every session (§6.5), and (0.85.0 draft) abandons and starts
+  3. It rekeys every session (§6.5), and (0.85.0) abandons and starts
      again its own open reconnects (§3.4.1 S5).
 
   The credential rotation is the PQC migration vehicle (PQC-MIGRATION §7):
@@ -3848,7 +3879,7 @@ sig_new = Ed25519(new_ik, "vettid/vms/2/rotate" || m)
   to every statement a receiver checks, whether it arrives in
   `identity.rotate` or in the `rotations` of a reconnect `hs.init` or
   `hs.resp` (§6.6); a reconnect that carries a second successor is not
-  answered and suspends the connection. (0.85.0 draft) The check comes before
+  answered and suspends the connection. (0.85.0) The check comes before
   any refusal of an earlier relay key, and relay keys have the same rule
   (§3.4.1 rule C). After `connection.rotation.resolve`,
   the dropped statement is remembered and a later copy of it is refused, not
@@ -3865,11 +3896,10 @@ sig_new = Ed25519(new_ik, "vettid/vms/2/rotate" || m)
   (§11.14.10).
 - **ETK** rotates at least every 24 h and on every enclave start.
 
-#### 3.4.1 Which keys a peer's messages may come from (0.85.0, draft)
+#### 3.4.1 Which keys a peer's messages may come from (0.85.0)
 
-*Draft for owner decision. Options pending, see the PR (vettid.org #536);
-the text assumes the recommended answers to O1–O4, O7 and O8. Until it is
-approved, the rest of §3.4 and §6.6 stand.*
+*Owner decisions of 2026-11-05 (vettid.org #536): O1a, O2a, O3a, O4a,
+O5b, O6c, O7a, O8a.*
 
 How a receiver Q decides which of a peer P's identity keys and relay
 keys a message may come from. It binds vaults, the reference client and
@@ -3983,6 +4013,14 @@ are applied (§6.6).
 | Ancestor | every link already followed: ignore | refuse (`ancestor_ik`; a reconnect also `reconnect_refused`, §6.6) | abort (`ancestor_ik`) | after `sig_I` verifies: a fork-evidence answer suspends (H5), else refuse (`ancestor_ik`) |
 | Rejected | refuse (`rejected_ik`) | refuse (`rejected_ik`) | abort (`rejected_ik`) | refuse (`rejected_ik`) |
 | Unknown | refuse (`unknown_ik`) | refuse (`unknown_ik`) | abort (`unknown_ik`) | — |
+
+**An older peer's `hs.fin`** (owner decision O3a). When Q refuses an
+`hs.fin` whose `sig_I` verifies under an ancestor `ik` (a peer without
+S5 that rotated while its own reconnect was open), the peer has
+activated an epoch Q never established, so the connection fails. Q also
+records a feed item, once per connection: "Your connection with <name>
+stopped working. Send them a new invitation." (NEW, for wording approval
+with the app PRs).
 
 **Epochs after an `ik` link.** When Q follows a link at position x, an
 epoch of P whose signer is that link's `old_ik` or an ancestor and that
@@ -4105,7 +4143,11 @@ each recipient Q).
   the new key after Q's token (S2). P keeps every key that is some
   recipient's key for it. A recipient whose key for P is not P's current
   key 30 days after the second write becomes `stale` (§6.6 "Limits") and
-  no longer keeps a key.
+  no longer keeps a key. The app shows a stale device as "<device name>
+  needs reconnecting. Pair it again." (NEW, for wording approval with the
+  app PRs): a desktop or agent is unlinked and paired again from the app
+  (§6.7); the app itself, the only holder, comes back by a recovery
+  (§11.11).
 - **S2, when Q's token arrives** (one state write): P's key for Q
   advances. An open reconnect whose `hs.init` announced the earlier key
   and that has sent no `hs.fin` is abandoned and started again with the
@@ -4176,7 +4218,7 @@ each recipient Q).
   the reconnect path of S1 for a recipient that has not followed.
 - For up to 30 days after Q follows, an old copy keeps the standing token
   Q issued to the old key and can suspend the connection with a second
-  successor (O4).
+  successor.
 - The relay can choose which of two successors Q sees first; rule C
   still suspends, and a second successor from it or an old copy suspends
   the connection (§3.4's residual, now also for relay links). An
@@ -4186,11 +4228,11 @@ each recipient Q).
   `deposited_at` as the update counts as before the cut-off.
 - A deferred token message that is refused is lost; P's next resend
   replaces it (rule U).
-- Before the gate (deployment), the three paths rotate no relay key, and
-  an old copy keeps the vault's live mailbox, as on release 28.
+- While the gate waits for a recipient (at most 30 days), an old copy
+  keeps the vault's live mailbox, as on release 28.
 
-**Invariants**, checked after every step of a run (the harness: see the
-PR):
+**Invariants**, checked after every step of a run of the randomized
+two-sided harness (described in vettid.org #536):
 - **I1, liveness.** At quiescence (every party unlocked and online, no
   action pending, every lease expired and every message delivered and
   processed, time past every resend and handshake retry, less than 30
@@ -4222,10 +4264,26 @@ PR):
   stores what it announces (§11.14.2), and a crash at any write loses no
   outbox entry.
 
-**Deployment.** Receivers first, then a gate (form pending, see the PR)
-before any vault rotates its relay key. Until the gate the three paths
-clear their owed marks in their flush as release 28 does, except a
-"relay-key rotation owed" mark.
+**The gate** (owner decision O6c). The receiving side is the capability
+`relay_follow`. A vault that implements this subsection lists it in its
+release capabilities (§11.10.9) and advertises it to every connection,
+person or service, in `profile.update`'s `features` (§10.8). A device
+(app, desktop or agent) that implements it sends `device.features
+{features: ["relay_follow"]}` (D→V, §10.2) after each epoch it activates
+with its vault, which keeps the last list per device. A vault rotates its
+relay key only when every recipient (each active connection and device)
+has advertised `relay_follow`. Until then a relay-key rotation one of the
+three paths of §3.4 makes is owed: the path rotates `ik`, `kem` and the
+wake key and clears its other owed marks in its flush, as release 28
+does, and only the "relay-key rotation owed" mark stays (§11.14.10),
+checked again at each unlock. `vault.status` to the app lists the
+recipients waited for (`relay_waiting`, ids, §10.2), and the app shows
+for each "Waiting for <name> to update before your vault can move to its
+new address" (NEW, for wording approval with the app PRs). Thirty days
+after the mark was set, a recipient still not advertising is moved to a
+new invitation (a connection becomes `stale`, a device as in S1) and the
+vault rotates without it. The gate never holds back a fresh key for a
+mailbox that no longer exists (§3.4 "A recovery's inherited key").
 
 ### 3.5 The Protean Credential
 
@@ -5946,7 +6004,7 @@ Field rules:
   is disclosed to a party that has not been approved. The receiving app
   shows the names on the request as §10.8 says for a profile (account
   names, not verified). A device's `profile` is unchanged.
-- `rotations` is used only for reconnects (§6.6) and (0.85.0 draft)
+- `rotations` is used only for reconnects (§6.6) and (0.85.0)
   rekeys (§3.4.1 S8), in both `hs.init` and `hs.resp`; it MUST be absent
   for every other purpose.
 - `device_attest` is used only for purpose `app` (§6.7, §11.7).
@@ -6089,7 +6147,7 @@ Verification and activation:
 - The collect `sender` (RELAY-PROTOCOL §6.3) MUST equal `from.relay.pk` for
   `hs.init`. For every later message, `sender` MUST equal the relay key on
   record for the principal whose session decrypts it. A mismatch is acked,
-  dropped and audited. (0.85.0 draft) Which of a principal's relay keys and
+  dropped and audited. (0.85.0) Which of a principal's relay keys and
   identity keys count, after it rotated them, is §3.4.1.
 - **The SAS** (0.10.3). `sas` exists only once both nonces are fixed:
   `I` computes it after verifying `sig_R` (it then sends `hs.fin`), `R`
@@ -6767,7 +6825,7 @@ is unlocked and either:
 - on unlock (§12.2), its standing token for the peer has already expired.
 
 **Initiating.** The reconnect `hs.init` is sealed to the last known `ek` of
-the peer. (0.85.0 draft) Its `from.relay` names the relay key it is deposited
+the peer. (0.85.0) Its `from.relay` names the relay key it is deposited
 with, which after the initiator's relay-key rotation is the old key
 until the peer's token for the new key arrives (§3.4.1 S1, S2). It
 carries:
@@ -6986,7 +7044,7 @@ below, and a second copy is caught by the fork detection above
 The responder MUST accept the reconnect only if all of these hold:
 
 - the collect `sender` equals the relay key on record for that connection,
-  which is also the reconnect token's `sub` ((0.85.0 draft) or an earlier relay
+  which is also the reconnect token's `sub` ((0.85.0) or an earlier relay
   key before its cut-off, §3.4.1 Table A);
 - `from.ik` equals the stored `ik`, or is reached from it through a valid
   `rotations` chain, resolved as in §3.4 (links already followed are
@@ -7015,7 +7073,7 @@ so that they can still open reconnect `hs.init`s sealed to an older key.
   controls the old mailbox, and rely on the resend path of §3.4. A party
   whose standing token expired before it got the update is not reached
   by the resend (a reconnect token cannot carry `relay.address.update`).
-  (0.85.0 draft) During the grace a connection's vault reaches it with a
+  (0.85.0) During the grace a connection's vault reaches it with a
   reconnect deposited with the old key and carrying tokens the old key
   minted for the old mailbox (§3.4 (a), §3.4.1 S1); the reconnect's
   fresh standing token then carries the update. After the grace, or for
@@ -7685,8 +7743,8 @@ The actions for each event are applied in one flush, in the order listed:
 
 | Event | Actions |
 |---|---|
-| Connection removed | Send `connection.removed` (best effort). Denylist the `jti` of every token the vault issued to the peer (standing and reconnect, including those minted in handshakes still in flight, (0.85.0 draft) those issued to an earlier relay key of the peer, and those issued by an earlier mailbox of the vault still in its grace, at that mailbox, §3.4.1 S7), so that none of them is accepted again. Delete the tokens held for the peer, its session keys and its outbox entries. |
-| Peer blocked | As for connection removed, plus a block entry on the peer's `ik` and relay key (§10.4) ((0.85.0 draft) and on each earlier relay key and ancestor `ik` the vault still keeps for it, §3.4.1) |
+| Connection removed | Send `connection.removed` (best effort). Denylist the `jti` of every token the vault issued to the peer (standing and reconnect, including those minted in handshakes still in flight, (0.85.0) those issued to an earlier relay key of the peer, and those issued by an earlier mailbox of the vault still in its grace, at that mailbox, §3.4.1 S7), so that none of them is accepted again. Delete the tokens held for the peer, its session keys and its outbox entries. |
+| Peer blocked | As for connection removed, plus a block entry on the peer's `ik` and relay key (§10.4) ((0.85.0) and on each earlier relay key and ancestor `ik` the vault still keeps for it, §3.4.1) |
 | Device unlinked | End its access session and drop its held and pending requests (§6.8). Send `device.unlinked` (best effort). Denylist `sub`. Remove the device from the unlock keys. Delete its wake reference. |
 | Agent revoked | As for device unlinked, plus revoke all of the agent's LEASH grants |
 | Invite or pairing cancelled or expired | Denylist the open token's `jti`. DELETE the claim. |
@@ -8360,7 +8418,7 @@ an answer to an unknown or expired id is dropped.
 |---|---|---|
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
-| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password. (0.33.0, release R) To the app also `recovery: {state, attempts, present_recorded_at, counter}`, to desktops `recovery: {state}` (§11.14.11). (0.41.0) To desktops and agents also `session: {session_id, expires_at} \| null`: the calling device's own current access session, never another device's (§6.8). (0.43.0, approved by the owner 2026-10-18) To the app and desktops also `time_scale`, the release constant of §11.10.8 (1 in production). (0.84.0; owner decision a, 2026-11-05, §3.4 "What the member sees") To the app also `relay: "refused"` while a pending relay key is in the refused state (§3.4), absent otherwise |
+| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password. (0.33.0, release R) To the app also `recovery: {state, attempts, present_recorded_at, counter}`, to desktops `recovery: {state}` (§11.14.11). (0.41.0) To desktops and agents also `session: {session_id, expires_at} \| null`: the calling device's own current access session, never another device's (§6.8). (0.43.0, approved by the owner 2026-10-18) To the app and desktops also `time_scale`, the release constant of §11.10.8 (1 in production). (0.84.0; owner decision a, 2026-11-05, §3.4 "What the member sees") To the app also `relay: "refused"` while a pending relay key is in the refused state (§3.4), absent otherwise (0.85.1) To the app also `relay_waiting`: the ids of the connections and devices a relay-key rotation waits for (§3.4.1 "The gate"), absent when none |
 | `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); (0.33.0, release R) also `recovery: {state, present_recorded}` (§11.14.5); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3); 0.29.0, release L: also `idle_lock_at` (§3.6.8) |
 | `vault.lock` (app, desktop) | `{}`; 0.29.0, release L: `{unlock_id}` ("Locks", below) | `{}`; then `vault.locking`. 0.29.0, release L: `stale_lock` when `unlock_id` does not name the current unlock (nothing is done); `bad_request` when it is not 32 lowercase hex characters |
@@ -8368,9 +8426,10 @@ an answer to an unknown or expired id is dropped.
 | `vault.delete` (app: the holder, or the enrolling app before a credential exists) | `{confirm: "delete my vault", credential?, utk_id, sealed{pin, password?}}` | `{}`; then the deletion of §12.5. `bad_request` without the exact phrase or a needed member; `bad_pin`, `backoff`, `bad_password`, `credential_frozen` / `rotation_required` (holder during an alarm), (0.54.0) `credential_required` with body `{"reason": "no_holder"}` (a vault with a credential but no holder, §3.5.9), `forbidden` (a recovering app since 0.16.0: it completes the recovery first, then deletes as the holder; a member without the credential uses §11.11.9) |
 | `vault.locking` (ephemeral) | — | `{reason?}` (0.29.0, release L: `{reason?, unlock_id}`, the unlock this lock ends), with `exp` = now + 60 s; an app ignores one whose `ts` is not later than its latest successful unlock result's (§11.4, 0.23.3); `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0), `"idle"` for the idle lock (§3.6.8; 0.29.0, release L) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
+| `device.features` (D→V) | — | `{features: [name]}` (0.85.1): the receiving-side capabilities the device implements, today only `relay_follow`; sent after each epoch it activates; the vault keeps the last (§3.4.1 "The gate") |
 | `relay.token.refresh` (req) | `{}` | `{kind: "standing", token}` |
-| `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>, rotations?}` ((0.85.0 draft) `rotations`: the links before `rotation`, §3.4.1 S8) |
-| `relay.address.update` | — | `{relay: {url, mailbox, pk}, token, reconnect_token?, links}` ((0.85.0 draft) `links`: the signed relay links, §3.4.1 rule U) |
+| `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>, rotations?}` ((0.85.0) `rotations`: the links before `rotation`, §3.4.1 S8) |
+| `relay.address.update` | — | `{relay: {url, mailbox, pk}, token, reconnect_token?, links}` ((0.85.0) `links`: the signed relay links, §3.4.1 rule U) |
 
 **Locks (0.29.0, release L; approved by the owner 2026-10-12,
 VAULT-LOCK §3).** A lock from a
@@ -10686,7 +10745,7 @@ The **profile object** holds the extras' display name and photo. Sent by
 |---|---|---|
 | `profile.get` | `{}` | `{version, name?, photo?, first_name, last_name, ik}` |
 | `profile.set` | `{version, name?, photo?}` | `{version}` |
-| `profile.update` (V↔V) | — | `{version, first_name, last_name, ik, name?, photo?, items: [{item_id, name, category, fields: [{field_id, label, kind, value}]}], features?}` (`features`, 0.81.0, only to a service connection) |
+| `profile.update` (V↔V) | — | `{version, first_name, last_name, ik, name?, photo?, items: [{item_id, name, category, fields: [{field_id, label, kind, value}]}], features?}` (`features`, 0.81.0, only to a service connection; (0.85.1) `["relay_follow"]` to any connection, §10.8) |
 
 - `name`, the display name, is optional: at most 128 bytes, absent when
   the member has none (the default). `photo` is base64 of a JPEG or PNG
@@ -10777,7 +10836,10 @@ The **profile object** holds the extras' display name and photo. Sent by
   received from each connection, and a later update that leaves a name
   out removes it. It is **never sent to a person connection** and the
   vault ignores `features` in any update it receives (a service's
-  included). A receiver that does not know the member ignores it (§10.1).
+  included), except (0.85.1) the name `relay_follow` (§3.4.1 "The
+  gate"): present exactly when the image lists that capability
+  (§11.10.9), sent to every connection, person or service, and kept by
+  the vault from any connection's update. A receiver that does not know the member ignores it (§10.1).
   The vault sends the update (a) when the connection becomes active
   (§9.3) and (b) once, to every active service connection, at the first
   unlock under a release whose image advertises a name the vault has not
@@ -11372,9 +11434,11 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `drop.ask_muted`, `drop.ask_paused`, `drop.ask_cooldown`,
   `drop.ask_pending` and `drop.ask_rate` (§10.4.1, 0.23.0), `drop.profile_ik_mismatch`
   and `drop.profile_malformed` (§10.8, 0.18.0), `drop.owner_check`
-  (§3.6.3) or (0.85.0 draft) `drop.peer_key` (§3.4.1; `ref` = its reason;
-  pending option O7 of vettid.org #536, History shows a line only for the
-  reasons `superseded_relay`, `ancestor_ik` and `rejected_ik`).
+  (§3.6.3) or (0.85.0) `drop.peer_key` (§3.4.1; `ref` = its reason;
+  owner decision O7a, 2026-11-05: History shows a line, "A message from
+  <name> used a replaced key and was dropped." (NEW, for wording approval
+  with the app PRs), only for the reasons `superseded_relay`,
+  `ancestor_ik` and `rejected_ik`).
 
 **History export** (0.22.0; owner decisions of 2026-10-08, §15 item
 30). The member may save the entries History shows to a file, as CSV or
@@ -18045,6 +18109,7 @@ not the optional features of §11.10.8, which the channel file chooses.
 | `attachments` | Message attachments (§7.3, §10.5.1) | listed from release R; release A implements them without saying so |
 | `item_ways` | The ways to use a secret (§10.11): each item an agent's rules include has its ways (`leash.item.set`, `leash.item.list`), and `item.get` is answered only for an item whose ways hold `reveal` (0.83.0; no release lists it yet) | the release that ships AGENT-PLAN AV9 |
 | `vote_rows` | `other_rows` and `rows_unavailable` of `vote.results.submit` (§10.19.6 step 3) | the vault release implementing 0.83.3 (added ahead of its release by owner decision with this PR's merge go, 2026-11-03, as `item_ways` was) |
+| `relay_follow` | The receiving side of §3.4.1 (`acceptFrom`, rules C, U, T, H5, S1–S9); also advertised to connections in `features` (§10.8) and by devices in `device.features` (§3.4.1 "The gate") | the vault release implementing 0.85 (added ahead of its release by owner decision O6c, 2026-11-05) |
 
 A name is added to this table only with the release that implements it,
 or ahead of it by owner decision with that release in **From**
@@ -19890,7 +19955,7 @@ notice only, and a rotation that cannot be written at all is audited
 unlock, from an owed mark, §11.14.10; a `credential.rotate` that could
 not be written is the member's to ask again): **it never fails the event**. The holder of an old copy also holds the old identity key and
 can announce a rotation of its own; a connection that sees two
-successors of one key suspends (§3.4, (0.85.0 draft) §3.4.1 rule C), and the relay and the host that carry the
+successors of one key suspends (§3.4, (0.85.0) §3.4.1 rule C), and the relay and the host that carry the
 notices are VettID's. So the rotation ends the old keys against someone
 who is not on the message path, and against VettID only once the
 connections have accepted the member's rotation. (0.72.0) A service
