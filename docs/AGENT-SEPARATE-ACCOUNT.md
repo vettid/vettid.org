@@ -357,6 +357,45 @@ cannot read the member's files**. This is the main cost.
   So a shared folder the agent can write remains a way to steer a run,
   as is any argument. A run is still for a member who reads the command
   (AGENT-PLAN §4.9, "The limit").
+- **Narrowing the steering through shared folders** (question 8). The
+  agent runs as the member, so anything the member can write, the agent
+  can write too. No account boundary separates them. What can be done
+  is to make the program not act on what the agent wrote, or to make a
+  change to it visible on the phone:
+  - **Hardened profiles for common programs.** For a program the
+    connector knows, it starts the program with settings that override
+    the folder's own and that the agent can't set. For git:
+    - command-line `-c` settings, which take precedence over every
+      configuration file, empty or neutral for each setting that runs a
+      command (`core.sshCommand`, `core.fsmonitor`, `core.hooksPath`
+      to an empty runner-owned folder, `credential.helper`, `core.pager`,
+      `core.editor`, `diff.external`, `filter.*`, aliases);
+    - `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` empty, set by the
+      connector itself, not by the request (whose `GIT_` names stay
+      refused);
+    - `safe.directory` given on the command line for that one run only.
+
+    The same approach applies to ssh (`-F none`, the options given) and
+    to curl (`-q`, no `.curlrc`). A program with a profile is marked
+    "hardened" in the binding and on the phone. The list of settings is
+    reviewed per program, and a new git version's settings are checked
+    before its profile covers it.
+  - **Pinning the folder's control files.** The vault records the
+    SHA-256 of the few files that steer a known program (for git,
+    `.git/config`, `.gitmodules`, `.gitattributes` and the hooks folder),
+    as it pins the program (VAULT-MESSAGING 0.85.3). A change sends the
+    next run to the phone, saying which file changed. This catches what a
+    profile misses, and it costs one more approval after the member's
+    own edits.
+  - **Programs that run the folder's code by design** (npm scripts,
+    `make`, cargo's `build.rs`, a test runner) can't be hardened: running
+    the repository's code is what they do. In a shared folder they are
+    always referred, every run, and the phone says the program runs code
+    from a folder the agent can change.
+  - **Not covered, said plainly:** file contents a program reads as data
+    (a file the agent wrote that git then pushes, for example) still
+    go where the command sends them. And a program with no profile, run
+    in a shared folder, is only as safe as what it reads there.
 - **What a runner cannot use, said plainly.** The member's own tool
   installs (nvm, pyenv, cargo or rustup in the home folder), the
   member's SSH agent, Git Credential Manager and `known_hosts`. A run
@@ -440,6 +479,15 @@ opened it leaves (§5).
      agent can shadow the command in the member's account.
    - b: no, run from the member's account (the agent can then pair a
      connector of its own and share any folder).
+8. **Steering through shared folders (§6).**
+   - a (recommended): hardened profiles for git, ssh and curl, plus
+     pinned control files for git. Programs that run the folder's code
+     are always referred in a shared folder, and any other program in a
+     shared folder is too until it has a profile.
+   - b: profiles only, no pinned control files (fewer approvals, and a
+     gap where a profile misses a setting).
+   - c: no shared folders at all (question 1 b). Runs use `work/` only,
+     and the steering doesn't arise.
 
 ## 10. What changes elsewhere, once approved
 
