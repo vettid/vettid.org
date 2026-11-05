@@ -83,8 +83,8 @@ changelog:
     §10.8 counts `features` from any message that passes `acceptFrom`
     steps 1–4; the revert skips ephemeral and expired messages and
     keeps at most 10,000 copies and 64 MiB; item 50's release-28 option
-    restated, a residual for rule E toward peers without `hs_confirm`,
-    the R2/R3 row to be measured again.
+    restated, a residual for rule E toward peers without `hs_confirm`;
+    the R2/R3 row measured again (6.07% each).
   - 0.85.3: 2026-11-05, owner decisions of 2026-11-05 for the agent
     connector (option b, thread 01M6PBG2YHEEPDQ9ETQEBWK0EB: pin a
     bound program's content; option a, thread
@@ -26776,7 +26776,7 @@ Follow-ups:
     |---|---|---|
     | All vaults on 28 (today) | 11.43% | all 28↔28: mostly "`ik` left behind" (the second bug, rule L) and finding C |
     | R1 with 28 | 6.03% | 0 false suspensions. By pair: 28↔28 90 runs (today's remainder, which 29 cannot fix), 28 first and 29 second 64, 29 first and 28 second 27. "`ik` left behind" 225 → 98 |
-    | R2, R3 with 28 | TBD | to be measured again |
+    | R2, R3 with 28 | 6.07% each (182 runs) | measured again under the current defaults |
     | R1, random upgrades from 28 | 2.60% | 22 false suspensions (0.73%), from the transition window |
     | R1, gate on | 0 | also 0 in 20,000 runs |
 
