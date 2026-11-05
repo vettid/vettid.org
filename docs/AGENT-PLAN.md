@@ -1,9 +1,18 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.10
+version: 0.1.11
 date: 2026-11-05
 changelog:
+  - 0.1.11: 2026-11-05, the owner's request in the implementing session
+    (after the lead's summary, thread 01M6PJT84B0Z9DK24SPAVDDK71): macOS
+    signing for the separate-account mode (AGENT-SEPARATE-ACCOUNT,
+    vettid.org #539; the owner's Q4 c: macOS runs and proxies wait for
+    signed builds). New A5.4: a signed, notarized installer package, with
+    every executable signed under the hardened runtime, the run helper
+    included, and an early check of the daemon's keychain. §8 item 3
+    gains the Developer ID Installer certificate. "What blocks what"
+    gains A5.4. No protocol change
   - 0.1.10: erratum, 2026-11-05, with VAULT-MESSAGING 0.85.3: the
     connector decisions for A3.5 and A3.7 to A3.9. The lead's answers of
     2026-11-05 to the implementing agent's questions (Q2 to Q7: the
@@ -1120,6 +1129,7 @@ recorded as decided in the table and the changelog (0.1.4, 0.1.5).
 | A5.1 | Reproducible release build script and workflow (unsigned artifacts, `SHA256SUMS`), and a `verify-reproducible` script | Two clean builds produce identical hashes on Linux amd64 and arm64 |
 | A5.2 | Signing in one command for the owner (owner decision, 2026-10-18): signed `v*` tags, refused by the release workflow unless GitHub verifies them; `scripts/sign-release` on the owner's machine checks the tag, rebuilds the release and compares it with the draft, signs `SHA256SUMS` (which names the tag and commit) with `ssh-keygen -Y sign -n vettid-agent-release` and the release key on the owner's YubiKey, verifies the signature against the repository's `allowed_signers`, uploads and publishes after confirmation; `scripts/verify-release` and instructions for users; a CI check of the signature on publish; the public key in the repository and on vettid.org | The owner signs a release candidate with one command; a published release without a valid signature fails the check; the verification instructions succeed on a clean machine |
 | A5.3 | macOS: `vettid-agent.app` built, signed with the owner's Developer ID (individual account), notarized and stapled by `scripts/sign-release` on the owner's Mac, added to `SHA256SUMS` (not reproducible across machines; vouched for by the Developer ID and the release key). Windows Authenticode **waits until the business entity exists** (owner, 2026-10-18) | Gatekeeper accepts the notarized app; the A1.5 round trip passes on the owner's Mac. Later: a signed Windows binary runs under Smart App Control in enforcement mode (#5 closed) |
+| A5.4 | **macOS installer for the separate-account mode** (0.1.11; AGENT-SEPARATE-ACCOUNT §3, the owner's Q4 c). Three parts, in order. **1. A keychain check first** (before any packaging work): a small test daemon, run by launchd under a hidden non-root user, stores and reads an item in the System keychain with an access list naming the signed connector by its code-signing requirement. If that can't work, the protector question (AGENT-SEPARATE-ACCOUNT Q4) goes back to the owner before 2 and 3. **2. Signing every executable**: the connector, the stub (the same binary in `mcp` mode, if so built) and the root run helper, each with the owner's Developer ID Application certificate, the hardened runtime, a timestamp and only the entitlements it needs (the connector: `keychain-access-groups` per §4.2; the helper: none), notarized. **3. A signed, notarized installer package** (`vettid-agent-<version>.pkg`), signed with the owner's **Developer ID Installer** certificate and stapled. It places the program files in administrator-only folders (`/Library/Application Support/VettID/agent/`, `/usr/local/libexec/vettid-agent/`), installs the launchd daemon and socket and the run helper's launchd job, creates the `_vettid<n>` users per pairing at `install` (not at package time), and includes an uninstaller that removes all of it. `scripts/sign-release` gains the package: build, sign each executable, build and sign the `.pkg`, notarize, staple, and add the package to `SHA256SUMS` and its release-key signature. No signing key or Apple credential is ever in CI or in the repository (AG4). | The test daemon's keychain round trip passes, or the failure is reported to the owner. `codesign --verify --strict --deep` and `spctl --assess` pass for each executable; `pkgutil --check-signature` and `spctl --assess --type install` pass for the package; `stapler validate` passes for both; the package installs and uninstalls cleanly on a Mac other than the build Mac, leaving nothing behind (checked and listed in the README); a dry run of `sign-release` on a test tag produces all of it. |
 
 ### A6 — Staging with the Android app (after AA1–AA5, §7.2)
 
@@ -1148,6 +1158,7 @@ deny referred requests in Approvals; see the agent's activity in History
 | A3.5 | AV7 in a staging release |
 | A3.7, A3.8a, A3.8b, A3.9 | AV9 (and AV10 for A3.8a and A3.8b, AV11 for A3.9) in a staging release; AA7 and AA8 for the staging checklist (A6) |
 | A5.2, A5.3 (macOS) | the owner's YubiKey keys and Apple Developer ID (§8 items 2–3) |
+| A5.4 | A5.3; the owner's Developer ID Installer certificate (§8 item 3); AGENT-SEPARATE-ACCOUNT approved (vettid.org #539). macOS runs and proxies (A3.8a, A3.8b, A3.9 on macOS) wait for it (the owner's Q4 c) |
 | A5.3 (Windows) | the business entity and its Authenticode certificate (§8 item 4) |
 | A6 | Android AA1–AA5 on staging (§7.2), ANDROID-PLAN's "Devices & agents" approved; its "auto" step: AV9 in a staging release (ANDROID-PLAN 0.1.53 decision 17) |
 | Production | a production release whose channel lists `leash` (§11.10.8, STAGING-DEVELOPMENT-PLAN §2.4) and the Android work in a production app |
@@ -1237,7 +1248,8 @@ Android; nothing here blocks on iOS.
    on vettid.org. The implementing agent never creates, reads or asks
    for signing material.
 3. **Apple**: a Developer ID Application certificate in the owner's team
-   for the connector, an App ID and a Developer ID provisioning profile
+   for the connector and (0.1.11, A5.4) the run helper, a **Developer ID
+   Installer** certificate for the installer package, an App ID and a Developer ID provisioning profile
    that authorises its `keychain-access-groups` entitlement (§4.2), and
    notarization credentials (a `notarytool` keychain profile), used on
    the owner's Mac (A5.3). The owner's individual Developer account;
