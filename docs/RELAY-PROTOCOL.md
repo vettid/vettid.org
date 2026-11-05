@@ -1,6 +1,6 @@
 # VettID Relay Protocol
 
-**Version:** 0.10.0 (draft)
+**Version:** 0.10.1 (draft)
 **Status:** Pre-implementation draft for review
 
 ## 1. Purpose & design principles
@@ -412,6 +412,25 @@ the old mailbox's revocations and used one-shot tokens cannot come back.
 Deleting the successor (§6.10) also deletes an old mailbox still in its grace
 period; deleting the old mailbox (signed by the old key) ends only its own
 grace.
+
+**Repeating a rotation (0.10.1).** While the old mailbox lives, a rotate
+repeated with the **same** `new_pubkey` and a valid `new_key_proof` is
+idempotent: `200` with the same `mailbox_id`. The successor is created
+only if it is absent or already holds that key, and the old mailbox's
+deletion time is never moved later, so a repeat never lengthens the
+grace. A client that lost the answer, or that stored the new key before
+calling (VAULT-MESSAGING §3.4), calls again with the same key, in a newly
+signed request (the same bytes are refused `replay_detected`, §4.1). A
+repeat counts against the limit on new mailboxes (§7.2, limit 3) like
+the first, so a client retries a `429` after its `retry_after`. A rotate
+with a **different** new key while the old mailbox lives also succeeds,
+and leaves the first successor orphaned; clients SHOULD NOT do it (a
+VettID vault repeats a rotate only with the same key, and rotates with
+another key only after the relay refused the first one definitively,
+VAULT-MESSAGING §3.4). After the grace
+the old mailbox is gone and a rotate signed by its key is answered
+`mailbox_unknown` (§6.10); the new key can still register on its own
+(§6.1).
 
 ### 6.8 Blob transfer (files up to relay blob limit)
 
@@ -1645,6 +1664,17 @@ The push gateway API is specified separately.
 
 ## 10. Changelog
 
+- **0.10.1** — with VAULT-MESSAGING 0.84.0 (the order of a vault's
+  relay-key rotation; owner decision of 2026-11-05, option a). §6.7:
+  a rotate repeated with the same new key and proof
+  while the old mailbox lives is idempotent (the same `mailbox_id`, the
+  successor created only if absent or already holding that key, the old
+  mailbox's deletion time never moved later); a rotate with a different
+  new key also succeeds and leaves the first successor orphaned (a
+  VettID vault does so only after a definite refusal of the first); after
+  the grace a rotate is `mailbox_unknown`. A repeat is a newly signed
+  request and counts against limit 3 (§7.2) like the first. States what
+  vettid-relay does; no wire change.
 - **0.10.0** — approved by the owner (2026-10-20). §6.11: relays serve
   `/.well-known/apple-app-site-association` (was reserved, `404`), so
   the VettID iOS app opens invitation links as Universal Links
