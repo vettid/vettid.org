@@ -301,7 +301,7 @@ exchange. **Checked 2026-11-05** from outside AWS, with Go 1.27
 | `account.vettid.org` (site and member API at `/api/*`) | CloudFront, `TLS_V1_2_2021` (`lib/constructs/static-site.ts`) | TLS 1.3, **X25519MLKEM768** | TLS 1.3, X25519 | TLS 1.2, ECDHE X25519 |
 | `admin.vettid.org` | CloudFront, `TLS_V1_2_2021` | TLS 1.3, **X25519MLKEM768** | TLS 1.3, X25519 | TLS 1.2, ECDHE X25519 |
 | `admin-api.vettid.org` | API Gateway custom domain, `TLS13_1_2_PFS_PQ_2025_09` (`lib/stacks/admin-api-stack.ts`) | TLS 1.3, **X25519MLKEM768** | TLS 1.3, X25519 | TLS 1.2, ECDHE X25519 |
-| `account.staging.vettid.org` | as production | TLS 1.3, **X25519MLKEM768** | TLS 1.3, X25519 | TLS 1.2, ECDHE X25519 |
+| `account.staging.vettid.org` | CloudFront, `TLS_V1_3_2025` since 2026-11-05 (vettid.org #531) | TLS 1.3, **X25519MLKEM768** | TLS 1.3, X25519 | **refused** (protocol version), re-checked 2026-11-05 13:43 UTC |
 
 The admin hosts complete the TLS handshake from anywhere: the exit-node IP
 lock (above) applies to requests, not to the handshake. Staging has no admin
@@ -316,11 +316,13 @@ policies still allow it.
 member API (`/api/*` to the execute-api URL). It runs inside AWS and can't be
 observed from a client.
 
-**Open, for whoever owns the CDK (not changed here):** making the account and
-admin fronts TLS 1.3 only would remove the classical TLS 1.2 path. For
-CloudFront that's `SecurityPolicyProtocol.TLS_V1_3_2025`, already used by
-`calls-stack.ts`, and for API Gateway a TLS 1.3-only PQ policy if one is
-offered. It drops clients without TLS 1.3, so it's a decision, not a fix.
+**Decided (owner, 2026-11-05):** the account and admin sites go TLS 1.3 only
+at CloudFront (`tls13Only`, `SecurityPolicyProtocol.TLS_V1_3_2025`; vettid.org
+#531), which removes the classical TLS 1.2 path. Staging's account site has it
+(table above). Production's account and admin sites change on their own
+deploy go; until then the production rows above still apply. `admin-api` is
+left as it is: API Gateway's only TLS 1.3-only policy isn't one AWS lists as
+post-quantum, so switching could lose the hybrid exchange it has now.
 
 **Re-check** after a change to either policy, and from time to time:
 
