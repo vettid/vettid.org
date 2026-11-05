@@ -419,7 +419,10 @@ idempotent: `200` with the same `mailbox_id`. The successor is created
 only if it is absent or already holds that key, and the old mailbox's
 deletion time is never moved later, so a repeat never lengthens the
 grace. A client that lost the answer, or that stored the new key before
-calling (VAULT-MESSAGING §3.4), calls again with the same key. A rotate
+calling (VAULT-MESSAGING §3.4), calls again with the same key, in a newly
+signed request (the same bytes are refused `replay_detected`, §4.1). A
+repeat counts against the limit on new mailboxes (§7.2, limit 3) like
+the first, so a client retries a `429` after its `retry_after`. A rotate
 with a **different** new key while the old mailbox lives also succeeds,
 and leaves the first successor orphaned; clients SHOULD NOT do it (a
 VettID vault repeats a rotate only with the same key). After the grace
@@ -1666,8 +1669,9 @@ The push gateway API is specified separately.
   successor created only if absent or already holding that key, the old
   mailbox's deletion time never moved later); a rotate with a different
   new key also succeeds and leaves the first successor orphaned; after
-  the grace a rotate is `mailbox_unknown`. States what vettid-relay
-  does; no wire change.
+  the grace a rotate is `mailbox_unknown`. A repeat is a newly signed
+  request and counts against limit 3 (§7.2) like the first. States what
+  vettid-relay does; no wire change.
 - **0.10.0** — approved by the owner (2026-10-20). §6.11: relays serve
   `/.well-known/apple-app-site-association` (was reserved, `404`), so
   the VettID iOS app opens invitation links as Universal Links
