@@ -768,6 +768,19 @@ allowed ways, so the agent can choose again.
   administrator can change it is safer, but not safe, against an agent
   that runs as the connector's user. The README says so, and that the
   connector must not run as an administrator or root.
+- **A separate account is the only full protection** (0.1.10). An
+  agent that runs as the same operating-system account as the
+  connector can, while a run lasts, open the `file` secret, read the
+  process's environment and memory, and attach to it; no check in the
+  connector can stop that, since the system treats them as the same
+  user. So a member who needs a secret kept from the agent itself runs
+  the agent under another account than the connector and its runs.
+  Today the MCP client starts the connector as its own child, in the
+  agent's account, so that is not yet possible with the connector as
+  built; a mode that runs the connector under its own account is an
+  owner decision (it needs a local channel between the agent's account
+  and the connector's, which AG1a rules out today). Until then, the
+  README says so plainly.
 - **The directory.** `cwd` is an absolute path to an existing directory;
   absent, the run's `work/` (below).
 - **The run's own directory** (the lead's answer, 2026-11-05). Each run
@@ -1422,7 +1435,10 @@ approval, each marked NEW except where the owner already chose it:
   settings files, and it does not stop another program running as you
   from looking inside it. An agent that runs as you can still misuse
   those. Programs installed for all users (in Program Files, System32
-  or /usr/bin) are harder to tamper with, but not immune."
+  or /usr/bin) are harder to tamper with, but not immune. While a
+  program runs with a secret, any program running under your account,
+  the agent included, can read that secret from it. Only an agent
+  running under another account cannot."
 - **`leash.request_secret` description**, added: "The value becomes
   part of this conversation, and your app may keep it in its history.
   Use leash.execute_action, leash.run_with_secret or leash.open_proxy
