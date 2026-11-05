@@ -3940,7 +3940,8 @@ these rules hold against anyone but the relay and its host (§13.5).
   `ik_rollback`, `conflict`, `unexpected`.
 - **defer**: left unacked, unprocessed, so the relay delivers it again;
   only for a token rule T says to defer, for at most two of the relay's
-  visibility timeouts (RELAY-PROTOCOL §6.3) after Q first saw it, or
+  visibility timeouts (RELAY-PROTOCOL §6.3) after Q first saw it (that
+  time is stored by `msg_id`, so a restart does not reset it), or
   while another mailbox of Q has not been collected past its
   `deposited_at`, and for at most 8 messages per peer and reason at
   once. Otherwise it is refused with the reason given.
@@ -3985,13 +3986,17 @@ are applied (§6.6).
 
 **Epochs after an `ik` link.** When Q follows a link at position x, an
 epoch of P whose signer is that link's `old_ik` or an ancestor and that
-was established by a message deposited after x stops being current (the
-epoch before it is current again), and messages under it deposited
-after x are refused (`ancestor_ik`). A rekey or reconnect from P under
+was established by a message deposited after x stops being current:
+Q sends nothing to P until a new epoch is established, starts a rekey
+sealed to the link's `new_kem`, and refuses messages under the demoted
+epoch deposited after x (`ancestor_ik`). A rekey or reconnect from P under
 the new `ik` whose `ctx` names an epoch Q superseded by one signed by an
 ancestor `ik` is fork evidence: Q suspends (§6.6 "Fork detection",
-`ref` = `epoch`). *Corner case:* a P whose answer expired before Q's
-`hs.fin` arrived, and that then rotated, is reported as two copies.
+`ref` = `epoch`). An epoch established before this release counts as
+signed by the `ik` current for P at the upgrade. *Corner case:* a P whose
+answer **expired** before Q's `hs.fin` arrived, and that then rotated,
+is reported as two copies (S5 keeps an answer still awaiting `hs.fin`
+from causing this).
 
 **Rule C, one successor per key.** A link whose old key already has a
 followed successor other than its new key is a second successor.
@@ -4073,7 +4078,8 @@ other than the one whose message made the change, is abandoned: no
 it carried are revoked (§6.6). Q's own rekeys and reconnects are started
 again under the current `ik`, except while suspended (a suspension
 abandons every handshake with P and starts none). Q's answers awaiting
-`hs.fin` are dropped; their initiator starts again (S5). A restarted
+`hs.fin` whose pinned `ik` is no longer current are dropped; their
+initiator starts again (S5). A restarted
 reconnect spends one of the reconnect token's 4 deposits (§6.6; the
 relay cannot tell a restart), at most once per change of the current
 `ik`; a peer that rotated sends a fresh reconnect token in its own
@@ -4118,7 +4124,11 @@ each recipient Q).
   new `ik` current, P abandons its own open rekeys and reconnects with
   every peer and starts them again under the new `ik` after the
   `identity.rotate`, so it never sends an `hs.fin` signed by a superseded
-  `ik`. This does not override §6.6 "After a restore" (a restored side
+  `ik`. After the rotation P starts no rekey with a peer while one of its
+  answers to that peer still awaits `hs.fin`, until that answer is
+  established or expires (§6.3: a responder activates only at `hs.fin`,
+  so a rekey started earlier would name an epoch the peer has
+  superseded). This does not override §6.6 "After a restore" (a restored side
   issues no `identity.rotate` until its reconnects are settled).
 - **S6, first contacts** (owner decision 2026-11-05, "gap 2"). In the
   write that makes a new `ik` current, P ends every unclaimed invitation
@@ -4145,7 +4155,9 @@ each recipient Q).
   Q processes P's messages, which the relay does not keep (§8.4).
 - **S9, a sign of a fork.** If P gets `token_revoked` for a token Q
   issued to an earlier key of P while that key is still P's key for Q,
-  and Q's token for P's current key has not arrived 24 hours later, Q
+  and Q's token for P's current key has not arrived 24 hours after P's
+  first collect after that refusal that returns fewer than `max`
+  messages (§12.2), Q
   has followed someone else's update: P audits
   `connection.fork_suspected` (`ref` = `relay_revoked`) with a feed item
   (NEW: "<connection name> may have connected to an old copy of your
@@ -4155,7 +4167,10 @@ each recipient Q).
 - Until Q follows P's update, P's earlier key is current for Q, so an old
   copy's deposits then count as P's, as before any rotation.
 - A copy taken after R's first write holds R's new keys (a pending relay
-  key, the new `ik`); only a later rotation ends it (§11.14.2).
+  key, the new `ik`, and the signed relay links made in that write, kept
+  even if the key is later discarded, for example by a `credential.rotate`
+  in the refused state); only a later rotation ends it (§11.14.2), and
+  rule C catches a link it announces for a discarded key.
 - During the grace an old copy holding the old key can collect, ack or
   delete the old mailbox (RELAY-PROTOCOL §6.7, §6.10), which also ends
   the reconnect path of S1 for a recipient that has not followed.
@@ -11357,7 +11372,9 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `drop.ask_muted`, `drop.ask_paused`, `drop.ask_cooldown`,
   `drop.ask_pending` and `drop.ask_rate` (§10.4.1, 0.23.0), `drop.profile_ik_mismatch`
   and `drop.profile_malformed` (§10.8, 0.18.0), `drop.owner_check`
-  (§3.6.3) or (0.85.0 draft) `drop.peer_key` (§3.4.1; `ref` = its reason).
+  (§3.6.3) or (0.85.0 draft) `drop.peer_key` (§3.4.1; `ref` = its reason;
+  pending option O7 of vettid.org #536, History shows a line only for the
+  reasons `superseded_relay`, `ancestor_ik` and `rejected_ik`).
 
 **History export** (0.22.0; owner decisions of 2026-10-08, §15 item
 30). The member may save the entries History shows to a file, as CSV or
