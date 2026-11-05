@@ -4217,8 +4217,8 @@ each recipient Q).
   (0.86.0 draft) **Resend.** P sends `identity.rotate` to Q again (with
   S8's links) when Q's view is evidently stale: a session message from
   Q under an epoch whose P-side signer is an ancestor of P's `ik`,
-  deposited after P's rotation; at most once per batch and once per
-  hour per peer. After
+  deposited after P's rotation; at most 3 times per peer per rotation,
+  and at most once per hour. After
   the rotation ((0.86.0 draft) and at any time, §6.5) P starts no rekey with a peer while one of its
   answers to that peer still awaits `hs.fin`, until that answer is
   established or expires (§6.3: a responder activates only at `hs.fin`,
@@ -4259,6 +4259,11 @@ each recipient Q).
   vault. Contact <connection name>.").
 
 **Residuals.**
+- (0.86.0 draft) A second successor carried only by messages from a
+  key Q does not know for P (step 2 refuses them as `foreign_sender`;
+  for example an old copy that took the original's mail from its live
+  mailbox before Q followed) is not detected until it arrives from a
+  key Q knows (I4).
 - Until Q follows P's update, P's earlier key is current for Q, so an old
   copy's deposits then count as P's, as before any rotation.
 - A copy taken after R's first write holds R's new keys (a pending relay
@@ -4313,7 +4318,9 @@ PR):
   suspends.
 - **I4, fork.** If two different successors of one `ik` or relay key of
   P each reach Q in messages Q can still open (an epoch it keeps,
-  §6.5), in any order and from any of P's keys, Q ends suspended (for a
+  §6.5), in any order and from keys Q knows for P ((0.86.0 draft) its
+  current relay key, an earlier one Q keeps, or a handshake Q can
+  attribute to P), Q ends suspended (for a
   device or agent: refuses the second and tells the member), unless one
   was an identity link dropped at resolve.
 - **I5, durability.** Nothing leaves a party before the state write that
