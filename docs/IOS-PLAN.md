@@ -1,9 +1,20 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.62
-date: 2026-11-04
+version: 0.1.63
+date: 2026-11-05
 changelog:
+  - 0.1.63: erratum, 2026-11-05 (ANDROID-PLAN 0.1.120). §6.6: what
+    holds the daily check back, the lead's reading of VAULT-MESSAGING
+    §3.6.5 that vettid-ios #205 and #206 build (ANDROID-PLAN §6 owner
+    check item 3). §4 carries ANDROID-PLAN 0.1.120: the apps don't
+    offer blocking, with the approved `data_failure_blocked`; AA3's
+    Other permissions heading. §4 differences from Android, from
+    vettid-ios #209: History export's `bad_request` shows the code
+    (Android to follow); a failed wait in transfer out rejects the
+    transfer and returns to the start (Android shows "expired"); a
+    refused update is said in words. §8 "Later": presence and location
+    follow ANDROID-PLAN's "last seen" wording and units.
   - 0.1.62: 2026-11-04 (ANDROID-PLAN 0.1.119, VAULT-MESSAGING 0.83.8).
     §4 Settings → Vault status: the credential-key fingerprint row, as
     on Android, with its loading, error and none-yet states.
@@ -728,7 +739,9 @@ Only these differ on iOS:
 | Settings → Vault status | ID15; the credential-key fingerprint row, as on Android (ANDROID-PLAN §4 "Owner check and status", 0.1.119), computed in `VettIDCrypto` beside the `ik` fingerprint. |
 | Profile photo | **Camera only**, as on Android (ANDROID-PLAN §4 Settings → Privacy; row I2.5): the app's own AVFoundation camera screen, to memory; no photo picker and no other camera app. Camera access "not yet asked" asks; "denied" and "restricted" show `ios_settings_photo_capture_permission_blocked` (§14) with **Open settings**, which opens the app's page in Settings (Android's text names its phone's Permissions screen). |
 | Photo attachments | AVFoundation camera to memory; `PHPickerViewController` (no photo-library permission, like the Android Photo Picker); saving uses the add-only permission and only after the warning. |
-| History export | `fileExporter` ("Save to Files") in place of "Save to…". |
+| History export | `fileExporter` ("Save to Files") in place of "Save to…". (0.1.63; vettid-ios #209) `bad_request` is the request's own fault and shows the vault's code; only `unsupported_type` says the vault release is too old. Android maps `bad_request` to "old vault" today and is to follow (ANDROID-PLAN 0.1.120). |
+| Transfer to a new phone (this phone the old one) | (0.1.63; vettid-ios #209) When the wait for the new phone fails (not the code's own end), the app rejects the transfer (`device.transfer.reject`), so its code cannot be used, and returns to the start with the failure said. Android shows the "expired" screen. |
+| Unlock, a refused update | (0.1.63; vettid-ios #209) The reason is said in words, with the refused release's own number, for the codes the app has a sentence for (`ios_unlock_update_refused_why`, a draft for the owner); any other code gets Android's `unlock_update_refused` with the code filtered, never raw. Android shows the code. |
 | Calls (later) | CallKit, and PushKit to ring (needs APNs). |
 
 ### 4.1 Event titles (0.1.11)
@@ -2377,6 +2390,14 @@ leaving the screen.
   again": `messages_held_title` "Messages are on hold",
   `history_held_title` "History is on hold", and `held_list_body` "Your
   daily check is due. They'll show again once it's done."
+  (0.1.63) What holds the check back is ANDROID-PLAN 0.1.120 §6 owner
+  check item 3, the lead's reading of VAULT-MESSAGING §3.6.5
+  (2026-11-03) that vettid-ios #205 and #206 build: an open approval or
+  a started credential operation holds it, typed or not; anything else
+  only while it holds input; at most 5 minutes after the deadline;
+  read-only screens are covered at once, typed secrets are wiped, and
+  the check stays once shown. iOS has no calls yet; when it does, a
+  call keeps only the call's own UI up over the covered shell.
 - **Unlock and check in** (0.1.47; owner decision 2026-10-28,
   VAULT-MESSAGING 0.71.0 §3.6.5 "Ask only for what is used"): as
   ANDROID-PLAN §6 owner check item 6, with the same approved texts
@@ -2700,7 +2721,10 @@ Android counterpart is done: **calls** (CALLS-PLAN; CallKit, ringing
 by PushKit, which needs APNs; the media stack and frame encryption of
 CALLS-PLAN §12; `calls.json`), **devices and agents** (§6.8, §10.11;
 `leash.json`), **wallet** (§10.18), **location** (§10.16; ANDROID-PLAN
-§6 location notes), **presence** (§10.17).
+§6 location notes), **presence** (§10.17). (0.1.63) They follow
+ANDROID-PLAN 0.1.120 §4: presence's "last seen" wording and card text
+(owner, 2026-11-03), and location's distances in miles or kilometers
+by the phone's region, with Settings → Units (owner, 2026-11-05).
 
 ### What blocks what
 
