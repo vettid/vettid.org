@@ -292,9 +292,9 @@ their Headscale node *and* disable/delete the Cognito user.
 ## Post-quantum TLS: account and admin (ACCOUNT-ADMIN-PLAN §7)
 
 These sites carry no application cryptography exposed to "harvest now,
-decrypt later". Their exposure is the TLS key exchange. **Checked
-2026-11-05** from outside AWS, with Go 1.27 `crypto/tls` (and OpenSSL 3.5
-`s_client -groups X25519MLKEM768` for `account.vettid.org`):
+decrypt later" (docs/PQC-MIGRATION.md). Their exposure is the TLS key
+exchange. **Checked 2026-11-05** from outside AWS, with Go 1.27
+`crypto/tls` and OpenSSL 3.5.7 `s_client`, on every host below:
 
 | Host | Front, policy (CDK) | Hybrid offered | X25519 only | TLS 1.2 at most |
 |---|---|---|---|---|
@@ -307,8 +307,8 @@ The admin hosts complete the TLS handshake from anywhere: the exit-node IP
 lock (above) applies to requests, not to the handshake. Staging has no admin
 hosts.
 
-**So:** any client that offers ML-KEM (current browsers, Go 1.24+, OpenSSL
-3.5+) gets the hybrid exchange. A client that offers only classical groups,
+**So:** any client that offers ML-KEM (current major browsers, Go 1.24+
+with default settings, OpenSSL 3.5+) gets the hybrid exchange. A client that offers only classical groups,
 or only TLS 1.2, gets a classical one: TLS 1.2 has no hybrid group, and both
 policies still allow it.
 
