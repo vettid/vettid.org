@@ -38,7 +38,9 @@ changelog:
     of the program file and `path` where it ran from. The vault
     records both, never the app, when the member approves a run whose
     hash is not recorded yet, or whose hash or path differs from the
-    recorded ones. Such a run is always referred, with the new flags
+    recorded ones (the earlier rule, a program only an administrator
+    can change, stays for a program with no pin yet). Such a run is
+    always referred, with the new flags
     `program_unrecorded` or `program_changed` (the latter with
     `previous_sha256` and `previous_path`), and `each: false` covers
     only a run that matches the pin. Recording raises the settings'
@@ -12465,7 +12467,12 @@ item's settings allow for its task:
     A `leash.item.set` may keep an entry's recorded `sha256` and `path`
     (the same `program`, the same values) or leave both out, which
     narrows; any other `sha256` or `path` is `bad_request`. Changing an
-    entry's `program` drops them.
+    entry's `program` drops them. (Owner decision of 2026-11-05, kept
+    as the fallback) When the matched entry has no `sha256` yet, the connector also refuses (`program_not_found`) a program that the connector's user can change, or that sits in a folder that user can change, by the `--run-path` check (AGENT-PLAN §4.9). A recorded pin replaces this check for that file.
+  - (0.85.0) **What approving a fingerprint means.** Approving a run
+    flagged `program_unrecorded` or `program_changed` lets later runs of
+    that exact file, at that path, go unasked when the item's settings
+    allow (`each: false`). The approval screen says so.
   - (0.85.0) **Settings that change while a run waits.** When the
     approval of an `item.run` arrives and the item's settings'
     `version` is no longer the one the run was decided under, the vault
@@ -12557,10 +12564,11 @@ item's settings allow for its task:
   `PERLLIB`, `PERL5DB`, `PYTHONSTARTUP`, `PYTHONPATH`, `PYTHONHOME`,
   `PYTHONUSERBASE`, `RUBYOPT`, `RUBYLIB`, `JAVA_TOOL_OPTIONS`,
   `_JAVA_OPTIONS`, `JDK_JAVA_OPTIONS`, `GCONV_PATH`,
-  `XDG_CONFIG_HOME`, `AWS_CONFIG_FILE`, `KUBECONFIG`, `LESSOPEN`,
-  `PAGER`, `EDITOR`, `VISUAL`, `SSH_ASKPASS`, `SUDO_ASKPASS`, `GOFLAGS`
-  or `RUSTC_WRAPPER`; nor is a name that sends a program's traffic
-  elsewhere or makes it trust another certificate: `HTTP_PROXY`,
+  `XDG_CONFIG_HOME`, `AWS_CONFIG_FILE`, `KUBECONFIG`; (proposed; not an owner decision)
+  nor `LESSOPEN`, `PAGER`, `EDITOR`, `VISUAL`, `SSH_ASKPASS`,
+  `SUDO_ASKPASS`, `GOFLAGS` or `RUSTC_WRAPPER`, nor a name that sends a
+  program's traffic elsewhere or makes it trust another certificate:
+  `HTTP_PROXY`,
   `HTTPS_PROXY`, `ALL_PROXY`, `SSL_CERT_FILE`,
   `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE` or
   `CURL_CA_BUNDLE`. Such a
@@ -12568,7 +12576,9 @@ item's settings allow for its task:
   entry's `env`), and it holds even for a listed name. `env` holds
   0–32 more variables `{NAME: value}`, names by the same rule, values
   at most 4,096 bytes, each name listed in the matched entry's `env`
-  (`env_not_allowed` otherwise, above). Otherwise `bad_request`. An `address` field cannot be used (`not_found`). The
+  (`env_not_allowed` otherwise, above). Otherwise `bad_request`. The
+  name rule is checked first (`bad_request`), then the allowlist
+  (`env_not_allowed`). An `address` field cannot be used (`not_found`). The
   answer is `{item_id, field_id, value}`, for the connector to pass to
   that one process only. Recorded as `leash.item.run`.
 - `item.proxy{item_id, field_id, host, seconds?}`: `host` one of the
@@ -12620,8 +12630,9 @@ item's settings allow for its task:
   The app shows, for an `item.run`: the agent, the item and field, the
   program, (0.85.0) its fingerprint (the first 16 hex digits of
   `sha256`, in groups of four) and, for `program_changed`, the previous
-  fingerprint and path beside them and that the program changed or
-  moved since the member last approved it, every argument unabridged (characters that are not printable
+  fingerprint and path beside them and that the program changed since
+  the member last approved it, or, when `previous_path` differs, that
+  it "moved to <path>", stressed, every argument unabridged (characters that are not printable
   shown escaped), the directory, how the secret is passed (with the
   variable's name), the other variables with their values, and a
   warning for each flag; for an `item.proxy`: the agent, the item and
