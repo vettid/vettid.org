@@ -66,14 +66,25 @@ changelog:
     `b400025`, release 28 modeled from its real code `0ee0078`): rule E
     drops an unsent `hs.fin` for a destroyed epoch, and toward a peer
     without `hs_confirm` a later-`ts` message under a destroyed epoch
-    starts a reconnect naming that epoch instead of suspending; new S10:
+    starts a reconnect naming that epoch instead of suspending; new rule L:
     toward a peer without `features`, an inferred refused rekey starts
     one reconnect carrying the whole chain when P's `ik` is newer than
     the current epoch's signer (release 28's second bug); S8 says the
     whole chain is carried after a further rotation; F9's trigger is "no
     valid standing token, or `token_expired`"; the 48 days come from the
     30-day token life; item 50's residuals as a table and what the model
-    does not cover.
+    does not cover. Fifth round (the lead's recheck): `own_copy` is an
+    audit and a History line ("<connection name> restarted its secure
+    session with you."), no feed item; the `ref` = `epoch` suspension's
+    feed item accuses neither side (NEW); rule L (was S10, renamed to
+    avoid staging release S10) and rule E's reconnect retry an
+    unanswered reconnect up to 3 times per epoch and end `stale` on a
+    refusal or the last failure; §6.3.1 "Deployment" points to rule L;
+    §10.8 counts `features` from any message that passes `acceptFrom`
+    steps 1–4; the revert skips ephemeral and expired messages and
+    keeps at most 10,000 copies and 64 MiB; item 50's release-28 option
+    restated, a residual for rule E toward peers without `hs_confirm`,
+    the R2/R3 row to be measured again.
   - 0.85.3: 2026-11-05, owner decisions of 2026-11-05 for the agent
     connector (option b, thread 01M6PBG2YHEEPDQ9ETQEBWK0EB: pin a
     bound program's content; option a, thread
@@ -4111,16 +4122,18 @@ than Q's confirmed epoch, where an epoch after it up to the confirmed
 one has as its epoch signer (P's side, Terms) an ancestor of P's `ik`,
 is fork evidence: Q suspends (§6.6 "Fork detection", `ref` = `epoch`).
 A suspension with `ref` = `epoch`, here or by §6.3.1 rule E, shows not
-§6.6's feed item but S9's neutral one with the new-invitation path
-(NEW, for owner approval): "<connection name> may have connected to an
-old copy of your vault. The connection is paused. Contact <connection
-name>, then connect again with a new invitation." Q's own rotations are
-no evidence. **Except** when the only explanation
+§6.6's feed item but this one, which accuses neither side (NEW, for
+owner approval): "<connection name> or your vault may be running from an old copy.
+The connection is paused. Contact <connection name>, then connect
+again with a new invitation." Q's own rotations are no evidence. **Except** when the only explanation
 is that P never activated an epoch Q began: every such epoch is one Q
 began (Q's `hs.fin` was lost, or P dropped the answer, S5). Then Q does
 not suspend: it demotes those epochs, accepts the `ctx` as its last epoch,
-and audits `connection.fork_suspected` (`ref` = `own_copy`) with S9's
-feed item. A real second successor still suspends by rule C when its
+and audits `connection.fork_suspected` (`ref` = `own_copy`) with a
+History line (NEW) "<connection name> restarted its secure session
+with you." and no feed item: benign cases reach it (an S5 drop while
+the sides disagree on the gate; a lost `hs.fin` toward an ungated peer
+followed by a rotation). A real second successor still suspends by rule C when its
 link arrives. (An initiator's confirmed epoch is
 its current one. In the S5 case Q received only `hs.fin` under the
 later epoch, so the earlier one stays confirmed.) An epoch established
@@ -4330,7 +4343,8 @@ each recipient Q).
   `connection.fork_suspected` (`ref` = `relay_revoked`) with a feed item
   (NEW: "<connection name> may have connected to an old copy of your
   vault. Contact <connection name>.").
-- (0.86.0 draft) **S10, a peer without `features` that missed a link.**
+- (0.86.0 draft) **Rule L, a peer without `features` that missed a
+  link.**
   Toward a peer that has not advertised `features` (§10.8; release 28
   or earlier), P infers that its rekey was refused when: its rekey
   `hs.init` goes unanswered for its lifetime (§6.3.1); an `hs.resp` is
@@ -4339,8 +4353,11 @@ each recipient Q).
   current one. Then, if P's `ik` is newer than the one that signed the
   current epoch (the peer may have missed a link), P drops its
   unfinished answers to that peer and starts a reconnect, which carries
-  the whole chain (§6.6). At most once per current epoch; a refused or
-  failed reconnect does not start another. *Why:* release 28 reads
+  the whole chain (§6.6). At most once per current epoch. A reconnect
+  that expires unanswered is tried again, up to 3 tries per epoch
+  within the reconnect token's quota. One that is refused, or the last
+  that fails, makes the connection `stale` with its feed item
+  (`connection.stale`, §10.9). *Why:* release 28 reads
   only an `identity.rotate`'s `rotation`, follows a link only from the
   `ik` it has stored, and refuses a rekey silently. A release-28 peer
   that missed a link is otherwise stuck for good (the second live bug,
@@ -6395,8 +6412,11 @@ itself at confirmation; it never moves back. While it is not current:
   message is not fork evidence: the peer activated at `hs.fin` and
   never learned of rule E. `R` starts a reconnect instead, naming the
   epoch the message came under (release 28 accepts a reconnect only if
-  it names its current epoch), at most one per destroyed epoch, within
-  the reconnect token's quota (§6.6). Toward a peer with `hs_confirm`
+  it names its current epoch). A reconnect that expires unanswered is
+  tried again, up to 3 tries per destroyed epoch within the reconnect
+  token's quota (§6.6). One that is refused, or the last that fails,
+  makes the connection `stale` with its feed item (`connection.stale`,
+  §10.9). Toward a peer with `hs_confirm`
   it still suspends, and rule C still suspends on a real fork's link.
 
 **Crossing** (§6.5). `I`, holding a pending epoch, drops a rekey
@@ -6422,19 +6442,25 @@ The gate is fixed per handshake when its `hs.init` is sent; a
 `features` that arrives later changes only later handshakes. To keep
 the ungated window short, every message a side deposits to a peer
 carries its `features` (the inner field of §5.3, §10.8; for a device or
-agent, its `device.features` list). Toward a
+agent, its `device.features` list). Toward a peer that has advertised
+no `features` at all, §3.4.1 rule L also applies. Toward a
 peer without the gate `I` activates at `hs.fin` as before, but keeps the
-old epoch's send keys, `rk` and receive keys, and a copy of each message
-it sends under the new epoch, until it receives anything under the new
-epoch, at most 48 days. If before that it receives from the peer a
+old epoch's send keys, `rk` and receive keys, and a copy of each durable
+message (§8.5) it sends under the new epoch, until it receives anything
+under the new epoch, at most 48 days. It keeps at most 10,000 copies
+(an epoch's message limit, §6.5) and 64 MiB of them (content sent by
+claim-check counts as its reference); past either, the oldest copy is
+dropped. If before that it receives from the peer a
 session message or a rekey `hs.init` under the old epoch whose inner
 `ts` is more than `T` + 2 days (the skew budget of the lifetimes, above)
 after its `hs.fin` (so the peer never activated), it **reverts**, in one
 write before it processes that message: the new epoch is destroyed and
 the old one is current again; `I` seals every message it sent under the
 new epoch again in the old one, with the same inner id and a new `ts`
-(receivers dedupe by inner id, §8.2); it audits
-`connection.epoch_reverted` (`connection_id`) and shows in History (NEW)
+(receivers dedupe by inner id, §8.2), skipping ephemeral ones and any
+whose `exp` has passed; it audits `connection.epoch_reverted`
+(`connection_id`; `ref` = the number of copies dropped by the cap, if
+any) and shows in History (NEW)
 "<connection name>: some messages were resent."; then it answers the
 peer's rekey, or starts one from the old epoch. If the two sides
 disagree on the gate (one has not yet seen the other's `features`), an
@@ -11159,8 +11185,10 @@ The **profile object** holds the extras' display name and photo. Sent by
   release also puts the list it advertises to a peer in the inner
   `features` field (§5.3) of every message it deposits to that peer,
   handshake messages included; a device or agent does the same with the
-  list of its `device.features`. A receiver takes it as that peer's
-  current list, as if it had arrived in `profile.update` or
+  list of its `device.features`. A receiver counts it from any message
+  that authenticates as that peer and passes `acceptFrom` steps 1–4
+  (§3.4.1), even one in a handshake it then abandons, and takes it as
+  that peer's current list, as if it had arrived in `profile.update` or
   `device.features` (a name is only ever added, so an older list in a
   late message removes nothing). A single update is not enough: the
   first message after an upgrade is often an `hs.resp` the peer drops
@@ -25871,7 +25899,7 @@ Follow-ups:
     1. a recovery wrap of the vault's recovery key under the PIN and the
        password together, with an attempt counter outside everything the
        host stores, first S3 objects under Object Lock in compliance
-       mode; the bound may rest on AWS's documented S3 behaviour, with
+       mode; the bound may rest on AWS's documented S3 behavior, with
        the assumption that AWS could act for the account owner stated;
     2. ten attempts at the pair together for the life of the pair; after
        ten, one of the two must change; two attempts at once, then one
@@ -25974,7 +26002,7 @@ Follow-ups:
     with a member's address block the member's sign-ins and approvals
     from that service for 7 days (§10.4.1). Decided:
     1. an optional `purpose` (`signin`, `approval`) in the challenge,
-       absent meaning the behaviour before 0.65.0, an unknown value
+       absent meaning the behavior before 0.65.0, an unknown value
        treated as absent;
     2. the purpose signed, under a label of its own and with a length
        prefix, and echoed in the signed response, so that sign-in
@@ -26712,8 +26740,8 @@ Follow-ups:
     refused (`reconnect_refused`), and the pair goes `stale`. A new
     invitation is needed. *An option for the owner only (not in the
     normative text):* the responder keeps an expired answer's keys for
-    `T` more, so that a late `hs.fin` still establishes it; never for a
-    reconnect's answer.
+    `T` more, so that a late `hs.fin` still establishes it (reconnects
+    included); it does not help an `hs.fin` that expired at the relay.
     **Release 29** (the held release 28 plus this):
     - **(R1, recommended) everything, gated.** Between two vaults of 29
       the gate opens once each has the other's `features` (first unlock
@@ -26746,9 +26774,9 @@ Follow-ups:
 
     | Mix | Runs with a violation | Notes |
     |---|---|---|
-    | All vaults on 28 (today) | 11.43% | all 28↔28: mostly "`ik` left behind" (the second bug, S10) and finding C |
+    | All vaults on 28 (today) | 11.43% | all 28↔28: mostly "`ik` left behind" (the second bug, rule L) and finding C |
     | R1 with 28 | 6.03% | 0 false suspensions. By pair: 28↔28 90 runs (today's remainder, which 29 cannot fix), 28 first and 29 second 64, 29 first and 28 second 27. "`ik` left behind" 225 → 98 |
-    | R2, R3 with 28 | 6.77% each | measured before the reconnect named the message's epoch by default; plus 2 runs of message loss between 29s |
+    | R2, R3 with 28 | TBD | to be measured again |
     | R1, random upgrades from 28 | 2.60% | 22 false suspensions (0.73%), from the transition window |
     | R1, gate on | 0 | also 0 in 20,000 runs |
 
@@ -26760,10 +26788,13 @@ Follow-ups:
     recovers it. The alternatives, keeping such an epoch or a 2-day
     window for it, were rejected: both let an old copy's session be
     used silently (a median of 6 days in the model). `features` on every
-    message (§10.8) keeps the window short. Release 28's own behaviour is
+    message (§10.8) keeps the window short. Release 28's own behavior is
     confirmed on its real code by probes: finding C, the split at a lost
     `hs.fin`, the stuck lost `identity.rotate`, `hs.confirm` answered
-    `unsupported_type`, and the inner `features` field ignored.
+    `unsupported_type`, and the inner `features` field ignored. Toward a
+    peer without `hs_confirm`, an old copy's use of a destroyed epoch is
+    not detected (§6.3.1 rule E reconnects instead); rule C on links
+    still is.
     **The lead recommends R1**, with three of its review's fixes: S5
     keeps an answer to a peer without `hs_confirm` (§3.4.1); the
     lower-`th1` rule for any two crossing handshakes (§6.5); and the
@@ -26780,8 +26811,8 @@ Follow-ups:
     carve-out of the lead's item 4 and F13's §6.6 epoch history);
     relay-key rotation under R1–R3; release 28 running a separate rekey
     and reconnect per peer; collect paging; the 4-deposit quota of the
-    reconnect token; the 7-day window of §6.6 "After a restore"; and the
-    cryptography behind confirmation (it takes opening under an epoch's
+    reconnect token; the 7-day window of §6.6 "After a restore"; how
+    often `own_copy` occurs (not counted); and the cryptography behind confirmation (it takes opening under an epoch's
     key as given). The model's findings H, G, E, I, J, K are fixed in §6.3.1
     and §3.4.1; A (rule C compares seen links) and B (a relay fork is
     recorded while suspended) in §3.4.1. The independent review's
