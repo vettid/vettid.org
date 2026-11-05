@@ -43,7 +43,8 @@ changelog:
     them could leave a mailbox the vault had no key for, or a key with
     no mailbox. `identity.rotated` is audited and owed marks clear at
     the second write, not the first (`ik`, `kem` and the wake key are
-    current from the first); a key left pending is audited
+    current from the first; for a rotation made while a key is pending,
+    below); a key left pending is audited
     `identity.rotation_failed` at an unlock whose attempt does not
     complete it, at most once per unlock. A run that ends before the
     second write is completed by the same rotate (idempotent,
@@ -66,8 +67,12 @@ changelog:
     never another key on the vault's own. Any rotation made while a key
     is pending keeps it and records a relay-key rotation owed; that
     key's second write then stores the next relay key as pending in the
-    same write and clears no mark, so the marks clear only at the next
-    key's second write and a run ending between them loses nothing.
+    same write, which meets (and clears) the relay-key mark, and the
+    other marks clear only at the next key's second write, so a run
+    ending between them loses nothing and no further key is minted. That
+    write audits `identity.rotated` for the earlier rotation and the next
+    key's audits the later one, with no `ref` named twice. A stored
+    `retry_after` end is dropped when its key stops being pending.
     Only the member's `credential.rotate` in the refused state replaces
     the pending key (a new key, rotated from the current mailbox or, past
     the grace, registered). Nothing about the new address goes out
@@ -3548,11 +3553,18 @@ create-only.
     or is not made because a `retry_after` is still running), **at most
     once per unlock**; an unlock that completes it audits
     `identity.rotated` only. A definite refusal (below) is audited at
-    once.
+    once. When a rotation R2 was made while R1's key K1 was pending
+    (below), K1's second write audits `identity.rotated` for R1, with
+    the `ref` R1 would have carried had it cleared the marks owed when it
+    was made (§11.14.10), though they stay owed; R2's `identity.rotated`
+    comes at the second write of the next key K2, with the `ref` of the
+    marks it clears that R1's audit did not already name (so a move's
+    line is not shown twice).
   - **Owed marks** (§11.14.10) clear at the second write, not the first,
     except while a relay-key rotation is owed (below): then that second
-    write clears no mark, and every mark clears at the next key's own
-    second write. Until then the retry an owed mark asks for at each
+    write clears only the relay-key-rotation mark, which the next key
+    stored in the same write meets, and every other mark clears at the
+    next key's own second write. Until then the retry an owed mark asks for at each
     unlock is the completion of the pending key below: it does not
     rotate `ik`, `kem` or the wake key again. A `credential.rotate` with
     no mark owed has none to clear; its pending key is completed the
@@ -3579,7 +3591,10 @@ create-only.
     the unlock makes no attempt, and the next is made when it has run
     out. So that a lock and a new unlock do not reset it, the vault
     stores the time it runs out with the pending key in the DEK state
-    (read at the unlock before the completion step; it is not secret). While a key is pending (and not refused), `mailbox_unknown` on
+    (read at the unlock before the completion step; it is not secret),
+    and drops it when that key stops being pending (made current, or
+    discarded by a `credential.rotate` in the refused state). While a
+    key is pending (and not refused), `mailbox_unknown` on
     the current mailbox (from the collect loop, §12.2) starts the same
     path: the rotate, then the registration below.
   - **A definite refusal** of the rotate or of the registration is any
@@ -3627,12 +3642,14 @@ create-only.
     held updates, and records in the same flush that a **relay-key
     rotation is owed** (a mark, as in §11.14.10). The pending key is
     then completed as above, at once if the relay answers, else at the
-    next unlocks. Because a relay-key rotation is owed, the pending
-    key's second write also stores the **next** relay key as pending,
-    with its new tokens and held updates (step 1), in that same write,
-    and clears no owed mark; the next key's rotate (signed by the key
-    just made current) follows by this same order, and the marks clear
-    at its own second write. The pending key's held updates still go
+    next unlocks. The pending key's second write then also stores the
+    **next** relay key as pending, with its new tokens and held updates
+    (step 1), in that same write. Storing the next key **meets** the
+    relay-key-rotation mark, so that write clears it (safely, as the
+    next key is stored in the same write) and the next key's second
+    write mints no further key; the other owed marks stay and clear at
+    the next key's own second write, after its rotate (signed by the key
+    just made current) by this same order. The pending key's held updates still go
     out after its second write, so the recipients have a live address
     while the next key waits. Otherwise the pending private key,
     already held in states sealed under an earlier DEK (for example a
@@ -3645,7 +3662,8 @@ create-only.
     refused key, its tokens, its held updates and the refused mark,
     generates a new relay key and stores it as pending with new tokens
     and held updates in its flush (that key meets any relay-key rotation
-    owed, so the owed marks clear at its second write), and continues
+    owed, which clears in that flush; the other owed marks clear at its
+    second write), and continues
     at step 2: the rotate signed by
     the current key, or past the grace the registration. (The refused
     key has no successor mailbox, or one that was never announced, so a
@@ -4183,7 +4201,8 @@ item's values seals them to a **one-time reply key** instead:
     key, so that after a PIN or password change it ends the whole old
     copy (§11.14.2). It clears every owed rotation mark (§11.14.10;
     (0.84.0) at its second write, §3.4; when it found a relay key
-    pending, at the second write of the relay key after it); if a
+    pending, the other marks at the second write of the relay key
+    after it); if a
     transfer's credential-key statement is still held, it sends that
     first, and it first deposits a waiting
     `device.unlinked{transferred}` with the old relay key. The relay-key
@@ -20051,7 +20070,7 @@ binding and replay rules of §11.3 and §11.6 and then, **in this order**:
    key, identity and KEM keys and wake key** (§3.4, §14; (0.84.0) the
    relay key is stored as pending in step 2 and the relay's rotate follows
    it, §3.4 "The order of a relay-key rotation"; a rotation that
-   cannot be made never fails the recovery, §11.14.2: the state holds a rotation owed with `ref` = the `recovery_id`, which a failed rotation leaves and the next unlock retries, audited `identity.rotation_failed`; one rotation clears every owed mark, §11.14.10). The notices to
+   cannot be made never fails the recovery, §11.14.2: the state holds a rotation owed with `ref` = the `recovery_id`, which a failed rotation leaves and the next unlock retries, audited `identity.rotation_failed`; one rotation clears every owed mark, §11.14.10, and (0.84.0) for a relay key pending §3.4 says when). The notices to
    removed devices, `device.unlinked{replaced}` and any pending unlink's
    `device.unlinked{transferred}` (§11.14.10), are deposited only after
    step 2 of the order of writes is confirmed (like every notice of an
@@ -21466,7 +21485,8 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   one, never holds it, so "The move didn't finish" needs no step to clear
   it. The mark outlives the pending unlink (a pending unlink deleted
   unsent because its token expired does not cancel the rotation). **One
-  rotation clears every owed mark**: the transfer's, a recovery's
+  rotation clears every owed mark** ((0.84.0) for a rotation that finds
+  a relay key pending, see §3.4): the transfer's, a recovery's
   (below), and a `credential.rotate`, which rotates the same full set
   (§3.5.5). **A rotation that clears a transfer's mark sends the held
   statement K0→K1 first, if it was not yet sent**, so the pinned
@@ -21480,8 +21500,9 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   state write holds the new relay key as pending; the mark clears at the
   second write, which makes that key current (if a relay-key rotation
   is owed, because the rotation found a relay key already pending, that
-  second write stores the next relay key as pending and clears no mark,
-  and the marks clear at the next key's second write), and until then the retry
+  second write stores the next relay key as pending and clears only the
+  relay-key-rotation mark, which that key meets; every other mark
+  clears at the next key's second write, §3.4), and until then the retry
   the mark asks for at each unlock is the completion of the pending key,
   not a new rotation of `ik`, `kem` or the wake key (§3.4 "The order of
   a relay-key rotation").
@@ -21493,7 +21514,9 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   successful rotation is audited `identity.rotated` ((0.84.0) at its
   second write, once the relay key is current; a relay key left pending
   is audited `identity.rotation_failed` at an unlock whose attempt does
-  not complete it, at most once per unlock, §3.4) and appears in
+  not complete it, at most once per unlock, §3.4; for a rotation made
+  while a relay key was pending, §3.4 "What is audited" says which
+  `ref` each of the two audits carries) and appears in
   History. (0.69.2) Its `ref` says which owed mark it cleared: the
   `transfer_id` **only** when it clears a transfer's mark; otherwise the
   literal `"recovery"` when it clears a recovery's mark (never the
@@ -21519,7 +21542,8 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   moment and can fail without the move failing, so the screen does not
   promise it. History shows `identity.rotated` ("Your vault's keys were
   renewed") with a line saying the keys were replaced for the move, and
-  `identity.rotation_failed` shows its existing text.
+  `identity.rotation_failed` shows the corrected text of §3.4 "What
+  the member sees" (0.84.0).
 - **Vault:** a staging release after 23 (not release L's 23).
 
 #### 11.14.11 What the member sees: status, audit, feed and emails
