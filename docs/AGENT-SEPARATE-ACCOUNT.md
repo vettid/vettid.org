@@ -62,9 +62,10 @@ in this mode.
   profile or process. Two runs may overlap (AGENT-PLAN §4.9: at most
   2), and a run must not reach another's secret either, so each
   pairing has two runner accounts, one per run slot (question 6). A
-  slot's account runs one run at a time, and its profile, temporary
-  folders and (Windows) registry hive are deleted and made new when
-  the run ends, so nothing one run leaves steers the next. The
+  slot's account runs one run at a time. Its profile is never loaded
+  (§3): each run gets fresh folders of its own for `HOME` or
+  `USERPROFILE`, `APPDATA` and the temporary folders, removed when the
+  run ends, so nothing one run leaves steers the next. The
   connector starts each run as a free slot's account (below) and gives
   it only that run's secret.
 - **A run ends with everything it started.** A slot's account is used
@@ -89,8 +90,8 @@ in this mode.
 - **What it does not give, said plainly.** A run is still steered by
   what the agent can write (its arguments, and the files in a shared
   folder, §6). Any agent app in the member's account can use any of
-  the member's pairings through the channel, including `forget`, as
-  before. The vault cannot tell which mode a pairing runs in (AG11 is
+  the member's pairings through the channel, as before. `pair`,
+  `forget` and `share` need an administrator (§5). The vault cannot tell which mode a pairing runs in (AG11 is
   self-asserted): "runs and proxies only in this mode" is the
   connector's own policy, and an agent that pairs a connector of its
   own making can ask for `item.run` itself. So the member approves only
@@ -130,7 +131,11 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   it. The run gets access to a window station and desktop of its own
   (without it, programs that load user32 fail at start, 0xC0000142).
   The service SID holds `SeAssignPrimaryTokenPrivilege`, granted at
-  install.
+  install. Without a loaded profile, the run's `HKEY_CURRENT_USER`
+  falls back to `.DEFAULT`, and programs that ask Windows for their
+  known folders (rather than reading the variables) may fail; such
+  programs are noted as unsupported until a profile mechanism is
+  tested.
   POSIX: starting a process as another user needs root, which the
   connector never holds. On both Linux and macOS a small **run helper**
   does it: a root service installed with the connector, listening on a
@@ -149,10 +154,16 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   program goes into a root-owned folder of that run that the helper
   makes, and the helper starts it from there.
 - **Where a run's files live.** A run's `work/`, `tmp/` and `secret/`
-  folders, and on macOS its program copy, are under the connector's
-  state folder, owned by the slot's runner for the run, never in a
-  folder the member's account can read. They are removed when the run
-  ends. Not `systemd-run`: polkit sees only the unit
+  folders, and on macOS its program copy, are never in a folder the
+  member's account can read, and are removed when the run ends.
+  - On POSIX the run helper makes them, under a run root of their own
+    (0711, owned by root, outside the connector's 0700 state folder,
+    which a runner can't traverse), owned by the slot's runner, 0700.
+  - The helper writes the `file` secret there from the descriptor the
+    connector passed: the connector can't chown to the runner, or write
+    into the runner's 0700 folder.
+  - On Windows the service makes them under its state folder, with an
+    access list for that run's runner account only. Not `systemd-run`: polkit sees only the unit
   name and verb, so a rule for it would also let the connector start a
   unit as root, and a unit's environment and command line can be read
   by any local user (`systemctl show`). The helper is the one root
@@ -247,9 +258,12 @@ and the service never takes another name.
     refused. The client's process id (`GetNamedPipeClientProcessId`) is
     never used for identity.
   - The pipe is made with `PIPE_REJECT_REMOTE_CLIENTS`, and its DACL
-    denies NETWORK. Its name has a random suffix, kept in the
-    administrator-only configuration, so another user cannot take it
-    ahead of time.
+    denies NETWORK. Its name has a random suffix, kept in a
+    configuration file only administrators can change, readable by the
+    member (the stub needs it). With on-demand start (question 5), the
+    name can be taken while the service is stopped. The stub's owner-SID
+    check still refuses a server that isn't the service, so the cost is
+    a denial of service, not a disclosure.
   - The stub, `pair`, `status` and `forget` open the pipe with
     `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`, so a server that
     is not the service cannot act as the member. They check the server
@@ -264,8 +278,11 @@ and the service never takes another name.
   same owner and mode. The gate is the peer check, not the mode: the
   service compares the peer's uid (`SO_PEERCRED`, `getpeereid`, never
   the pid) with the recorded uid. The stub `lstat`s the socket (a
-  symbolic link is refused), checks that its owner is the connector's
-  account, and checks the server's uid the same way.
+  symbolic link is refused) and checks that its owner is the
+  connector's account and its parent folder is root-owned. The
+  server's uid it reads (`SO_PEERCRED`, `getpeereid`) may be root, since
+  with socket activation the uid that called `listen()` is systemd's or
+  launchd's, so it accepts root or the connector's account.
 - **What crosses it**: MCP messages only, framed as on stdio. No file
   descriptors and no handles are passed. The service never opens a path
   the stub names except as a tool's argument (`cwd`, §6).
@@ -278,9 +295,12 @@ and the service never takes another name.
   of its own. Its own connector would then show its own SAS, the member
   would approve it, and that connector could ask for `item.run` itself.
   So these three run elevated, from the administrator-only absolute
-  path (`sudo /usr/local/libexec/vettid-agent/vettid-agent pair`, or the
-  Start menu's elevated shortcut on Windows), and the README says to
-  start them only that way. `status` needs no elevation. The SAS and the
+  path (`/usr/bin/sudo /usr/local/libexec/vettid-agent/vettid-agent
+  pair`, `sudo` by its absolute path too, since an rc file can alias it;
+  or the Start menu's elevated shortcut on Windows), and the README says
+  to start them only that way. Said plainly: a member with password-less
+  `sudo` (NOPASSWD), or UAC set to "never notify", gets no protection
+  from this elevation, since the agent can elevate the same way. `status` needs no elevation. The SAS and the
   texts of AGENT-PLAN §11 are shown by the command, as today. The
   pairing code is passed once over the channel and never stored or
   logged (AGENT-PLAN §4.7).
@@ -363,30 +383,69 @@ cannot read the member's files**. This is the main cost.
   is to make the program not act on what the agent wrote, or to make a
   change to it visible on the phone:
   - **Hardened profiles for common programs.** For a program the
-    connector knows, it starts the program with settings that override
-    the folder's own and that the agent can't set. For git:
-    - command-line `-c` settings, which take precedence over every
-      configuration file, empty or neutral for each setting that runs a
-      command (`core.sshCommand`, `core.fsmonitor`, `core.hooksPath`
-      to an empty runner-owned folder, `credential.helper`, `core.pager`,
-      `core.editor`, `diff.external`, `filter.*`, aliases);
-    - `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` empty, set by the
-      connector itself, not by the request (whose `GIT_` names stay
-      refused);
-    - `safe.directory` given on the command line for that one run only.
+    connector knows, a profile fixes how it may be run in a shared
+    folder. The profile limits what the agent may ask for, overrides what
+    the folder says, and pins the rest. For git:
+    - **An allowlist of subcommands and options.** The agent's own
+      options can beat the profile's: a later `-c`, `--config-env`, `-C`,
+      `--git-dir`, `--work-tree` or `--exec-path`. So can options that
+      name a program: `push --receive-pack`, `fetch --upload-pack`,
+      `clone -u`, `rebase --exec`, `difftool -x`, `bisect run`,
+      `--recurse-submodules`. A run in a shared folder may use only the
+      profile's subcommands (to start: `status`, `fetch`, `pull`, `push`,
+      `commit`, `add`, `log`, `diff`, `checkout`, `switch`, `branch`,
+      `tag`, `merge`, `rebase` without `--exec`), each with its
+      allowlisted options. Anything else is `program_not_allowed`, or is
+      referred, as the binding says.
+    - **Overrides on the command line**, placed by the connector before
+      the agent's arguments: neutral values for every fixed-name
+      setting that runs a command or redirects traffic (`core.sshCommand`,
+      `core.fsmonitor`, `core.hooksPath` set to an empty runner-owned
+      folder, `core.pager`, `core.editor`, `core.askPass`, `diff.external`,
+      `gpg.program`, `http.proxy`, `http.sslVerify` true, and others on
+      the profile's list).
+    - **Its own credential helper.** Emptying `credential.helper` would
+      also remove the way the secret reaches git. So the profile sets
+      its own helper, which hands git the run's secret (from the `file`
+      secret) for the bound host only.
+    - `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` set to the null
+      device (`/dev/null`; `NUL` on Windows), by the connector itself,
+      not by the request (whose `GIT_` names stay refused). And
+      `safe.directory` for that one folder, on the command line, for
+      that one run.
+    - **What `-c` can't neutralize:** settings with names the agent
+      chooses: `filter.<x>.*`, `diff.<x>.textconv` and `.command`,
+      `merge.<x>.driver`, `hook.<x>.command`, `url.<x>.insteadOf` and
+      `.pushInsteadOf` (which would send the push, and the token, to the
+      agent), `remote.<x>.url` with `ext::`, `http.<x>.extraHeader`. Only
+      the pin below catches these, which is why profiles without pins
+      (question 8 b) are unsafe.
 
-    The same approach applies to ssh (`-F none`, the options given) and
-    to curl (`-q`, no `.curlrc`). A program with a profile is marked
-    "hardened" in the binding and on the phone. The list of settings is
-    reviewed per program, and a new git version's settings are checked
-    before its profile covers it.
+    ssh's profile: `-F none`, the options given, a `UserKnownHostsFile`
+    managed by the connector, and `StrictHostKeyChecking=yes`. curl's:
+    `-q` (no `.curlrc`), with `-K` and `-d @file` refused, since they
+    read the agent's files as instructions. A program with a profile is
+    marked "hardened" in the binding and on the phone. Each profile's
+    lists are reviewed, and a new version of the program is checked
+    against them before its profile covers it.
   - **Pinning the folder's control files.** The vault records the
-    SHA-256 of the few files that steer a known program (for git,
-    `.git/config`, `.gitmodules`, `.gitattributes` and the hooks folder),
-    as it pins the program (VAULT-MESSAGING 0.85.3). A change sends the
-    next run to the phone, saying which file changed. This catches what a
-    profile misses, and it costs one more approval after the member's
-    own edits.
+    SHA-256 of every file that steers a known program, as it pins the
+    program (VAULT-MESSAGING 0.85.3). A change sends the next run to the
+    phone, saying which file changed. For git that means:
+    - the resolved git folder's `config`, as a normalized projection:
+      every setting except those that change in everyday use
+      (`branch.<x>.*` tracking, for example). Otherwise every
+      `push -u` or `checkout -b` would ask;
+    - the common folder's `config` and `config.worktree` for a worktree;
+    - every file pulled in by `include` or `includeIf`, resolved, or
+      else includes are refused;
+    - `.gitmodules` and `.git/modules/**/config`, or else submodule
+      recursion is refused;
+    - `.gitattributes`, `.git/info/attributes`, `.lfsconfig` (or else
+      LFS is refused), and the hooks folder.
+
+    Pins catch what a profile misses, at the cost of one more approval
+    after the member's own changes to these files.
   - **Programs that run the folder's code by design** (npm scripts,
     `make`, cargo's `build.rs`, a test runner) can't be hardened: running
     the repository's code is what they do. In a shared folder they are
@@ -484,8 +543,9 @@ opened it leaves (§5).
      leaves. Closest to AG1a's "reaches the vault only while a client
      runs it".
 6. **Runner accounts (§2).**
-   - a (recommended): two per pairing, one per run slot, each profile
-     made new after each run.
+   - a (recommended): two per pairing, one per run slot, with fresh
+     per-run folders in place of a profile, and a slot used again only
+     once every process of the previous run is gone.
    - b: one per run, made at its start and removed at its end
      (Linux `DynamicUser=`-like; slower, and on Windows a profile is
      made for every run).
@@ -502,12 +562,15 @@ opened it leaves (§5).
    the implementing session, 2026-11-05: a, with profiles as a general
    mechanism for non-coding agents too; to be confirmed on Ground
    Control.*
-   - a (recommended): hardened profiles for git, ssh and curl, plus
-     pinned control files for git. Programs that run the folder's code
-     are always referred in a shared folder, and any other program in a
-     shared folder is too until it has a profile.
-   - b: profiles only, no pinned control files (fewer approvals, and a
-     gap where a profile misses a setting).
+   - a (recommended): hardened profiles for git, ssh and curl
+     (allowlisted subcommands and options, overrides, their own
+     credential helper), plus pinned control files for git. Programs
+     that run the folder's code are always referred in a shared folder,
+     and so is any program without a profile.
+   - b: profiles only, no pinned control files. This is **unsafe**:
+     settings with names the agent chooses (`url.<x>.insteadOf`,
+     `filter.<x>.*` and others) can't be overridden, and only the pin
+     catches them.
    - c: no shared folders at all (question 1 b). Runs use `work/` only,
      and the steering doesn't arise.
 9. **Handing files in and out (§6).**
