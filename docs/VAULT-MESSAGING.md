@@ -12472,7 +12472,10 @@ item's settings allow for its task:
     decides the run again under the current settings before it answers:
     a run they now refuse gets that refusal (`way_not_allowed`,
     `program_not_allowed`, `env_not_allowed`), never the value, and the
-    hash is not recorded.
+    hash is not recorded. A run whose pin no longer matches the one now
+    recorded (another approval recorded a different one meanwhile) is
+    referred again as a new approval; the value is never sent on the
+    old one.
   - (0.85.0; owner decision of 2026-11-05, option a) **The variables
     a program may receive.** An entry's `env` (0–32 names, default
     empty) lists the names a run of that program may set in its `env`.
@@ -12558,7 +12561,7 @@ item's settings allow for its task:
   `PAGER`, `EDITOR`, `VISUAL`, `SSH_ASKPASS`, `SUDO_ASKPASS`, `GOFLAGS`
   or `RUSTC_WRAPPER`; nor is a name that sends a program's traffic
   elsewhere or makes it trust another certificate: `HTTP_PROXY`,
-  `HTTPS_PROXY`, `ALL_PROXY` (in any case), `SSL_CERT_FILE`,
+  `HTTPS_PROXY`, `ALL_PROXY`, `SSL_CERT_FILE`,
   `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE` or
   `CURL_CA_BUNDLE`. Such a
   list cannot be complete; it is a backstop under the allowlist (an
