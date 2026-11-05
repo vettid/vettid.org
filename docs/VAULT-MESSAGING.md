@@ -29,7 +29,7 @@ related:
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.86.0: 2026-11-05, DRAFT for owner decision (§15 item 50; open PRs
-    take 0.85.1 and 0.85.2). A lost `hs.fin` split a pair across two
+    take 0.85.2 and 0.85.4). A lost `hs.fin` split a pair across two
     epochs. New §6.3.1: handshake lifetimes stated; in a rekey or
     reconnect the initiator activates only when the responder confirms
     (new `hs.confirm`, or any message under the new epoch), else
