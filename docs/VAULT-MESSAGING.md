@@ -53,14 +53,19 @@ changelog:
     model rounds r3–r4): the `own_copy` exception covers every epoch Q
     began; the F1 demotion has no exception for an epoch activated at
     `hs.fin` without confirmation; a side sends its `features` at its
-    first contact with each peer after an upgrade (§10.8, §6.3.1); a
+    first contact with each peer after an upgrade (§10.8, §6.3.1;
+    replaced in the third round); a
     suspension with `ref` = `epoch` shows S9's neutral feed item with
     the new-invitation path (NEW), not §6.6's; §15 item 50 gives the
-    model's residuals (about 0.5% false suspensions before the gate,
-    0 after; about 1.4% dead connections with release-28 parties; R1
-    clean in 20,000 runs, R2 and R3 12 to 13 stale splits in 3,000),
-    the lead's R1 recommendation, and the model test for each finding
-    (vettid-vault `ab1d3cf`).
+    model's residuals, the lead's R1 recommendation, and the model test
+    for each finding. Third round (final model run, vettid-vault
+    `cba781b`): every message a side deposits to a peer carries its
+    `features` in a new inner field (§5.3, §10.8), since a single
+    update after an upgrade was often lost with a dropped `hs.resp`;
+    item 50's residuals restated (R1 gate-on clean; 0.77% false
+    suspensions before the gate in the worst case, 0.60% with random
+    upgrades; about 1.9% dead connections with release-28 parties; R2
+    and R3 lose messages in 0.7% and 0.6% of runs).
   - 0.85.3: 2026-11-05, owner decisions of 2026-11-05 for the agent
     connector (option b, thread 01M6PBG2YHEEPDQ9ETQEBWK0EB: pin a
     bound program's content; option a, thread
@@ -5914,6 +5919,7 @@ The inner plaintext is a UTF-8 JSON object, followed by padding:
 | `exp` | MAY | Discard the message if it is still unprocessed after this time. REQUIRED for ephemeral types (§8.5). |
 | `status`, `error` | responses | `ok` or `error` |
 | `body` | MUST | Type-specific. The schema is TBD per feature unless this document defines it. |
+| `features` | (0.86.0 draft) see §10.8 | The sender's capability names as it advertises them to this recipient (§10.8): an array of `[a-z0-9_]{1,32}`, sorted in ascending byte order, each once, never empty. Older receivers ignore it as an unknown field. |
 
 - Binary values are encoded as standard base64 with padding. Receivers
   MUST reject non-canonical base64 and base64 containing CR or LF.
@@ -6373,9 +6379,9 @@ naming it, rule E, and §6.5's rekey block. The initiator half (pending
 epoch, `B`) applies only toward a peer that advertises `hs_confirm`.
 The gate is fixed per handshake when its `hs.init` is sent; a
 `features` that arrives later changes only later handshakes. To keep
-the ungated window short, a side sends its `features` to each peer at
-its first contact with that peer after an upgrade (§10.8; a device or
-agent sends `device.features` to its vault the same way). Toward a
+the ungated window short, every message a side deposits to a peer
+carries its `features` (the inner field of §5.3, §10.8; for a device or
+agent, its `device.features` list). Toward a
 peer without the gate `I` activates at `hs.fin` as before, but keeps the
 old epoch's send keys, `rk` and receive keys, and a copy of each message
 it sends under the new epoch, until it receives anything under the new
@@ -11108,12 +11114,17 @@ The **profile object** holds the extras' display name and photo. Sent by
   §11.10.8), with the next `version`; if the send fails it is retried
   with the connection's other messages (§8.6). (0.86.0 draft, with
   vettid.org #540, which sends `features` to every connection and
-  `device.features` from devices) After an upgrade that adds a name,
-  the update goes to each connection at the vault's first contact with
-  it: before, or in the same flush as, the first other message or
-  handshake the vault sends it; a device or agent sends
-  `device.features` to its vault before its first other message after
-  an upgrade. §6.3.1 "Deployment" relies on it. The set it last
+  `device.features` from devices) **On every message.** A vault of this
+  release also puts the list it advertises to a peer in the inner
+  `features` field (§5.3) of every message it deposits to that peer,
+  handshake messages included; a device or agent does the same with the
+  list of its `device.features`. A receiver takes it as that peer's
+  current list, as if it had arrived in `profile.update` or
+  `device.features` (a name is only ever added, so an older list in a
+  late message removes nothing). A single update is not enough: the
+  first message after an upgrade is often an `hs.resp` the peer drops
+  as abandoned, and the list is then lost for good. §6.3.1
+  "Deployment" relies on it. The set it last
   advertised to each service connection is vault state. It does not
   depend on the vault being unlocked when the service chooses its
   roster, because the service keeps the last statement.
@@ -26688,23 +26699,27 @@ Follow-ups:
     - **(R3) responder half plus the revert, no confirmation.** Option
       B in effect: splits happen and are repaired by the revert after
       `T` + 2 days, which resends what the initiator sent meanwhile.
-    **Residuals** (trust model, vettid-vault `ab1d3cf`, branch
-    trust-model):
-    - *False suspensions before the gate opens:* about 0.5% of runs, 0
-      after. A link in flight while a side has activated at `hs.fin`
+    **Residuals** (trust model, vettid-vault `cba781b`, branch
+    trust-model; 3,000 runs, seed 1):
+    - *R1 with the gate on:* clean, also in 20,000 runs.
+    - *False suspensions before the gate opens:* 0.77% of runs in the
+      worst case (`features` never seen), 0.60% with realistic random
+      upgrades from 28 to 29; 0 after. They happen in the transition
+      window, whatever the rule for sending `features`. A link in flight while a side has activated at `hs.fin`
       without confirmation demotes that epoch (§3.4.1, no exception),
       and the reconnect that follows can be taken as fork evidence. It
       fails secure and loud, and a new invitation recovers it. The
       alternatives, keeping such an epoch or a 2-day window for it,
       were rejected: both let an old copy's session be used silently
-      (a median of 6 days in the model). Sending `features` at the
-      first contact after an upgrade (§10.8) keeps that window short.
-    - *Release-28 parties:* about 1.4% of runs with them end with a
-      dead connection: a release-28 rekey message expires at the relay
-      TTL (above).
-    - *R1 with the gate on:* clean in 20,000 runs. R2 and R3 with the
-      gate on leave 12 to 13 dead connections (a stale split) in 3,000
-      runs; R1 none.
+      (a median of 6 days in the model). `features` on every message
+      (§10.8) keeps that window short: it opens the gate for 93.6% of
+      pair-directions, and every one still closed has a dead party or a
+      stale pair.
+    - *Release-28 parties:* about 1.9% of runs with them end with a
+      dead connection (a stale split), mostly a release-28 rekey message
+      expiring at the relay TTL (above).
+    - *R2 and R3 with the gate on:* 0.7% and 0.6% of runs lose messages
+      (19 and 18 losses or splits); R1 none.
     **The lead recommends R1**, with three of its review's fixes: S5
     keeps an answer to a peer without `hs_confirm` (§3.4.1); the
     lower-`th1` rule for any two crossing handshakes (§6.5); and the
@@ -26712,7 +26727,7 @@ Follow-ups:
     **To decide:** A or B; R1, R2 or R3; the lifetimes (16, 16, 32, 48
     days); the option for release-28 initiators above.
     **What the model shows.** The trust model finds the split gone
-    under A between gated peers. Since `ab1d3cf` it also runs a
+    under A between gated peers. Since `cba781b` it also runs a
     release-28 initiator with a release-29 responder
     (`TestLeadR28FinLostToward29`) and clock skew in its random runs.
     It does not show: collect paging; the 4-deposit quota of the reconnect token;
