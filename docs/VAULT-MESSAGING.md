@@ -28,9 +28,8 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.84.0: 2026-11-05 (draft for the owner's review; option a,
-    recommended, owner decision pending). §3.4 **The order of a
-    relay-key rotation**: store first, then rotate, retried with the
+  - 0.84.0: 2026-11-05, owner decision of 2026-11-05 (option a).
+    §3.4 **The order of a relay-key rotation**: store first, then rotate, retried with the
     same key. The rotation's state write stores the new relay key as
     **pending** (sealed in the DEK state, never logged), with the new
     tokens for every recipient and the `relay.address.update`s, which

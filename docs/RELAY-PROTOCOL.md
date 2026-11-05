@@ -1662,9 +1662,9 @@ The push gateway API is specified separately.
 
 ## 10. Changelog
 
-- **0.10.1** — draft for the owner's review, with VAULT-MESSAGING
-  0.84.0 (the order of a vault's relay-key rotation; owner decision
-  pending). §6.7: a rotate repeated with the same new key and proof
+- **0.10.1** — with VAULT-MESSAGING 0.84.0 (the order of a vault's
+  relay-key rotation; owner decision of 2026-11-05, option a). §6.7:
+  a rotate repeated with the same new key and proof
   while the old mailbox lives is idempotent (the same `mailbox_id`, the
   successor created only if absent or already holding that key, the old
   mailbox's deletion time never moved later); a rotate with a different
