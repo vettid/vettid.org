@@ -30,6 +30,10 @@ export class VettidOrgAdminSiteStack extends cdk.Stack {
       hostName: hostName(config, 'admin'),
       hostedZone: hostedZone,
       sourceDir: 'sites/admin',
+      // TLS 1.3 only: no connection falls back to TLS 1.2, so every client
+      // that offers the hybrid post-quantum group gets it (owner decision a,
+      // 2026-11-05).
+      tls13Only: true,
       notFoundPage: '404.html',
       webAclArn: readRef(this, config, 'admin-access/site-web-acl-arn'),
       connectSrc: [apiBase, cognitoDomain],

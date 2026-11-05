@@ -87,6 +87,10 @@ describe('staging (-c stage=staging)', () => {
     const aliases = (n: string) => resources(t(n), 'AWS::CloudFront::Distribution').map((d) => d.Properties.DistributionConfig.Aliases);
     expect(aliases('VettidOrgAccountSiteStack')).toEqual([['account.staging.vettid.org']]);
     expect(aliases('VettidOrgStageSiteStack')).toEqual([['staging.vettid.org']]);
+    // Owner decision a (2026-11-05): the account site is TLS 1.3 only; the stage site keeps TLS 1.2+.
+    const tls = (n: string) => resources(t(n), 'AWS::CloudFront::Distribution').map((d) => d.Properties.DistributionConfig.ViewerCertificate.MinimumProtocolVersion);
+    expect(tls('VettidOrgAccountSiteStack')).toEqual(['TLSv1.3_2025']);
+    expect(tls('VettidOrgStageSiteStack')).toEqual(['TLSv1.2_2021']);
   });
 
   test('no vettid.org lookup in staging: the sites use the stage zone by its SSM ref', () => {
