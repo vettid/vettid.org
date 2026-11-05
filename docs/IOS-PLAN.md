@@ -4,17 +4,23 @@ status: approved (owner, 2026-10-17)
 version: 0.1.63
 date: 2026-11-05
 changelog:
-  - 0.1.63: erratum, 2026-11-05 (ANDROID-PLAN 0.1.120). §6.6: what
-    holds the daily check back, the lead's reading of VAULT-MESSAGING
-    §3.6.5 that vettid-ios #205 and #206 build (ANDROID-PLAN §6 owner
-    check item 3). §4 carries ANDROID-PLAN 0.1.120: the apps don't
-    offer blocking, with the approved `data_failure_blocked`; AA3's
-    Other permissions heading. §4 differences from Android, from
-    vettid-ios #209: History export's `bad_request` shows the code
-    (Android to follow); a failed wait in transfer out rejects the
-    transfer and returns to the start (Android shows "expired"); a
-    refused update is said in words. §8 "Later": presence and location
-    follow ANDROID-PLAN's "last seen" wording and units.
+  - 0.1.63: erratum, 2026-11-05 (ANDROID-PLAN 0.1.120, VAULT-MESSAGING
+    0.83.12). §6.6: what holds the daily check back, the lead's reading
+    of VAULT-MESSAGING §3.6.5 that vettid-ios #205 builds, with #206's
+    call note (ANDROID-PLAN §6 owner check item 3); a difference from
+    Android: a return from the background also ends the deferral (#205).
+    §4 inherits ANDROID-PLAN 0.1.120: the apps don't offer blocking,
+    with the approved `data_failure_blocked` (from the app version
+    with vettid-ios #209, in review); AA3's Other permissions heading. §4 differences from Android, from the app version with
+    vettid-ios #209 (in review): History export's `bad_request` shows
+    the code (Android to follow); a failed wait in transfer out rejects
+    the transfer and returns to the start (Android shows "expired"); a
+    refused update is said in words. §4.16 results check rules: a
+    `gave_up` check run again downloads `rows.json` again only as
+    ANDROID-PLAN 0.1.120 says. §8 "Later": presence and location
+    follow ANDROID-PLAN's "last seen" wording and units, and devices
+    and agents its Pair a desktop (vettid-android #291, in review).
+    `related`: ANDROID-PLAN 0.1.120, VAULT-MESSAGING 0.83.12.
   - 0.1.62: 2026-11-04 (ANDROID-PLAN 0.1.119, VAULT-MESSAGING 0.83.8).
     §4 Settings → Vault status: the credential-key fingerprint row, as
     on Android, with its loading, error and none-yet states.
@@ -559,8 +565,8 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.119, the credential-key row of §4 "Owner check and status"; 0.1.102; §4.16 results check and choice labels from 0.1.116; the results rules, app lock and held notices of 0.1.117) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.83.8) — the app's contract with the vault
+  - ANDROID-PLAN.md (0.1.120; 0.1.119, the credential-key row of §4 "Owner check and status"; 0.1.102; §4.16 results check and choice labels from 0.1.116; the results rules, app lock and held notices of 0.1.117) — the Android app; this plan mirrors it
+  - VAULT-MESSAGING.md (0.83.12) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -739,9 +745,9 @@ Only these differ on iOS:
 | Settings → Vault status | ID15; the credential-key fingerprint row, as on Android (ANDROID-PLAN §4 "Owner check and status", 0.1.119), computed in `VettIDCrypto` beside the `ik` fingerprint. |
 | Profile photo | **Camera only**, as on Android (ANDROID-PLAN §4 Settings → Privacy; row I2.5): the app's own AVFoundation camera screen, to memory; no photo picker and no other camera app. Camera access "not yet asked" asks; "denied" and "restricted" show `ios_settings_photo_capture_permission_blocked` (§14) with **Open settings**, which opens the app's page in Settings (Android's text names its phone's Permissions screen). |
 | Photo attachments | AVFoundation camera to memory; `PHPickerViewController` (no photo-library permission, like the Android Photo Picker); saving uses the add-only permission and only after the warning. |
-| History export | `fileExporter` ("Save to Files") in place of "Save to…". (0.1.63; vettid-ios #209) `bad_request` is the request's own fault and shows the vault's code; only `unsupported_type` says the vault release is too old. Android maps `bad_request` to "old vault" today and is to follow (ANDROID-PLAN 0.1.120). |
-| Transfer to a new phone (this phone the old one) | (0.1.63; vettid-ios #209) When the wait for the new phone fails (not the code's own end), the app rejects the transfer (`device.transfer.reject`), so its code cannot be used, and returns to the start with the failure said. Android shows the "expired" screen. |
-| Unlock, a refused update | (0.1.63; vettid-ios #209) The reason is said in words, with the refused release's own number, for the codes the app has a sentence for (`ios_unlock_update_refused_why`, a draft for the owner); any other code gets Android's `unlock_update_refused` with the code filtered, never raw. Android shows the code. |
+| History export | `fileExporter` ("Save to Files") in place of "Save to…". (0.1.63; from the app version with vettid-ios #209, in review) `bad_request` is the request's own fault and shows the vault's code; only `unsupported_type` says the vault release is too old. Android maps `bad_request` to "old vault" today and is to follow (ANDROID-PLAN 0.1.120). |
+| Transfer to a new phone (this phone the old one) | (0.1.63; from the app version with vettid-ios #209, in review) When the wait for the new phone fails (not the code's own end), the app rejects the transfer (`device.transfer.reject`), so its code cannot be used, and returns to the start with the failure said. Android shows the "expired" screen. |
+| Unlock, a refused update | (0.1.63; from the app version with vettid-ios #209, in review) The reason is said in words, with the refused release's own number, for the codes the app has a sentence for (`ios_unlock_update_refused_why`, a draft for the owner); any other code gets Android's `unlock_update_refused` with the code filtered, never raw. Android shows the code. |
 | Calls (later) | CallKit, and PushKit to ring (needs APNs). |
 
 ### 4.1 Event titles (0.1.11)
@@ -1839,7 +1845,13 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   "Abstain" matching (remove Default_Ignorable characters and U+2800
   anywhere, then trim Unicode White_Space at both ends, then ignore case;
   look-alike letters are out of scope). `other_rows` and `rows_unavailable` are sent only to a vault that lists the capability `vote_rows`. An extra row the app cannot make into a leaf is not sent: the member's row cannot be had (`rows_unavailable`). An invalid own-row `choice_id` is sent as `rows_unavailable` with `vote_rows`, and not submitted without it. Going to the background cancels
-  a recheck; it runs again on return.
+  a recheck; it runs again on return. (0.1.63; ANDROID-PLAN 0.1.120 "A
+  `gave_up` check run again", VAULT-MESSAGING 0.83.12 §10.19.6) A
+  `gave_up` check run again downloads `rows.json` again only when
+  `results.json` was absent, unreachable or changed, when `rows.json`
+  could not be fetched on the last attempt, or when the last attempt
+  failed on the vault's side; otherwise it submits again the row and
+  proof kept from the last attempt, or sends nothing.
 - The credential password prompt is the existing one (§4, the unlock
   window), used before `vote.cast`.
 - **Notifications:** the feed items (`vote.open`, `vote.closing`,
@@ -2392,12 +2404,16 @@ leaving the screen.
   daily check is due. They'll show again once it's done."
   (0.1.63) What holds the check back is ANDROID-PLAN 0.1.120 §6 owner
   check item 3, the lead's reading of VAULT-MESSAGING §3.6.5
-  (2026-11-03) that vettid-ios #205 and #206 build: an open approval or
-  a started credential operation holds it, typed or not; anything else
+  (2026-11-03), which vettid-ios #205 builds: an open approval or a
+  started credential operation holds it, typed or not; anything else
   only while it holds input; at most 5 minutes after the deadline;
   read-only screens are covered at once, typed secrets are wiped, and
-  the check stays once shown. iOS has no calls yet; when it does, a
-  call keeps only the call's own UI up over the covered shell.
+  the check stays once shown. **A difference from Android** (#205): on
+  iOS a return from the background also ends the deferral, so the
+  check opens over a screen holding input once the member comes back
+  to the app; on Android only leaving the screen or the 5 minutes do.
+  iOS has no calls yet; when it does, a call keeps only the call's own
+  UI up over the covered shell (the call note of vettid-ios #206).
 - **Unlock and check in** (0.1.47; owner decision 2026-10-28,
   VAULT-MESSAGING 0.71.0 §3.6.5 "Ask only for what is used"): as
   ANDROID-PLAN §6 owner check item 6, with the same approved texts
@@ -2723,8 +2739,10 @@ CALLS-PLAN §12; `calls.json`), **devices and agents** (§6.8, §10.11;
 `leash.json`), **wallet** (§10.18), **location** (§10.16; ANDROID-PLAN
 §6 location notes), **presence** (§10.17). (0.1.63) They follow
 ANDROID-PLAN 0.1.120 §4: presence's "last seen" wording and card text
-(owner, 2026-11-03), and location's distances in miles or kilometers
-by the phone's region, with Settings → Units (owner, 2026-11-05).
+(owner, 2026-11-03), location's distances in miles or kilometers by
+the phone's region, with Settings → Units (owner, 2026-11-05), and,
+for devices and agents, **Pair a desktop** beside Pair an agent (owner
+decision a, 2026-11-05; vettid-android #291, in review).
 
 ### What blocks what
 

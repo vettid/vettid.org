@@ -11,22 +11,32 @@ changelog:
     as built in vettid-android #268): a call keeps only its own screen
     over a covered shell; an open approval or a started credential
     operation holds it, typed or not; anything else only while it holds
-    input; at most 5 minutes after the deadline; read-only screens
-    covered at once, typed secrets wiped, and the check stays once
-    shown. §4 AA3: the Other permissions heading shows only when there
-    are such grants, never with an add action (#267). §4 Connection
-    detail: the apps don't offer blocking (owner, 2026-11-03; #271), and
-    `data_failure_blocked` for an earlier block is approved. §4
-    Presence: the "last seen" wording, the card's "…roughly when your
+    input; at most 5 minutes after the deadline, which "never over an
+    action in progress" now says; read-only screens covered at once,
+    typed secrets wiped, and the check stays once shown. §4 AA3: the
+    Other permissions heading shows only when there are such grants,
+    and has no add action until the owner confirms the connector's A4
+    (decision 3; #267). §4 Connection detail: the apps don't offer
+    blocking (owner, 2026-11-03; #271; on iOS from the app version
+    with vettid-ios #209, in review), and `data_failure_blocked` for
+    an earlier block is approved. §4 Presence: the "last seen" wording,
+    its date in the phone's locale, the card's "…roughly when your
     vault was last in use", choice 3a (keep asking while Invisible),
     and the texts approved (owner, 2026-11-03; #274). §4 Location:
     `location.share.stop` is allowed while due or held
-    (VAULT-MESSAGING 0.37.0; the plan said refused), and distances in
-    miles or kilometers by the phone's region with Settings → Units
-    (owner, 2026-11-05). §4 History export: `bad_request` shows the
-    vault's code, as on iOS (vettid-ios #209; Android to follow). §4
+    (VAULT-MESSAGING 0.37.0; the plan said refused; vault follow-up 10
+    marked settled), and distances in miles or kilometers by the
+    phone's region with Settings → Units (owner, 2026-11-05; al-cal's
+    units PR, stacked on vettid-android #290, not yet open). §4 Votes:
+    a `gave_up` check run again downloads `rows.json` again only when
+    `results.json` changed or was not had, when `rows.json` could not
+    be fetched on the last attempt, or after a failure on the vault's
+    side; otherwise it submits the kept row and proof again or sends
+    nothing (VAULT-MESSAGING 0.83.12 §10.19.6). §4 History export:
+    `bad_request` shows the vault's code, as on iOS from the app
+    version with vettid-ios #209 (in review); Android to follow. §4
     Devices & agents: decision 9 reversed for pairing, "Pair a desktop"
-    (owner decision a, 2026-11-05; #291).
+    (owner decision a, 2026-11-05; vettid-android #291, in review).
   - 0.1.119: 2026-11-04 (VAULT-MESSAGING 0.83.8; plan task "Spec:
     credential-key fingerprint"). §4 "Owner check and status": Settings
     → Vault status shows the member's own credential-key fingerprint,
@@ -1470,7 +1480,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.83.8) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.83.12) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -1599,7 +1609,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Messages | Inbox | Conversations by connection (people only; services never, 0.1.90, §4 "Service connections"); Unread chip; the floating action button starts a new message (pick a connection, then the conversation) |
 | Conversation | Message detail | Bubbles in a card list; pill actions (reply, more). Links in a message (0.1.29, VAULT-MESSAGING 0.24.0 §10.5): only `https://` URLs are tappable; a tap asks "Open link to <host>?" and then hands the URL to Android, so a verified App Link opens its app and any other link the browser; every other scheme, custom app schemes included, stays plain text. (0.1.39) Photos: a photo button in the composer, thumbnails in bubbles, a viewer (§4 "Photo attachments") |
 | Connections | Contacts | (0.1.90) Services are a separate "Services" section below the people, §4 "Service connections". Initial tiles, status (pending / active / stale / blocked); a star marks favourites (the owner's `favorite` flag, `connection.update`), whose tiles are teal; the floating action button invites a connection (0.1.11: QR or link, or scan the other's QR), the only invite entry point besides empty states. Each is titled "First Last" from the profile's core (VAULT-MESSAGING 0.18.0 §10.8), the display name, if any, as secondary text. Incoming requests show the requester's names the same way. Only between activation and the first `profile.update`, when the request's names are not at hand: "Name not shared yet"; never "Unnamed connection" |
-| Connection detail | — | Titled "First Last" (never an alias), the display name secondary. Profile shared with you (the names labelled as the name on their VettID account, never "verified"; display name, photo and items labelled as shared by them), sharing both ways ("You share with <First>": every share rule a row with its own settings, opening its editor or deleted after a confirmation, "Add a rule" up to 64, 0.1.20), a connection's requests (0.1.22, VAULT-MESSAGING 0.23.0 §10.4.1: muted, paused after several declines, declined ones in cooldown, with Mute/Unmute, Resume and "Allow declined requests again"), authenticate, the vault key fingerprint (`ik`, 8 groups of 4 hex digits, §10.8: the lasting identity check). The action bar: message, favourite, History, remove (confirmed). No safety code (it belongs to connecting: the invite and request screens), no alias or notes, no edit or block (0.1.13). (0.1.120; owner decision 2026-11-03, thread 01M6H4NSKXMKW8XQVVM1H6W9BK; vettid-android #271) **The apps don't offer blocking**, on a connection or on a request: a request is declined and a connection is removed. The vault's `block*` operations stay for blocks made earlier, and so do the "Blocked" label and the History titles "Connection blocked" / "Connection unblocked". A connect refused with the vault's `blocked` code from such a block shows `data_failure_blocked`: "You blocked this vault earlier, so this invitation can't be used to connect." (approved by the owner, 2026-11-03) |
+| Connection detail | — | Titled "First Last" (never an alias), the display name secondary. Profile shared with you (the names labelled as the name on their VettID account, never "verified"; display name, photo and items labelled as shared by them), sharing both ways ("You share with <First>": every share rule a row with its own settings, opening its editor or deleted after a confirmation, "Add a rule" up to 64, 0.1.20), a connection's requests (0.1.22, VAULT-MESSAGING 0.23.0 §10.4.1: muted, paused after several declines, declined ones in cooldown, with Mute/Unmute, Resume and "Allow declined requests again"), authenticate, the vault key fingerprint (`ik`, 8 groups of 4 hex digits, §10.8: the lasting identity check). The action bar: message, favourite, History, remove (confirmed). No safety code (it belongs to connecting: the invite and request screens), no alias or notes, no edit or block (0.1.13). (0.1.120; owner decision 2026-11-03, thread 01M6H4NSKXMKW8XQVVM1H6W9BK; vettid-android #271, and on iOS from the app version with vettid-ios #209, in review) **The apps don't offer blocking**, on a connection or on a request: a request is declined and a connection is removed. The vault's `block*` operations stay for blocks made earlier, and so do the "Blocked" label and the History titles "Connection blocked" / "Connection unblocked". A connect refused with the vault's `blocked` code from such a block shows `data_failure_blocked`: "You blocked this vault earlier, so this invitation can't be used to connect." (approved by the owner, 2026-11-03) |
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password. 0.1.22: a connection's asks within 10 minutes are one entry ("Sam asks for 3 things"), a connection whose asks are paused is a notice (resume, or remove the connection), a share question names the rule that asks first and warns when declining stops an item already shared, one question per item and connection |
 | Votes | — (VettID-specific) | (0.1.102, owner decision of 2026-10-30; VAULT-MESSAGING 0.81.0 §10.19.) A service's proposals: open, upcoming, being checked and closed, with the member's own ballot and the checked results; one vote screen with the choices, the fixed disclosure and the cast; shown in the drawer only when the vault has a vote or a service to reconnect (§4 "Votes"). Not in Messages or Approvals |
 | Vault | Folder list | Titled "Vault" (0.1.11; was "Items"). Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag (0.1.21: "✕ Clear" ends the filter chips while a filter is on); each tag in its own colour (0.1.21), stored in the vault's tag registry and the same on every device, the least-used of a palette of ten for a new tag, picked by the member on Manage tags (0.1.25; `@profile` always gold); add/edit from templates ("Save item" in the top bar, 0.1.21); share rules by tag, as many per connection as needed (up to 64), each with its own tags, mode (default: ask each time), fetch limit and end (presets or a custom date and time), overlaps shown (0.1.20); one tag per rule, per-hour and per-day limits, `ask` wins, rules named by their tags, "Save rule" in the top bar (0.1.22). Critical items live in the Protean Credential and are never shared by a rule |
@@ -1728,7 +1738,8 @@ the screen changes or deletes an entry.
      available while a credential alarm is open", with a link to the
      alarm; `backoff`: the countdown; `not_found`: "Nothing to export"
      (the entries are gone); `owner_check_required`: the owner-check
-     screen. (0.1.120, as on iOS, vettid-ios #209; Android to follow)
+     screen. (0.1.120; as on iOS from the app version with vettid-ios
+     #209, in review; Android to follow)
      `bad_request` is the request's own fault and shows the vault's
      code; only `unsupported_type` says the vault release is too old
      (Android today shows "old vault" for `bad_request` too).
@@ -4822,7 +4833,7 @@ looks the same as a locked or offline vault.
 |---|---|
 | Settings → Privacy → **Presence** | The member's status: **Available**, **Busy**, **Away**, **Invisible** ("You appear offline to everyone"); **Who can see it**: "All my connections" (`share: all`) or "No one" (`share: none`), and **Exceptions**: the connections for whom it is the other way round ("Except…" under all, "Only…" under no one), picked from the connection list (at most 1,024). `presence.get`, `presence.set` with the policy's `version`; `conflict` reloads and re-applies the member's change once |
 | Avatar sheet | One row under the name: "Status: Available" opening a short picker of the four states (the same `presence.set`) |
-| Connection detail | A line under the name: "Available", "Busy", "Away", each with "· active {age}" from `last_active` ("active 10 min ago"; "active today" past an hour; nothing without it), or "Status unknown"; a refresh icon; and a switch **Share my status with <First>** (adds or removes the connection in `except`). (0.1.120; owner decisions 2026-11-03, as built in vettid-android #274) The age reads **"· last seen {n} min ago"**, **"· last seen just now"** under 5 minutes, **"· last seen today"** past an hour, and **"· last seen {d MMM}"** ("· last seen 2 Nov") for an earlier day, with the year only when it is not this year; "active …" is withdrawn (VAULT-MESSAGING §10.17: `last_active` also counts background traffic) |
+| Connection detail | A line under the name: "Available", "Busy", "Away", each with "· active {age}" from `last_active` ("active 10 min ago"; "active today" past an hour; nothing without it), or "Status unknown"; a refresh icon; and a switch **Share my status with <First>** (adds or removes the connection in `except`). (0.1.120; owner decisions 2026-11-03, as built in vettid-android #274) The age reads **"· last seen {n} min ago"**, **"· last seen just now"** under 5 minutes, **"· last seen today"** past an hour, and **"· last seen {d MMM}"** for an earlier day, the date formatted in the phone's locale ("· last seen 2 Nov" in the UK, "· last seen Nov 2" in the US, as #274's tests show), with the year only when it is not this year; "active …" is withdrawn (VAULT-MESSAGING §10.17: `last_active` also counts background traffic) |
 | Conversation | The same line under the title, smaller |
 
 **When the app asks.** `presence.query{connection_id}` when a
@@ -4864,7 +4875,7 @@ audited or put in the feed.
 | Unknown | "Status unknown" / detail: "{First}'s vault didn't answer. They may be offline or locked, or not sharing their status with you." |
 | Invisible | "Invisible: you appear offline to everyone." |
 | Share switch, off | "{First} sees 'Status unknown' for you, as if your vault were offline." |
-| Last seen (0.1.120; was "Last active": "active {n} min ago") | "· last seen {n} min ago" (rounded down to 5 minutes by the vault); "· last seen just now" (under 5 minutes); "· last seen today" (past an hour); "· last seen {d MMM}" (an earlier day; the year only when not this year) |
+| Last seen (0.1.120; was "Last active": "active {n} min ago") | "· last seen {n} min ago" (rounded down to 5 minutes by the vault); "· last seen just now" (under 5 minutes); "· last seen today" (past an hour); "· last seen {d MMM}" (an earlier day, in the phone's locale: "2 Nov", or "Nov 2" in the US; the year only when not this year) |
 | First-time card | as above, ending "…roughly when your vault was last in use." |
 
 **Tests.** Unit: the policy editor (all/none with exceptions, the
@@ -5015,7 +5026,8 @@ history sent to / received from <First Last>"; `drop.location`,
 `drop.location_limit` (category Blocked and dropped) "Location from
 <First Last> dropped". History never shows a position.
 
-**Units** (0.1.120; owner decision 2026-11-05). Distances are shown in
+**Units** (0.1.120; owner decision 2026-11-05; al-cal's units PR,
+stacked on vettid-android #290, not yet open). Distances are shown in
 miles or kilometers. By default the app follows the phone's region:
 a region that uses miles (the US, Liberia, Myanmar) shows miles and
 feet, any other kilometers and meters. **Settings → Units** offers
@@ -5023,7 +5035,8 @@ feet, any other kilometers and meters. **Settings → Units** offers
 distance the member reads follows it: the distance from this phone,
 the accuracy ("within …", the incoming card's too), the share sheet's
 precision lines, and L2's map scale. The app's internal thresholds
-stay in meters. Its texts are new and come to the owner with the PR.
+stay in meters. Its texts are new and come to the owner with that
+PR.
 
 **Texts (drafts).**
 
@@ -5141,7 +5154,9 @@ changes vault code here.
    (`features/location/location.go:236-243`: the sweep runs only when a
    message is handled and sends a `sync.event` then). The app keeps its
    own timer; proposed: say so in §10.16.
-10. **Stopping a share while due or held.** The hold's allow list has no
+10. (0.1.120: settled by VAULT-MESSAGING 0.37.0, which allows
+    `location.share.stop` while due or held; §4 Location.)
+    **Stopping a share while due or held.** The hold's allow list has no
     `location.*` type (`vault/ownercheck.go:503-518`), so the member
     cannot stop disclosing their location until they pass the check
     (positions do not flow meanwhile). Proposed: allow
@@ -5430,6 +5445,7 @@ The app **never** says: that the vote is "secret" or "anonymous" without "the pu
 - **"Abstain" matching.** Remove Default_Ignorable characters and U+2800 anywhere, then trim Unicode White_Space at both ends, then compare ignoring case. Look-alike letters (Cyrillic, fullwidth) are out of scope.
 - **A second ballot under the member's code** (owner decision a, 2026-11-03, thread 01M6FT8PCK46FTKM42VFY348S5). When `rows.json` holds another row with the member's `record_tag` at a different index, the app adds that row and its inclusion proof to `rows_root` to `vote.results.submit` as `other_rows: [{row, proof}]` (at most 4). The vault verifies each proof. An extra row the app cannot make into a leaf is not sent: the member's row cannot be had (below). A second verifying row is a signed contradiction: the check is `failed` with reason `row_duplicate`, and the vote shows `vote_failed_title` and `vote_failed_body` with **Save the proof**.
 - **The member's row cannot be had** (same decision): `rows.json` has a root that does not match the signed `rows_root`, cannot be parsed within the bounds, or has no leaf for the member. The app submits with `rows_unavailable: true` and the results, signature and bundle. The vault holds the check `pending` with reason `rows_unavailable`, and gives up with the same reason 7 days after the check was due; the record stays in the problem set. The app shows the text for a problem with the published results.
+- **A `gave_up` check run again** (0.1.120; VAULT-MESSAGING 0.83.12 §10.19.6). The app runs it whenever it opens, at most once a day per record, as a pending one. It does not download `rows.json` again when `results.json` is the same as at the last attempt (compared by its hash); it fetches `rows.json` again only when `results.json` was absent, unreachable or changed, when `rows.json` could not be fetched on the last attempt, or when the last attempt failed on the vault's side (`trust_root`, `service_list`, `clock`). A re-check that skips the download submits again the row and proof kept from the last attempt, or sends nothing: the same submission gets the same answer from the vault.
 - **Older vaults.** `other_rows` and `rows_unavailable` are sent only to a vault that lists the release capability `vote_rows` (VAULT-MESSAGING §11.10.9, 0.83.3); with an older vault the app sends neither and keeps 0.83.2's behaviour.
 - **Not in this version:** a future `vote.get` field with the held `results_hash` would let the apps compare it with the published results.
 
@@ -5668,11 +5684,10 @@ in memory only and cleared at lock, like the feed (§4 Notifications,
 - The floating action button: **Pair an agent** (below). No "Pair a
   desktop" (decision 9). (0.1.120; owner decision a, 2026-11-05,
   thread 01M6MMP5H717WVF4X9XYBJ6N9Z, which reverses decision 9's "no
-  Pair a desktop") **Pair a desktop** is offered beside Pair an agent:
+  Pair a desktop"; vettid-android #291, in review) **Pair a desktop** is offered beside Pair an agent:
   the same pairing flow with `device.pair.create{role: "desktop"}`,
   approved with no grants; a desktop gets no grants or agent rules.
-  Its texts are new and await the owner's approval (vettid-android
-  #291, in review).
+  Its texts are new and await the owner's approval in that PR.
 - **Empty** (this phone only): "No agents yet" / "Pair an agent to let
   an AI assistant on your computer use items you choose. It acts only
   while you allow it."
@@ -5693,8 +5708,9 @@ in memory only and cleared at lock, like the feed (§4 Notifications,
     and only within the permissions you give them."
 - Agents only: **What it may use** (the agent's share rules, AA4) and
   **Other permissions** (its other grants, AA3), each a list with its
-  own add action (0.1.120: Other permissions has none, and shows only
-  when there are such grants; AA3, decision 3).
+  own add action (0.1.120: Other permissions shows only when there are
+  such grants, and has no add action until the owner confirms the
+  connector's A4, decision 3; AA3).
 - The action bar: **History** (opens History with the search field set
   to the device's name, since `audit.list` has no device filter and the
   vault's search matches device names, §10.9; decision 14, item e) and
@@ -5834,7 +5850,8 @@ rules (`grant_id` = `rule_id`) and are listed under **What it may
 use** (AA4); the others under **Other permissions**. (0.1.120, as
 built in vettid-android #267) The **Other permissions** heading is
 shown only when the agent has such grants (or their read failed), and
-never with an add action (decision 3). A row:
+has no add action until the owner confirms the connector's A4
+(decision 3, below). A row:
 
 - the scope's label (below) and, under it, "Asks you each time" or
   "Allowed automatically, up to 60 an hour and 1,000 a day without
@@ -5851,14 +5868,14 @@ permissions. Resume it only if you know why this happened." Action
 signs nothing). `{}`: "Resumed"; `not_found`: "It is no longer paused"
 and the list is read again.
 
-**Other permissions: hidden until the connector supports them**
-(decision 3). The delegable owner types (§10.11: the
+**Other permissions: no add action until the connector supports
+them** (decision 3). The delegable owner types (§10.11: the
 connections, messages, profile and shared-action scopes) are what the
 connector offers only in its v1.1 (AGENT-PLAN A4, AG5). Until the owner
 confirms that, the "Other permissions" add action is not shown, and
-the heading only when there are such grants (0.1.120, above); grants
-another device issued are listed and can be removed.
-When it is shown, the editor is:
+the heading only when there are such grants (0.1.120, above; it said
+the heading was hidden too); grants another device issued are listed
+and can be removed. Once the add action is shown, the editor is:
 
 - **Scope**: one of the nine delegable types, with labels: "See your
   list of connections" (`connection.list`), "See a connection's
@@ -6218,7 +6235,7 @@ editor behind decision 3). AA6–AA8 follow in their own sections.
 | 6 | Length of an approved access request | (a) the requested length preselected, any of 15 min to 24 h allowed; (b) never longer than requested | **(a)**: the member may know the task is long; shortening stays one tap |
 | 7 | Default end of an agent's permissions and rules | (a) Never (the specification's default when absent); (b) 1 month; (c) 3 months | **(b)**: access that lapses unless renewed; the member can choose Never |
 | 8 | Status lifetime (`status_ttl`) | (a) 15 min default under More options; (b) shown in the main form; (c) not shown | **(a)**: rarely changed, but the revocation bound depends on it |
-| 9 | Desktops | (a) listed (end access, remove) and their access requests approvable; no "Pair a desktop"; their held step-up requests deny-only; (b) also pair desktops now | **(a)**: no VettID desktop app is released, and each step-up type would need its own approval screen. (0.1.120) **Reversed for pairing** by the owner (decision a, 2026-11-05): "Pair a desktop" is offered, for the VettID Desktop staging run (§4 "Devices & agents", the device list); desktops are listed and their access requests approved as before |
+| 9 | Desktops | (a) listed (end access, remove) and their access requests approvable; no "Pair a desktop"; their held step-up requests deny-only; (b) also pair desktops now | **(a)**: no VettID desktop app is released, and each step-up type would need its own approval screen. (0.1.120) **Reversed for pairing** by the owner (decision a, 2026-11-05; vettid-android #291, in review): "Pair a desktop" is offered, for the VettID Desktop staging run (§4 "Devices & agents", the device list); desktops are listed and their access requests approved as before |
 | 10 | Asks whose details the app no longer holds (after its process ends) | (a) deny-only, plus a spec follow-up (14a); (b) hide them | **(a)**: never approve unseen; never hide an ask |
 | 11 | Renaming a device | (a) no rename, the self-asserted name labelled as such; (b) a local name on this phone; (c) a spec change for a name kept in the vault | **(a)** now; (c) later if wanted, so all devices agree |
 | 12 | Confirm "End access"? | (a) confirm; (b) no confirmation | **(a)**: it declines the device's waiting requests, and the connector waits before asking again (AGENT-PLAN AG8) |
@@ -7139,7 +7156,8 @@ interval). Follow-ups, in A3 unless noted:
    0.17.0 §10.1); the send button stays off until it ends.
 3. **When to ask**: at the first app open or return to the foreground
    after the deadline, before any vault screen; never over an action in
-   progress. A refused request keeps its input (drafts stay drafts) and
+   progress (0.1.120: and then only until 5 minutes after the deadline,
+   below). A refused request keeps its input (drafts stay drafts) and
    the prompt follows when the member leaves the screen.
    (0.1.117, owner decision a, 2026-11-03, thread
    01M6FHES389JBHYZTN648MH3MG) When the check comes due, what the member

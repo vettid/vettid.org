@@ -19,7 +19,7 @@ related:
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
-  - BALLOT-PROTOCOL.md (0.13.3; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at 0cf7553, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.11.1, unchanged since)
+  - BALLOT-PROTOCOL.md (0.13.7; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at 8940571, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.11.1, unchanged since)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.34; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
@@ -40,16 +40,21 @@ changelog:
     check is answered reason `input` while the stored reason stays; a
     `rows_unavailable` submission keeps no results. (3) §10.19.6: the
     re-check of a `gave_up` record does not download an unchanged
-    `rows.json` again; §10.19.2: the `problems` notice ends when the
+    `rows.json` again, unless `rows.json` could not be fetched on the
+    last attempt; a re-check that skips it submits the kept row and
+    proof again or sends nothing; §10.19.2: the `problems` notice ends when the
     count drops below 16. (4) §10.19.4, §6.4: a member's request for a
     proposal the service holds but has not published gets no answer,
     not `unknown_proposal` (BALLOT-PROTOCOL 0.13.7, service-vault
-    #122); the vault asks again. (5) §6.4, §3.4: an outgoing connection
-    request, reconnect or rekey that cannot be restored at an unlock or
-    a recovery is dropped as an aborted one (vettid-vault #200; needs a
-    vault release). (6) §11.14.10 "The owed mark": the held statement
-    K0→K1 precedes anything signed with the new credential key, not
-    `identity.rotate`. Only (3)'s re-check rule is for the apps.
+    #122); the vault asks again, the cast on its schedule and
+    `vote.status` on its own. (5) §6.4, §3.4: from the vault release
+    with vettid-vault #200 (in review), an outgoing connection request,
+    reconnect or rekey that cannot be restored at an unlock or a
+    recovery's open is dropped as an aborted one; an `hs.init` queued
+    by an earlier release may still be sent. (6) §11.14.10 "The owed
+    mark": the held statement K0→K1 precedes anything signed with K1 or
+    a later key (K2), not `identity.rotate`. BALLOT-PROTOCOL in
+    `related` is now 0.13.7 (at 8940571, service-vault #122). Only (3)'s re-check rule is for the apps.
   - 0.83.11: 2026-11-04. Two corrections to the transfer's credential
     key (§11.14.10, 0.68.0), from building it. (1) §11.14.10 and the
     request tables: while a transfer's rotation statement K0→K1 is held
@@ -3538,10 +3543,11 @@ create-only.
   2. It appends the statement to its **rotation chain**.
   3. It rekeys every session (§6.5).
 
-  (0.83.12) An outgoing handshake begun under the old `ik` that has not
-  finished when the vault locks cannot be restored at the next unlock;
-  it is dropped as an aborted one is (§6.4, "An outgoing handshake that
-  cannot be restored").
+  (0.83.12; from the vault release with vettid-vault #200) An outgoing
+  handshake begun under the old `ik` that has not finished when the
+  vault locks cannot be restored at the next unlock or at a recovery's
+  open; it is dropped as an aborted one is (§6.4, "An outgoing handshake
+  that cannot be restored").
 
   The credential rotation is the PQC migration vehicle (PQC-MIGRATION §7):
   the release that introduces suite 3 generates the hybrid credential key
@@ -5865,12 +5871,14 @@ Rules:
   - A handshake aborted on a commitment mismatch (§6.3) drops the
     incoming request, which its devices were never shown, and denylists
     every token issued to the peer.
-  - (0.83.12, vettid-vault #200) **An outgoing handshake that cannot be
-    restored** at an unlock or a recovery's open (a connection request,
-    a reconnect or a rekey; for example one begun under an identity
-    key that a rotation has since replaced, §3.4) is dropped as an
-    aborted one is, and audited `handshake_not_restored`: its queued
-    `hs.init` is not sent, and every token it issued is denylisted. For
+  - (0.83.12; from the vault release with vettid-vault #200) **An
+    outgoing handshake that cannot be restored** at an unlock or a
+    recovery's open (a connection request, a reconnect or a rekey; for
+    example one begun under an identity key that a rotation has since
+    replaced, §3.4) is dropped as an aborted one is, and audited
+    `handshake_not_restored`: its queued `hs.init` is not sent (one
+    queued by an earlier release may still be sent), and every token it
+    issued is denylisted. For
     a new connection the vault also denylists the tokens issued to the
     peer and sends `connection.event{connection_id, event: "failed"}`
     with no `reason`. A dropped reconnect sends no `connection.event`;
@@ -6012,7 +6020,7 @@ bytes, `proposal` and `extension` of the exact JCS bytes of the document
 | service → vault | `vote.extended` | `{proposal_id, extension, extension_sig, bundle}` | `{proposal_id}`, or `not_found`, `bad_request`, `unsupported_type` |
 | service → vault | `vote.closed` | `{proposal_id, results_hash}` | `{proposal_id}`, or `not_found`, `bad_request`, `unsupported_type` |
 | vault → service | `vote.cast` | `{proposal_id, record_tag, vk, choice_id, ballot_sig, cast_sig, pad}` (`pad`: §10.19.5) | `{proposal_id, msg_ms, receipt_sig}`, or a refusal |
-| vault → service | `vote.status` | `{proposal_id}` | `{proposal_id, proposal, proposal_sig, bundle, record_secret, record_proof, ballot?, msg_ms?, receipt_sig?, status_sig}` (`ballot` is `{vk, choice_id, ballot_sig, pad?}`, `pad`: §10.19.5; as the service vault sends it, BALLOT-PROTOCOL 0.12.3 §4.2: **`bundle` is always present**: (0.83.12, BALLOT-PROTOCOL 0.13.7) until the service has one, it sends a member no answer (§10.19.4); `ballot` is `{vk, choice_id, ballot_sig}`; **`ballot`, `msg_ms` and `receipt_sig` come together or not at all**), or a refusal |
+| vault → service | `vote.status` | `{proposal_id}` | `{proposal_id, proposal, proposal_sig, bundle, record_secret, record_proof, ballot?, msg_ms?, receipt_sig?, status_sig}` (`ballot` is `{vk, choice_id, ballot_sig, pad?}`, `pad`: §10.19.5; as the service vault sends it, BALLOT-PROTOCOL 0.12.3 §4.2: **`bundle` is always present**: (0.83.12, BALLOT-PROTOCOL 0.13.7) while the proposal is unpublished, the service sends a member no answer (§10.19.4); `ballot` is `{vk, choice_id, ballot_sig}`; **`ballot`, `msg_ms` and `receipt_sig` come together or not at all**), or a refusal |
 
 A refusal from the service is an `error` response whose `error.code` is
 one of `not_eligible`, `not_open`, `closed`, `not_active`,
@@ -14421,7 +14429,7 @@ Every check is the vault's own; the app never decides one. **Every signature in 
 
 **Locked and held.** A locked vault does nothing (§12.1): the relay keeps the message (14 days) and the vault handles it at the next unlock with that moment's clock. A **held** vault (§3.6.3) handles all three as above, because nothing in them waits for the member: the proposal is kept and checked, the feed item is made (counted in `vault.held`'s `other`, with no wake: §14.2 does not wake a held vault for it), and the member sees it after the check.
 
-**A proposal the vault was never sent.** For each site index entry (`vote.site.sync`) of a service the vault has a `service`-kind connection with, whose proposal it does not hold, the vault asks `vote.status` (at most once an hour per proposal). The answer carries the proposal, `proposal_sig`, `bundle`, `record_secret` and `record_proof` (§6.4); they are checked as in steps 2 to 6, with `status_sig` (§10.19.5), and the proposal's bytes must equal the site's. The service always sends a `bundle`, but the vault is **tolerant of its absence**: an answer without one leaves the proposal `checking` (`site`) until the site's bundle arrives. An answer with only some of `ballot`, `msg_ms` and `receipt_sig` is malformed and counts as no answer. A signed `not_eligible` or `unknown_proposal` is kept as evidence and shown (decision 7). (0.83.12; BALLOT-PROTOCOL 0.13.7 §4.2, owner decision b, 2026-11-04, service-vault #122) A proposal the service holds but has not published (its anchor is missing, after a table restore or a lost publication) gets **no answer** for a member's `vote.status` or `vote.cast`, not `unknown_proposal` or `not_eligible`, which would be final for the member's vault: the service acknowledges the request and does not answer it. The vault treats it as no answer and asks again (§10.19.5 "Sending again": the cast is resent, and `vote.status` is asked after 24 hours), and once the proposal is published a later request is answered as usual. A party with no tag for the proposal is still refused. 0.83.11 and before said the service answered `unknown_proposal` until the proposal was anchored.
+**A proposal the vault was never sent.** For each site index entry (`vote.site.sync`) of a service the vault has a `service`-kind connection with, whose proposal it does not hold, the vault asks `vote.status` (at most once an hour per proposal). The answer carries the proposal, `proposal_sig`, `bundle`, `record_secret` and `record_proof` (§6.4); they are checked as in steps 2 to 6, with `status_sig` (§10.19.5), and the proposal's bytes must equal the site's. The service always sends a `bundle`, but the vault is **tolerant of its absence**: an answer without one leaves the proposal `checking` (`site`) until the site's bundle arrives. An answer with only some of `ballot`, `msg_ms` and `receipt_sig` is malformed and counts as no answer. A signed `not_eligible` or `unknown_proposal` is kept as evidence and shown (decision 7). (0.83.12; BALLOT-PROTOCOL 0.13.7 §4.2, owner decision b, 2026-11-04, service-vault #122) A proposal the service holds but has not published (its anchor is missing, after a table restore or a lost publication) gets **no answer** for a member's `vote.status` or `vote.cast`, not `unknown_proposal` or `not_eligible`, which would be final for the member's vault: the service acknowledges the request and does not answer it. The vault treats it as no answer and asks again (the cast is resent; `vote.status` is asked again on its schedule: hourly for a proposal the vault was never sent, as above, and for a cast as §10.19.5 "Sending again" says), and once the proposal is published a later request is answered as usual. A party with no tag for the proposal is still refused. 0.83.11 and before said the service answered `unknown_proposal` until the proposal was anchored.
 
 **Comparing with the public site** (BALLOT-PROTOCOL §9.2, a split view; chosen). The vault keeps, per proposal, the site's proposal bytes and a `site` state, **decided from the document itself**, `p/<proposal_id>/proposal.json` (VOTES-SITE §3: immutable and kept for good), and not from the index: `index.json` lists only the last 30 days and its write can lag the document (VOTES-SITE §3, §4), so the index and `archive/<YYYY-MM>.json` serve for discovery only. The states: `matches` (the document's bytes equal the held bytes), `mismatch` (the document exists with other bytes **and is a valid proposal document with the same `proposal_id`, signed under the service's `ik`**: 0.81.2, below), `not_listed` (a site that **answered** has no document: a `404`; one `404` is only this), `unreachable` (no answer) or `unpublished` (below). **Only a positive `mismatch` blocks a cast** (`site_mismatch`): VettID's own site must not stop a member from voting (BALLOT-PROTOCOL §1, §10.1). `not_listed` and `unreachable` allow the cast with a plain warning, and the vault compares as soon as the site answers. **A service can show one member a private variant**, anchored in Rekor and never uploaded, even under its own `proposal_id`; the site is write-once and takes uploads only before the close (BALLOT-PROTOCOL §3.3, VOTES-SITE §4), so absence is a positive signal after a while:
 - a `404` for the document from an answering site **more than 10 minutes after the proposal arrived** makes a `vote.problem` feed item with a plain warning, and an audit entry `vote.proposal_conflict` (`ref` = `<proposal_id>:not_listed`); the member can still vote;
@@ -14486,7 +14494,7 @@ A code the vault does not know is no answer.
 
 #### 10.19.6 After the close: checking the results
 
-At `vote.closed`, and in any case at **`closes_at` (as extended) + 2 hours**, the vault marks the check `pending` and tells the app (`vote.event{event: "check_due"}`; `check.due_at` in `vote.list`). The app runs pending checks whenever it opens and retries with backoff; the vault gives up (`gave_up`) **7 days** after the check was due (BALLOT-PROTOCOL §8.3). The app knows why it could not finish (the site could not be reached, or `results.json` was not there) and says so (ANDROID-PLAN); the vault records only `gave_up` (with reason `rows_unavailable` when the app said it could not get the row, step 3). **A `gave_up` check is not final** (0.83.6, owner decision a, thread 01M6HK8A1VMV41M8TTASXV4BSK): the app keeps running it whenever it opens, as a `pending` one but at most once a day per record, and a later submission is judged as usual, so it can still become `verified`, `unconfirmed` or `failed`. (0.83.12) Such a re-check **does not download an unchanged `rows.json` again** (it can be up to 51 MB per record): `results.json` names `rows_root`, so with the same `results.json` (compared by its hash) as at the last attempt the rows are unchanged, and the app fetches `rows.json` again only when `results.json` was absent, unreachable or changed, or when the last attempt failed on the vault's side (`trust_root`, `service_list`, `clock`). Until then the record is in the problem set (§10.19.2). The results are public and write-once, so with a service that publishes them the record clears by itself the next time the app opens; only results that are never published or never verify keep it there. A released record (§10.19.8 `vote.release`) is not checked again. While the app stays closed past the give-up, a busy service can bring its `gave_up` records to the problem cap of 16; until the app opens and the checks clear, its new proposals are answered `limit`, and one still on the site comes back through `vote.site.sync`. This is accepted: the cap is what keeps a withholding service from evicting the records.
+At `vote.closed`, and in any case at **`closes_at` (as extended) + 2 hours**, the vault marks the check `pending` and tells the app (`vote.event{event: "check_due"}`; `check.due_at` in `vote.list`). The app runs pending checks whenever it opens and retries with backoff; the vault gives up (`gave_up`) **7 days** after the check was due (BALLOT-PROTOCOL §8.3). The app knows why it could not finish (the site could not be reached, or `results.json` was not there) and says so (ANDROID-PLAN); the vault records only `gave_up` (with reason `rows_unavailable` when the app said it could not get the row, step 3). **A `gave_up` check is not final** (0.83.6, owner decision a, thread 01M6HK8A1VMV41M8TTASXV4BSK): the app keeps running it whenever it opens, as a `pending` one but at most once a day per record, and a later submission is judged as usual, so it can still become `verified`, `unconfirmed` or `failed`. (0.83.12) Such a re-check **does not download an unchanged `rows.json` again** (it can be up to 51 MB per record): `results.json` names `rows_root`, so with the same `results.json` (compared by its hash) as at the last attempt the rows are unchanged, and the app fetches `rows.json` again only when `results.json` was absent, unreachable or changed, when `rows.json` could not be fetched on the last attempt, or when the last attempt failed on the vault's side (`trust_root`, `service_list`, `clock`). A re-check that skips the download either submits again the row and proof it kept from the last attempt, or sends nothing: the vault judges only what is submitted (steps 2 and 3), and the same results, row and proof get the same answer, still no answer (`input`) or `rows_unavailable`, so sending nothing loses nothing. Until then the record is in the problem set (§10.19.2). The results are public and write-once, so with a service that publishes them the record clears by itself the next time the app opens; only results that are never published or never verify keep it there. A released record (§10.19.8 `vote.release`) is not checked again. While the app stays closed past the give-up, a busy service can bring its `gave_up` records to the problem cap of 16; until the app opens and the checks clear, its new proposals are answered `limit`, and one still on the site comes back through `vote.site.sync`. This is accepted: the cap is what keeps a withholding service from evicting the records.
 
 1. The **app** fetches `results.json`, `rows.json`, the bundle and `results_sig` from votes.vettid.org with no session, verifies them as an observer does (BALLOT-PROTOCOL §8.4), and sends `vote.results.submit`: `results.json`, the signature, the bundle, **its own row** (the vault's tag is in `vote.get`) and the row's inclusion proof to `rows_root`. The app sends it whenever what the vault itself checks can hold (0.83.2): `results.json` parses, `results_sig` verifies under the service key, and the bundle holds. Any other failure of the observer check (the member's own row's ballot, other rows, the proposal or extensions, the tally, the published trees) is shown to the member but does not stop the submit; the vault never relies on the app's verdict. (0.83.3) "`results_sig` verifies" here is the vault's check: the app checks only the form (a 64-byte signature, the bundle an object). **What stops the app's submit of a row:** a `rows.json` larger than 512 bytes × `counts.eligible` + 4,096 (the download is capped the same way, and never at more than 51,204,096 bytes; it need not be JCS), nested deeper than 4, or holding a row or ballot that cannot be made into a leaf (a ballot that is not an object, a `record_tag` that is not 32 bytes of base64, a ballot member that is not a base64 string). When the member's row cannot be had (step 3), the app submits with `rows_unavailable: true` instead of a row. **Reported, but they do not stop it:** a `rows.json` that is not exactly `{v: 1, proposal_id, rows}` or names another proposal, a `results.json` that names another `proposal_id`, and a `tally` or `counts` that differs from the vault's own (`vote.get`, when it holds them). When `rows.json` has another row with the member's `record_tag` at a different index, the app sends the first one as `row` and adds the others (at most 4) with their inclusion proofs as `other_rows`. If those vault-checked inputs do not verify, the app does not submit and shows a problem with the published results (had it been sent, the vault would leave the check `pending` with reason `input`, step 3); the app retries at its next attempt. With `verified` or `unconfirmed` and a failed observer check, the app shows the state, shows no number (the choice counts, the turnout, the quorum line and the unhandled line) and shows the line "The rest of the published results don't add up. The service may have published them wrongly." under it; it does not show the app's text for a problem with the published results.
 2. The **vault** checks the strict JCS bytes and schema (BALLOT-PROTOCOL §8.5); `results_sig` over `proposal_hash ‖ H(results bytes)` under the service key and `"vettid/vote/1/results\x00"`; the bundle against an accepted anchor key (§10.19.4 step 6); that the `proposal` in the results is, byte for byte, the one it holds with its signature, and that the extensions are the ones it holds, in order (an extension in the results that it lacks is checked as in `vote.extended` and adopted; a held one missing from the results is a failure); that `tally` names every choice and `counts.eligible` equals the proposal's; and its row.
@@ -21269,7 +21277,7 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   connections get an unbroken chain: a recovery (its open uses the
   backup copy, which holds K1) and a `credential.rotate` (its own
   statement is K1→K2) both do. (0.83.12) "First" means before anything
-  signed with the **new credential key**, not before `identity.rotate`:
+  signed with **K1 or a later key** (K2), not before `identity.rotate`:
   a `credential.rotate` sends `identity.rotate`, then the rekey, then
   the chain K0→K1→K2, all from one state write. A `credential.rotate` or a recovery made
   while the transfer's pending unlink waits first deposits the pending
