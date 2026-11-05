@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.85.0
+version: 0.85.3
 date: 2026-11-05
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,7 +28,7 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.85.0: 2026-11-05, owner decisions of 2026-11-05 for the agent
+  - 0.85.3: 2026-11-05, owner decisions of 2026-11-05 for the agent
     connector (option b, thread 01M6PBG2YHEEPDQ9ETQEBWK0EB: pin a
     bound program's content; option a, thread
     01M6PC7E5E3DARQSS4SE200MNR: an env allowlist in the binding), with
@@ -7814,7 +7814,7 @@ an answer to an unknown or expired id is dropped.
     `item.proxy` for an item whose settings do not allow that way, with
     body `{ways}`; `program_not_allowed`: an `item.run` whose program
     the item is not bound to (§10.11 "Ways to use a secret");
-    (0.85.0) `env_not_allowed`: an `item.run` with an `env` name the
+    (0.85.3) `env_not_allowed`: an `item.run` with an `env` name the
     matched program entry does not list, with body `{names}` (the
     refused names);
   - `bad_password`, `backoff`, `stale_credential`, `utk_invalid`: §3.5.3,
@@ -8086,7 +8086,7 @@ device belongs to the unlock it ends.
 | `device.session.granted` (to the device) | — | `{session_id, expires_at}` |
 | `device.session.end` (app: `{device_id}`; desktop, agent: `{}`, its own; (0.82.5) either may add `session_id`) | as left | `{}`; (0.82.5) also `{}`, with nothing changed, when `session_id` is not the device's current, unexpired session (a session suspended by the hold, §3.6.3, is current); `bad_request` for a `session_id` that is not a non-empty string (§6.8 "Ending") |
 | `device.session.ended` (to the device) | — | `{reason: "denied" \| "ended"}` |
-| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history`, (0.85.0) `program_unrecorded`, `program_changed` (with `previous_sha256` and `previous_path`) (§10.11) |
+| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history`, (0.85.3) `program_unrecorded`, `program_changed` (with `previous_sha256` and `previous_path`) (§10.11) |
 | `approval.waiting` (to the requester) | — | `{approval_id, request_id, exp}` |
 | `approval.decide` (app) | `{approval_id, approve: bool}` | `{result}`: `"ok"` or the error code the held request was answered with |
 
@@ -12443,7 +12443,7 @@ item's settings allow for its task:
     binds the item to programs. Each entry's `program` is an absolute
     path, matched exactly against the request's `program`, or a bare
     name, matched against its last path element (the connector finds
-    names only on its fixed search path, AGENT-PLAN §4.9). (0.85.0) No
+    names only on its fixed search path, AGENT-PLAN §4.9). (0.85.3) No
     two entries may match the same path: compared without case and
     without a final `.exe`, no two entries are equal, and no bare name
     equals an absolute entry's last path element (`bad_request`
@@ -12451,7 +12451,7 @@ item's settings allow for its task:
     `true`) refers every run to an app; it can be `false` only when
     `programs` is not empty, and even then a run of a shell or an
     interpreter is referred (below).
-  - (0.85.0; owner decision of 2026-11-05, option b) **The program's
+  - (0.85.3; owner decision of 2026-11-05, option b) **The program's
     content is pinned.** An entry's `sha256` (64 lowercase hex digits)
     is the SHA-256 of the program file the member approved, and its
     `path` the absolute path that file was run from (for an absolute
@@ -12470,11 +12470,11 @@ item's settings allow for its task:
     narrows; any other `sha256` or `path` is `bad_request`. Changing an
     entry's `program` drops them. (Owner decision of 2026-11-05, kept
     as the fallback, AGENT-PLAN §4.9) The connector applies the check of a program only an administrator can change (`program_not_found` otherwise: a program that the connector's user can change, or that sits in a folder that user can change, by the `--run-path` check) to every resolved program except one equal to its entry's pinned `path`, which the catalog gives. So a pinned program moved to a changeable place is checked again.
-  - (0.85.0) **What approving a fingerprint means.** Approving a run
+  - (0.85.3) **What approving a fingerprint means.** Approving a run
     flagged `program_unrecorded` or `program_changed` lets later runs of
     that exact file, at that path, go unasked when the item's settings
     allow (`each: false`). The approval screen says so.
-  - (0.85.0) **Settings that change while a run waits.** When the
+  - (0.85.3) **Settings that change while a run waits.** When the
     approval of an `item.run` arrives and the item's settings'
     `version` is no longer the one the run was decided under, the vault
     decides the run again under the current settings before it answers:
@@ -12484,7 +12484,7 @@ item's settings allow for its task:
     recorded (another approval recorded a different one meanwhile) is
     referred again as a new approval; the value is never sent on the
     old one.
-  - (0.85.0; owner decision of 2026-11-05, option a) **The variables
+  - (0.85.3; owner decision of 2026-11-05, option a) **The variables
     a program may receive.** An entry's `env` (0–32 names, default
     empty) lists the names a run of that program may set in its `env`.
     Each name follows the rule given for `item.run` (below), so no
@@ -12505,7 +12505,7 @@ item's settings allow for its task:
     `["use"]`.
   - **Widening needs the member.** A `leash.item.set` that adds a way or
     a program or a host, empties `programs`, adds a name to an entry's
-    `env` (0.85.0), or sets `each` to `false` needs the credential's
+    `env` (0.85.3), or sets `each` to `false` needs the credential's
     unlock window, as issuing a grant does
     (`credential_locked` outside it). One that only narrows does not.
   - Settings are per agent and item, not per rule, so the strictest
@@ -12523,7 +12523,7 @@ item's settings allow for its task:
   reference client, set `reveal` first.
 - **The catalog** gives, per item, `ways` and, when present,
   `programs` and `hosts` (never `header` or `prefix`), so the agent can
-  choose a way the item allows. (0.85.0) Its `programs` entries are
+  choose a way the item allows. (0.85.3) Its `programs` entries are
   `{program, env, path?}`: `path` is the pinned path when there is a
   pin, never the hash, so the connector knows which file needs no
   further check (above).
@@ -12532,14 +12532,14 @@ item's settings allow for its task:
   (body `{ways}`, the item's ways) and counted as *refused* (above,
   with its cooldown). An `item.run` whose `program` does not match a
   non-empty `programs` is answered `program_not_allowed`, also counted
-  as refused. (0.85.0) An `item.run` with an `env` name that the
+  as refused. (0.85.3) An `item.run` with an `env` name that the
   matched entry's `env` does not list, or with any `env` when
   `programs` is empty, is answered `env_not_allowed` (body `{names}`),
   also counted as refused. Otherwise each is decided as an
   `items.read` request (above: the windows and `uses` of every
   including rule count it), and in addition it is **referred** to an
   app: an `item.run` when `each` is `true`, `programs` is empty, the
-  run does not match the entry's pin (0.85.0: no `sha256` recorded, or
+  run does not match the entry's pin (0.85.3: no `sha256` recorded, or
   a different `sha256` or `path`), or `program` is a shell or an
   interpreter (its last path element, without `.exe` and in any case,
   is one of the `shell` names below or starts with `python`, `node`,
@@ -12550,7 +12550,7 @@ item's settings allow for its task:
   that `ask` means one prompt per item, not per read).
 - `item.run{item_id, field_id, program, sha256, argv, cwd, how, name?, env?}`:
   `program` is the absolute path the connector resolved for `argv[0]`;
-  (0.85.0) `sha256` is the SHA-256 of that file as the connector
+  (0.85.3) `sha256` is the SHA-256 of that file as the connector
   read it, 64 lowercase hex digits; the connector runs exactly the
   bytes it hashed (AGENT-PLAN §4.9);
   `argv` 1–64 strings, each at most 4,096 bytes and 32,768 in all;
@@ -12560,7 +12560,7 @@ item's settings allow for its task:
   exactly `{secret_file}`); `name` matches `^[A-Z_][A-Z0-9_]{0,63}$`,
   is required for `env` and `file`, and is none of the connector's
   minimal environment, `PATH`, `TMPDIR`, `TEMP` or `TMP`, nor starts with
-  `LD_` or `DYLD_`; (0.85.0) nor is a name that makes a program load
+  `LD_` or `DYLD_`; (0.85.3) nor is a name that makes a program load
   or run other code: it starts with `GIT_`, `COR_PROFILER`, `CORECLR_`
   or `DOTNET_`, or is `NODE_OPTIONS`, `NODE_PATH`, `BASH_ENV`, `ENV`,
   `SHELL`, `COMSPEC`, `PSMODULEPATH`, `PERL5OPT`, `PERL5LIB`,
@@ -12597,7 +12597,7 @@ item's settings allow for its task:
   command or an API call chosen by a hijacked agent can still misuse the
   secret; this is why the approval shows the command or the host, the
   vault flags shells, and an item can bind programs.
-- (0.85.0) **What the pin covers, said plainly.** `sha256` and `path`
+- (0.85.3) **What the pin covers, said plainly.** `sha256` and `path`
   pin the one file the connector starts, so another program put in its
   place is caught. The first approval trusts whatever file is at the
   path then: the member cannot check a fingerprint against anything,
@@ -12622,9 +12622,9 @@ item's settings allow for its task:
     `--eval`;
   - `unbound_program`: an `item.run` for an item whose `programs` is
     empty;
-  - (0.85.0) `program_unrecorded`: an `item.run` whose matched entry
+  - (0.85.3) `program_unrecorded`: an `item.run` whose matched entry
     has no `sha256` yet; approving it records the run's (above);
-  - (0.85.0) `program_changed`: an `item.run` whose `sha256` or
+  - (0.85.3) `program_changed`: an `item.run` whose `sha256` or
     `program` differs from the matched entry's recorded `sha256` and
     `path`. The approval then also carries `previous_sha256` and
     `previous_path`, the recorded ones. Approving it records the new
@@ -12632,7 +12632,7 @@ item's settings allow for its task:
   - `history`: an `item.get`.
 
   The app shows, for an `item.run`: the agent, the item and field, the
-  program, (0.85.0) its fingerprint (the first 16 hex digits of
+  program, (0.85.3) its fingerprint (the first 16 hex digits of
   `sha256`, in groups of four) and, for `program_changed`, the previous
   fingerprint and path beside them and that the program changed since
   the member last approved it, or, when `previous_path` differs, that
@@ -12883,7 +12883,7 @@ grant set carries a `grant_seq`:
   from 0.
 - **No fallback.** An agent built for 0.41.0 ignores a list or update
   without `grant_seq`; it needs a vault of 0.41.0 or later (owner
-  decision of 2026-10-18). (0.85.0) A `grant_seq` of 0, or one that is
+  decision of 2026-10-18). (0.85.3) A `grant_seq` of 0, or one that is
   not an unsigned 64-bit integer, counts as absent.
 
 | Type | Request body | Response / event body |
@@ -12894,7 +12894,7 @@ grant set carries a `grant_seq`:
 | `leash.grant.updated` (V→D, to the agent) | — | `{grants: [<grant>], suspended, grant_seq}`: all of its grants, after every change and at suspension and resumption; (0.41.0) `grant_seq` is the set's (above) |
 | `leash.agent.resume` (app) | `{agent_id}` | `{}`; `not_found` unless the agent is suspended |
 | `leash.status.get` (agent) | `{grant_id}` | `{grant_id, status, status_sig, rotations?}`; `not_found`, `forbidden` (suspended), `owner_check_required` (the vault is held, §3.6.3) |
-| `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}`; (0.42.0) `{op: "item.run", item_id, field_id, program, sha256 (0.85.0), argv, cwd, how, name?, env?}` or `{op: "item.proxy", item_id, field_id, host, seconds?}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}`; (0.42.0) `{item_id, field_id, value}` or `{item_id, field_id, value, header, prefix, host, expires_at}`; `way_not_allowed` (body `{ways}`), `program_not_allowed`, (0.85.0) `env_not_allowed` (body `{names}`) |
+| `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}`; (0.42.0) `{op: "item.run", item_id, field_id, program, sha256 (0.85.3), argv, cwd, how, name?, env?}` or `{op: "item.proxy", item_id, field_id, host, seconds?}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}`; (0.42.0) `{item_id, field_id, value}` or `{item_id, field_id, value, header, prefix, host, expires_at}`; `way_not_allowed` (body `{ways}`), `program_not_allowed`, (0.85.3) `env_not_allowed` (body `{names}`) |
 | `leash.item.set` (app; widening within the unlock window) | `{agent_id, item_id, version?, ways, run?, proxy?}` (0.42.0); `version` required to replace existing settings (`conflict`) | `<item_ways>`; `not_found` unless a rule of the agent includes the item; `credential_locked` for a widening outside the window; `bad_request` |
 | `leash.item.list` (app, desktop) | `{agent_id, item_id?}` (0.42.0) | `{items: [<item_ways>]}`: the settings of each item the agent's rules include |
 
