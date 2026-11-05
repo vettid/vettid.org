@@ -30,9 +30,12 @@ related:
 changelog:
   - 0.86.1: erratum, 2026-11-05 (owner decision a, GC thread
     01M6Q17YWAD9X7Y9ME7SPYG00T): §6.3.1 "Deployment", the revert keeps at
-    most 256 copies and 1 MiB per connection and 8 MiB per vault, oldest
-    dropped first, replacing 0.86.0's 10,000 copies and 64 MiB per
-    connection, which nothing sized: the copies are in the vault's state,
+    most 256 copies and 1 MiB per peer (connection, device or agent) and
+    8 MiB per vault, oldest dropped first, replacing 0.86.0's 10,000
+    copies and 64 MiB per connection; a copy's size is its inner
+    plaintext, a drop is counted in its own peer's
+    `connection.epoch_reverted`, and copies end at a revert, at removal
+    and at their `exp` without counting as dropped. 0.86.0's figures, which nothing sized: the copies are in the vault's state,
     rewritten whole at every flush (§8.3), and are needed only toward
     peers without `hs_confirm` during an upgrade. §15 item 50 follows.
   - 0.86.0: 2026-11-05, owner decision R1 of 2026-11-05 (§15 item 50; open PRs
@@ -6457,16 +6460,23 @@ old epoch's send keys, `rk` and receive keys, and a copy of each durable
 message (§8.5) it sends under the new epoch, until it receives anything
 under the new epoch, at most 48 days. (0.86.1, owner decision a of
 2026-11-05, thread 01M6Q17YWAD9X7Y9ME7SPYG00T) It keeps at most 256
-copies and 1 MiB of them per connection, and at most 8 MiB of copies
-in the whole vault (content sent by claim-check counts as its
-reference). The copies are part of the vault's state, which is
-rewritten whole at every flush (§8.3), so they are kept small; they
-are needed only toward a peer without the gate, during an upgrade.
-Past any of the three, the oldest copy is dropped: the connection's
-oldest for a per-connection limit, the vault's oldest for the vault's.
-A dropped copy is lost at a revert as it would have been before
-0.86.0, and is counted in `connection.epoch_reverted`. If before that it receives from the peer a
-session message or a rekey `hs.init` under the old epoch whose inner
+copies and 1 MiB of them per peer (a connection, or one of the vault's
+devices or agents), and a vault keeps at most 8 MiB of copies in all; a
+device or agent, which has one peer, has only the per-peer limits. A
+copy's size is its inner plaintext as encoded (§5.3), the bytes sealed
+again at a revert; content sent by claim-check counts as its reference,
+so a copy is never more than 245,760 bytes (§5.5). The copies are part
+of the vault's state, which is rewritten whole at every flush (§8.3), so
+they are kept small; they are needed only toward a peer without the
+gate, during an upgrade. Past any limit, the oldest copy by when it was
+sent is dropped: the peer's oldest for a per-peer limit, the vault's
+oldest for the vault's. A dropped copy is lost at a revert as it would
+have been before 0.86.0, and is counted in the `ref` of its own peer's
+`connection.epoch_reverted`. Copies go, without counting as dropped,
+at a revert once sealed again, when anything arrives under the new
+epoch or the 48 days end, when their `exp` passes, and when the
+connection or device is removed. If, while it keeps them, `I` receives
+from the peer a session message or a rekey `hs.init` under the old epoch whose inner
 `ts` is more than `T` + 2 days (the skew budget of the lifetimes, above)
 after its `hs.fin` (so the peer never activated), it **reverts**, in one
 write before it processes that message: the new epoch is destroyed and
@@ -26822,7 +26832,7 @@ Follow-ups:
     R1.** That is option A, rolled out in release 29 and switched on per
     peer by `hs_confirm`, with the lifetimes as written (16, 16, 32, 48
     days) and the revert's cap (§6.3.1 "Deployment"; 0.86.1, owner
-    decision a of 2026-11-05: 256 copies and 1 MiB per connection, 8 MiB
+    decision a of 2026-11-05: 256 copies and 1 MiB per peer, 8 MiB
     per vault, replacing 0.86.0's 10,000 copies and 64 MiB per
     connection). The option for release-28 initiators above was not
     taken up.
