@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.63
+version: 0.1.64
 date: 2026-11-05
 changelog:
+  - 0.1.64: erratum, 2026-11-05 (ANDROID-PLAN 0.1.121, VAULT-MESSAGING 0.85.2; owner decisions a and a/a). The iPhone's transfer-in follows ANDROID-PLAN §4 "Transfer (new phone)": past the 11-minute deadline it collects for the settlement window (about 90 s) in the background, never cancels its own collect, retries failed collects, ends a rejection as rejected and hides the comparison code meanwhile.
   - 0.1.63: erratum, 2026-11-05 (ANDROID-PLAN 0.1.120, VAULT-MESSAGING
     0.84.1). §6.6: what holds the daily check back, the lead's reading
     of VAULT-MESSAGING §3.6.5 that vettid-ios #205 builds, with #206's
