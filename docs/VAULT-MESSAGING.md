@@ -33,9 +33,9 @@ changelog:
     epochs. New §6.3.1: handshake lifetimes stated; in a rekey or
     reconnect the initiator activates only when the responder confirms
     (new `hs.confirm`, or any message under the new epoch), else
-    abandons it after 32 days; the responder accepts its confirmed
-    epoch until then. Adjusted: §6.2 `ctx`, §6.3, §6.5, §6.6 "Accepting
-    `ctx`", §3.4.1 H5 and S5, §10 registry.
+    abandons it after 32 days; the responder accepts the last epoch the
+    peer used until it confirms, fork checks first. Adjusted: §6.2 `ctx`,
+    §6.3, §6.5, §6.6 "Accepting `ctx`", §3.4.1 H5, S5 and I1, §10.
   - 0.85.3: 2026-11-05, owner decisions of 2026-11-05 for the agent
     connector (option b, thread 01M6PBG2YHEEPDQ9ETQEBWK0EB: pin a
     bound program's content; option a, thread
@@ -4268,8 +4268,10 @@ each recipient Q).
 PR):
 - **I1, liveness.** At quiescence (every party unlocked and online, no
   action pending, every lease expired and every message delivered and
-  processed, time past every resend and handshake retry, less than 30
-  days after the last rotation), for every pair not suspended, removed
+  processed, time past every resend and handshake retry and (0.86.0
+  draft) every confirmation bound `B` of §6.3.1, less than 30 days
+  after the last rotation or, if `B` ends later, before S1 could make
+  the pair `stale`), for every pair not suspended, removed
   or `stale`: each side's current relay key and `ik` for the other are
   the other's own; both hold the same current epoch; each holds a token
   that passes rule T for the other's current mailbox; a message sent
@@ -6209,7 +6211,7 @@ leave the two sides on different epochs (§15 item 50).
 | An initiator's handshake awaiting `hs.resp` | 16 days from `hs.init` (§6.6 "After a restore": 7 days) |
 | A responder's answer awaiting `hs.fin` (`L`) | 16 days from its `hs.resp` |
 | An initiator's pending epoch awaiting confirmation (`B`) | 32 days from `hs.fin` (`L` + `T` + 2 days) |
-| A responder's confirmed epoch (below) | its keys 46 days from the activation (`B` + `T`); its id until the peer confirms |
+| A responder's confirmed epoch (below) | its keys 46 days (`B` + `T`) from the first activation that superseded it; its id until the peer confirms a newer epoch or the connection ends |
 
 An expired handshake or answer is destroyed and the tokens it carried are
 revoked (§6.6); a later message for it is acked and dropped.
@@ -6220,19 +6222,25 @@ confirmed, `I` keeps the current epoch with its send keys and `rk`,
 sends in it (after a reconnect, `I` sends nothing but the handshake: its
 outbox waits), opens messages under both epochs, and starts no rekey or
 reconnect with `R`. A message from `R` that opens under the pending
-epoch's `r2i` key, of any type, **confirms** it: in the write that
+epoch's `r2i` key, of any type, and passes `acceptFrom` steps 1 and 2
+(§3.4.1), **confirms** it, even if a later step refuses it: in the write that
 processes it the pending epoch becomes current (§6.5 "Key retention"),
 and the outbox continues in it. A reconnect succeeds (§6.6 re-mint) at
 confirmation. If `B` passes first, `I` **abandons** the pending epoch:
 its receive keys are kept 16 days as a previous epoch's, nothing under
 it confirms any more, and `I` starts a rekey from its current epoch, or
-a reconnect naming it when its standing token for `R` has expired.
+a reconnect naming it when its standing token for `R` has expired. `I`
+keeps the abandoned epoch's id, and accepts a reconnect naming it, until
+a newer epoch is confirmed.
 
 **Responder.** `R` activates at a verified `hs.fin` that arrives within
 `L` (§6.3) and, in the same write, queues **`hs.confirm`**: body `{}`,
-session mode under the new epoch, durable. Until `R` receives from `I`
-a message under the new epoch other than `hs.fin`, the epoch it
-superseded remains `R`'s **confirmed epoch**:
+session mode under the new epoch, durable; an own pending epoch with `I`
+is abandoned. `R`'s **confirmed epoch** with `I` is the last epoch in
+which it received from `I` a message other than `hs.fin` (or that it
+activated itself at confirmation). A later activation does not replace
+it: it stays until `I` sends under a newer epoch, however many epochs
+`R` activates meanwhile. While it is not current:
 
 - `R` keeps its receive keys and `rk` (not its send keys) for the
   lifetime above, and accepts `I`'s messages under it;
@@ -6240,7 +6248,18 @@ superseded remains `R`'s **confirmed epoch**:
   `hs.confirm` again (once per batch);
 - a rekey `hs.init` under it naming it in `ctx`, and a reconnect naming
   it, are accepted as if it were current (§6.2, §6.6); `R` abandons its
-  own open rekey for it. This is neither a restore nor fork evidence.
+  own open rekey for it. *Precedence:* the fork-evidence rules of
+  §3.4.1 "Epochs after an `ik` link" and §6.6 "Fork detection" are
+  applied first. A `ctx` naming the confirmed epoch is accepted as
+  ordinary (not a restore, not fork evidence) only if no epoch that
+  superseded it at `R` is signed by an ancestor `ik` of `I` and was
+  established by a message deposited after the link that made it one
+  (the demoted epochs of "Epochs after an `ik` link"); otherwise it is
+  fork evidence and `R` suspends (`ref` = `epoch`). An `hs.fin` that
+  `I` sent before its own rotation (S5) is deposited before that link,
+  so it is not counted.
+- A reconnect needs only the id: after the keys are gone, a reconnect
+  naming it is still accepted.
 
 Then a lost `hs.fin` leaves both on the old epoch, and a lost
 `hs.confirm` is repaired by `I`'s next message, or by `I`'s rekey from
@@ -6257,6 +6276,11 @@ abandon it when its pinned `ik` stops being current, and "Epochs after
 an `ik` link" abandons one whose signer is demoted; the rekey started
 again names the current epoch, which `R` accepts as current or as its
 confirmed epoch.
+
+**Bookkeeping.** In §3.4.1 Table A `hs.confirm` is a session message;
+it is not on S1's list, so S1 may hold it, which only delays
+confirmation. In §6.6's crossing rules only a pending *reconnect*
+counts as a side's last epoch, not a pending rekey.
 
 **Devices.** Devices, desktops and agents implement both roles as the
 vault does: the vault initiates every unlock's rekey and the 7-day one
@@ -6973,7 +6997,8 @@ connection the responder also accepts its pending epoch and its
 confirmed epoch (§6.3.1); an initiator's last epoch is its current one,
 never a pending one. In the crossing rules below, a side that has sent
 `hs.fin` for its own reconnect counts that pending epoch as its last, so
-a peer's `hs.init` naming the epoch before it is refused as before. Any other `ctx` is refused
+a peer's `hs.init` naming the epoch before it is refused as before; a
+pending rekey does not count. Any other `ctx` is refused
 (`reconnect_refused`). The binding stays: `ctx` must name an epoch of
 this connection that the responder itself recorded, and the
 authentication below is unchanged.
@@ -26489,11 +26514,11 @@ Follow-ups:
       until then are lost (unacked, then expired), a silent responder
       gives no signal, a message the receiver cannot open cannot be
       authenticated to trigger anything, and devices have no reconnect.
-    **To decide:** A or B; the lifetimes (16, 16, 32, 46 days); whether
-    the vault waits for confirmation from a device or desktop of an
-    earlier release (one that stays silent until `B` refuses the rekey
-    from the old epoch; with `device.features` the vault could keep
-    activating at `hs.fin` for such devices).
+    **To decide:** A or B; the lifetimes (16, 16, 32, 46 days). An
+    older device that sends no `hs.confirm` is not a practical gap:
+    online, its own token refresh (about day 20) confirms before `B`;
+    offline, it goes `stale` at 30 days. (The trust model finds the
+    split gone under A.)
 
 ## 16. Test vectors
 
