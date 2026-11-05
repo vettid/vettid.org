@@ -113,6 +113,9 @@ export class VettidOrgAccountSiteStack extends cdk.Stack {
       hostName: hostName(config, 'account'),
       hostedZone,
       sourceDir: 'sites/account',
+      // TLS 1.3 only: every connection gets the hybrid post-quantum key
+      // exchange (owner decision a, 2026-11-05).
+      tls13Only: true,
       notFoundPage: '404.html',
       runtimeConfig: accountSiteConfig(config),
       // The same-device setup link opens in this stage's Android app (App
