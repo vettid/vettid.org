@@ -53,7 +53,8 @@ changelog:
     `env_not_allowed` (§10.1), also counted as refused. An unbound
     item's runs carry no `env`. The name rule for `name`, `env` and an
     entry's `env` also refuses the code-loading, proxy and certificate
-    names listed there, even when listed. The catalog's entries carry
+    names listed there, even when listed (the extra names: owner
+    decision of 2026-11-05, thread 01M6PFQMMSQT0HWGDRGENKZ2Q0). The catalog's entries carry
     the pinned path, never the hash. The app shows a 16-digit fingerprint. A paragraph says
     plainly what the pin does not cover. "Grant-set sequence": a
     `grant_seq` of 0, or one that is not an unsigned 64-bit integer,
@@ -12566,9 +12567,9 @@ item's settings allow for its task:
   `PERLLIB`, `PERL5DB`, `PYTHONSTARTUP`, `PYTHONPATH`, `PYTHONHOME`,
   `PYTHONUSERBASE`, `RUBYOPT`, `RUBYLIB`, `JAVA_TOOL_OPTIONS`,
   `_JAVA_OPTIONS`, `JDK_JAVA_OPTIONS`, `GCONV_PATH`,
-  `XDG_CONFIG_HOME`, `AWS_CONFIG_FILE`, `KUBECONFIG`; (proposed; not an owner decision)
+  `XDG_CONFIG_HOME`, `AWS_CONFIG_FILE`, `KUBECONFIG`; (owner decision 2026-11-05)
   nor `LESSOPEN`, `PAGER`, `EDITOR`, `VISUAL`, `SSH_ASKPASS`,
-  `SUDO_ASKPASS`, `GOFLAGS` or `RUSTC_WRAPPER`; (proposed; not an owner decision) nor a
+  `SUDO_ASKPASS`, `GOFLAGS` or `RUSTC_WRAPPER`; (owner decision 2026-11-05) nor a
   name that sends a program's traffic elsewhere or makes it trust
   another certificate:
   `HTTP_PROXY`,

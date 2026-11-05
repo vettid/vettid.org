@@ -11,16 +11,21 @@ changelog:
     referred runs and proxies, run details, proxy details). The owner's
     decisions of 2026-11-05: the old-vault notice (option a);
     `--run-path` refuses at startup a directory that the connector's
-    user can change (option a; the same for a folder above it is
-    proposed); a bound program's
+    user can change (option a), or that sits below a folder that user
+    could replace; a bound program's
     content is pinned by its SHA-256 in the item's binding (option b,
     which adds to the first choice, a program that only an administrator
     can change: that check stays for a program with no pin yet); and a program's variables are an
     allowlist in that binding (option a). §4.9 now says how the
     connector runs exactly the file it hashed on each platform (and
-    where macOS falls short), and what the pin does not cover; the
-    additions beyond the decisions are marked "(proposed; not an owner
-    decision)". The pin is the
+    where macOS falls short), and what the pin does not cover. The
+    owner's further decisions of 2026-11-05 (thread
+    01M6PFQMMSQT0HWGDRGENKZ2Q0): NTFS or ReFS fixed local drives only;
+    `#!` scripts refused as bound programs, for now; the extra refused
+    names (pager and editor, the askpass pair, `GOFLAGS`,
+    `RUSTC_WRAPPER`, proxy and certificate names); the folder-below rule
+    for `--run-path`; and the refused names apply to a request's `env`
+    and a binding, not to the operator's `--run-env`. The pin is the
     hash with the path it ran from, and a run whose settings changed
     while it waited is decided again. A3.8 is split into A3.8a and A3.8b (§6). New texts in §11
     are marked NEW, for the owner's approval
@@ -691,10 +696,10 @@ allowed ways, so the agent can choose again.
   (`cmd.exe` parses its arguments again, so they can run other
   commands), a name found with another extension than `.exe` or `.com`,
   a UNC path, a stream name (`file:stream`), a drive that is not a
-  fixed local NTFS or ReFS drive (proposed; not an owner decision), and a junction or
+  fixed local NTFS or ReFS drive (owner decision 2026-11-05), and a junction or
   other reparse point anywhere in the resolved path; on every platform,
   a path that is not a regular file the operator may run, and a script
-  (`#!`, below, (proposed; not an owner decision)). Each is `program_not_found`, with the
+  (`#!`, below, (owner decision 2026-11-05)). Each is `program_not_found`, with the
   reason in the log.
 - **The program's content** (VAULT-MESSAGING 0.85.0; owner decision of
   2026-11-05, option b). The connector reads the resolved file once,
@@ -717,7 +722,7 @@ allowed ways, so the agent can choose again.
   2026-11-05). Never hash by path and then start by path: the file
   could be swapped in between, or, on Linux and macOS, written in
   place. (chosen; not in the spec, to be confirmed by A3.8a's tests)
-  - **Windows** (NTFS or ReFS volumes only, others refused, (proposed; not an owner decision)): the
+  - **Windows** (NTFS or ReFS volumes only, others refused, (owner decision 2026-11-05)): the
     connector opens the file with sharing that refuses writing and
     deleting (an open that fails because another process has it open
     for writing refuses the run), hashes it through that handle, and
@@ -744,7 +749,7 @@ allowed ways, so the agent can choose again.
     memory file (`vm.memfd_noexec` = 2), the run is refused
     (`run_failed`) with its text; the connector never falls back to
     starting by path.
-  - **Scripts** (proposed; not an owner decision): a file that starts with `#!` is
+  - **Scripts** (owner decision 2026-11-05): a file that starts with `#!` is
     refused as a program (`program_not_found`), on every platform. This
     rules out npm and pip command-line tools as bound programs. A
     script's interpreter, which does the work, is not pinned, and on Linux a script cannot start
@@ -827,8 +832,9 @@ allowed ways, so the agent can choose again.
   and the vault both refuse the code-loading names VAULT-MESSAGING
   §10.11 lists (`GIT_…`, `NODE_OPTIONS`, `PYTHONPATH`,
   `XDG_CONFIG_HOME` and others), even when listed: a backstop, since
-  such a list is never complete. (proposed; not an owner decision) The same refusal for
-  the operator's `--run-env` names.
+  such a list is never complete. The operator's `--run-env` names are
+  checked by the name rule above only, not by this list (owner decision
+  2026-11-05).
 - **The secret** reaches the process one way, as `how` says: `env`, in
   the variable `name`; `stdin`, written to its standard input, which is
   then closed (otherwise standard input is the null device); `file`, in
@@ -872,7 +878,7 @@ allowed ways, so the agent can choose again.
   the name rule above. The connector refuses to start on a bad value,
   with the texts of §11. It also refuses a `--run-path` directory that
   the connector's user can change (the owner's decision), or that sits
-  below a folder the user could replace (proposed; not an owner decision), or that is a
+  below a folder the user could replace (owner decision 2026-11-05), or that is a
   junction or other reparse point: a
   program found there could be replaced by an agent running as that
   user. (chosen; not in the spec) On Windows this is the Windows access
