@@ -1,9 +1,24 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.9
-date: 2026-10-26
+version: 0.1.10
+date: 2026-11-05
 changelog:
+  - 0.1.10: erratum, 2026-11-05, with VAULT-MESSAGING 0.85.0: the
+    connector decisions for A3.5 and A3.7 to A3.9. The lead's answers of
+    2026-11-05 to the implementing agent's questions (Q2 to Q7: the
+    order of grant sets, an old vault, `check_status` for a reveal,
+    referred runs and proxies, run details, proxy details). The owner's
+    decisions of 2026-11-05: the old-vault notice (option a);
+    `--run-path` refuses at startup a directory, or one above it, that
+    the connector's user can change (option a); a bound program's
+    content is pinned by its SHA-256 in the item's binding (option b,
+    which replaces a first choice that a program must be one only an
+    administrator can change); and a program's variables are an
+    allowlist in that binding (option a). §4.9 now says how the
+    connector runs exactly the file it hashed and what the pin does not
+    cover. A3.8 is split into A3.8a and A3.8b (§6). New texts in §11
+    are marked NEW, for the owner's approval
   - 0.1.9: editorial (status as of 2026-10-26); no rule changes. §6
     status paragraph: nothing has merged in vettid-agent since
     2026-10-20 (#40) and the vault items and the Android work it waits
@@ -362,7 +377,9 @@ the mapping. Every tool returns MCP tool errors with a stable `code`
 took its place, so its answer cannot be returned here, AG9). With AG13
 the vault adds `way_not_allowed` (body `{ways}`) and
 `program_not_allowed`, and the connector `program_not_found`,
-`run_failed`, `proxy_limit` and `proxy_not_found` (§4.9).
+`run_failed`, `proxy_limit` and `proxy_not_found` (§4.9). With
+VAULT-MESSAGING 0.85.0 the vault adds `env_not_allowed` (body
+`{names}`), and the connector `vault_too_old` (§4.5).
 
 | Tool | Vault request | Input | Result |
 |---|---|---|---|
@@ -536,6 +553,39 @@ decision of 2026-10-18: no fallback for older vaults): it ignores a
 list or update without one, so A3.5 is released only after AV7 is on
 staging.
 
+The lead's rules for A3.5 (2026-11-05):
+
+- **Higher, lower, equal.** A higher `grant_seq` replaces the set,
+  whether it comes in a list or an update, so it can add grants as well
+  as remove them. A lower one is ignored. An equal one keeps the set and
+  takes only the newer status statements.
+- **Marks learned outside the sets.** A `not_found` or `forbidden` for a
+  grant from `leash.status.get` or an `agent.request` answer marks it
+  dead. The connector keeps its counter `gen` for these marks only.
+  A list answered before the revocation can carry a higher number than
+  the connector's and would bring the grant back, so a mark is cleared
+  only by the answer to a list this process sent after learning it,
+  with a number at least the one kept. An equal or higher number alone
+  never brings a dead grant back.
+- **"Listed in this session".** An equal number counts as listed in
+  this session only as the answer to this process's own list, never as
+  an event.
+- **Pairing.** The connector does not record the `grant_seq` of the
+  `leash.grant.updated` in the `device.paired` batch: a number kept
+  without its set would make a later list with the same number keep an
+  empty set.
+- **Without.** A `grant_seq` of 0, absent, or not an unsigned 64-bit
+  integer counts as absent (VAULT-MESSAGING 0.85.0), and the list or
+  update is ignored.
+- **An old vault.** An ignored list counts as a failed list: the
+  connector tries again after 15 s, doubling to 5 minutes, logs it once
+  per session, and answers tools that need grants with `vault_too_old`
+  and its text (§11; owner decision of 2026-11-05).
+- **State.** The state file's header `Version` stays 1. Its `leash`
+  member goes to `"v": 2` and holds `grant_seq`. A `"v": 1` member reads
+  as "number unknown": only the answer to this process's own list
+  widens it.
+
 **Delegation checks** (owner decision, 2026-10-18; deliberate). Agents
 never get the member's credential key. The connector checks a
 delegation's signature under its own `iss`, and that its members match
@@ -626,11 +676,65 @@ allowed ways, so the agent can choose again.
   on Windows `%SystemRoot%\System32;%SystemRoot%`, plus the directories
   the operator adds with `--run-path`. Never the agent's or the
   inherited `PATH`, which may name directories the agent can write. A
-  relative path with a separator is refused (`program_not_found`).
-  Symbolic links are resolved; the result is the `program` the vault
-  checks against the item's `programs` and the phone shows.
+  relative path with a separator is refused (`program_not_found`); on
+  Windows `/`, `\` and a volume name (`C:`) each count as one (the
+  lead's answer, 2026-11-05). Symbolic links are resolved; the result
+  is the `program` the vault checks against the item's `programs` and
+  the phone shows.
+- **What is refused as a program** (2026-11-05; the owner's decisions
+  and the lead's design notes): on Windows a `.bat` or `.cmd` file
+  (`cmd.exe` parses its arguments again, so they can run other
+  commands), a name found with another extension than `.exe` or `.com`,
+  a UNC path, a stream name (`file:stream`), a drive that is not a
+  fixed local drive, and a junction or other reparse point anywhere in
+  the resolved path; on every platform, a path that is not a regular
+  file the operator may run. Each is `program_not_found`, with the
+  reason in the log.
+- **The program's content** (VAULT-MESSAGING 0.85.0; owner decision of
+  2026-11-05, option b). The connector reads the resolved file once,
+  computes its SHA-256 as it reads, and sends it as `item.run`'s
+  `sha256`. The vault refers the run to the phone when the item has no
+  hash for that program yet, or a different one, and records the new
+  hash when the member approves. So the first run of a bound program,
+  and the first run after any change to the file (an update or a
+  swap), is always asked on the phone, with the path and the
+  fingerprint (and the old fingerprint when it changed); a matching
+  file then runs under the item's settings as before.
+- **Run exactly what was hashed** (the lead's design note,
+  2026-11-05). Never hash by path and then start by path: the file
+  could be swapped in between. (chosen; not in the spec) On Windows the
+  connector opens the file with sharing that refuses writing and
+  deleting, hashes it through that handle, and holds the handle until
+  the process has started from the same resolved path (as
+  `lpApplicationName`, with `NoDefaultCurrentDirectoryInExePath` set),
+  so the file cannot be changed, renamed or deleted in between;
+  A3.8a's tests check that renaming the file or a folder above it
+  fails while it is held. On Linux it starts the opened file itself
+  (`execveat` with `AT_EMPTY_PATH`). On macOS, which has neither, it
+  copies the file into `run/<id>/bin/` (owner-only) while hashing and
+  starts the copy; a program that finds its own files beside itself
+  may then fail, and says so in its error. Just before the start the
+  connector resolves `argv[0]` again and refuses the run
+  (`program_not_found`) if the path changed. The `program` sent and
+  shown stays the resolved original path.
+- **What the pin does not cover, said plainly.** It pins the one file
+  started. It does not pin what that program loads: libraries beside
+  it (on Windows, a DLL in the program's folder is loaded first),
+  a script's interpreter (`#!`), modules, plugins or configuration
+  files in folders the agent's user can change. An agent running as
+  the same user that changes those can run code inside the program that
+  receives the secret. A program installed where only an administrator
+  can change it (System32, Program Files, `/usr/bin`) does not have
+  this gap. The README says so, and that the connector must not run as
+  an administrator or root.
 - **The directory.** `cwd` is an absolute path to an existing directory;
-  absent, a new empty directory under the state directory's `run/`.
+  absent, the run's `work/` (below).
+- **The run's own directory** (the lead's answer, 2026-11-05). Each run
+  has `run/<id>/` under the state directory, owner-only (0700; on
+  Windows the owner-only DACL of A1.1), holding `tmp/` (for `TMPDIR`,
+  or `TEMP` and `TMP`), `work/` (the default `cwd`) and `secret/` (for
+  the `file` secret), and on macOS `bin/` (above). When the run ends,
+  the secret file is overwritten and the whole of `run/<id>/` removed.
 - **The environment.** The process never inherits the connector's
   environment. It gets only this minimal set, each copied from the
   connector's environment when present: on POSIX `HOME`, `USER`,
@@ -638,32 +742,75 @@ allowed ways, so the agent can choose again.
   `SystemDrive`, `windir`, `PATHEXT`, `USERPROFILE`, `USERNAME`,
   `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA`. Set by the
   connector: `PATH` (the fixed search path above), `TMPDIR` (POSIX) or
-  `TEMP` and `TMP` (Windows), pointing at the run's own directory. Then
-  the names the operator allows with `--run-env NAME` (never the
-  agent), then the request's `env` (at most 32 names, values at most
-  4,096 bytes), then the secret's variable. A name in `env` or `name`
-  must match `^[A-Z_][A-Z0-9_]{0,63}$` and must not be one of the
+  `TEMP` and `TMP` (Windows), pointing at the run's `tmp/`; (chosen;
+  not in the spec) on Windows also `SystemRoot` and `windir` from the
+  system's Windows directory, `SystemDrive` from its volume, and
+  `PATHEXT` as `.COM;.EXE`, never copied from the connector's
+  environment. Then the names the operator allows with `--run-env NAME`
+  (never the agent), then the request's `env` (at most 32 names, values
+  at most 4,096 bytes), then the secret's variable. A name in `env` or
+  `name` must match `^[A-Z_][A-Z0-9_]{0,63}$` and must not be one of the
   minimal set, `PATH`, `TMPDIR`, `TEMP`, `TMP`, or start with `LD_` or
   `DYLD_` (`bad_request`). So proxies, cloud credentials, the MCP
   client's tokens and loader variables never reach the process unless
   the operator allows them by name.
+- **An allowlist for the request's `env`** (VAULT-MESSAGING 0.85.0;
+  owner decision of 2026-11-05, option a). The phone's approval shows
+  the variables, but a run under `each: false` is not asked, and some
+  variables make a program load other code. So each bound program in
+  the item lists the names a run of it may set, chosen by the member on
+  the phone, empty by default; any other name is refused
+  (`env_not_allowed`, from the vault, or from the connector before it
+  asks when the catalog already shows the name is not listed). A run of
+  an unbound item carries no `env`. Under the allowlist the connector
+  and the vault both refuse the code-loading names VAULT-MESSAGING
+  §10.11 lists (`GIT_…`, `NODE_OPTIONS`, `PYTHONPATH`,
+  `XDG_CONFIG_HOME` and others), even when listed and even for
+  `--run-env`: a backstop, since such a list is never complete.
 - **The secret** reaches the process one way, as `how` says: `env`, in
   the variable `name`; `stdin`, written to its standard input, which is
   then closed (otherwise standard input is the null device); `file`, in
   a file in a new directory under `run/` (directory 0700, file 0600; on
   Windows the owner-only DACL of A1.1), whose path is in the variable
   `name` and replaces each argument that is exactly `{secret_file}`.
-  The file is overwritten and deleted when the process ends; `run/` is
-  emptied at every start, so a crash leaves nothing past the next one.
+  The file is the run's `secret/` (above). The file is overwritten and
+  deleted when the process ends; `run/` is emptied at every start, so a
+  crash leaves nothing past the next one.
 - **The process.** Its own process group (POSIX `setsid`) or a Windows
   job object that kills its processes when closed; no terminal.
   `timeout_seconds` 1–600, default 60; at the limit the whole group gets
   SIGTERM, then SIGKILL after 5 s (Windows: the job is ended), and
-  `timed_out` is true. At most 2 runs at once per connector.
+  `timed_out` is true. At most 2 runs at once per connector: a third
+  is answered `rate_limited_local` with the "Too many running" text of
+  §11, and the connector reserves the slot before it sends `item.run`,
+  so a value never arrives for a run that cannot start (the lead's
+  answer, 2026-11-05).
+- **A referred run starts at once** (the lead's answer, 2026-11-05).
+  When the approval arrives, the connector starts the process in the
+  background; it does not wait for `leash.check_status`. It keeps only
+  the redacted answer for `check_status`, for the 10 minutes of AG9,
+  and zeroes the value when the process ends, as for any run. When the
+  connector exits, it kills its runs' process groups and jobs.
 - **The output.** Standard output and standard error are each read up
   to 1 MiB; beyond that the rest is read and discarded and `truncated`
   is true. Each is redacted (below) and then returned up to 64 KiB, as
-  UTF-8 with invalid bytes replaced. The answer is `{exit_code, signal?,
+  UTF-8 with invalid bytes replaced. `truncated` is true whenever what
+  is returned is shorter than what the process wrote, the 64 KiB cut
+  included (the lead's answer, 2026-11-05).
+- **The operator's flags** (the lead's answer and the owner's decision
+  of 2026-11-05, option a). `--run-path DIR`: an absolute path to an
+  existing directory, at most 16. `--run-env NAME`: at most 32, each by
+  the name rule above. The connector refuses to start on a bad value,
+  with the texts of §11. It also refuses a `--run-path` directory that
+  the connector's user, or anyone else who is not an administrator, can
+  change, or one with such a directory above it, or one that is a
+  junction or other reparse point: a program found there could be
+  replaced by an agent running as that user. (chosen; not in the spec)
+  On Windows "can change" is the Windows access check for the
+  connector's own token (adding files, writing, deleting or changing
+  permissions); on POSIX it is a directory writable by its group or
+  others, owned by another user than root, or writable by the
+  connector's user. The answer is `{exit_code, signal?,
   timed_out, stdout, stderr, truncated, redacted}`, where `redacted`
   counts the replacements. It holds no value, so it is sent in both
   MCP forms as other tools are.
@@ -729,7 +876,10 @@ replace unrelated text.
 - **Other hosts and redirects.** Only the one host the approval named is
   ever contacted. Redirects are never followed: a `Location` on the same
   host is rewritten to `base_url`; one to any other host or scheme turns
-  the response into 502 with `{"code": "redirect_refused"}`.
+  the response into 502 with `{"code": "redirect_refused"}`. "The same
+  host" means `https`, the same name compared without case and without
+  a trailing dot, and the same port, an absent port meaning 443;
+  anything else is another host (the lead's answer, 2026-11-05).
 - **Echoes.** Response headers and body are redacted as above, and
   `Content-Length` recomputed (chunked when it changes). A response
   with a `Content-Encoding` other than `identity` cannot be scanned and
@@ -737,7 +887,19 @@ replace unrelated text.
 - **The end.** At `expires_at` (`seconds` 60–3,600, default 900, never
   past the access session's end), on `leash.close_proxy`, when the
   access session ends, the vault is held, the agent is suspended or the
-  connector exits: the listener closes and the value is zeroed.
+  connector exits: the listener closes and the value is zeroed. The
+  connector learns of a hold only from `vault.status`, so while any
+  proxy is open it sends `vault.status` in the background at most once
+  a minute, and closes every proxy when the answer shows the vault held
+  or its daily check due (the lead's answer, 2026-11-05).
+- **A referred proxy opens at once** (the lead's answer, 2026-11-05).
+  When the approval arrives the connector opens the listener; it keeps
+  only `base_url` and `expires_at` for `leash.check_status`, and the
+  proxy's time runs from the approval.
+- **Tests.** The test TLS root is an unexported field set only from
+  `_test.go` files: no flag, variable or file sets it, so a member's
+  build has no way to trust another root (the lead's answer,
+  2026-11-05).
 - **The limit, said plainly.** The agent can make any request the API
   allows with the key, including asking the API to show the key: a full
   echo is redacted, a partial one (the last four characters) is not.
@@ -754,6 +916,12 @@ whose ways include `reveal`).
   answer twice. Text alone reaches every client and the model, and with
   no structured content the recommendation does not apply. Every other
   tool keeps both forms (they carry no value).
+- **Through `leash.check_status` too** (the lead's answer, 2026-11-05).
+  A referred reveal returns its value through `leash.check_status`, so
+  a `check_status` result for an `item.get` takes the same form: one
+  text block, no `structuredContent`. `leash.check_status` declares no
+  output schema. Its results for runs and proxies keep both forms (they
+  carry no value). Golden files cover both.
 - **No `readOnlyHint`** (owner decision, 2026-10-18; vettid-agent #36).
   `leash.request_secret` carries no `readOnlyHint`: handing a value to
   the agent's app is not free of effect, and a client must not treat
@@ -839,7 +1007,7 @@ recorded as decided in the table and the changelog (0.1.4, 0.1.5).
 
 ### A3 — LEASH and the MCP server
 
-*Status: A3.1 #26, A3.2 #27, A3.3 #28, A3.4 #32 and A3.6 #36 are done (follow-ups #30, #34). A3.5 and A3.7 to A3.9 are not built.*
+*Status: A3.1 #26, A3.2 #27, A3.3 #28, A3.4 #32 and A3.6 #36 are done (follow-ups #30, #34). A3.5 and A3.7 to A3.9 are not built; A3.8a is in progress (vettid-agent #42, draft).*
 
 | PR | Contents | Acceptance |
 |---|---|---|
@@ -847,10 +1015,11 @@ recorded as decided in the table and the changelog (0.1.4, 0.1.5).
 | A3.2 | `agent.request` (`catalog`, `item.get`, `item.use`) with `approval.waiting`, retries reusing the inner id, pending results kept 10 minutes (AG9), no retry after `forbidden` | Unit tests for allow, refer-then-approve, refer-then-deny, `approval_timeout`, `forbidden`, `owner_check_required`, locked vault |
 | A3.3 | `internal/mcp` and `vettid-agent mcp`: the five LEASH tools over stdio, the local rate limit, golden files; README section for configuring MCP clients | Golden files; an MCP client library test drives `tools/list` and every tool against a fake vault connection; a second `mcp` on the same state exits with "in use by another agent app"; nothing is written to standard output but MCP messages |
 | A3.4 | Dev-stack LEASH tests | **Exit A3 test**: with `vaultctl` as the app: a share rule for the agent (`share set -agent`, `ask`) → `leash.list_available` empty until the member approves the item → `leash.request_secret` returns the value; an `auto` rule within limits returns at once; past `per_hour` the request is referred and approved; `leash.execute_action` returns the HMAC the test computes; a critical item is never listed or readable; revoking the rule stops reads at once; a loop of refused requests suspends the connector and `leash.connection_info` shows it; `leash.agent.resume` restores it. **Hold step** (owner decision, 2026-10-18), against the real clock: set `owner_check.interval_seconds` to 3,600, wait for the deadline (about 65 minutes), see `owner_check_required`; a check and then a `vault.status` that is not held end it. Opt-in (`make devstack-hold-test`), not part of `make devstack-test`; no dev clock is added to the vault |
-| A3.5 | Grant-set sequence numbers (§4.5; after AV7): the highest `grant_seq` kept in the state file; a lower one ignored; an equal one gives only fresher statements | Unit tests: a list sent before a revocation and received after it does not bring the grant back; an equal number keeps the set and refreshes statements; a re-paired state starts with none; a list or update without `grant_seq` is ignored |
+| A3.5 | Grant-set sequence numbers (§4.5; after AV7): the highest `grant_seq` kept in the state file; a higher one replaces the set; a lower one ignored; an equal one gives only fresher statements; `gen` kept for marks learned outside the sets; the `leash` state member at `"v": 2` | Unit tests: a list sent before a revocation and received after it does not bring the grant back; a higher-numbered update adds a grant; an equal number keeps the set and refreshes statements; a grant marked `not_found` stays dead under an equal or higher number until this process's own list answers; the pairing batch's number is not recorded; a re-paired state starts with none; a list or update without `grant_seq`, or with 0, is ignored and paced as a failed list, with `vault_too_old`; a `"v": 1` state member reads as number unknown |
 | A3.6 | **README note now** (AG13; before any vault change): the note of §11 "README note" in vettid-agent's README, in the MCP section. **Done** in vettid-agent #36 (`5cd72fe`), with the text as merged | The README carries the text exactly |
-| A3.7 | **Reveal as the last resort** (§4.9 "Reveal"; after AV9): `leash.request_secret` answers in one text block, no `structuredContent`, no output schema; descriptions in AG13's order; `ways`, `programs` and `hosts` in `leash.list_available`; `way_not_allowed` with the allowed ways | Golden files: `tools/list` shows no output schema for `leash.request_secret`, and its answer has exactly one content block and no `structuredContent`; the value appears once in the serialized answer; `way_not_allowed` gives its text with the ways; dev stack: an item without `reveal` refuses `leash.request_secret`, one with it is referred every time and returns the value once approved |
-| A3.8 | **`leash.run_with_secret`** (§4.9 "Run"; after AV9, AV10): resolution, the minimal environment, the three ways to pass the secret, process group and limits, redaction | Unit tests: each of the redacted forms of §4.9 is replaced, also when split across reads and in standard error; a value never appears in the answer, the logs or the run directory after the run; the child's environment is exactly the minimal set plus the request's (a test program prints it); `LD_PRELOAD` and `PATH` in `env` refused; a bare name is resolved on the fixed path only; a relative path with a slash refused; the temporary file is owner-only and gone after the run, and `run/` is emptied at start after a simulated crash; the time limit kills the whole process group; output past 1 MiB is truncated and flagged. Dev stack: a bound program runs without a prompt with `each: false`, a bound shell or interpreter is still referred; an unbound one is referred and the approval shows argv, directory and how; a shell is flagged |
+| A3.7 | **Reveal as the last resort** (§4.9 "Reveal"; after AV9): `leash.request_secret`, and `leash.check_status` for an `item.get`, answer in one text block, no `structuredContent`, no output schema; descriptions in AG13's order; `ways`, `programs` and `hosts` in `leash.list_available`; `way_not_allowed` with the allowed ways | Golden files: `tools/list` shows no output schema for `leash.request_secret`, and its answer has exactly one content block and no `structuredContent`; the value appears once in the serialized answer; `way_not_allowed` gives its text with the ways; dev stack: an item without `reveal` refuses `leash.request_secret`, one with it is referred every time and returns the value once approved |
+| A3.8a | **`leash.run_with_secret`, part 1** (§4.9 "Run"; after AV9, AV10): resolution and what is refused as a program; the hash, and running exactly what was hashed; the run's own directory; the minimal environment, the `env` allowlist and the code-loading refusals; the three ways to pass the secret; the operator's flags and their startup checks | Unit tests: the child's environment is exactly the minimal set plus the request's (a test program prints it); `LD_PRELOAD`, `NODE_OPTIONS` and `PATH` in `env` refused, also when the binding lists them; a name the binding does not list refused; a bare name is resolved on the fixed path only; a relative path with a separator refused (on Windows also `\` and a volume); `.bat` and `.cmd` refused; a junction in the path refused; the `sha256` sent is the file's; a file renamed or replaced between the hash and the start does not run (Windows: the rename fails while held; macOS: the copy runs); the secret file is owner-only and gone after the run, and `run/` is emptied at start after a simulated crash; `--run-path` refuses a missing, relative or changeable directory or one below a changeable one, and more than 16; `--run-env` refuses a bad name and more than 32. Dev stack: a bound program's first run is referred with `program_unrecorded`, a matching later one runs without a prompt with `each: false`, a changed file is referred with `program_changed`; a bound shell or interpreter is still referred; an unbound one is referred and the approval shows argv, directory and how; a shell is flagged |
+| A3.8b | **`leash.run_with_secret`, part 2** (§4.9 "Run" and "Redaction"): output redaction, process group or job and its kill, the time, size and concurrency limits, `truncated`, referred runs started at once | Unit tests: each of the redacted forms of §4.9 is replaced, also when split across reads and in standard error; a value never appears in the answer, the logs or the run directory after the run; the time limit kills the whole process group; output past 1 MiB is truncated and flagged, and so is output cut at 64 KiB; a third run is `rate_limited_local` and no `item.run` is sent for it; a referred run starts when the approval arrives and its redacted answer is kept for `check_status`; runs are killed when the connector exits |
 | A3.9 | **`leash.open_proxy`, `leash.close_proxy`** (§4.9 "Proxy"; after AV9, AV11) | Unit tests against a local TLS test server with a test root: the header is added only to the bound host; an incoming copy of the header is dropped; a wrong token, a wrong `Host`, an `Origin` header, an absolute-form or `CONNECT` request get 403 or 405 and reach nothing; a redirect to another host becomes 502 `redirect_refused`, one to the same host is rewritten; the value and its encodings in response headers and body (also across chunk boundaries) are replaced; a compressed response is refused; a certificate not valid for the host fails; the proxy closes at `expires_at`, at `leash.close_proxy` and when the session ends. Dev stack: opening is referred and the approval shows host, header name and length |
 
 ### A4 — Delegable owner types (v1.1, after the owner confirms AG5)
@@ -898,7 +1067,7 @@ deny referred requests in Approvals; see the agent's activity in History
 | A4 | AG5's v1.1 confirmed |
 | A1.5's manual round trip | the signed app bundle of A5 (the owner's App ID and Developer ID provisioning profile, §8 item 3) |
 | A3.5 | AV7 in a staging release |
-| A3.7, A3.8, A3.9 | AV9 (and AV10 for A3.8, AV11 for A3.9) in a staging release; AA7 and AA8 for the staging checklist (A6) |
+| A3.7, A3.8a, A3.8b, A3.9 | AV9 (and AV10 for A3.8a and A3.8b, AV11 for A3.9) in a staging release; AA7 and AA8 for the staging checklist (A6) |
 | A5.2, A5.3 (macOS) | the owner's YubiKey keys and Apple Developer ID (§8 items 2–3) |
 | A5.3 (Windows) | the business entity and its Authenticode certificate (§8 item 4) |
 | A6 | Android AA1–AA5 on staging (§7.2), ANDROID-PLAN's "Devices & agents" approved; its "auto" step: AV9 in a staging release (ANDROID-PLAN 0.1.53 decision 17) |
@@ -922,8 +1091,8 @@ AV7 and AV8 change the enclave and ship in a staging release.
 | AV6 | **The bound on access-session prompts** (VAULT-MESSAGING 0.40.0, §7.3 Q3): a `device.session.request` within 10 minutes of the device's last accepted one is answered `too_soon` (`{allowed_after}`), notifies no app and records no feed item, and does not replace a pending request; tests for each case. An enclave change: in the next staging release (0.1.9) **Built:** vettid-vault #109 (merged 2026-10-17); it ships in the staging releases from S17 on (S16 was not published). | §6.8, §10.3 | `hSessionRequest` (`vault/access.go`) notifies the apps and records a high-priority feed item for every request; only "newest replaces older" bounded them | — |
 | AV7 | **Grant-set sequence numbers** (VAULT-MESSAGING 0.41.0 §10.11). **Not started.** One counter in the vault's sealed state; every change to an agent's grant set (a grant issued, replaced or revoked, a share rule of the agent set or deleted, a grant revoked with its connection, suspension, resumption, the set a pairing completes with) takes its next value; `leash.grant.updated` and the agent's `leash.grant.list` answer carry it as `grant_seq`; never reset, never reused; tests for each change and for a re-paired agent | §10.11, §8.4 | Without it, a `leash.grant.list` answer sent before a revocation can arrive after it and bring the grant back | A3.5 |
 | AV8 | **The device's own session in `vault.status`** (VAULT-MESSAGING 0.41.0 §10.2). **Not started.** `vault.status` to a desktop or agent also returns `session: {session_id, expires_at}` for the caller's own current access session, or `null`; never another device's | §10.2, §6.8 | An agent has no message that returns its own session; the connector probes with `leash.grant.list` (§4.3 step 4) | — |
-| AV9 | **Ways to use a secret: settings, catalog, reveal off** (VAULT-MESSAGING 0.42.0 §10.11). **Not started.** `leash.item.set` and `.list`, the settings per agent and item, the unlock window to widen, deletion when the item is no longer included, `sync.event{leash.item.changed}`; `ways`, `programs` and `hosts` in `catalog`; `item.get` only with `reveal` (`way_not_allowed`, counted as refused) and always referred; `approval.pending{flags}`; every existing agent item starts with `["use"]` | §10.11, §10.12, §6.8 | `item.get` hands every included item's value to the agent's app, which may keep it in its history | A3.7 |
-| AV10 | **`item.run`** (§10.11). **Not started.** Checks of `program`, `argv`, `cwd`, `how`, `name` and `env`; `programs` binding (`program_not_allowed`); referral when `each`, unbound, or a shell or interpreter; `flags` (`shell`, `inline_code`, `unbound_program`); the windows and `uses` counted; `leash.item.run` audited and in the feed. Tests for each refusal, each flag and each referral case | §10.11 | The second way needs the value released to the connector for one approved command | A3.8 |
+| AV9 | **Ways to use a secret: settings, catalog, reveal off** (VAULT-MESSAGING 0.42.0 §10.11). **Not started.** `leash.item.set` and `.list`, the settings per agent and item, the unlock window to widen, deletion when the item is no longer included, `sync.event{leash.item.changed}`; `ways`, `programs` and `hosts` in `catalog`; `item.get` only with `reveal` (`way_not_allowed`, counted as refused) and always referred; `approval.pending{flags}`; every existing agent item starts with `["use"]`. (0.1.10, VAULT-MESSAGING 0.85.0) `programs` entries are `{program, sha256?, env}`: `sha256` recorded by the vault, never the app, when the member approves a run flagged `program_unrecorded` or `program_changed`, and kept or dropped (never set) by `leash.item.set`; `env` names checked by the name rule, adding one widens; the catalog's entries without `sha256` | §10.11, §10.12, §6.8 | `item.get` hands every included item's value to the agent's app, which may keep it in its history | A3.7 |
+| AV10 | **`item.run`** (§10.11). **Not started.** Checks of `program`, `argv`, `cwd`, `how`, `name` and `env`; `programs` binding (`program_not_allowed`); referral when `each`, unbound, or a shell or interpreter; `flags` (`shell`, `inline_code`, `unbound_program`); (0.1.10, VAULT-MESSAGING 0.85.0) `sha256` checked against the matched entry, a missing or different hash referred with `program_unrecorded` or `program_changed` (with `previous_sha256`) and recorded on approval unless the settings changed meanwhile; `env` names only from the matched entry's `env`, none for an unbound item (`env_not_allowed`, counted as refused); the code-loading names refused; the windows and `uses` counted; `leash.item.run` audited and in the feed. Tests for each refusal, each flag and each referral case | §10.11 | The second way needs the value released to the connector for one approved command | A3.8 |
 | AV11 | **`item.proxy`** (§10.11). **Not started.** Always referred; `host` among the item's `hosts`; `seconds` bounded by 3,600 and the access session; a value that is not header-safe refused; `leash.item.proxy` audited and in the feed; tests for each | §10.11 | The third way needs the value released to the connector for one host and a bounded time | A3.9 |
 
 ### 7.2 vettid-android (ANDROID-PLAN "Devices & agents", owner approval)
@@ -947,8 +1116,8 @@ ones).
 | AA4 | **Agent share rules** (`items.read`): the share-rule editor with an agent as subject, including `per_hour` and `per_day` (agent rules only, ANDROID-PLAN §4 rule editor note; VAULT-MESSAGING 0.23.0) | §10.12, §10.11 | model only (`ShareSubject.agentId`) |
 | AA5 | **Approvals for agents**: approve (not only decline) `device.session.pending` with a changeable length, and `approval.pending` for an agent's `agent.request` (say which item, "read" or "use", and which agent) and for delegable owner types; replace "This version of the app does not pair desktops or agents, so it can only decline." | §6.8, §10.3 | decline only |
 | AA6 | **Feed and History**: details for `leash.*` (`leash.rate_limited`, `leash.referrals_limited`, `leash.agent.suspended`, `leash.item.read`, `leash.item.used`, summaries), which today open "Not available in this version of the app" (ANDROID-PLAN §4 feed table); the `agents` History category | §10.9, §10.11 | texts only |
-| AA7 | **How an agent may use an item** (AG13): per agent and included item, the ways (use always; run, proxy, "May be shown to agents", all off by default), the allowed programs and "Ask me before each run", the API hosts and the header (name and prefix); widening asks for the password (unlock window); `leash.item.set`, `.list`, `sync.event{leash.item.changed}`. Not started. Acceptance: each setting round-trips; widening without the unlock window asks for the password; narrowing does not; the reveal switch shows the history warning before it turns on | §10.11 | none |
-| AA8 | **Approvals for the new ways** (AG13): `approval.pending` for `item.run` (program, every argument unabridged, directory, how the secret is passed, extra variables, the `shell`, `inline_code` and `unbound_program` warnings), `item.proxy` (host, header name and prefix, length) and `item.get` (the history warning). Not started. Acceptance: screenshots for each kind and flag in the PR; a long or non-printable argument is shown in full, escaped, never cut | §6.8, §10.11 | none |
+| AA7 | **How an agent may use an item** (AG13): per agent and included item, the ways (use always; run, proxy, "May be shown to agents", all off by default), the allowed programs and "Ask me before each run", (0.1.10) for each program the variables it may receive (none by default, adding one is a widening) and whether its fingerprint is recorded, with a way to forget it, the API hosts and the header (name and prefix); widening asks for the password (unlock window); `leash.item.set`, `.list`, `sync.event{leash.item.changed}`. Not started. Acceptance: each setting round-trips; widening without the unlock window asks for the password; narrowing does not; the reveal switch shows the history warning before it turns on | §10.11 | none |
+| AA8 | **Approvals for the new ways** (AG13): `approval.pending` for `item.run` (program, every argument unabridged, directory, how the secret is passed, extra variables, the `shell`, `inline_code` and `unbound_program` warnings; (0.1.10) the program's fingerprint, and for `program_unrecorded` that approving lets later runs of this exact file follow the item's settings, for `program_changed` the old fingerprint beside the new and that the program changed), `item.proxy` (host, header name and prefix, length) and `item.get` (the history warning). Not started. Acceptance: screenshots for each kind and flag in the PR; a long or non-printable argument is shown in full, escaped, never cut | §6.8, §10.11 | none |
 
 IOS-PLAN places devices and agents in its "Later" list, following
 Android; nothing here blocks on iOS.
@@ -1147,6 +1316,48 @@ Ways to use a secret (AG13; new drafts):
   Close one with leash.close_proxy and try again."
 - **No such proxy** (`proxy_not_found`): "No proxy with that address is
   open. It may have ended; open a new one with leash.open_proxy."
+
+Erratum of 2026-11-05 (0.1.10): connector texts for the owner's
+approval, each marked NEW except where the owner already chose it:
+
+- **Old vault** (`vault_too_old`; owner decision of 2026-11-05, option
+  a, as chosen): "Your vault is too old for this connector. Update your
+  vault, then try again."
+- **Variables not allowed** (`env_not_allowed`), NEW: "Your vault does
+  not let this program receive these variables: <names>. You can allow
+  them for this program on your phone."
+- **Batch file** (`program_not_found`), NEW: "Batch files (.bat, .cmd)
+  cannot be run with a secret. Run the program itself instead."
+- **Program moved** (`program_not_found`, the path changed before the
+  start), NEW: "The program changed while it was being started, so it
+  was not run. Try again."
+- **Not a plain local path** (`program_not_found`), NEW: "The program's
+  path goes through a link, a network share or a removable drive, so
+  it cannot be run with a secret. Give the program's own path on a
+  local drive."
+- **`--run-path`, bad value** (startup), NEW: "--run-path <dir>: give
+  an absolute path to an existing directory."
+- **`--run-path`, too many** (startup), NEW: "--run-path: at most 16
+  directories."
+- **`--run-path`, changeable** (startup; owner decision of 2026-11-05,
+  option a), NEW: "--run-path <dir>: this folder, or a folder above
+  it, can be changed by this connector's user or by others. Use a
+  folder only an administrator can change."
+- **`--run-path`, a link** (startup), NEW: "--run-path <dir>: this
+  folder is a link, junction or other reparse point (a OneDrive folder,
+  for example). Use a plain local folder."
+- **`--run-env`, bad name** (startup), NEW: "--run-env <name>: this
+  variable cannot be passed to programs."
+- **`--run-env`, too many** (startup), NEW: "--run-env: at most 32
+  names."
+- **README**, NEW, in the section on running commands: "Run the
+  connector as your normal user, never as an administrator or root.
+  The first time a program runs with a secret, and after every update
+  to it, your phone asks you to approve it and shows its fingerprint.
+  Approving pins that exact file. The pin does not cover what the
+  program loads from folders you can change, such as its libraries,
+  plugins or settings. Programs installed for all users (in Program
+  Files, System32 or /usr/bin) do not have this gap."
 - **`leash.request_secret` description**, added: "The value becomes
   part of this conversation, and your app may keep it in its history.
   Use leash.execute_action, leash.run_with_secret or leash.open_proxy
