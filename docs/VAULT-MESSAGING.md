@@ -1,12 +1,12 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.83.12
+version: 0.84.1
 date: 2026-11-05
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
-  - RELAY-PROTOCOL.md (0.6.0)
+  - RELAY-PROTOCOL.md (0.10.1)
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md (0.2.2)
@@ -28,7 +28,7 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.83.12: erratum, 2026-11-05 (as built, the lead's choices, and
+  - 0.84.1: erratum, 2026-11-05 (as built, the lead's choices, and
     owner decision b of 2026-11-04). (1) §3.5.3, §3.5.9: only
     `credential.ack` confirms a credential version; presenting it in a
     later operation does not (the vault already works this way). (2)
@@ -55,6 +55,66 @@ changelog:
     mark": the held statement K0→K1 precedes anything signed with K1 or
     a later key (K2), not `identity.rotate`. BALLOT-PROTOCOL in
     `related` is now 0.13.7 (at 8940571, service-vault #122). Only (3)'s re-check rule is for the apps.
+  - 0.84.0: 2026-11-05, owner decisions of 2026-11-05 (option a for
+    the order, option a for the notice).
+    §3.4 **The order of a relay-key rotation**: store first, then rotate, retried with the
+    same key. The rotation's state write stores the new relay key as
+    **pending** (sealed in the DEK state, never logged), with the new
+    tokens for every recipient and the `relay.address.update`s, which
+    are held; the vault then calls the relay's rotate with that key; on
+    success a second write makes it current (re-minting held tokens
+    near their end, and taking the recipients again: added ones get
+    tokens and an update, removed ones are dropped), the old key becomes
+    deposit-only and the held updates are sent. Before, the order of the
+    relay call and the write was not stated, so a run ending between
+    them could leave a mailbox the vault had no key for, or a key with
+    no mailbox. `identity.rotated` is audited and owed marks clear at
+    the second write, not the first (`ik`, `kem` and the wake key are
+    current from the first; for a rotation made while a key is pending,
+    below); a key left pending is audited
+    `identity.rotation_failed` at an unlock whose attempt does not
+    complete it, at most once per unlock. A run that ends before the
+    second write is completed by the same rotate (idempotent,
+    RELAY-PROTOCOL 0.10.1 §6.7), each call newly signed, made at the
+    unlock before the drain and the collect (§12.2) in place of the
+    registration, and also when the collect loop gets `mailbox_unknown`;
+    a timeout, `5xx` or `429 rate_limited` is retried at the next unlock
+    and sooner with a full-jitter backoff from 1 minute to 1 hour, and a
+    running `retry_after` (its end stored in the DEK state) is honored
+    at an unlock too. Meanwhile the
+    vault collects from the old mailbox, and from the new one once the
+    rotate has succeeded; the one loss left (a lock past the grace
+    between the rotate and the second write) is stated. Past the grace
+    (`mailbox_unknown`) the vault registers the stored pending key; a
+    `201` (fresh mailbox) re-mints every held token with `iat` then. A
+    definite refusal of the rotate or the registration (a `4xx` other
+    than `429 rate_limited`, `timestamp_stale`, `replay_detected` and
+    the rotate's `mailbox_unknown`) puts the key in a **refused** state
+    stored in the DEK state: audited at once, one attempt per unlock,
+    never another key on the vault's own. Any rotation made while a key
+    is pending keeps it and records a relay-key rotation owed; that
+    key's second write then stores the next relay key as pending in the
+    same write, which meets (and clears) the relay-key mark, and the
+    other marks clear only at the next key's second write, so a run
+    ending between them loses nothing and no further key is minted. That
+    write audits `identity.rotated` for the earlier rotation and the next
+    key's audits the later one, with no `ref` named twice. A stored
+    `retry_after` end is dropped when its key stops being pending.
+    Only the member's `credential.rotate` in the refused state replaces
+    the pending key (a new key, rotated from the current mailbox or, past
+    the grace, registered). Nothing about the new address goes out
+    before the relay has the mailbox. What the member sees: the
+    `identity.rotation_failed` body that says the connections still
+    know the old keys is corrected, and (owner decision a, 2026-11-05)
+    `vault.status` gains `relay: "refused"` (§10.2) for the refused
+    state, which the app shows as a lasting notice with "Replace your
+    vault's keys" (texts NEW, their wording for owner approval with the
+    app PRs). "Resending the new
+    address": the old key also collects from the old mailbox until the
+    grace ends (§3.4 step 1 already said so), and nothing is resent
+    while the key is pending. §3.5.5, §10.2, §11.14.2, §11.14.6 step 6,
+    §11.14.10 and §12.2 follow. Needs a vault release and an app
+    release (the corrected text and the notice).
   - 0.83.11: 2026-11-04. Two corrections to the transfer's credential
     key (§11.14.10, 0.68.0), from building it. (1) §11.14.10 and the
     request tables: while a transfer's rotation statement K0→K1 is held
@@ -3479,6 +3539,189 @@ create-only.
 
   The vault MUST rotate after any suspected exposure of its state.
 
+  **The order of a relay-key rotation** (0.84.0; owner decision a,
+  2026-11-05). The relay's mailbox rotation (RELAY-PROTOCOL §6.7) and the
+  vault's state write that keeps the new key are two steps, and a run
+  can end between them. The vault **stores first, then rotates, and
+  retries with the same key**:
+  1. The rotation's state write stores the new relay key as **pending**
+     (sealed in the DEK state like every other key, never logged),
+     together with the new tokens it minted for every recipient (step 2
+     above) and their `relay.address.update` deposits (step 3), which
+     are **held**. The current relay key stays current.
+  2. After that write, the vault calls the relay's rotate
+     (`POST /v1/mailbox/rotate`, signed by the current key) with the
+     pending key.
+  3. On success, a second state write makes the pending key current. The
+     old key becomes deposit-only ("Resending the new address" (a),
+     below), and the held updates are sent. The same write re-mints any
+     held standing token with less than 10 days left and any held
+     reconnect token with less than 60 days left (§7.2 "On unlock"), so
+     tokens that waited while the key was pending do not go out nearly
+     spent. It also takes the recipients again: a device or peer added
+     since the first write gets new tokens and a held update minted in
+     this write, and the tokens and update of one removed since are
+     dropped.
+
+  - **Nothing is announced before the relay has the new mailbox.** The
+    `relay.address.update`s and the new tokens go out only after the
+    rotate (or the registration below) succeeded and the second write is
+    stored. The other keys of the same rotation (`ik`, `kem`, the wake
+    key) are current from the first write, and their notices follow it
+    as before (§11.14.2).
+  - **What is audited.** `identity.rotated` is audited at the second
+    write, once for the whole set, with the `ref` of §11.14.10; nothing
+    is audited at the first write, though `ik`, `kem` and the wake key
+    are current from it, because the rotation is not done until the old
+    key no longer owns the vault's only mailbox. A relay key left
+    pending by an earlier run is audited `identity.rotation_failed`
+    (with the same `ref`), with its feed item (§10.9), at an unlock
+    whose own attempt does not complete it (it fails, gets no answer,
+    or is not made because a `retry_after` is still running), **at most
+    once per unlock**; an unlock that completes it audits
+    `identity.rotated` only. A definite refusal (below) is audited at
+    once. When a rotation R2 was made while R1's key K1 was pending
+    (below), K1's second write audits `identity.rotated` for R1, with
+    the `ref` R1 would have carried had it cleared the marks owed when it
+    was made (§11.14.10), though they stay owed; R2's `identity.rotated`
+    comes at the second write of the next key K2, with the `ref` of the
+    marks it clears that R1's audit did not already name (so a move's
+    line is not shown twice).
+  - **Owed marks** (§11.14.10) clear at the second write, not the first,
+    except while a relay-key rotation is owed (below): then that second
+    write clears only the relay-key-rotation mark, which the next key
+    stored in the same write meets, and every other mark clears at the
+    next key's own second write. Until then the retry an owed mark asks for at each
+    unlock is the completion of the pending key below: it does not
+    rotate `ik`, `kem` or the wake key again. A `credential.rotate` with
+    no mark owed has none to clear; its pending key is completed the
+    same way.
+  - **Retrying with the same key.** If the run ends before the rotate,
+    or after it and before the second write, the next unlock finds the
+    pending key and calls the rotate again with the same key, which the
+    relay answers with the same mailbox (RELAY-PROTOCOL §6.7, "Repeating
+    a rotation"). Each call is a new signed request (RELAY-PROTOCOL
+    §4.1: a repeated signature is refused `replay_detected`) with the
+    same `new_pubkey` and `new_key_proof`. While a key is pending, the
+    unlock calls the rotate in place of registering the current key
+    (RELAY-PROTOCOL §6.1), which after the grace would make the old
+    mailbox again. A rotate or registration that gets no definite answer
+    (a timeout, an unreachable relay, a `5xx`, or `429 rate_limited`,
+    retried after its `retry_after`: a repeat counts against the relay's
+    limit on new mailboxes like the first, RELAY-PROTOCOL §7.2 limit 3)
+    is retried at the next unlock, and SHOULD be retried sooner while
+    the vault is unlocked, always with the same key. The sooner retries
+    back off with **full jitter** (RELAY-PROTOCOL §7.2; vaults on one
+    host must not act in step, §12.2): the wait before the n-th retry
+    in a row is a random time from 0 to min(1 h, 1 min × 2^(n−1)). A
+    `retry_after` that is still running is honored at an unlock too:
+    the unlock makes no attempt, and the next is made when it has run
+    out. So that a lock and a new unlock do not reset it, the vault
+    stores the time it runs out with the pending key in the DEK state
+    (read at the unlock before the completion step; it is not secret),
+    and drops it when that key stops being pending (made current, or
+    discarded by a `credential.rotate` in the refused state). While a
+    key is pending (and not refused), `mailbox_unknown` on
+    the current mailbox (from the collect loop, §12.2) starts the same
+    path: the rotate, then the registration below.
+  - **A definite refusal** of the rotate or of the registration is any
+    `4xx` other than `429 rate_limited`, `timestamp_stale` and
+    `replay_detected` (which a freshly signed request can pass) and,
+    for the rotate, other than `mailbox_unknown` (which leads to the
+    registration below): for example `400 bad_request` or
+    `401 signature_invalid`. It is not retried with backoff: it
+    **fails secure** and puts the pending key in the refused state
+    (below).
+  - **Collecting while a key is pending.** The vault keeps collecting
+    from the old mailbox with the current key and, once the rotate has
+    succeeded, also from the new one with the pending key, so nothing
+    deposited in either is missed until the second write lands. One
+    narrow loss remains: if the run ends after a successful rotate and
+    before the second write, and the vault then stays locked past the
+    relay's grace, the relay deletes the old mailbox with whatever the
+    peers deposited there and the vault had not collected; and from
+    then until the second write, the peers, not yet told the new
+    address (the updates are held), have their deposits to the old
+    mailbox refused `mailbox_unknown`.
+  - **After the grace.** The old mailbox is gone, so the rotate is
+    answered `mailbox_unknown`. The vault then registers the **stored**
+    pending key (RELAY-PROTOCOL §6.1). A `200` means an earlier rotate
+    had made the mailbox, and the vault continues with step 3. A `201`
+    means a fresh mailbox: the second write re-mints **every** held
+    token, with `iat` at that time and never backdated (a fresh mailbox
+    at an id that has a tombstone refuses tokens issued before it,
+    RELAY-PROTOCOL §6.10), and the held updates carry the new tokens. A
+    definite refusal of the registration (above) puts the pending key
+    in the refused state.
+  - **The refused state.** After a definite refusal the vault marks the
+    pending key **refused** in the DEK state (a state write of its own,
+    with the refusal's code), keeps the key, its tokens and its held
+    updates, audits `identity.rotation_failed` with its feed item, and
+    **never generates another relay key on its own**. It makes one
+    attempt at each unlock (the rotate, then the registration; no sooner
+    retries), and one that succeeds leaves the state at the second
+    write. While the state lasts the vault collects from the old mailbox
+    if it still lives (a refused rotate), and otherwise (a refused
+    registration, past the grace) it receives nothing.
+  - **A rotation made while a relay key is pending** (a
+    `credential.rotate`, a recovery's or a transfer's) rotates the other
+    keys in its flush, keeps the pending relay key, its tokens and its
+    held updates, and records in the same flush that a **relay-key
+    rotation is owed** (a mark, as in §11.14.10). The pending key is
+    then completed as above, at once if the relay answers, else at the
+    next unlocks. The pending key's second write then also stores the
+    **next** relay key as pending, with its new tokens and held updates
+    (step 1), in that same write. Storing the next key **meets** the
+    relay-key-rotation mark, so that write clears it (safely, as the
+    next key is stored in the same write) and the next key's second
+    write mints no further key; the other owed marks stay and clear at
+    the next key's own second write, after its rotate (signed by the key
+    just made current) by this same order. The pending key's held updates still go
+    out after its second write, so the recipients have a live address
+    while the next key waits. Otherwise the pending private key,
+    already held in states sealed under an earlier DEK (for example a
+    recovery's, before a PIN change), would outlive the rotation meant
+    to end that copy (§11.14.2), and a run that ended between two writes
+    could lose the owed rotation. The one exception is a
+    `credential.rotate` in the refused state (next).
+  - **The way out of the refused state** is the member's
+    `credential.rotate` (§3.5.5). Only in that state, it discards the
+    refused key, its tokens, its held updates and the refused mark,
+    generates a new relay key and stores it as pending with new tokens
+    and held updates in its flush (that key meets any relay-key rotation
+    owed, which clears in that flush; the other owed marks clear at its
+    second write), and continues
+    at step 2: the rotate signed by
+    the current key, or past the grace the registration. (The refused
+    key has no successor mailbox, or one that was never announced, so a
+    rotate with a different key, RELAY-PROTOCOL §6.7, orphans nothing a
+    peer uses.) A recovery's or a transfer's rotation made in the
+    refused state keeps the refused key and owes a relay-key rotation,
+    as above.
+  - **What the member sees** (owner decision a, 2026-11-05: the field
+    and the lasting notice below). While the key stays pending, the apps show what they show for
+    `identity.rotation_failed` today: a `high` feed item, now at most
+    once per unlock, and its line in History (ANDROID-PLAN §4 "Event
+    titles", IOS-PLAN §4.1). Its approved text says the connections
+    still know the old keys, which is wrong here: `ik`, `kem` and the
+    wake key are current from the first write and their notices went
+    out; only the new relay address waits. That body becomes (NEW, its
+    wording for owner approval with the app PRs): "Your vault couldn't
+    finish updating its keys. It will try again the next time you
+    unlock it." For the refused state, where trying again does not
+    help, there is a lasting notice: `vault.status` (§10.2) to the app
+    gains
+    `relay: "refused"` while the pending key is in the refused state,
+    absent otherwise. While it is present the app shows a lasting notice
+    (NEW, its wording for owner approval with the app PRs), title "Your vault couldn't move to its
+    new address", body "Your vault may not receive messages until its
+    keys are replaced.", with the action "Replace your vault's keys"
+    (`credential.rotate`, §3.5.5); the notice goes when a later
+    `vault.status` has no `relay`.
+  - **The three paths** that rotate the relay key all follow this order:
+    a transfer's owed rotation (§11.14.10), a completed recovery
+    (§11.14.6 step 6) and `credential.rotate` (§3.5.5).
+
   **Resending the new address** (0.68.0; owner decision 2026-10-27). A
   recipient that is offline, locked or unreachable when the vault rotates
   its relay key (at a transfer, a `credential.rotate` or a recovery)
@@ -3487,9 +3730,11 @@ create-only.
   life, lose the connection (§6.6 "Limits"). So:
   - **(a) The old relay key stays, for deposits only.** After any
     relay-key rotation the vault keeps the **old relay key in the DEK
-    state**, used **only to deposit** to recipients: never to collect,
-    rotate, delete or mint tokens on any mailbox, and never for an owner
-    operation; the vault **never registers the old key again**
+    state**, used **only to deposit** to recipients and, (0.84.0) until
+    the relay's grace ends, to collect from its own old mailbox (§3.4
+    step 1: both mailboxes during the grace):
+    never otherwise to collect, and never to rotate, delete or mint
+    tokens on any mailbox, nor for an owner operation; the vault **never registers the old key again**
     (RELAY-PROTOCOL §6.10 would allow it). A deposit needs the recipient's token for the old `sub`
     and `X-VettID-Key` = the old key (RELAY-PROTOCOL §5.3 steps 2–7); it
     does not need the vault's own old mailbox to exist.
@@ -3523,7 +3768,8 @@ create-only.
     per hour**; a deposit refused with a definite answer (token expired
     or revoked, mailbox gone) ends the resends to that recipient. A
     resend is not audited unless it is refused for a reason other than
-    those.
+    those. (0.84.0) Nothing is resent while the new key is still
+    pending ("The order of a relay-key rotation", above).
   - **Security.** Keeping the old key adds nothing for a holder of an
     old copy, who already has it. The vault's old mailbox still ends at
     the relay's grace, so the window in which a peer holds a stale
@@ -3536,14 +3782,17 @@ create-only.
   (§11.14.10) and with the Protean Credential (PQC-MIGRATION §7). (0.68.0)
   A `credential.rotate` (§3.5.5) MUST rotate them, **and the vault relay
   key** (new mailbox, new tokens, `relay.address.update`, as above)
-  **and the wake key**, in the same flush as the new credential; the vault MAY also rotate them alone, after a
+  **and the wake key**, in the same flush as the new credential
+  ((0.84.0) the flush stores the new relay key as pending; the relay's
+  rotate follows the flush, as "The order of a relay-key rotation"
+  above says); the vault MAY also rotate them alone, after a
   suspected exposure of its state:
   1. The vault sends an `identity.rotate` statement, signed by both the old
      and the new `ik`, to every device and peer.
   2. It appends the statement to its **rotation chain**.
   3. It rekeys every session (§6.5).
 
-  (0.83.12; from the vault release with vettid-vault #200) An outgoing
+  (0.84.1; from the vault release with vettid-vault #200) An outgoing
   handshake begun under the old `ik` that has not finished when the
   vault locks cannot be restored at the next unlock or at a recovery's
   open; it is dropped as an aborted one is (§6.4, "An outgoing handshake
@@ -3784,7 +4033,7 @@ lost response therefore never loses the credential:
   request within 24 h gets the same answer.
 - **The latest blob is always kept until the app confirms it.** Even with
   `credential.backup` off (§3.5.6), the vault keeps the latest blob until
-  the app sends `credential.ack{version}`. (0.83.12, as built) Only
+  the app sends `credential.ack{version}`. (0.84.1, as built) Only
   `credential.ack` confirms a version: presenting it in a later
   operation does not (0.83.11 and before said either did). The holder,
   answered `stale_credential` for
@@ -3978,9 +4227,17 @@ item's values seals them to a **one-time reply key** instead:
 - **Rotate.** `credential.rotate` generates a new credential key.
   - (0.68.0, owner decision 2026-10-27) It rotates the whole set the
     vault holds, in the same flush (§3.4): the relay key (a new mailbox
-    and new tokens, `relay.address.update`), `ik`, `kem` and the wake
+    and new tokens, `relay.address.update`; (0.84.0) the flush stores
+    the new key as pending, and the relay's rotate and the
+    `relay.address.update`s follow it, §3.4 "The order of a relay-key
+    rotation"; a relay key already pending is kept with a relay-key
+    rotation owed, which its second write turns into the next pending
+    key, except in the refused state, where this rotation replaces it), `ik`, `kem` and the wake
     key, so that after a PIN or password change it ends the whole old
-    copy (§11.14.2). It clears every owed rotation mark (§11.14.10); if a
+    copy (§11.14.2). It clears every owed rotation mark (§11.14.10;
+    (0.84.0) at its second write, §3.4; when it found a relay key
+    pending, the other marks at the second write of the relay key
+    after it); if a
     transfer's credential-key statement is still held, it sends that
     first, and it first deposits a waiting
     `device.unlinked{transferred}` with the old relay key. The relay-key
@@ -4254,7 +4511,7 @@ from the current hash:
 - **The holder's own retry is not a clone.** If the presenter is the
   holder, the blob's header `version` is exactly the current version − 1,
   and the holder has not yet confirmed the current version (by
-  `credential.ack`; 0.83.12: presenting it does not confirm it), the answer is
+  `credential.ack`; 0.84.1: presenting it does not confirm it), the answer is
   `stale_credential`. This is the app re-fetching after a lost response
   or a crash; it fetches the latest blob with `credential.get`.
 - **Everything else is a clone:** a presenter other than the holder; an
@@ -5871,7 +6128,7 @@ Rules:
   - A handshake aborted on a commitment mismatch (§6.3) drops the
     incoming request, which its devices were never shown, and denylists
     every token issued to the peer.
-  - (0.83.12; from the vault release with vettid-vault #200) **An
+  - (0.84.1; from the vault release with vettid-vault #200) **An
     outgoing handshake that cannot be restored** at an unlock or a
     recovery's open (a connection request, a reconnect or a rekey; for
     example one begun under an identity key that a rotation has since
@@ -6020,7 +6277,7 @@ bytes, `proposal` and `extension` of the exact JCS bytes of the document
 | service → vault | `vote.extended` | `{proposal_id, extension, extension_sig, bundle}` | `{proposal_id}`, or `not_found`, `bad_request`, `unsupported_type` |
 | service → vault | `vote.closed` | `{proposal_id, results_hash}` | `{proposal_id}`, or `not_found`, `bad_request`, `unsupported_type` |
 | vault → service | `vote.cast` | `{proposal_id, record_tag, vk, choice_id, ballot_sig, cast_sig, pad}` (`pad`: §10.19.5) | `{proposal_id, msg_ms, receipt_sig}`, or a refusal |
-| vault → service | `vote.status` | `{proposal_id}` | `{proposal_id, proposal, proposal_sig, bundle, record_secret, record_proof, ballot?, msg_ms?, receipt_sig?, status_sig}` (`ballot` is `{vk, choice_id, ballot_sig, pad?}`, `pad`: §10.19.5; as the service vault sends it, BALLOT-PROTOCOL 0.12.3 §4.2: **`bundle` is always present**: (0.83.12, BALLOT-PROTOCOL 0.13.7) while the proposal is unpublished, the service sends a member no answer (§10.19.4); `ballot` is `{vk, choice_id, ballot_sig}`; **`ballot`, `msg_ms` and `receipt_sig` come together or not at all**), or a refusal |
+| vault → service | `vote.status` | `{proposal_id}` | `{proposal_id, proposal, proposal_sig, bundle, record_secret, record_proof, ballot?, msg_ms?, receipt_sig?, status_sig}` (`ballot` is `{vk, choice_id, ballot_sig, pad?}`, `pad`: §10.19.5; as the service vault sends it, BALLOT-PROTOCOL 0.12.3 §4.2: **`bundle` is always present**: (0.84.1, BALLOT-PROTOCOL 0.13.7) while the proposal is unpublished, the service sends a member no answer (§10.19.4); `ballot` is `{vk, choice_id, ballot_sig}`; **`ballot`, `msg_ms` and `receipt_sig` come together or not at all**), or a refusal |
 
 A refusal from the service is an `error` response whose `error.code` is
 one of `not_eligible`, `not_open`, `closed`, `not_active`,
@@ -7750,7 +8007,7 @@ an answer to an unknown or expired id is dropped.
 |---|---|---|
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
-| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password. (0.33.0, release R) To the app also `recovery: {state, attempts, present_recorded_at, counter}`, to desktops `recovery: {state}` (§11.14.11). (0.41.0) To desktops and agents also `session: {session_id, expires_at} \| null`: the calling device's own current access session, never another device's (§6.8). (0.43.0, approved by the owner 2026-10-18) To the app and desktops also `time_scale`, the release constant of §11.10.8 (1 in production) |
+| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password. (0.33.0, release R) To the app also `recovery: {state, attempts, present_recorded_at, counter}`, to desktops `recovery: {state}` (§11.14.11). (0.41.0) To desktops and agents also `session: {session_id, expires_at} \| null`: the calling device's own current access session, never another device's (§6.8). (0.43.0, approved by the owner 2026-10-18) To the app and desktops also `time_scale`, the release constant of §11.10.8 (1 in production). (0.84.0; owner decision a, 2026-11-05, §3.4 "What the member sees") To the app also `relay: "refused"` while a pending relay key is in the refused state (§3.4), absent otherwise |
 | `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); (0.33.0, release R) also `recovery: {state, present_recorded}` (§11.14.5); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3); 0.29.0, release L: also `idle_lock_at` (§3.6.8) |
 | `vault.lock` (app, desktop) | `{}`; 0.29.0, release L: `{unlock_id}` ("Locks", below) | `{}`; then `vault.locking`. 0.29.0, release L: `stale_lock` when `unlock_id` does not name the current unlock (nothing is done); `bad_request` when it is not 32 lowercase hex characters |
@@ -14371,7 +14628,7 @@ Per proposal, in DEK state (`features.vote`), encrypted like all vault state and
 
 The vault also keeps the latest verified **service list** (§10.19.4) and the time it last saw it confirmed.
 
-Bounds (chosen): a `vote.proposal` body is at most 196,608 bytes, its `proposal` at most 65,536 bytes decoded and its `bundle` at most 65,536 bytes; the vault keeps at most **128 proposals**, at most **32 per connection** in all states and 16 per connection not yet closed, so that one service cannot fill the vault. **Making room** (a busy organisation must not run out): when a connection is at its cap, the vault evicts that connection's **oldest records whose check is final and clean**, `verified` or `unconfirmed` (`unconfirmed` needs a ballot), with or without a ballot, keeping for each a **compact evidence record** outside the cap. **A record is never evicted while its check is absent or `pending`** (0.83.6: for a record without a ballot, the row check is what shows a ballot cast under the member's tag); such a record holds its place until at most 7 days after its check is due, when the check gives up (§10.19.6). **A `gave_up` check is never clean** (0.83.6): the vault never saw results that verify, so it cannot know whether the service published a ballot under the member's tag, and a service that withholds or breaks its results for 7 days must not then be able to push the record out. It is a problem record until a later check settles it (§10.19.6), so an honest service's records leave the problem set by themselves and do not fill the cap of 16 below. The compact record holds what cannot be fetched again: `proposal_id`, `proposal_hash`, `record_tag`, the service's `ik`, the ballot `{vk, choice_id, ballot_sig}`, `msg_ms` and `receipt_sig`, every signed refusal verbatim, and the outcome (about 250 bytes plus refusals). The proposal and the results are public and write-once on the site and are fetched again when needed. At most 512 compact records per connection, each deleted **365 days** after its close, oldest first. **The problem set** is explicit: a proposal that is `rejected`; whose check is `failed` or `gave_up` (0.83.6: for any reason), or `pending` with reason `rows_unavailable` (0.83.3); whose ballot is in `conflict` or `disputed`, or that has conflict evidence (§10.19.3, 0.81.3); whose `site` is `mismatch` or `unpublished`; or that holds a refusal which raised a `vote.problem`. A problem record is **never evicted**, is **counted apart** (it does not count toward the 32 or the 16 not closed), and is deleted **365 days after its close** or when the member releases it. **In-progress records** (`checking`, `upcoming`, `open`, check `pending`, ballot not final; a check `pending` with reason `rows_unavailable` is a problem record, not in progress) stay under the 32 and are never evicted; `upcoming` and `open` records also count toward the 16 not yet closed. A `checking` record does not (0.83.6), so proposals that have not verified do not keep a verified one out of the 16; they still fill the 32. When a `checking` record verifies and is `open` or `upcoming`, the count of records not yet closed may pass 16; nothing is evicted for it, and a new proposal is kept only once the count is below 16 again. The cap on problem records is **16 per connection and applies only to keeping new proposals**: a record can turn into a problem after it is kept, so the count may pass 16; at 16 or more the vault keeps no new proposal from that connection, answers it `limit`, and tells the member with the `problems` notice below, deleting nothing. This cap is chosen (§15 item 48): a misbehaving service can block its own members this way, which BALLOT-PROTOCOL §1 and §9.2 already allow, and the notice names the service as its cause. **Releasing** a problem record (`vote.release`, §10.19.8) replaces it by a compact record that still holds **every signed item that is not on the public site**: the held proposal bytes, `proposal_sig` and `bundle` when `site` is not `matches`; the site's copy for a `mismatch`; every `vote.status` answer verbatim; the foreign ballot(s) of a `conflict`, of conflict evidence or of a `disputed` (the first and the latest); a `rejected` proposal with its reason. A release frees only what can be fetched again. A proposal that still cannot be kept (the cap is full of proposals that cannot be evicted, or the vault is at 128) is answered `limit` (`{limit: "votes", max}`, §10.1), audited `drop.vote_limit` and **shown to the member**: a `vote.problem` feed item (`ref` = the `connection_id`, at most one per connection per 24 hours) and a `dropped` entry in `vote.list` (`{connection_id, count, last_at}`) **until the app acknowledges it** (0.81.3: an explicit `ack_dropped: [connection_id]` in a later `vote.list` request, which removes those entries; a `vote.list` alone does not, so a notice the app did not show, because it crashed or the list was never read, is returned again). For the problem cap the entry is `problems` (`{connection_id, count}`) and stays while the count is 16 or more (0.83.12: the count can pass 16, above); it ends when the count drops below 16, as a release or (0.83.6) a late check that settles a record lowers it (§10.19.6).
+Bounds (chosen): a `vote.proposal` body is at most 196,608 bytes, its `proposal` at most 65,536 bytes decoded and its `bundle` at most 65,536 bytes; the vault keeps at most **128 proposals**, at most **32 per connection** in all states and 16 per connection not yet closed, so that one service cannot fill the vault. **Making room** (a busy organisation must not run out): when a connection is at its cap, the vault evicts that connection's **oldest records whose check is final and clean**, `verified` or `unconfirmed` (`unconfirmed` needs a ballot), with or without a ballot, keeping for each a **compact evidence record** outside the cap. **A record is never evicted while its check is absent or `pending`** (0.83.6: for a record without a ballot, the row check is what shows a ballot cast under the member's tag); such a record holds its place until at most 7 days after its check is due, when the check gives up (§10.19.6). **A `gave_up` check is never clean** (0.83.6): the vault never saw results that verify, so it cannot know whether the service published a ballot under the member's tag, and a service that withholds or breaks its results for 7 days must not then be able to push the record out. It is a problem record until a later check settles it (§10.19.6), so an honest service's records leave the problem set by themselves and do not fill the cap of 16 below. The compact record holds what cannot be fetched again: `proposal_id`, `proposal_hash`, `record_tag`, the service's `ik`, the ballot `{vk, choice_id, ballot_sig}`, `msg_ms` and `receipt_sig`, every signed refusal verbatim, and the outcome (about 250 bytes plus refusals). The proposal and the results are public and write-once on the site and are fetched again when needed. At most 512 compact records per connection, each deleted **365 days** after its close, oldest first. **The problem set** is explicit: a proposal that is `rejected`; whose check is `failed` or `gave_up` (0.83.6: for any reason), or `pending` with reason `rows_unavailable` (0.83.3); whose ballot is in `conflict` or `disputed`, or that has conflict evidence (§10.19.3, 0.81.3); whose `site` is `mismatch` or `unpublished`; or that holds a refusal which raised a `vote.problem`. A problem record is **never evicted**, is **counted apart** (it does not count toward the 32 or the 16 not closed), and is deleted **365 days after its close** or when the member releases it. **In-progress records** (`checking`, `upcoming`, `open`, check `pending`, ballot not final; a check `pending` with reason `rows_unavailable` is a problem record, not in progress) stay under the 32 and are never evicted; `upcoming` and `open` records also count toward the 16 not yet closed. A `checking` record does not (0.83.6), so proposals that have not verified do not keep a verified one out of the 16; they still fill the 32. When a `checking` record verifies and is `open` or `upcoming`, the count of records not yet closed may pass 16; nothing is evicted for it, and a new proposal is kept only once the count is below 16 again. The cap on problem records is **16 per connection and applies only to keeping new proposals**: a record can turn into a problem after it is kept, so the count may pass 16; at 16 or more the vault keeps no new proposal from that connection, answers it `limit`, and tells the member with the `problems` notice below, deleting nothing. This cap is chosen (§15 item 48): a misbehaving service can block its own members this way, which BALLOT-PROTOCOL §1 and §9.2 already allow, and the notice names the service as its cause. **Releasing** a problem record (`vote.release`, §10.19.8) replaces it by a compact record that still holds **every signed item that is not on the public site**: the held proposal bytes, `proposal_sig` and `bundle` when `site` is not `matches`; the site's copy for a `mismatch`; every `vote.status` answer verbatim; the foreign ballot(s) of a `conflict`, of conflict evidence or of a `disputed` (the first and the latest); a `rejected` proposal with its reason. A release frees only what can be fetched again. A proposal that still cannot be kept (the cap is full of proposals that cannot be evicted, or the vault is at 128) is answered `limit` (`{limit: "votes", max}`, §10.1), audited `drop.vote_limit` and **shown to the member**: a `vote.problem` feed item (`ref` = the `connection_id`, at most one per connection per 24 hours) and a `dropped` entry in `vote.list` (`{connection_id, count, last_at}`) **until the app acknowledges it** (0.81.3: an explicit `ack_dropped: [connection_id]` in a later `vote.list` request, which removes those entries; a `vote.list` alone does not, so a notice the app did not show, because it crashed or the list was never read, is returned again). For the problem cap the entry is `problems` (`{connection_id, count}`) and stays while the count is 16 or more (0.84.1: the count can pass 16, above); it ends when the count drops below 16, as a release or (0.83.6) a late check that settles a record lowers it (§10.19.6).
 
 The records survive a lock, a hold, a restart, a release move, a transfer to a new phone and a recovery (they are vault state, §3.3), and the removal of the connection (they are the member's evidence); they go with the vault (§12.5). **Nothing is synced to the owner's desktops and agents**: they have no vote access (decision 4), so no `sync.event` kind is added. A desktop sees the vault's audit entries `vote.cast` and `vote.recorded` through `audit.list` like all entries (that the member took part, the proposal id and the time; never the choice). A vault has one app (§1.1 item 8); a new phone reads `vote.list`.
 
@@ -14429,7 +14686,7 @@ Every check is the vault's own; the app never decides one. **Every signature in 
 
 **Locked and held.** A locked vault does nothing (§12.1): the relay keeps the message (14 days) and the vault handles it at the next unlock with that moment's clock. A **held** vault (§3.6.3) handles all three as above, because nothing in them waits for the member: the proposal is kept and checked, the feed item is made (counted in `vault.held`'s `other`, with no wake: §14.2 does not wake a held vault for it), and the member sees it after the check.
 
-**A proposal the vault was never sent.** For each site index entry (`vote.site.sync`) of a service the vault has a `service`-kind connection with, whose proposal it does not hold, the vault asks `vote.status` (at most once an hour per proposal). The answer carries the proposal, `proposal_sig`, `bundle`, `record_secret` and `record_proof` (§6.4); they are checked as in steps 2 to 6, with `status_sig` (§10.19.5), and the proposal's bytes must equal the site's. The service always sends a `bundle`, but the vault is **tolerant of its absence**: an answer without one leaves the proposal `checking` (`site`) until the site's bundle arrives. An answer with only some of `ballot`, `msg_ms` and `receipt_sig` is malformed and counts as no answer. A signed `not_eligible` or `unknown_proposal` is kept as evidence and shown (decision 7). (0.83.12; BALLOT-PROTOCOL 0.13.7 §4.2, owner decision b, 2026-11-04, service-vault #122) A proposal the service holds but has not published (its anchor is missing, after a table restore or a lost publication) gets **no answer** for a member's `vote.status` or `vote.cast`, not `unknown_proposal` or `not_eligible`, which would be final for the member's vault: the service acknowledges the request and does not answer it. The vault treats it as no answer and asks again (the cast is resent; `vote.status` is asked again on its schedule: hourly for a proposal the vault was never sent, as above, and for a cast as §10.19.5 "Sending again" says), and once the proposal is published a later request is answered as usual. A party with no tag for the proposal is still refused. 0.83.11 and before said the service answered `unknown_proposal` until the proposal was anchored.
+**A proposal the vault was never sent.** For each site index entry (`vote.site.sync`) of a service the vault has a `service`-kind connection with, whose proposal it does not hold, the vault asks `vote.status` (at most once an hour per proposal). The answer carries the proposal, `proposal_sig`, `bundle`, `record_secret` and `record_proof` (§6.4); they are checked as in steps 2 to 6, with `status_sig` (§10.19.5), and the proposal's bytes must equal the site's. The service always sends a `bundle`, but the vault is **tolerant of its absence**: an answer without one leaves the proposal `checking` (`site`) until the site's bundle arrives. An answer with only some of `ballot`, `msg_ms` and `receipt_sig` is malformed and counts as no answer. A signed `not_eligible` or `unknown_proposal` is kept as evidence and shown (decision 7). (0.84.1; BALLOT-PROTOCOL 0.13.7 §4.2, owner decision b, 2026-11-04, service-vault #122) A proposal the service holds but has not published (its anchor is missing, after a table restore or a lost publication) gets **no answer** for a member's `vote.status` or `vote.cast`, not `unknown_proposal` or `not_eligible`, which would be final for the member's vault: the service acknowledges the request and does not answer it. The vault treats it as no answer and asks again (the cast is resent; `vote.status` is asked again on its schedule: hourly for a proposal the vault was never sent, as above, and for a cast as §10.19.5 "Sending again" says), and once the proposal is published a later request is answered as usual. A party with no tag for the proposal is still refused. 0.83.11 and before said the service answered `unknown_proposal` until the proposal was anchored.
 
 **Comparing with the public site** (BALLOT-PROTOCOL §9.2, a split view; chosen). The vault keeps, per proposal, the site's proposal bytes and a `site` state, **decided from the document itself**, `p/<proposal_id>/proposal.json` (VOTES-SITE §3: immutable and kept for good), and not from the index: `index.json` lists only the last 30 days and its write can lag the document (VOTES-SITE §3, §4), so the index and `archive/<YYYY-MM>.json` serve for discovery only. The states: `matches` (the document's bytes equal the held bytes), `mismatch` (the document exists with other bytes **and is a valid proposal document with the same `proposal_id`, signed under the service's `ik`**: 0.81.2, below), `not_listed` (a site that **answered** has no document: a `404`; one `404` is only this), `unreachable` (no answer) or `unpublished` (below). **Only a positive `mismatch` blocks a cast** (`site_mismatch`): VettID's own site must not stop a member from voting (BALLOT-PROTOCOL §1, §10.1). `not_listed` and `unreachable` allow the cast with a plain warning, and the vault compares as soon as the site answers. **A service can show one member a private variant**, anchored in Rekor and never uploaded, even under its own `proposal_id`; the site is write-once and takes uploads only before the close (BALLOT-PROTOCOL §3.3, VOTES-SITE §4), so absence is a positive signal after a while:
 - a `404` for the document from an answering site **more than 10 minutes after the proposal arrived** makes a `vote.problem` feed item with a plain warning, and an audit entry `vote.proposal_conflict` (`ref` = `<proposal_id>:not_listed`); the member can still vote;
@@ -14494,11 +14751,11 @@ A code the vault does not know is no answer.
 
 #### 10.19.6 After the close: checking the results
 
-At `vote.closed`, and in any case at **`closes_at` (as extended) + 2 hours**, the vault marks the check `pending` and tells the app (`vote.event{event: "check_due"}`; `check.due_at` in `vote.list`). The app runs pending checks whenever it opens and retries with backoff; the vault gives up (`gave_up`) **7 days** after the check was due (BALLOT-PROTOCOL §8.3). The app knows why it could not finish (the site could not be reached, or `results.json` was not there) and says so (ANDROID-PLAN); the vault records only `gave_up` (with reason `rows_unavailable` when the app said it could not get the row, step 3). **A `gave_up` check is not final** (0.83.6, owner decision a, thread 01M6HK8A1VMV41M8TTASXV4BSK): the app keeps running it whenever it opens, as a `pending` one but at most once a day per record, and a later submission is judged as usual, so it can still become `verified`, `unconfirmed` or `failed`. (0.83.12) Such a re-check **does not download an unchanged `rows.json` again** (it can be up to 51 MB per record): `results.json` names `rows_root`, so with the same `results.json` (compared by its hash) as at the last attempt the rows are unchanged, and the app fetches `rows.json` again only when `results.json` was absent, unreachable or changed, when `rows.json` could not be fetched on the last attempt, or when the last attempt failed on the vault's side (`trust_root`, `service_list`, `clock`). A re-check that skips the download either submits again the row and proof it kept from the last attempt, or sends nothing: the vault judges only what is submitted (steps 2 and 3), and the same results, row and proof get the same answer, still no answer (`input`) or `rows_unavailable`, so sending nothing loses nothing. Until then the record is in the problem set (§10.19.2). The results are public and write-once, so with a service that publishes them the record clears by itself the next time the app opens; only results that are never published or never verify keep it there. A released record (§10.19.8 `vote.release`) is not checked again. While the app stays closed past the give-up, a busy service can bring its `gave_up` records to the problem cap of 16; until the app opens and the checks clear, its new proposals are answered `limit`, and one still on the site comes back through `vote.site.sync`. This is accepted: the cap is what keeps a withholding service from evicting the records.
+At `vote.closed`, and in any case at **`closes_at` (as extended) + 2 hours**, the vault marks the check `pending` and tells the app (`vote.event{event: "check_due"}`; `check.due_at` in `vote.list`). The app runs pending checks whenever it opens and retries with backoff; the vault gives up (`gave_up`) **7 days** after the check was due (BALLOT-PROTOCOL §8.3). The app knows why it could not finish (the site could not be reached, or `results.json` was not there) and says so (ANDROID-PLAN); the vault records only `gave_up` (with reason `rows_unavailable` when the app said it could not get the row, step 3). **A `gave_up` check is not final** (0.83.6, owner decision a, thread 01M6HK8A1VMV41M8TTASXV4BSK): the app keeps running it whenever it opens, as a `pending` one but at most once a day per record, and a later submission is judged as usual, so it can still become `verified`, `unconfirmed` or `failed`. (0.84.1) Such a re-check **does not download an unchanged `rows.json` again** (it can be up to 51 MB per record): `results.json` names `rows_root`, so with the same `results.json` (compared by its hash) as at the last attempt the rows are unchanged, and the app fetches `rows.json` again only when `results.json` was absent, unreachable or changed, when `rows.json` could not be fetched on the last attempt, or when the last attempt failed on the vault's side (`trust_root`, `service_list`, `clock`). A re-check that skips the download either submits again the row and proof it kept from the last attempt, or sends nothing: the vault judges only what is submitted (steps 2 and 3), and the same results, row and proof get the same answer, still no answer (`input`) or `rows_unavailable`, so sending nothing loses nothing. Until then the record is in the problem set (§10.19.2). The results are public and write-once, so with a service that publishes them the record clears by itself the next time the app opens; only results that are never published or never verify keep it there. A released record (§10.19.8 `vote.release`) is not checked again. While the app stays closed past the give-up, a busy service can bring its `gave_up` records to the problem cap of 16; until the app opens and the checks clear, its new proposals are answered `limit`, and one still on the site comes back through `vote.site.sync`. This is accepted: the cap is what keeps a withholding service from evicting the records.
 
 1. The **app** fetches `results.json`, `rows.json`, the bundle and `results_sig` from votes.vettid.org with no session, verifies them as an observer does (BALLOT-PROTOCOL §8.4), and sends `vote.results.submit`: `results.json`, the signature, the bundle, **its own row** (the vault's tag is in `vote.get`) and the row's inclusion proof to `rows_root`. The app sends it whenever what the vault itself checks can hold (0.83.2): `results.json` parses, `results_sig` verifies under the service key, and the bundle holds. Any other failure of the observer check (the member's own row's ballot, other rows, the proposal or extensions, the tally, the published trees) is shown to the member but does not stop the submit; the vault never relies on the app's verdict. (0.83.3) "`results_sig` verifies" here is the vault's check: the app checks only the form (a 64-byte signature, the bundle an object). **What stops the app's submit of a row:** a `rows.json` larger than 512 bytes × `counts.eligible` + 4,096 (the download is capped the same way, and never at more than 51,204,096 bytes; it need not be JCS), nested deeper than 4, or holding a row or ballot that cannot be made into a leaf (a ballot that is not an object, a `record_tag` that is not 32 bytes of base64, a ballot member that is not a base64 string). When the member's row cannot be had (step 3), the app submits with `rows_unavailable: true` instead of a row. **Reported, but they do not stop it:** a `rows.json` that is not exactly `{v: 1, proposal_id, rows}` or names another proposal, a `results.json` that names another `proposal_id`, and a `tally` or `counts` that differs from the vault's own (`vote.get`, when it holds them). When `rows.json` has another row with the member's `record_tag` at a different index, the app sends the first one as `row` and adds the others (at most 4) with their inclusion proofs as `other_rows`. If those vault-checked inputs do not verify, the app does not submit and shows a problem with the published results (had it been sent, the vault would leave the check `pending` with reason `input`, step 3); the app retries at its next attempt. With `verified` or `unconfirmed` and a failed observer check, the app shows the state, shows no number (the choice counts, the turnout, the quorum line and the unhandled line) and shows the line "The rest of the published results don't add up. The service may have published them wrongly." under it; it does not show the app's text for a problem with the published results.
 2. The **vault** checks the strict JCS bytes and schema (BALLOT-PROTOCOL §8.5); `results_sig` over `proposal_hash ‖ H(results bytes)` under the service key and `"vettid/vote/1/results\x00"`; the bundle against an accepted anchor key (§10.19.4 step 6); that the `proposal` in the results is, byte for byte, the one it holds with its signature, and that the extensions are the ones it holds, in order (an extension in the results that it lacks is checked as in `vote.extended` and adopted; a held one missing from the results is a failure); that `tally` names every choice and `counts.eligible` equals the proposal's; and its row.
-3. **The row.** Its leaf is `ballot_leaf` for a row with a ballot, or the 32-byte tag for an empty one. **The proof is verified to `rows_root` before the row is judged** (0.81.3). The check is `failed` only for a **contradiction under the service's signature and the verified anchor**: a changed proposal; a missing extension; a `tally` that does not name every choice, or a wrong `counts.eligible` (the vault cannot recompute the tally); a row proof that verifies to `rows_root` at an `index` other than the `record_proof`'s (the rows and the tags are both sorted by tag, so a member's row is at its tag's index); an invalid ballot (a `choice_id` not in the proposal, or a `ballot_sig` that fails) under the member's code behind a verifying proof; `row_mismatch`, `row_unexpected` (below); `counts.eligible` not equal to the `record_proof`'s `tree_size`; and (0.83.3) `row_duplicate`: an entry of `other_rows` whose leaf begins with the member's `record_tag` and whose proof verifies to the signed `rows_root` at an index other than the main row's, a second row under the member's tag, which is a signed contradiction. It takes precedence over every other row outcome (`row_mismatch`, `row_unexpected`, `conflict`, and a row at an index other than the `record_proof`'s); `vote.evidence` includes the extra rows. An entry with another tag, at the main row's index, repeating another entry's index, or whose proof does not verify, is input that does not verify (`pending`, `input`). An entry whose leaf can be made and whose proof verifies at another index is `row_duplicate`, whatever its `choice_id`. Only an entry whose members do not decode (base64, types) is `input` for that reason. The app does not send an entry it cannot make into a leaf: `rows.json` then cannot be had (`rows_unavailable`). More than 4 entries, or `rows_unavailable` together with `row`, is `bad_request`; (0.83.12, as built in vettid-vault #191) so is an `other_rows` that is `null` or not an array. **Precedence** (0.83.12, as built): `row_duplicate` also wins over an entry elsewhere in `other_rows` that is input that does not verify; a contradiction in the results themselves (a changed proposal, a missing or invalid extension, the `tally`, or `counts.eligible`; reason `results`) is judged before the extra rows and wins over `row_duplicate`. An entry's index counts as taken only once its proof verifies: an entry that does not verify is input and does not make a later entry at the same index a repeat. **Input that does not verify is no answer** (0.81.3): a results document that does not parse or whose signature fails, a bundle that does not hold for these results, a proof with a `tree_size` other than the signed `counts.eligible` or one that does not verify to the signed `rows_root`. The check **stays `pending` with reason `input`** (not `failed`, no audit entry, no feed item) and a later correct submission is judged; the app shows it as a problem with the published results (step 1). "Any difference is `failed`" of 0.81.0 is withdrawn. **A row the app cannot get** (0.83.3): a `vote.results.submit` with `rows_unavailable: true` (no `row`, `row_proof` or `other_rows`) and the results, signature and bundle, which the vault verifies as above, leaves the check `pending` with reason `rows_unavailable`, because the vault cannot check the claim. It raises `vote.problem` once. Contradictions in the results themselves are judged as usual; they rest on the service's signature, not on the claim. A later submission with a verifying row is judged as usual. (0.83.12, as built in vettid-vault #191) A submission that does not verify, for a check left `pending` (or `gave_up`) with reason `rows_unavailable`, is answered with reason `input`, and the stored reason, the one `vote.get` shows, stays `rows_unavailable`. A `rows_unavailable` submission keeps no results for `vote.evidence`: they are public. If the check is still unresolved when it would give up (7 days), the vault records `gave_up` with reason `rows_unavailable` and keeps the record in the problem set (§10.19.2); it is not released or evicted as clean. The app shows its text for a problem with the published results. **Version gating:** §10.1 ignores members it does not know, so a vault before this version would ignore `other_rows` and refuse a submit without `row`. The vault release that implements 0.83.3 lists the release capability `vote_rows` (§11.10.9) and accepts both; an app that does not see it in the vault's capabilities sends neither and keeps 0.83.2's behaviour. Then:
+3. **The row.** Its leaf is `ballot_leaf` for a row with a ballot, or the 32-byte tag for an empty one. **The proof is verified to `rows_root` before the row is judged** (0.81.3). The check is `failed` only for a **contradiction under the service's signature and the verified anchor**: a changed proposal; a missing extension; a `tally` that does not name every choice, or a wrong `counts.eligible` (the vault cannot recompute the tally); a row proof that verifies to `rows_root` at an `index` other than the `record_proof`'s (the rows and the tags are both sorted by tag, so a member's row is at its tag's index); an invalid ballot (a `choice_id` not in the proposal, or a `ballot_sig` that fails) under the member's code behind a verifying proof; `row_mismatch`, `row_unexpected` (below); `counts.eligible` not equal to the `record_proof`'s `tree_size`; and (0.83.3) `row_duplicate`: an entry of `other_rows` whose leaf begins with the member's `record_tag` and whose proof verifies to the signed `rows_root` at an index other than the main row's, a second row under the member's tag, which is a signed contradiction. It takes precedence over every other row outcome (`row_mismatch`, `row_unexpected`, `conflict`, and a row at an index other than the `record_proof`'s); `vote.evidence` includes the extra rows. An entry with another tag, at the main row's index, repeating another entry's index, or whose proof does not verify, is input that does not verify (`pending`, `input`). An entry whose leaf can be made and whose proof verifies at another index is `row_duplicate`, whatever its `choice_id`. Only an entry whose members do not decode (base64, types) is `input` for that reason. The app does not send an entry it cannot make into a leaf: `rows.json` then cannot be had (`rows_unavailable`). More than 4 entries, or `rows_unavailable` together with `row`, is `bad_request`; (0.84.1, as built in vettid-vault #191) so is an `other_rows` that is `null` or not an array. **Precedence** (0.84.1, as built): `row_duplicate` also wins over an entry elsewhere in `other_rows` that is input that does not verify; a contradiction in the results themselves (a changed proposal, a missing or invalid extension, the `tally`, or `counts.eligible`; reason `results`) is judged before the extra rows and wins over `row_duplicate`. An entry's index counts as taken only once its proof verifies: an entry that does not verify is input and does not make a later entry at the same index a repeat. **Input that does not verify is no answer** (0.81.3): a results document that does not parse or whose signature fails, a bundle that does not hold for these results, a proof with a `tree_size` other than the signed `counts.eligible` or one that does not verify to the signed `rows_root`. The check **stays `pending` with reason `input`** (not `failed`, no audit entry, no feed item) and a later correct submission is judged; the app shows it as a problem with the published results (step 1). "Any difference is `failed`" of 0.81.0 is withdrawn. **A row the app cannot get** (0.83.3): a `vote.results.submit` with `rows_unavailable: true` (no `row`, `row_proof` or `other_rows`) and the results, signature and bundle, which the vault verifies as above, leaves the check `pending` with reason `rows_unavailable`, because the vault cannot check the claim. It raises `vote.problem` once. Contradictions in the results themselves are judged as usual; they rest on the service's signature, not on the claim. A later submission with a verifying row is judged as usual. (0.84.1, as built in vettid-vault #191) A submission that does not verify, for a check left `pending` (or `gave_up`) with reason `rows_unavailable`, is answered with reason `input`, and the stored reason, the one `vote.get` shows, stays `rows_unavailable`. A `rows_unavailable` submission keeps no results for `vote.evidence`: they are public. If the check is still unresolved when it would give up (7 days), the vault records `gave_up` with reason `rows_unavailable` and keeps the record in the problem set (§10.19.2); it is not released or evicted as clean. The app shows its text for a problem with the published results. **Version gating:** §10.1 ignores members it does not know, so a vault before this version would ignore `other_rows` and refuse a submit without `row`. The vault release that implements 0.83.3 lists the release capability `vote_rows` (§11.10.9) and accepts both; an app that does not see it in the vault's capabilities sends neither and keeps 0.83.2's behaviour. Then:
 
 | The vault holds | The row must be | Outcome |
 |---|---|---|
@@ -14581,7 +14838,7 @@ row_proof: { "index": 1, "tree_size": 3, "path": ["<b64 32 bytes>"] }
   - **What is checked is what is sent** (0.81.6): the strict checks apply to the bytes the app actually puts in the request. If the app re-encodes a site value, it checks the re-encoding (re-encoding can change bytes; a lone surrogate escape, which could turn two distinct names into one, is refused outright since 0.83.1, §5.3); simplest is to embed the validated value's own bytes.
   - **Index element size** (0.81.6): an `index` element over 65,536 bytes is left out before any strict parse (the vault reads only its `service_id`), so a hostile `index.json` cannot make the app parse megabytes per element.
   - **Choice ids in results** (0.81.6): before `vote.results.submit`, the app checks that the member's own row's `choice_id` is a valid choice id (1 to 32 bytes of `[a-z0-9-]`, the vault's rule); otherwise, with `vote_rows` (§11.10.9), it submits with `rows_unavailable: true`; without it, it does not submit and shows the existing problem hint.
-  - **Extra rows** (0.83.3): the app makes each `other_rows` row into a leaf as it does its own row, and does not send an entry it cannot (`rows.json` then cannot be had: `rows_unavailable`). The vault judges an entry whose leaf can be made and whose proof verifies at another index as `row_duplicate`, whatever its `choice_id`; an entry whose members do not decode (base64, types) is `input` for that entry, not `bad_request` for the call. The call-level `bad_request` cases are only more than 4 entries, an `other_rows` that is `null` or not an array (0.83.12, as built), and `rows_unavailable` together with `row`.
+  - **Extra rows** (0.83.3): the app makes each `other_rows` row into a leaf as it does its own row, and does not send an entry it cannot (`rows.json` then cannot be had: `rows_unavailable`). The vault judges an entry whose leaf can be made and whose proof verifies at another index as `row_duplicate`, whatever its `choice_id`; an entry whose members do not decode (base64, types) is `input` for that entry, not `bad_request` for the call. The call-level `bad_request` cases are only more than 4 entries, an `other_rows` that is `null` or not an array (0.84.1, as built), and `rows_unavailable` together with `row`.
   - **Results:** an empty `results`, one over the request limit, or a `results_sig` that is not 64 bytes is not submitted; the vote shows the existing problem hint for a check it cannot complete.
   - **Stages:** the app sends the lists (or `services_confirm`), then the entries, then each `vote.results.submit`, as separate calls, so a refusal in one does not stop the next.
 
@@ -19269,11 +19526,14 @@ success screen whether to replace the vault's keys (`credential.rotate`,
 §3.5.5, which rotates the whole set: relay key and tokens, `ik`, `kem`,
 wake key and the credential key); the member can also do it later from
 the credential screen. A rotation is written in the event's state write and its notices
-go out afterwards; a connection that cannot be reached delays its own
-notice only, and a rotation that cannot be made at all is audited
+go out afterwards ((0.84.0) the relay key as pending, made current by a
+second write after the relay's rotate, §3.4 "The order of a relay-key
+rotation"; a relay key that is pending is not a failure: the vault
+completes it at the next unlocks, whichever rotation wrote it); a connection that cannot be reached delays its own
+notice only, and a rotation that cannot be written at all is audited
 (`identity.rotation_failed`) and tried again (a recovery's or a transfer's at the next
-unlock, from an owed mark, §11.14.10; a `credential.rotate` that failed
-is the member's to ask again): **it never fails the event**. The holder of an old copy also holds the old identity key and
+unlock, from an owed mark, §11.14.10; a `credential.rotate` that could
+not be written is the member's to ask again): **it never fails the event**. The holder of an old copy also holds the old identity key and
 can announce a rotation of its own; a connection keeps the first
 successor it accepted (§3.4), and the relay and the host that carry the
 notices are VettID's. So the rotation ends the old keys against someone
@@ -19857,8 +20117,10 @@ binding and replay rules of §11.3 and §11.6 and then, **in this order**:
    records the vault's signer binding as `recovered_signer` (§11.7.1; it moves at the recovered phone's first handshake, §11.14.6); makes its app key the vault's app
    key; removes every other device of role `app` (`device.unlinked{reason:
    "replaced"}`); keeps desktops and agents; **rotates the vault's relay
-   key, identity and KEM keys and wake key** (§3.4, §14; a rotation that
-   cannot be made never fails the recovery, §11.14.2: the state holds a rotation owed with `ref` = the `recovery_id`, which a failed rotation leaves and the next unlock retries, audited `identity.rotation_failed`; one rotation clears every owed mark, §11.14.10). The notices to
+   key, identity and KEM keys and wake key** (§3.4, §14; (0.84.0) the
+   relay key is stored as pending in step 2 and the relay's rotate follows
+   it, §3.4 "The order of a relay-key rotation"; a rotation that
+   cannot be made never fails the recovery, §11.14.2: the state holds a rotation owed with `ref` = the `recovery_id`, which a failed rotation leaves and the next unlock retries, audited `identity.rotation_failed`; one rotation clears every owed mark, §11.14.10, and (0.84.0) for a relay key pending §3.4 says when). The notices to
    removed devices, `device.unlinked{replaced}` and any pending unlink's
    `device.unlinked{transferred}` (§11.14.10), are deposited only after
    step 2 of the order of writes is confirmed (like every notice of an
@@ -21221,7 +21483,9 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   and sealed as above, and waits for the relay's answer. **The relay key
   (new mailbox and tokens), `ik`, `kem` and the wake key rotate (§3.4)
   in the state write that follows, once the relay has accepted the
-  notice** (its `201`). The wake key rotates as `credential.rotate` and
+  notice** (its `201`). (0.84.0) That write stores the new relay key as
+  pending; the relay's rotate follows it, and a second write makes the
+  key current (§3.4 "The order of a relay-key rotation"). The wake key rotates as `credential.rotate` and
   a recovery rotate it: the vault erases the registration in force and
   any pending one with their wake keys and sends the app
   `push.token-needed{reason: "token_gone"}`, and the app registers
@@ -21230,7 +21494,8 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   new phone has unlocked the old phone is the way back from the one
   write fault no order can fix (above), and a rotation announced to the
   connections could not be taken back. After the state write the
-  notices go out (§3.4 notices, `relay.address.update`); a connection
+  notices go out (§3.4 notices; (0.84.0) `relay.address.update` only
+  after the second write); a connection
   that cannot be reached delays its own notice only, and
   **`relay.address.update` is resent at each unlock** to a party that
   has not acknowledged (§3.4 "Resending the new address"). The new
@@ -21270,26 +21535,41 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   one, never holds it, so "The move didn't finish" needs no step to clear
   it. The mark outlives the pending unlink (a pending unlink deleted
   unsent because its token expired does not cancel the rotation). **One
-  rotation clears every owed mark**: the transfer's, a recovery's
+  rotation clears every owed mark** ((0.84.0) for a rotation that finds
+  a relay key pending, see §3.4): the transfer's, a recovery's
   (below), and a `credential.rotate`, which rotates the same full set
   (§3.5.5). **A rotation that clears a transfer's mark sends the held
   statement K0→K1 first, if it was not yet sent**, so the pinned
   connections get an unbroken chain: a recovery (its open uses the
   backup copy, which holds K1) and a `credential.rotate` (its own
-  statement is K1→K2) both do. (0.83.12) "First" means before anything
+  statement is K1→K2) both do. (0.84.1) "First" means before anything
   signed with **K1 or a later key** (K2), not before `identity.rotate`:
   a `credential.rotate` sends `identity.rotate`, then the rekey, then
   the chain K0→K1→K2, all from one state write. A `credential.rotate` or a recovery made
   while the transfer's pending unlink waits first deposits the pending
   `device.unlinked{transferred}` with the old relay key, as recovery
   step 6 does, and then rotates; the old key is kept as above. A pending unlink written by a release before the mark
-  existed is treated as owing a rotation.
+  existed is treated as owing a rotation. (0.84.0) The rotation's first
+  state write holds the new relay key as pending; the mark clears at the
+  second write, which makes that key current (if a relay-key rotation
+  is owed, because the rotation found a relay key already pending, that
+  second write stores the next relay key as pending and clears only the
+  relay-key-rotation mark, which that key meets; every other mark
+  clears at the next key's second write, §3.4), and until then the retry
+  the mark asks for at each unlock is the completion of the pending key,
+  not a new rotation of `ik`, `kem` or the wake key (§3.4 "The order of
+  a relay-key rotation").
 - **Failure.** A rotation that cannot be made is audited
   (`identity.rotation_failed`, with the `ref` a success would carry,
   below; 0.69.2), the mark is
   kept, and it is tried again at the next unlock: **it never fails the
   unlock, never delays the notice and never fails the move.** A
-  successful rotation is audited `identity.rotated` and appears in
+  successful rotation is audited `identity.rotated` ((0.84.0) at its
+  second write, once the relay key is current; a relay key left pending
+  is audited `identity.rotation_failed` at an unlock whose attempt does
+  not complete it, at most once per unlock, §3.4; for a rotation made
+  while a relay key was pending, §3.4 "What is audited" says which
+  `ref` each of the two audits carries) and appears in
   History. (0.69.2) Its `ref` says which owed mark it cleared: the
   `transfer_id` **only** when it clears a transfer's mark; otherwise the
   literal `"recovery"` when it clears a recovery's mark (never the
@@ -21315,7 +21595,8 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   moment and can fail without the move failing, so the screen does not
   promise it. History shows `identity.rotated` ("Your vault's keys were
   renewed") with a line saying the keys were replaced for the move, and
-  `identity.rotation_failed` shows its existing text.
+  `identity.rotation_failed` shows the corrected text of §3.4 "What
+  the member sees" (0.84.0).
 - **Vault:** a staging release after 23 (not release L's 23).
 
 #### 11.14.11 What the member sees: status, audit, feed and emails
@@ -21699,7 +21980,12 @@ check. A held vault may still be locked by any trigger of §12.3.
 
 - **One collect loop per unlocked vault.** The loop runs inside the enclave
   as a signed long-poll (`wait=25`, `max=32`) or a WebSocket. During a
-  rotation grace period it also collects from the old mailbox.
+  rotation grace period it also collects from the old mailbox. (0.84.0)
+  While a relay key is pending (§3.4) it collects from the current
+  mailbox and, once the relay's rotate has succeeded, from the new one
+  too; then `mailbox_unknown` on the current mailbox is not only waited
+  out (below) but starts §3.4's rotate and registration of the pending
+  key (not in §3.4's refused state).
 - **Waits of the collect loop** (0.27.2, as built; VAULT-RELAY-SCALING
   §4 G). Vaults on one host MUST NOT poll in step: a relay task that
   stops answers every held poll at once. So, in the enclave:
@@ -21738,9 +22024,13 @@ check. A held vault may still be locked by any trigger of §12.3.
 - **On unlock**, in order:
   1. re-mint tokens and start reconnects (§7.2);
   2. rekey due device sessions;
-  3. drain the outbox;
-  4. start collecting;
-  5. renew the lease while unlocked (§11.1).
+  3. (0.84.0) complete a pending relay key (§3.4: the rotate, or the
+     registration, then the second write and its held updates); one
+     attempt, and the steps after it go on when it fails or gets no
+     answer;
+  4. drain the outbox;
+  5. start collecting;
+  6. renew the lease while unlocked (§11.1).
 
 #### 12.2.1 Shared connections (0.27.2, as built)
 

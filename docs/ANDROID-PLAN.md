@@ -6,7 +6,7 @@ date: 2026-11-05
 changelog:
   - 0.1.120: erratum, 2026-11-05 (owner decisions of 2026-11-03 and
     2026-11-05, the lead's readings, and what was built; IOS-PLAN
-    0.1.63, VAULT-MESSAGING 0.83.12). §6 owner check item 3: what holds
+    0.1.63, VAULT-MESSAGING 0.84.1). §6 owner check item 3: what holds
     the daily check back (the lead's reading of VAULT-MESSAGING §3.6.5,
     as built in vettid-android #268): a call keeps only its own screen
     over a covered shell; an open approval or a started credential
@@ -32,7 +32,7 @@ changelog:
     `results.json` changed or was not had, when `rows.json` could not
     be fetched on the last attempt, or after a failure on the vault's
     side; otherwise it submits the kept row and proof again or sends
-    nothing (VAULT-MESSAGING 0.83.12 §10.19.6). §4 History export:
+    nothing (VAULT-MESSAGING 0.84.1 §10.19.6). §4 History export:
     `bad_request` shows the vault's code, as on iOS from the app
     version with vettid-ios #209 (in review); Android to follow. §4
     Devices & agents: decision 9 reversed for pairing, "Pair a desktop"
@@ -1480,7 +1480,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.83.12) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.84.1) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -5445,7 +5445,7 @@ The app **never** says: that the vote is "secret" or "anonymous" without "the pu
 - **"Abstain" matching.** Remove Default_Ignorable characters and U+2800 anywhere, then trim Unicode White_Space at both ends, then compare ignoring case. Look-alike letters (Cyrillic, fullwidth) are out of scope.
 - **A second ballot under the member's code** (owner decision a, 2026-11-03, thread 01M6FT8PCK46FTKM42VFY348S5). When `rows.json` holds another row with the member's `record_tag` at a different index, the app adds that row and its inclusion proof to `rows_root` to `vote.results.submit` as `other_rows: [{row, proof}]` (at most 4). The vault verifies each proof. An extra row the app cannot make into a leaf is not sent: the member's row cannot be had (below). A second verifying row is a signed contradiction: the check is `failed` with reason `row_duplicate`, and the vote shows `vote_failed_title` and `vote_failed_body` with **Save the proof**.
 - **The member's row cannot be had** (same decision): `rows.json` has a root that does not match the signed `rows_root`, cannot be parsed within the bounds, or has no leaf for the member. The app submits with `rows_unavailable: true` and the results, signature and bundle. The vault holds the check `pending` with reason `rows_unavailable`, and gives up with the same reason 7 days after the check was due; the record stays in the problem set. The app shows the text for a problem with the published results.
-- **A `gave_up` check run again** (0.1.120; VAULT-MESSAGING 0.83.12 §10.19.6). The app runs it whenever it opens, at most once a day per record, as a pending one. It does not download `rows.json` again when `results.json` is the same as at the last attempt (compared by its hash); it fetches `rows.json` again only when `results.json` was absent, unreachable or changed, when `rows.json` could not be fetched on the last attempt, or when the last attempt failed on the vault's side (`trust_root`, `service_list`, `clock`). A re-check that skips the download submits again the row and proof kept from the last attempt, or sends nothing: the same submission gets the same answer from the vault.
+- **A `gave_up` check run again** (0.1.120; VAULT-MESSAGING 0.84.1 §10.19.6). The app runs it whenever it opens, at most once a day per record, as a pending one. It does not download `rows.json` again when `results.json` is the same as at the last attempt (compared by its hash); it fetches `rows.json` again only when `results.json` was absent, unreachable or changed, when `rows.json` could not be fetched on the last attempt, or when the last attempt failed on the vault's side (`trust_root`, `service_list`, `clock`). A re-check that skips the download submits again the row and proof kept from the last attempt, or sends nothing: the same submission gets the same answer from the vault.
 - **Older vaults.** `other_rows` and `rows_unavailable` are sent only to a vault that lists the release capability `vote_rows` (VAULT-MESSAGING §11.10.9, 0.83.3); with an older vault the app sends neither and keeps 0.83.2's behaviour.
 - **Not in this version:** a future `vote.get` field with the held `results_hash` would let the apps compare it with the published results.
 

@@ -5,7 +5,7 @@ version: 0.1.63
 date: 2026-11-05
 changelog:
   - 0.1.63: erratum, 2026-11-05 (ANDROID-PLAN 0.1.120, VAULT-MESSAGING
-    0.83.12). §6.6: what holds the daily check back, the lead's reading
+    0.84.1). §6.6: what holds the daily check back, the lead's reading
     of VAULT-MESSAGING §3.6.5 that vettid-ios #205 builds, with #206's
     call note (ANDROID-PLAN §6 owner check item 3); a difference from
     Android: a return from the background also ends the deferral (#205).
@@ -23,7 +23,7 @@ changelog:
     §6.9: "no photo cache" means nothing persisted; a memory-only
     decoded-photo cache (16 MiB, emptied at lock, hold and wipe) is
     allowed (owner a, 2026-11-05; vettid-ios #212).
-    `related`: ANDROID-PLAN 0.1.120, VAULT-MESSAGING 0.83.12.
+    `related`: ANDROID-PLAN 0.1.120, VAULT-MESSAGING 0.84.1.
   - 0.1.62: 2026-11-04 (ANDROID-PLAN 0.1.119, VAULT-MESSAGING 0.83.8).
     §4 Settings → Vault status: the credential-key fingerprint row, as
     on Android, with its loading, error and none-yet states.
@@ -569,7 +569,7 @@ changelog:
 owner: Al Liebl (Mesmer)
 related:
   - ANDROID-PLAN.md (0.1.120; 0.1.119, the credential-key row of §4 "Owner check and status"; 0.1.102; §4.16 results check and choice labels from 0.1.116; the results rules, app lock and held notices of 0.1.117) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.83.12) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.84.1) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -1849,7 +1849,7 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   anywhere, then trim Unicode White_Space at both ends, then ignore case;
   look-alike letters are out of scope). `other_rows` and `rows_unavailable` are sent only to a vault that lists the capability `vote_rows`. An extra row the app cannot make into a leaf is not sent: the member's row cannot be had (`rows_unavailable`). An invalid own-row `choice_id` is sent as `rows_unavailable` with `vote_rows`, and not submitted without it. Going to the background cancels
   a recheck; it runs again on return. (0.1.63; ANDROID-PLAN 0.1.120 "A
-  `gave_up` check run again", VAULT-MESSAGING 0.83.12 §10.19.6) A
+  `gave_up` check run again", VAULT-MESSAGING 0.84.1 §10.19.6) A
   `gave_up` check run again downloads `rows.json` again only when
   `results.json` was absent, unreachable or changed, when `rows.json`
   could not be fetched on the last attempt, or when the last attempt
