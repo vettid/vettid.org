@@ -58,9 +58,15 @@ in this mode.
   the connector's account it could read the state file and unwrap it,
   open the connector and read every other run's secret and every
   proxy's value, or change the profile later runs use. So programs run
-  under a third account, one per pairing, that can read none of the
-  connector's state, profile or process. The connector starts each run
-  as that account (below) and gives it only that run's secret.
+  under runner accounts that can read none of the connector's state,
+  profile or process. Two runs may overlap (AGENT-PLAN §4.9: at most
+  2), and a run must not reach another's secret either, so each
+  pairing has two runner accounts, one per run slot (question 6). A
+  slot's account runs one run at a time, and its profile, temporary
+  folders and (Windows) registry hive are deleted and made new when
+  the run ends, so nothing one run leaves steers the next. The
+  connector starts each run as a free slot's account (below) and gives
+  it only that run's secret.
 - **What the separation gives.** The agent can still call every tool:
   reaching the tools is its job, and the vault's rules decide what it
   gets. It can no longer read the connector's keys or state, a run's
@@ -84,9 +90,9 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
 
 | Platform | Connector account | Runner account | Started by | State |
 |---|---|---|---|---|
-| Windows | `NT SERVICE\vettid-agent-<n>` (a virtual service account) | a local user `vettid-run-<n>`, no logon right, random password kept only as the service's LSA secret | a Windows service | `%ProgramData%\VettID\agent\<n>\`, owner the service SID only |
-| macOS | a hidden user `_vettid<n>` | a hidden user `_vettidrun<n>` | a launchd daemon | `/Library/Application Support/VettID/agent/<n>/`, 0700 |
-| Linux | a system user `vettid-agent-<n>` | a system user `vettid-run-<n>` | a systemd system service | `/var/lib/vettid-agent/<n>/`, 0700 |
+| Windows | `NT SERVICE\vettid-agent-<n>` (a virtual service account) | local users `vettid-run-<n>-1` and `-2`: the batch logon right only, interactive and remote logon denied, hidden from the sign-in screen, a random password kept under the connector's DPAPI | a Windows service | `%ProgramData%\VettID\agent\<n>\`, owner the service SID only |
+| macOS | a hidden user `_vettid<n>` | hidden users `_vettidrun<n>a` and `b` | a launchd daemon | `/Library/Application Support/VettID/agent/<n>/`, 0700 |
+| Linux | a system user `vettid-agent-<n>` | system users `vettid-run-<n>-1` and `-2` | a systemd system service | `/var/lib/vettid-agent/<n>/`, 0700 |
 
 - **Windows privileges.** Services get `SeImpersonatePrivilege` by
   default, and code holding it has known ways to SYSTEM. The service is
@@ -95,19 +101,32 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   `SeIncreaseQuotaPrivilege`), and every run starts
   under the runner account with a restricted token, in a job object.
   Identifying the pipe's client does not need the impersonation
-  privilege.
+  privilege. Whether a virtual service account can hold
+  `SeAssignPrimaryTokenPrivilege` is checked on Windows here first; if
+  not, the connector's account becomes a local user with the
+  service logon right, like the runners.
 - **Starting a run as the runner.** Windows: `CreateProcessAsUser` with
   the runner's token, the handle list limited to the run's standard
   handles (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), suspended, then the
-  image check of AGENT-PLAN §4.9. POSIX: starting a process as another
-  user needs root, which the connector never holds. Linux: the service
-  manager starts each run as a transient unit with the runner's uid
-  (`systemd-run --uid`), allowed to the connector's account by a polkit
-  rule that permits nothing else. macOS: a small root helper, installed
-  with the daemon, whose only job is to start a run as the runner and
-  report its exit. Either is settled in A3.10, with its own review. Every other descriptor is
-  close-on-exec; tests check that a run inherits only its standard
-  streams.
+  image check of AGENT-PLAN §4.9. The runner's token comes from
+  `LogonUser` (batch logon) with the password the connector keeps.
+  POSIX: starting a process as another user needs root, which the
+  connector never holds. On both Linux and macOS a small **run helper**
+  does it: a root service installed with the connector, listening on a
+  root-owned socket that only the connector's account may open (peer
+  uid checked). The connector passes it, over `SCM_RIGHTS`, the
+  program's sealed copy (Linux, the memfd of AGENT-PLAN §4.9; macOS,
+  the copy's descriptor), the run's standard streams and the secret's
+  descriptor; the helper starts the program as the slot's runner uid in
+  its own session, and reports its exit. It takes no path, no
+  environment and no argument it does not pass on unchanged, and never
+  starts anything as root. Not `systemd-run`: polkit sees only the unit
+  name and verb, so a rule for it would also let the connector start a
+  unit as root, and a unit's environment and command line can be read
+  by any local user (`systemctl show`). The helper is the one root
+  component; it is small and gets its own review in A3.10. Every other
+  descriptor is close-on-exec; tests check that a run inherits only its
+  standard streams.
 - **Keys at rest (AG3).**
   - Windows: DPAPI of the connector's virtual account. Its master key is
     protected by LSA secrets, so any SYSTEM process can decrypt it. The
@@ -144,7 +163,10 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   exchange their versions on connect; a mismatch is refused with a
   plain text (NEW, §8) rather than half working.
 - **Logs** go to the system log (Windows Event Log, `os_log`, the
-  journal) under the pairing's name, readable by the member, never with
+  journal) under the pairing's name. Other users of the computer can
+  read those logs, so they hold only the pairing's name, the tool,
+  the outcome code and a resolved program path, never arguments,
+  `cwd`, variable names or values. They are readable by the member, never with
   a value, code, SAS or email address in them (AGENT-PLAN §4.7).
   `vettid-agent status` shows the latest refusal reasons, so the member
   never needs to read the service's state.
@@ -170,7 +192,8 @@ and the service never takes another name.
     restart), the service does not start: it logs it and `status` says
     so (NEW text, §8). That is a denial of service by a local user, not
     a disclosure.
-  - Its DACL gives the member's SID read and write of data only, never
+  - Its DACL gives the member's SID read and write of data and
+    `READ_CONTROL` (for the owner check below) only, never
     `FILE_CREATE_PIPE_INSTANCE` (the same bit as `FILE_APPEND_DATA`, so
     not `GENERIC_WRITE`). Only the service SID may create instances.
   - The service identifies each client from its token at
@@ -183,8 +206,10 @@ and the service never takes another name.
     (`GetSecurityInfo`), which must be the service SID. This is not
     by process id, which can be reused.
 - **macOS and Linux**: a Unix socket in a directory owned by root and
-  0755 (`/var/run/vettid-agent/`, made by the installer; on Linux not
-  systemd's `RuntimeDirectory=`, which belongs to the service). The
+  0755 (`/var/run/vettid-agent/`; it is emptied at every boot, so it
+  is made again at boot, by a `tmpfiles.d` entry on Linux and by a
+  launchd job on macOS, not by systemd's `RuntimeDirectory=`, which
+  belongs to the service). The
   socket is owned by the connector's account, group a group holding
   only the member, mode 0660. The service checks the peer's uid
   (`SO_PEERCRED`, `getpeereid`) against the recorded uid. The stub
@@ -206,6 +231,9 @@ and the service never takes another name.
   the vault only while a client runs it" change. The alternative is to
   start it on demand when a stub connects and stop it a while after the
   last one leaves.
+- **Locking the computer** does not end a stub (the agent app keeps
+  running). Nothing changes: runs and proxies go on, and the vault's
+  own lock and hold rules (AGENT-PLAN §4.4) still apply.
 - **When the stub leaves** (the client closes, the member logs off or
   locks the computer): runs started for that stub go on to their own
   time limit, and their redacted answers are kept for AG9's 10 minutes.
@@ -302,12 +330,27 @@ opened it leaves (§5).
 3. **One instance per pairing (§3).**
    - a (recommended): two accounts and a service per pairing, as AG1a's one pairing per client.
    - b: one service and runner per member user, holding several pairings. Fewer accounts, but the pairings share them.
-4. **macOS keys (§3).**
-   - a (recommended): the system keychain, with an access list naming only the connector.
-   - b: the passphrase protector, typed by an administrator at each start.
+4. **macOS keys (§3).** Neither choice is free.
+   - a: the system keychain, with an access list naming the connector
+     by its code-signing requirement. AG3 (§4.2) rejected the
+     file-based keychain because its items travel with Migration
+     Assistant, and the access list needs signed builds (A5.2).
+   - b: the passphrase protector, typed by an administrator at each
+     start. Then the service cannot restart unattended after a crash
+     or a reboot.
+   - c (recommended): macOS runs and proxies wait until signed builds
+     exist, and then a. Until then macOS gets the same-account connector
+     (§8) only.
 5. **When the service runs (§5).**
    - a (recommended): always, as a service, catching up continuously.
    - b: on demand, while a stub is connected.
+6. **Runner accounts (§2).**
+   - a (recommended): two per pairing, one per run slot, each profile
+     made new after each run.
+   - b: one per run, made at its start and removed at its end
+     (Linux `DynamicUser=`-like; slower, and on Windows a profile is
+     made for every run).
+   - c: one per pairing, with one run at a time instead of two.
 
 ## 10. What changes elsewhere, once approved
 
@@ -319,7 +362,7 @@ opened it leaves (§5).
   - §4.9:
     - runs under the runner account, and only in this mode;
     - the `--run-path` check against the member's and runner's accounts;
-    - where the environment's `HOME`, `USERPROFILE` and `APPDATA` come from (the runner's profile, made empty for each run);
+    - where the environment's `HOME`, `USERPROFILE` and `APPDATA` come from (the run slot's profile, made new after each run);
     - "when the connector exits, it kills its runs" read per §5.
   - New PRs before A3.8a ships:
     - the service, runner and stub (A3.10);
