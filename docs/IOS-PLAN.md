@@ -20,6 +20,9 @@ changelog:
     ANDROID-PLAN 0.1.120 says. §8 "Later": presence and location
     follow ANDROID-PLAN's "last seen" wording and units, and devices
     and agents its Pair a desktop (vettid-android #291, in review).
+    §6.9: "no photo cache" means nothing persisted; a memory-only
+    decoded-photo cache (16 MiB, emptied at lock, hold and wipe) is
+    allowed (owner a, 2026-11-05; vettid-ios #212).
     `related`: ANDROID-PLAN 0.1.120, VAULT-MESSAGING 0.83.12.
   - 0.1.62: 2026-11-04 (ANDROID-PLAN 0.1.119, VAULT-MESSAGING 0.83.8).
     §4 Settings → Vault status: the credential-key fingerprint row, as
@@ -2549,8 +2552,11 @@ the content goes to a file, `UserDefaults`, scene state restoration, a
 log or a backup. Pending approval events and the names on recent
 connection requests are included: they are shown while the vault is open
 and read again from the vault after the next unlock (the app persisted
-them, encrypted, across a lock; that is being removed). The app lock
-(ID17) is a UI gate only and protects no data at rest: no data key; its
+them, encrypted, across a lock; that is being removed). (0.1.63; owner
+decision a, 2026-11-05, vettid-ios #212) "No photo cache" means
+nothing persisted: a memory-only cache of decoded photos, of at most
+16 MiB and emptied at the lock, a hold and a wipe, is allowed. The app
+lock (ID17) is a UI gate only and protects no data at rest: no data key; its
 Secure Enclave key only gates the prompt (0.1.46).
 
 | Item | Where | Protection | Cleared when | Backup |

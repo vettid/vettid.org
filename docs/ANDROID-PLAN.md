@@ -20,14 +20,14 @@ changelog:
     blocking (owner, 2026-11-03; #271; on iOS from the app version
     with vettid-ios #209, in review), and `data_failure_blocked` for
     an earlier block is approved. §4 Presence: the "last seen" wording,
-    its date in the phone's locale, the card's "…roughly when your
-    vault was last in use", choice 3a (keep asking while Invisible),
+    its date in the phone's locale (owner decision a, 2026-11-05),
+    the card's "…roughly when your vault was last in use", choice 3a (keep asking while Invisible),
     and the texts approved (owner, 2026-11-03; #274). §4 Location:
     `location.share.stop` is allowed while due or held
     (VAULT-MESSAGING 0.37.0; the plan said refused; vault follow-up 10
     marked settled), and distances in miles or kilometers by the
-    phone's region with Settings → Units (owner, 2026-11-05; al-cal's
-    units PR, stacked on vettid-android #290, not yet open). §4 Votes:
+    phone's region with Settings → Units (owner, 2026-11-05; from the
+    app version with vettid-android #292). §4 Votes:
     a `gave_up` check run again downloads `rows.json` again only when
     `results.json` changed or was not had, when `rows.json` could not
     be fetched on the last attempt, or after a failure on the vault's
@@ -4875,7 +4875,7 @@ audited or put in the feed.
 | Unknown | "Status unknown" / detail: "{First}'s vault didn't answer. They may be offline or locked, or not sharing their status with you." |
 | Invisible | "Invisible: you appear offline to everyone." |
 | Share switch, off | "{First} sees 'Status unknown' for you, as if your vault were offline." |
-| Last seen (0.1.120; was "Last active": "active {n} min ago") | "· last seen {n} min ago" (rounded down to 5 minutes by the vault); "· last seen just now" (under 5 minutes); "· last seen today" (past an hour); "· last seen {d MMM}" (an earlier day, in the phone's locale: "2 Nov", or "Nov 2" in the US; the year only when not this year) |
+| Last seen (0.1.120; was "Last active": "active {n} min ago") | "· last seen {n} min ago" (rounded down to 5 minutes by the vault); "· last seen just now" (under 5 minutes); "· last seen today" (past an hour); "· last seen {date, locale skeleton MMMd}" (an earlier day, in the phone's locale, owner decision a, 2026-11-05: "Nov 2" in the US, "2 Nov" in the UK; the year only when not this year) |
 | First-time card | as above, ending "…roughly when your vault was last in use." |
 
 **Tests.** Unit: the policy editor (all/none with exceptions, the
@@ -5026,8 +5026,8 @@ history sent to / received from <First Last>"; `drop.location`,
 `drop.location_limit` (category Blocked and dropped) "Location from
 <First Last> dropped". History never shows a position.
 
-**Units** (0.1.120; owner decision 2026-11-05; al-cal's units PR,
-stacked on vettid-android #290, not yet open). Distances are shown in
+**Units** (0.1.120; owner decision 2026-11-05; from the app version
+with vettid-android #292). Distances are shown in
 miles or kilometers. By default the app follows the phone's region:
 a region that uses miles (the US, Liberia, Myanmar) shows miles and
 feet, any other kilometers and meters. **Settings → Units** offers
@@ -5684,7 +5684,8 @@ in memory only and cleared at lock, like the feed (§4 Notifications,
 - The floating action button: **Pair an agent** (below). No "Pair a
   desktop" (decision 9). (0.1.120; owner decision a, 2026-11-05,
   thread 01M6MMP5H717WVF4X9XYBJ6N9Z, which reverses decision 9's "no
-  Pair a desktop"; vettid-android #291, in review) **Pair a desktop** is offered beside Pair an agent:
+  Pair a desktop") **from the app version with vettid-android #291**
+  (in review), **Pair a desktop** is offered beside Pair an agent:
   the same pairing flow with `device.pair.create{role: "desktop"}`,
   approved with no grants; a desktop gets no grants or agent rules.
   Its texts are new and await the owner's approval in that PR.
