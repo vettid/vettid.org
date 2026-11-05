@@ -1,12 +1,12 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.83.11
-date: 2026-11-04
+version: 0.84.0
+date: 2026-11-05
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
-  - RELAY-PROTOCOL.md (0.6.0)
+  - RELAY-PROTOCOL.md (0.10.1)
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md (0.2.2)
@@ -28,6 +28,33 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.84.0: 2026-11-05 (draft for the owner's review; option a,
+    recommended, owner decision pending). §3.4 **The order of a
+    relay-key rotation**: store first, then rotate, retried with the
+    same key. The rotation's state write stores the new relay key as
+    **pending** (sealed in the DEK state, never logged), with the new
+    tokens for every recipient and the `relay.address.update`s, which
+    are held; the vault then calls the relay's rotate with that key; on
+    success a second write makes it current, the old key becomes
+    deposit-only and the held updates are sent. Before, the order of
+    the relay call and the write was not stated, so a run ending
+    between them could leave a mailbox the vault had no key for, or a
+    key with no mailbox. A run that ends before the second write is
+    completed at the next unlock by the same rotate (idempotent,
+    RELAY-PROTOCOL 0.10.1 §6.7), called in place of the unlock's
+    registration; meanwhile the vault collects from the old mailbox,
+    and from the new one once the rotate has succeeded. Past the grace
+    (`mailbox_unknown`) the vault registers the stored pending key; if
+    the relay refuses, it keeps the key, audits
+    `identity.rotation_failed` with its feed item, and never makes
+    another key on its own. Nothing about the new address goes out
+    before the relay has the mailbox. The first write clears every owed
+    mark; the pending key is completed by its own retry, and a rotation
+    made meanwhile keeps it. "Resending the new address": the old key
+    also collects from the old mailbox until the grace ends (step 1
+    already said so), and nothing is resent while the key is pending.
+    §3.5.5, §11.14.2, §11.14.6 step 6, §11.14.10 and §12.2 follow.
+    Needs a vault release; no app change.
   - 0.83.11: 2026-11-04. Two corrections to the transfer's credential
     key (§11.14.10, 0.68.0), from building it. (1) §11.14.10 and the
     request tables: while a transfer's rotation statement K0→K1 is held
@@ -3452,6 +3479,66 @@ create-only.
 
   The vault MUST rotate after any suspected exposure of its state.
 
+  **The order of a relay-key rotation** (0.84.0; draft, owner decision
+  pending). The relay's mailbox rotation (RELAY-PROTOCOL §6.7) and the
+  vault's state write that keeps the new key are two steps, and a run
+  can end between them. The vault **stores first, then rotates, and
+  retries with the same key**:
+  1. The rotation's state write stores the new relay key as **pending**
+     (sealed in the DEK state like every other key, never logged),
+     together with the new tokens it minted for every recipient (step 2
+     above) and their `relay.address.update` deposits (step 3), which
+     are **held**. The current relay key stays current.
+  2. After that write, the vault calls the relay's rotate
+     (`POST /v1/mailbox/rotate`, signed by the current key) with the
+     pending key.
+  3. On success, a second state write makes the pending key current. The
+     old key becomes deposit-only ("Resending the new address" (a),
+     below), and the held updates are sent.
+
+  - **Nothing is announced before the relay has the new mailbox.** The
+    `relay.address.update`s and the new tokens go out only after the
+    rotate (or the registration below) succeeded and the second write is
+    stored. The other keys of the same rotation (`ik`, `kem`, the wake
+    key) are current from the first write, and their notices follow it
+    as before (§11.14.2).
+  - **A run that ends early.** If the run ends before the rotate, or
+    after it and before the second write, the next unlock finds the
+    pending key and calls the rotate again with the same key, which the
+    relay answers with the same mailbox (RELAY-PROTOCOL §6.7, "Repeating
+    a rotation"). While a key is pending, the unlock calls the rotate in
+    place of registering the current key (RELAY-PROTOCOL §6.1), which
+    after the grace would make the old mailbox again. A rotate that gets
+    no definite answer (a timeout, an unreachable relay, a `5xx`) is
+    retried the same way, and MAY be retried sooner while the vault is
+    unlocked, always with the same key.
+  - **Collecting while a key is pending.** The vault keeps collecting
+    from the old mailbox with the current key and, once the rotate has
+    succeeded, also from the new one with the pending key, so nothing
+    deposited in either is missed until the second write lands.
+  - **No unlock until after the grace.** The old mailbox is gone, so the
+    rotate is answered `mailbox_unknown`. The vault then registers the
+    **stored** pending key as a fresh mailbox (RELAY-PROTOCOL §6.1) and
+    continues with step 3. If the relay refuses that registration (the
+    id exists with another key, the key is refused, or the id is
+    tombstoned, RELAY-PROTOCOL §6.10), the vault **fails secure**: it
+    keeps the pending key and the held updates, audits
+    `identity.rotation_failed` (with the `ref` the rotation's
+    `identity.rotated` carried, §11.14.10) with its feed item (§10.9),
+    tries again at each unlock, and **never generates another relay key
+    on its own**.
+  - **Owed marks.** The first write is the rotation's state write: it
+    clears every owed mark (§11.14.10), as it does for `ik`, `kem` and
+    the wake key, and `identity.rotated` is audited with it. The pending
+    relay key is not an owed mark: it is completed by its own retry,
+    above, and a rotate that fails does not set a mark again. A rotation
+    made while a relay key is pending (a `credential.rotate`, or one that
+    clears an owed mark) rotates the other keys and keeps the pending
+    relay key, its tokens and its held updates; it does not make another.
+  - **The three paths** that rotate the relay key all follow this order:
+    a transfer's owed rotation (§11.14.10), a completed recovery
+    (§11.14.6 step 6) and `credential.rotate` (§3.5.5).
+
   **Resending the new address** (0.68.0; owner decision 2026-10-27). A
   recipient that is offline, locked or unreachable when the vault rotates
   its relay key (at a transfer, a `credential.rotate` or a recovery)
@@ -3460,9 +3547,10 @@ create-only.
   life, lose the connection (§6.6 "Limits"). So:
   - **(a) The old relay key stays, for deposits only.** After any
     relay-key rotation the vault keeps the **old relay key in the DEK
-    state**, used **only to deposit** to recipients: never to collect,
-    rotate, delete or mint tokens on any mailbox, and never for an owner
-    operation; the vault **never registers the old key again**
+    state**, used **only to deposit** to recipients and, (0.84.0) until
+    the relay's grace ends, to collect from its own old mailbox (step 1):
+    never otherwise to collect, and never to rotate, delete or mint
+    tokens on any mailbox, nor for an owner operation; the vault **never registers the old key again**
     (RELAY-PROTOCOL §6.10 would allow it). A deposit needs the recipient's token for the old `sub`
     and `X-VettID-Key` = the old key (RELAY-PROTOCOL §5.3 steps 2–7); it
     does not need the vault's own old mailbox to exist.
@@ -3496,7 +3584,8 @@ create-only.
     per hour**; a deposit refused with a definite answer (token expired
     or revoked, mailbox gone) ends the resends to that recipient. A
     resend is not audited unless it is refused for a reason other than
-    those.
+    those. (0.84.0) Nothing is resent while the new key is still
+    pending ("The order of a relay-key rotation", above).
   - **Security.** Keeping the old key adds nothing for a holder of an
     old copy, who already has it. The vault's old mailbox still ends at
     the relay's grace, so the window in which a peer holds a stale
@@ -3509,7 +3598,10 @@ create-only.
   (§11.14.10) and with the Protean Credential (PQC-MIGRATION §7). (0.68.0)
   A `credential.rotate` (§3.5.5) MUST rotate them, **and the vault relay
   key** (new mailbox, new tokens, `relay.address.update`, as above)
-  **and the wake key**, in the same flush as the new credential; the vault MAY also rotate them alone, after a
+  **and the wake key**, in the same flush as the new credential
+  ((0.84.0) the flush stores the new relay key as pending; the relay's
+  rotate follows the flush, as "The order of a relay-key rotation"
+  above says); the vault MAY also rotate them alone, after a
   suspected exposure of its state:
   1. The vault sends an `identity.rotate` statement, signed by both the old
      and the new `ik`, to every device and peer.
@@ -3943,7 +4035,10 @@ item's values seals them to a **one-time reply key** instead:
 - **Rotate.** `credential.rotate` generates a new credential key.
   - (0.68.0, owner decision 2026-10-27) It rotates the whole set the
     vault holds, in the same flush (§3.4): the relay key (a new mailbox
-    and new tokens, `relay.address.update`), `ik`, `kem` and the wake
+    and new tokens, `relay.address.update`; (0.84.0) the flush stores
+    the new key as pending, and the relay's rotate and the
+    `relay.address.update`s follow it, §3.4 "The order of a relay-key
+    rotation"), `ik`, `kem` and the wake
     key, so that after a PIN or password change it ends the whole old
     copy (§11.14.2). It clears every owed rotation mark (§11.14.10); if a
     transfer's credential-key statement is still held, it sends that
@@ -19219,7 +19314,9 @@ success screen whether to replace the vault's keys (`credential.rotate`,
 §3.5.5, which rotates the whole set: relay key and tokens, `ik`, `kem`,
 wake key and the credential key); the member can also do it later from
 the credential screen. A rotation is written in the event's state write and its notices
-go out afterwards; a connection that cannot be reached delays its own
+go out afterwards ((0.84.0) the relay key as pending, made current by a
+second write after the relay's rotate, §3.4 "The order of a relay-key
+rotation"); a connection that cannot be reached delays its own
 notice only, and a rotation that cannot be made at all is audited
 (`identity.rotation_failed`) and tried again (a recovery's or a transfer's at the next
 unlock, from an owed mark, §11.14.10; a `credential.rotate` that failed
@@ -19807,7 +19904,9 @@ binding and replay rules of §11.3 and §11.6 and then, **in this order**:
    records the vault's signer binding as `recovered_signer` (§11.7.1; it moves at the recovered phone's first handshake, §11.14.6); makes its app key the vault's app
    key; removes every other device of role `app` (`device.unlinked{reason:
    "replaced"}`); keeps desktops and agents; **rotates the vault's relay
-   key, identity and KEM keys and wake key** (§3.4, §14; a rotation that
+   key, identity and KEM keys and wake key** (§3.4, §14; (0.84.0) the
+   relay key is stored as pending in step 2 and the relay's rotate follows
+   it, §3.4 "The order of a relay-key rotation"; a rotation that
    cannot be made never fails the recovery, §11.14.2: the state holds a rotation owed with `ref` = the `recovery_id`, which a failed rotation leaves and the next unlock retries, audited `identity.rotation_failed`; one rotation clears every owed mark, §11.14.10). The notices to
    removed devices, `device.unlinked{replaced}` and any pending unlink's
    `device.unlinked{transferred}` (§11.14.10), are deposited only after
@@ -21171,7 +21270,9 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   and sealed as above, and waits for the relay's answer. **The relay key
   (new mailbox and tokens), `ik`, `kem` and the wake key rotate (§3.4)
   in the state write that follows, once the relay has accepted the
-  notice** (its `201`). The wake key rotates as `credential.rotate` and
+  notice** (its `201`). (0.84.0) That write stores the new relay key as
+  pending; the relay's rotate follows it, and a second write makes the
+  key current (§3.4 "The order of a relay-key rotation"). The wake key rotates as `credential.rotate` and
   a recovery rotate it: the vault erases the registration in force and
   any pending one with their wake keys and sends the app
   `push.token-needed{reason: "token_gone"}`, and the app registers
@@ -21180,7 +21281,8 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   new phone has unlocked the old phone is the way back from the one
   write fault no order can fix (above), and a rotation announced to the
   connections could not be taken back. After the state write the
-  notices go out (§3.4 notices, `relay.address.update`); a connection
+  notices go out (§3.4 notices; (0.84.0) `relay.address.update` only
+  after the second write); a connection
   that cannot be reached delays its own notice only, and
   **`relay.address.update` is resent at each unlock** to a party that
   has not acknowledged (§3.4 "Resending the new address"). The new
@@ -21230,7 +21332,10 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   while the transfer's pending unlink waits first deposits the pending
   `device.unlinked{transferred}` with the old relay key, as recovery
   step 6 does, and then rotates; the old key is kept as above. A pending unlink written by a release before the mark
-  existed is treated as owing a rotation.
+  existed is treated as owing a rotation. (0.84.0) The mark clears at
+  the rotation's first state write, which holds the new relay key as
+  pending; the pending key is then completed by its own retry (§3.4
+  "The order of a relay-key rotation"), not by the mark.
 - **Failure.** A rotation that cannot be made is audited
   (`identity.rotation_failed`, with the `ref` a success would carry,
   below; 0.69.2), the mark is
@@ -21646,7 +21751,10 @@ check. A held vault may still be locked by any trigger of §12.3.
 
 - **One collect loop per unlocked vault.** The loop runs inside the enclave
   as a signed long-poll (`wait=25`, `max=32`) or a WebSocket. During a
-  rotation grace period it also collects from the old mailbox.
+  rotation grace period it also collects from the old mailbox. (0.84.0)
+  While a relay key is pending (§3.4) it collects from the current
+  mailbox and, once the relay's rotate has succeeded, from the new one
+  too.
 - **Waits of the collect loop** (0.27.2, as built; VAULT-RELAY-SCALING
   §4 G). Vaults on one host MUST NOT poll in step: a relay task that
   stops answers every held poll at once. So, in the enclave:
