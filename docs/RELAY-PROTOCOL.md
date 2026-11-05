@@ -1,6 +1,6 @@
 # VettID Relay Protocol
 
-**Version:** 0.10.1 (draft)
+**Version:** 0.10.2 (draft)
 **Status:** Pre-implementation draft for review
 
 ## 1. Purpose & design principles
@@ -412,6 +412,10 @@ the old mailbox's revocations and used one-shot tokens cannot come back.
 Deleting the successor (§6.10) also deletes an old mailbox still in its grace
 period; deleting the old mailbox (signed by the old key) ends only its own
 grace.
+(0.10.2) Until its grace ends the old mailbox stays live: it accepts
+deposits under tokens its key issued (verified against that key, §5.3,
+including tokens it mints during the grace) and owner requests signed by
+its key (collect, ack, denylist, delete), as vettid-relay does.
 
 **Repeating a rotation (0.10.1).** While the old mailbox lives, a rotate
 repeated with the **same** `new_pubkey` and a valid `new_key_proof` is
@@ -1664,6 +1668,10 @@ The push gateway API is specified separately.
 
 ## 10. Changelog
 
+- **0.10.2** — with VAULT-MESSAGING 0.85.0 (draft). §6.7: an old
+  mailbox in its grace accepts deposits under its tokens and owner
+  requests signed by its key (collect, ack, denylist, delete). States
+  what vettid-relay does; no wire change.
 - **0.10.1** — with VAULT-MESSAGING 0.84.0 (the order of a vault's
   relay-key rotation; owner decision of 2026-11-05, option a). §6.7:
   a rotate repeated with the same new key and proof
