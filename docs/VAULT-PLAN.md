@@ -1,9 +1,13 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.15
-date: 2026-11-02
+version: 0.1.16
+date: 2026-11-05
 changelog:
+  - 0.1.16: editorial (status as of 2026-11-05); no rule changes. The V6
+    status has V1 to V5 built, staging releases 1 to 27; the desktop on the
+    relay and its staging run of 2026-11-05 (two fail-secure display
+    faults open, vettid-desktop #79 and #80); Android #291, iOS I4
   - 0.1.15: owner decision 2026-11-02: §8 follow-up 1 (a retention hint
     on grants) dropped and closed; VAULT-MESSAGING 0.82.7 §10.12 states
     that the apps keep a fetched value in memory only
@@ -254,21 +258,33 @@ transport, enrollment, unlock, key attestation already exists in
 `HardwareAttestationManager`), then iOS, then desktop (pairs; never unlocks).
 **Exit:** each client passes a scripted run against the staging vault.
 
-*Status (2026-10-23).* `vaultctl` and the Go agent: `vettid-agent` A0
-to A3 and A5 are built (vettid-agent #7 to #40, 2026-10-17 to
-2026-10-20). Android: built and in daily use on staging (ANDROID-PLAN
-§6). iOS: under way (vettid-ios I0 to I3.3 and I3.4a merged, with release
-L's L1 and L2 and the no-erase rule, #138 to #140; IOS-PLAN; status
-2026-10-26). Android has also merged release L's app side (#190, #191,
-#193), the transfer keep-check (#187, #189), the deletion rules (#192,
-#194) and "a phone that could not tell" (#195); the vault's side of
-release L is merged and ships as staging release 23 (not yet cut), with
-vettid-vault #150 (a repeated recovery open rebinds the same identity's
-invitation, VAULT-MESSAGING 0.63.0) and #151 (an unlock that finishes a
-recovery's step 3 ends the recovery record, VAULT-MESSAGING 0.63.2).
-Desktop: not done; vettid-desktop #8 (the Windows build) and #10 (the
-machine-bound storage key) are open since 2026-10-13, and only #5 and #7
-(CI and icons) are merged.
+*Status (2026-11-05).* V1 to V5 are built: the vault runs on hardware
+on the staging channel, with staging releases 1 (2026-10-04) to 27
+(2026-11-04) published by vettid-vault, and no production release yet.
+Release 27 carries vettid-vault #183 (`device.session.end` may name its
+session; `vault.status` returns a device's own session, VAULT-MESSAGING
+0.82.5), which the desktop needs.
+
+- `vaultctl` and the Go agent: `vettid-agent` A0 to A3 and A5 are built
+  (vettid-agent #7 to #40, 2026-10-17 to 2026-10-20).
+- Android: built and in daily use on staging (ANDROID-PLAN §6). "Pair a
+  desktop", the phone side of the desktop's pairing, is vettid-android
+  #291 (open; used in the desktop's staging run below).
+- iOS: under way (IOS-PLAN), through I4's network and performance work
+  (vettid-ios #211, #212).
+- Desktop: on the relay. NATS is removed, and pairing, sessions and
+  access sessions run through the relay (vettid-desktop #50 to #59,
+  #61 to #64). The saved pairing is protected at rest by DPAPI on
+  Windows and by the TPM or the Secret Service on Linux (#67, #69,
+  #70). The Windows uninstaller deletes a saved pairing and confirms
+  it (#71), also for managed installs (#73). The scripted staging run (vettid-desktop `docs/STAGING-CHECKLIST.md`) ran
+  on 2026-11-05 against staging release 27 with Android #291. Pairing,
+  End session, the vault locked on the phone, Log out and the uninstall
+  passed. Two fail-secure display faults are open: a rejected pairing
+  was shown as "in place" (vettid-desktop #79), and an End session the
+  vault had not confirmed looked confirmed for about 2 minutes (#80).
+  The desktop's exit is met when both are fixed and those two steps
+  pass again. The desktop's own lock doesn't lock the vault yet (#77).
 
 ### Later
 
