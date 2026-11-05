@@ -35,7 +35,21 @@ changelog:
     epoch the peer last used; gated per peer (`hs_confirm`), with a
     revert toward older peers. Model findings H, G, E, I, J, K, A, B and
     review F1–F13 fixed (§3.4.1 fork rule, rule C, S5, I1, I4). Release
-    29 options in §15 item 50.
+    29 options in §15 item 50. The lead's review: S5 drops an answer
+    only to a peer that advertises `hs_confirm`, and toward any other
+    keeps it, establishes it and rekeys at once under the new `ik`; the
+    fork rule counts only the peer's ancestor signers, and a reconnect
+    explained by the peer never activating an epoch the responder
+    began is audited
+    (`own_copy`), not suspended; the lower-`th1` rule covers any two
+    crossing handshakes (§6.5); the revert waits `T` + 2 days, resends
+    what was sent under the destroyed epoch, is audited
+    (`connection.epoch_reverted`) and shown in History; the gate is
+    fixed per handshake; §6.5 notes the 10,000-message limit is exceeded
+    while an epoch is pending and why the random nonces stay safe. §15
+    item 50: release-28 initiators keep the bug until both sides run
+    29; R1 and R2 restated; the findings F1–F13 in a table; what the
+    model does not show.
   - 0.85.3: 2026-11-05, owner decisions of 2026-11-05 for the agent
     connector (option b, thread 01M6PBG2YHEEPDQ9ETQEBWK0EB: pin a
     bound program's content; option a, thread
@@ -4070,15 +4084,23 @@ epoch deposited after x (`ancestor_ik`). For a rekey or reconnect from P
 under the new `ik`, (0.86.0 draft) a `ctx` naming Q's current or
 confirmed epoch (§6.3.1) is ordinary; a `ctx` naming an epoch older
 than Q's confirmed epoch, where an epoch after it up to the confirmed
-one is signed by an ancestor `ik`, is fork evidence: Q suspends (§6.6
-"Fork detection", `ref` = `epoch`). (An initiator's confirmed epoch is
+one has as its epoch signer (P's side, Terms) an ancestor of P's `ik`,
+is fork evidence: Q suspends (§6.6 "Fork detection", `ref` = `epoch`).
+Q's own rotations are no evidence. **Except** when the only explanation
+is that P never activated an epoch Q began: every such epoch is one Q
+initiated and under which Q has received no message from P (Q's
+`hs.fin` was lost, or P dropped the answer, S5). Then Q does not
+suspend: it demotes those epochs, accepts the `ctx` as its last epoch,
+and audits `connection.fork_suspected` (`ref` = `own_copy`) with S9's
+feed item. A real second successor still suspends by rule C when its
+link arrives. (An initiator's confirmed epoch is
 its current one. In the S5 case Q received only `hs.fin` under the
 later epoch, so the earlier one stays confirmed.) An epoch established
 before this release counts as signed by the `ik` current for P at the
 upgrade. (0.86.0 draft) Following a link abandons Q's pending epoch with
 P (§6.3.1) whose `sig_R` was made by the link's `old_ik` (P dropped
 that answer at its rotation, S5), unless the message carrying the link
-travelled under that pending epoch (it has just confirmed it). A link
+traveled under that pending epoch (it has just confirmed it). A link
 carried under an epoch E of P, while Q's current epoch is later than E
 and signed by the link's `old_ik`, shows that P never activated that
 later epoch: Q demotes it and reconnects naming E, which P accepts as
@@ -4221,11 +4243,15 @@ each recipient Q).
   new `ik` current, P abandons its own open rekeys and reconnects with
   every peer and starts them again under the new `ik` after the
   `identity.rotate`, so it never sends an `hs.fin` signed by a superseded
-  `ik` ((0.86.0 draft) and abandons its pending epochs and drops its
-  answers awaiting `hs.fin`, revoking their tokens: their epochs would
-  be signed by the superseded `ik`; Q abandons the matching pending
-  epoch when it follows the link, "Epochs after an `ik` link"; a later
-  `hs.fin` for a dropped answer is acked and dropped).
+  `ik` ((0.86.0 draft) and abandons its pending epochs). (0.86.0 draft)
+  **Answers awaiting `hs.fin`.** To a peer that advertises `hs_confirm`
+  (§6.3.1 "Deployment"), P drops them and revokes their tokens: their
+  epochs would be signed by the superseded `ik`. Q abandons the matching
+  pending epoch when it follows the link ("Epochs after an `ik` link"),
+  and a later `hs.fin` for a dropped answer is acked and dropped. To any
+  other peer, which activates at `hs.fin`, P keeps the answer: it
+  establishes the epoch at that `hs.fin` (S8 carries the links to the
+  new `ik`) and then at once starts a rekey under the new `ik`.
   (0.86.0 draft) **Resend.** P sends `identity.rotate` to Q again (with
   S8's links) when Q's view is evidently stale: a session message from
   Q under an epoch whose P-side signer is an ancestor of P's `ik`,
@@ -6253,7 +6279,7 @@ both advertise `hs_confirm` ("Deployment", below).
 |---|---|
 | An initiator's handshake awaiting `hs.resp` | 16 days from `hs.init` (§6.6 "After a restore": 7 days) |
 | A responder's answer awaiting `hs.fin` (`L`) | 16 days from its `hs.resp` |
-| An initiator's pending epoch awaiting confirmation (`B`) | 32 days from `hs.fin` (`L` + `T` + 2 days), judged only after the first collect that follows an unlock |
+| An initiator's pending epoch awaiting confirmation (`B`) | 32 days from `hs.fin` (`L` + `T` + 2 days), judged only after the first collect after an unlock that returns fewer than `max` messages (§12.2) |
 | A responder's confirmed epoch while not current (below) | keys: up to 48 days (`B` + `T` + 2 days of clock skew) from the first activation that superseded it, and 16 days (§6.5) once it stops being the confirmed epoch; id: until it stops being the confirmed epoch or the connection ends |
 
 An expired handshake or answer is destroyed and the tokens it carried are
@@ -6328,13 +6354,25 @@ devices); once seen it stays. Toward every peer it applies the responder
 half: `hs.confirm`, the confirmed epoch, accepting a rekey or reconnect
 naming it, rule E, and §6.5's rekey block. The initiator half (pending
 epoch, `B`) applies only toward a peer that advertises `hs_confirm`.
-Toward any other peer `I` activates at `hs.fin` as before, but keeps the
-old epoch's send keys, `rk` and receive keys until it receives anything
-under the new epoch, at most 48 days. If before that it receives from
-the peer a session message under the old epoch whose inner `ts` is more
-than `T` + 1 hour after its `hs.fin` (so the peer never activated), it
-**reverts**: the new epoch is destroyed, the old one is current again,
-and `I` rekeys from it. Messages it sent under the new epoch are lost.
+The gate is fixed per handshake when its `hs.init` is sent; a
+`features` that arrives later changes only later handshakes. Toward a
+peer without the gate `I` activates at `hs.fin` as before, but keeps the
+old epoch's send keys, `rk` and receive keys, and a copy of each message
+it sends under the new epoch, until it receives anything under the new
+epoch, at most 48 days. If before that it receives from the peer a
+session message or a rekey `hs.init` under the old epoch whose inner
+`ts` is more than `T` + 2 days (the skew budget of the lifetimes, above)
+after its `hs.fin` (so the peer never activated), it **reverts**, in one
+write before it processes that message: the new epoch is destroyed and
+the old one is current again; `I` seals every message it sent under the
+new epoch again in the old one, with the same inner id and a new `ts`
+(receivers dedupe by inner id, §8.2); it audits
+`connection.epoch_reverted` (`connection_id`) and shows in History (NEW)
+"<connection name>: some messages were resent."; then it answers the
+peer's rekey, or starts one from the old epoch. If the two sides
+disagree on the gate (one has not yet seen the other's `features`), an
+answer dropped by S5 is repaired by the demotion of §3.4.1 "Epochs
+after an `ik` link".
 
 ### 6.4 Connections and invitations
 
@@ -6941,13 +6979,22 @@ Either side MAY rekey sooner. The side that hits the limit initiates. A
 new connection's or device's first epoch counts from its activation
 (§6.3), not from `hs.fin`; a pending one is never rekeyed (0.10.3). If both
 sides initiate at once, the `hs.init` with the lower `th1` wins (compared as
-big-endian byte strings). (0.86.0 draft) A side starts no rekey with a
+big-endian byte strings). (0.86.0 draft) The lower-`th1` rule applies to
+any two crossing handshakes of a connection, whatever their purposes
+(between a service and a member, §6.6 "Crossing reconnects" decides
+two reconnects).
+A side starts no rekey with a
 peer while one of its answers to that peer awaits `hs.fin` or while its
 own new epoch awaits confirmation (§6.3.1; S5 in general).
 
 Reaching the limit does not stop sending: both sides keep sending in the
 old epoch until the new epoch activates (at the initiator, at
 confirmation, §6.3.1), so that a locked peer does not block delivery.
+(0.86.0 draft) So the 10,000-message limit is exceeded while an epoch
+is pending, for up to 32 days (`B`). That is safe: session mode draws a
+fresh random 192-bit nonce for each message (§4.2), so no count of
+messages under one key brings a nonce repeat within reach; the limit
+bounds what one epoch key exposes, not the AEAD.
 An earlier initiator's first messages in the new epoch can reach
 the responder before its `hs.fin`; the responder leaves them unacked
 until the epoch is established (§6.3, 0.23.0).
@@ -11475,7 +11522,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `connection.stale`, `connection.reconnected`; (0.72.0)
   `connection.restored_reconnect` (`connection_id`, `ref` = the named
   epoch's activation time, §6.6) and `connection.fork_suspected`
-  (`connection_id`, §6.6); `identity.rotated`;
+  (`connection_id`, §6.6; (0.86.0 draft) `ref` = `epoch`, `relay`,
+  `relay_revoked` or `own_copy`, §3.4.1); (0.86.0 draft)
+  `connection.epoch_reverted` (`connection_id`, §6.3.1);
+  `identity.rotated`;
   `credential.created`, `credential.rotated`, `credential.password_changed`,
   `credential.password_failed`, `credential.unlocked`;
   `credential.recovered`; (0.52.0) `credential.utk_resync`
@@ -13295,7 +13345,7 @@ sig        = standard base64 of Ed25519(credential key, "leash/v1/delegation" ||
   | Member | Here |
   |---|---|
   | `v` | `1` |
-  | `iss` | The member's credential key (§3.5.1), its 32-byte Ed25519 public key in standard base64. (Before 0.12.0 it travelled beside the delegation as `key`.) |
+  | `iss` | The member's credential key (§3.5.1), its 32-byte Ed25519 public key in standard base64. (Before 0.12.0 it traveled beside the delegation as `key`.) |
   | `sub` | The agent's `ik` (its connector key, §6.7), likewise (was `agent_ik`) |
   | `grant_id`, `version` | The grant's (§10.1) |
   | `scope` | An object: `op`, the grant's scope (an owner type or `items.read`, below); `connections` when the grant has them; for `items.read`, the rule's `tags`, `match` and `access`, and `uses` when the rule has it. These were top-level members before 0.12.0 (`scope` was the bare string). |
@@ -17061,7 +17111,7 @@ already made:
     recovery's register have, so every chain that was attested over
     the alternate channel fits the unlock that re-sends it (real
     chains are 3,100 to 3,300 bytes, §11.7). **Known limit:** a chain
-    attested in a transfer's `hs.init` travelled in a handshake
+    attested in a transfer's `hs.init` traveled in a handshake
     envelope, which is larger; such a chain above about 8,100 bytes
     could not be sent again at unlock, and that vault would bind only
     by a new transfer or a recovery. None is known.
@@ -26573,29 +26623,76 @@ Follow-ups:
     would be lost; and it rekeys while its answer awaits `hs.fin`, so
     crossings can split. Hence the gate and, toward ungated peers, the
     revert rule (§6.3.1 "Deployment").
+    **Release-28 initiators keep the bug until both sides run 29.** A
+    release-28 initiator activates at `hs.fin`. If that `hs.fin` is
+    lost, the pair still splits, and nothing on the release-29 side
+    repairs it: the responder's rekeys from the old epoch are refused
+    (`rekey_not_current_epoch`), its reconnect naming the old epoch is
+    refused (`reconnect_refused`), and the pair goes `stale`. A new
+    invitation is needed. *An option for the owner only (not in the
+    normative text):* the responder keeps an expired answer's keys for
+    `T` more, so that a late `hs.fin` still establishes it; never for a
+    reconnect's answer.
     **Release 29** (the held release 28 plus this):
     - **(R1, recommended) everything, gated.** Between two vaults of 29
       the gate opens once each has the other's `features` (first unlock
       under 29), and from then on a lost `hs.fin` cannot split them.
       Before that, and toward peers of 28 or earlier, the initiator
-      still activates at `hs.fin`: a split still happens, and is
-      repaired (by the revert) as soon as the peer sends anything more
-      than 14 days after the `hs.fin`, losing what the initiator sent
-      under the new epoch. A quiet ungated peer stays split until it
-      sends; crossings with an old responder can still split.
+      still activates at `hs.fin`, and a split still happens. A 29
+      initiator repairs it by the revert as soon as the peer sends
+      anything under the old epoch more than `T` + 2 days after the
+      `hs.fin`, and resends what it sent under the new epoch. Open
+      cases: (a) a release-28 initiator (above); (b) a quiet ungated
+      peer stays split until its next rekey or message once unlocked.
+      A vault rekeys within 24 hours of unlocked time (§6.5), so only a
+      device or agent can stay quiet longer; (c) crossings with an old
+      responder can still split.
     - **(R2) the responder half only** ("release A"; the initiator half
-      in 30). It fixes nothing of finding C by itself: initiators still
-      activate at `hs.fin`, so two vaults of 29 still split. It only
-      lets 30 enable the initiator half sooner. Release 28's bug ships.
+      in 30). Initiators still activate at `hs.fin`, so two vaults of 29
+      still split on a lost `hs.fin`. But they repair at the
+      responder's first rekey after its answer expires (at most `L` +
+      24 hours of unlocked time): the initiator's confirmed epoch is
+      still the old one, so it accepts the rekey, and rule E destroys
+      the new epoch. Everything the initiator sent under the new epoch
+      is lost. That loss is R2's cost against R1, not a lasting split.
+      It lets 30 enable the initiator half sooner.
     - **(R3) responder half plus the revert, no confirmation.** Option
-      B in effect: splits happen and recover after 14 days with loss.
+      B in effect: splits happen and are repaired by the revert after
+      `T` + 2 days, which resends what the initiator sent meanwhile.
+    **The lead's review** (independent, FIX FIRST, fixed in this
+    draft) recommends R1 with three of its fixes: S5 keeps an answer
+    to a peer without `hs_confirm` (§3.4.1); the lower-`th1` rule for
+    any two crossing handshakes (§6.5); and the revert that resends and
+    waits `T` + 2 days (§6.3.1 "Deployment").
     **To decide:** A or B; R1, R2 or R3; the lifetimes (16, 16, 32, 48
-    days). The trust model finds the split gone under A between gated
-    peers; it does not model releases of 28 or earlier, nor an old copy
-    collecting the original's mailbox (an independent review did). The
-    model's findings H, G, E, I, J, K and the review's F1–F13 are fixed
-    in §6.3.1 and §3.4.1; A (rule C compares seen links) and B (a relay
-    fork is recorded while suspended) in §3.4.1.
+    days); the option for release-28 initiators above.
+    **What the model shows.** The trust model finds the split gone
+    under A between gated peers. It does not show: the direction of a
+    release-28 initiator with a release-29 responder (above); clock
+    skew; collect paging; the 4-deposit quota of the reconnect token;
+    the 7-day window of §6.6 "After a restore"; the epoch history of
+    service connections; the cryptography behind confirmation (it
+    takes opening under an epoch's key as given); and devices on older
+    releases. The model's findings H, G, E, I, J, K are fixed in §6.3.1
+    and §3.4.1; A (rule C compares seen links) and B (a relay fork is
+    recorded while suspended) in §3.4.1. The independent review's
+    findings F1–F13, and the sentence that fixes each:
+
+    | Finding | Fixed by | Model test |
+    |---|---|---|
+    | F1 (High): a message from an old copy that Table A refuses could confirm an epoch the original dropped | §6.3.1 "Initiator": a message "that `acceptFrom` does not refuse at steps 1–4 … **confirms** it"; §3.4.1 "Epochs after an `ik` link": "A link carried under an epoch E of P, while Q's current epoch is later than E and signed by the link's `old_ik`, shows that P never activated that later epoch" | TBD |
+    | F2 (High): fork evidence depended on deposit order, which the relay asserts | §3.4.1 "Epochs after an `ik` link": "a `ctx` naming Q's current or confirmed epoch … is ordinary; a `ctx` naming an epoch older than Q's confirmed epoch, where an epoch after it up to the confirmed one has as its epoch signer (P's side, Terms) an ancestor of P's `ik`, is fork evidence", with its exception for an epoch Q began | TBD |
+    | F3 (Medium-High): rule E's destruction hid fork evidence | §6.3.1 rule E: "records them with the accepted `hs.init`'s inner `ts`. An authenticated message under one of them with a later inner `ts` is fork evidence" | TBD |
+    | F4 (High): a new initiator with an older responder lost messages | §6.3.1 "Deployment": "The initiator half (pending epoch, `B`) applies only toward a peer that advertises `hs_confirm`", and the revert | TBD |
+    | F5 (Medium): when a confirming message takes effect | §6.3.1 "Initiator": "The confirmation takes effect before anything else is done with the message (dedupe, the `ts` window, step 5, its handler)"; §3.4.1: "unless the message carrying the link traveled under that pending epoch" | TBD |
+    | F6 (Medium): which epoch is "last" confirmed, and how long its keys stay | §6.3.1 "Responder": "the newest epoch, in activation order, … it never moves back"; "Lifetimes": "16 days (§6.5) once it stops being the confirmed epoch"; "Initiator": "entries already sealed under the old epoch are deposited as they are" | TBD |
+    | F7 (Medium): when rule E destroys epochs | §6.3.1 rule E: "in the write that establishes such a handshake's epoch at its verified `hs.fin`" | TBD |
+    | F8 (Medium): §6.6 "Accepting `ctx`" contradicted itself | §6.6: "also accepts its pending epoch, and its confirmed epoch while that is not current (§6.3.1), except that a side which has sent `hs.fin` for its own reconnect refuses its earlier epoch"; "'Last epoch' means the current epoch" | TBD |
+    | F9 (Medium): no reconnect while an epoch is pending | §6.3.1 "Initiator": "on `token_expired` it abandons the pending epoch and reconnects naming its current epoch"; at `B`, "a device: rekeys if its standing token is valid, else pairs again" | TBD |
+    | F10 (Low-Medium): `hs.confirm` resent without a cap | §6.3.1 "Responder": "queues `hs.confirm` again (a new inner id) unless one to `I` is still in its outbox"; "not a request, so never answered" | TBD |
+    | F11 (Low-Medium): S5's resend fired on normal traffic | §3.4.1 S5 "Resend": "with an inner `ts` more than 1 hour after P's first `identity.rotate` to Q" | TBD |
+    | F12 (Low): rule J unclear | §6.3.1 "Lifetimes": "`R` holds no standing token for `I` that is valid by its `exp` on `R`'s clock (one the rekey's `hs.init` carried counts; no deposit is tried). Then neither the rekey block of §6.5 nor §6.6's holds `R` back" | TBD |
+    | F13 (Low): no margin in the lifetimes; smaller gaps | §6.3.1 "Lifetimes": "up to 48 days (`B` + `T` + 2 days of clock skew)" and `B` "judged only after the first collect after an unlock that returns fewer than `max` messages"; §6.2: "the epoch the `hs.init` travels under"; §6.6: "An epoch enters it only once it has been current"; §3.4.1 I1 split into *Quiescence* and *Then* | TBD |
 
 ## 16. Test vectors
 
