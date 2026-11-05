@@ -1,8 +1,8 @@
 ---
 title: STAGING-TIME-SCALE
 status: draft, approved by the owner 2026-10-18
-version: 0.1.5
-date: 2026-11-01
+version: 0.1.6
+date: 2026-11-05
 owner: Al Liebl (Mesmer)
 component: vault (enclave, release constants), member API, apps (Android, iOS), dev stack
 related:
@@ -14,6 +14,7 @@ related:
   - VAULT-LOCK.md (0.1.2) (the idle lock), AGENT-PLAN.md (0.1.6) (the dev stack's held-vault test)
   - vettid-vault `main` f0976ee (read only: `enclave/releasecfg/*.json`, `releasecfg.go` and the timer constants)
 changelog:
+  - 0.1.6: VAULT-MESSAGING 0.85.1. S18, S19: the relay-key gate's 30-day deadline and §3.4.1 S1's 30 days before an unfollowed recipient goes `stale` are the vault's own waits and are divided by `time_scale` (30 h at 24)
   - 0.1.5: VAULT-MESSAGING 0.82.0 (owner decision 2026-11-01). N16: an
     `approval` challenge's life (up to 24 h) is not scaled by the vault;
     its challenger is service-vault, which has no `time_scale`, and its
@@ -106,6 +107,8 @@ value at `time_scale` 24.
 | S15 | Account site PIN locked after 15 failures in a day | member API | MEMBER-API rate limits | 24 h lock (the day of counting unchanged) | 1 h lock |
 | S16 | Vault update banner dismissed | app | ANDROID-PLAN 0.1.19 | at most 24 h | at most 1 h |
 | S17 | Wallet spend cap period (VAULT-MESSAGING 0.56.0; proposed, for the owner's approval) | vault | §10.18 "Spend caps" | rolling 24 h | rolling 1 h; the ledger keeps absolute times |
+| S18 | Relay-key gate deadline: the vault rotates without the recipients still not advertising `relay_follow` (VAULT-MESSAGING 0.85.1) | vault | §3.4.1 "The gate" | 30 days after the owed mark was set | 30 h |
+| S19 | A recipient that has not followed the vault's new relay key becomes `stale` (VAULT-MESSAGING 0.85.0) | vault | §3.4.1 S1 | 30 days after the second write | 30 h; the relay's grace and the tokens' lives stay real time (N6, N7) |
 
 Already short on staging and left as is: the **recovery waits** `W(k)`
 (§11.14.6), whose unit `recovery_wait_unit_seconds` is 86,400 in
