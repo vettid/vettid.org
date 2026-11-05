@@ -1123,6 +1123,72 @@
         "security": "recommended",
         "security_text": "Release 27 fixes three weaknesses in voting. The size of some messages your vault sent about a vote could depend on the choice you picked, so VettID's relay, which sees only the size of each message, could in some cases have told choices apart. A service could make your vault clear away a vote's record before its published results had checked out: by withholding them for 7 days, or, for a vote you did not cast, before the check was due. And your vault did not look for published results that list your vote's code twice. In either of the last two cases, a ballot the service had added or changed in your name could have gone unnoticed. We know of no use of any of them against any vault. Your PIN and credential password were not exposed. Vaults on releases 25 and 26 are affected."
       }
+    },
+    {
+      "release": 28,
+      "status": "candidate",
+      "pcr0": "31b9d2c40602edadd2e33de1b3822dbe698e495344ad4ddaddf9bb07ad5f5db582ab794e040578b0a6ad2154b357378d",
+      "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
+      "pcr2": "270c1ff1c253ebafc663a6c178d48cd5702e87db83a138aa083a7ce3853f07f25241443dfd5da4bc2bd4bf2747b2bf36",
+      "seal_key": "",
+      "admitted_pcr0s": [
+        "2303feb157143c5393fe55e8dd880f0ebc82f982c5f0e2a64e0d1c3b53e306d5c36641544185c1dfed7d7834188864e8",
+        "8eebbb1012f55e131ab24a8259d1e714ffc6cc2f9ea090c41e3773702979fd0756134b7035773f8b58ab174f864f5f7d",
+        "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e",
+        "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e",
+        "398b654dfcd98079fe558e4a2a2c000877fd59b4f9298383dc66ed0d54f6706938e1620f2d1d80b8cb02dca2eef3e72b",
+        "859733fa15df56bfedcb8c3a0a1524e9287aea6a8fa01d798d0f8c8df32cc2cbf32cdc5102bbd89b1f6c6e05e478e4bf",
+        "0f4d7915f5fc56aa7d705e82ddd14ec48e48ce3bb99217792b3e67bee9a6db6bd74dee16971d750f4af3a294e2bccdb2",
+        "082e1380273fd025f934e24941d6d91513e8e9e70d8d28ae3ea1dcc63b82c04bc0ee2ca495598df6355c1042ad90ec7e",
+        "76b9dc48934fde944227d2714fc93278f4527fefcd8152fd5471f7075d906f51a5430d5e2eb5f19a8906e80a0c5c1bba",
+        "937ccd203cc54a6da405ff9f2a612465befc4c3d77072f1683489b042cde07fad343bd25fb1115a3b6429fd5cf55c248",
+        "535e0fb98d08ee0c485c147f5f04c6d9826dfeb1a73210cb8bf2e0ec0f50fb74ffdb1ab3111a66c001c935bb8c967181",
+        "38daf72e76dcbb5672e69d664b8d5d619edf91ce7d3c523bedd823383b5515cf79c7e2da2100f0aefaca507049a40758",
+        "44f731679d8c0a9aa63a814f9f6eae03798879ee8aa6ed9da7a8fd0dde90613d5650ea0f16abbafac0c85edf4eb63d25",
+        "891a9401d7aa314e843cfc655e494899ed6e230c8a03cf4246f23197779d22a55c929fc22b2649f9d4207d4b1832ad24",
+        "d4e759beb13b906d063e1ee084bfd94dd441c82c8a101da8b02c2852a2b32a4ed89dcf372854c240a615fc37a964fe90",
+        "ed22773fa50f0507e06db63baffd4c64802e9c3bcd946706b2935a610d1ddf1f80baa779f20bb07bad4c34bd915fc32e",
+        "108dc95d6bc310e39c8cfcd18c20ad5fc40c252e6e562ddcd1752b29f1a701c2790f5727cf401e4ddab51dd2cef6ff1a",
+        "2c44e12be20a6683cc733929a8c752cd0ea19fce88e2769efc9e57987d3764df1cadb2d08b4979bcde84bd2e277e6006",
+        "067f83f975f71b6637417af147b0d14f6481f9cf45a6a2352d51eb2d07c554e7a07f0fc75273de22d25616c680f432af",
+        "6fa87c5c02d14e95004769b2475a334a7cb1f23a5e1823ab87e3ffa2bfd6cb25dd01aed0ebdf48723ee400c8c2bcc699"
+      ],
+      "notes": "https://staging.vettid.org/security/releases/28/",
+      "host": {
+        "tag": "release/staging/28",
+        "source_commit": "0ee007810fc9d6b7b2282db3845d704556cb325b",
+        "measurements_sha256": "b3f61e29ba16253947e1f3bfec234954b6e06d662db8f7802787eb0e944e8a4c",
+        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
+        "nitro_cli_version": "1.5.0",
+        "base_ami": "ami-04048e843b318bc37",
+        "ami_revision": 0,
+        "min_instances": 0,
+        "max_instances": 2
+      },
+      "log": {
+        "summary": "Release 28 changes your vault's keys when you move to a new phone, and fixes phone moves and key changes that a failed save or a crash could break.",
+        "changes": [
+          "When you move your vault to a new phone, it now also changes the key your credential signs with, and tells your connections the new key when the new phone first unlocks it. Before, a move changed only the key that encrypts your credential.",
+          "So your old phone, even with your PIN, your password and an old copy of your vault's stored data, can no longer sign in your name once your connections have the new key.",
+          "Votes: a vote still open when you move to a new phone is signed again with the new key and sent only after the service has been told that key, so the service does not refuse it.",
+          "Between approving a move on your old phone and the new phone's first unlock, your vault now refuses to approve a sign-in or to grant access to a desktop or agent, and asks you to finish the move first. This usually takes a few minutes.",
+          "After a move, once VettID's relay has taken your old phone's notice that it was replaced, your vault also changes the keys it uses with your devices and connections. If the notice cannot be delivered, this happens at your first unlock 7 days or more after the move.",
+          "Your vault now tries again at each unlock to tell your old phone that it was replaced, until VettID's relay accepts or refuses the notice. Before, it tried once.",
+          "Each time your vault changes these keys, after a move, a recovery or a change of your credential key, it now also replaces the key it uses to wake your phone, and asks your phone to register for notifications again.",
+          "If your vault crashed or restarted just after changing its keys, your devices' connections to it could stay broken across unlocks. Now a session begun under the old keys is ended and started again under the new ones.",
+          "If your vault failed to save a move to a new phone and then locked, it could still send the unsaved removal of your old phone, leaving neither phone able to open your vault. Now what your vault has queued to send waits until the change behind it is saved.",
+          "While your vault has a save it could not finish, a phone move or a change of your PIN or password now answers \"try again\" and uses up nothing, until the save goes through. Before, such a change could leave your old phone, which your vault still had on record, unable to unlock it.",
+          "If your vault finds that another copy of it saved first while it was sending messages, it now stops cleanly. Before, it could crash.",
+          "If a connection request or a reconnection your vault began before a change of its keys is still open when you next unlock or recover your vault, it is now ended: the access it gave the other side is withdrawn, and you are told if a new connection failed.",
+          "Declining a service's approval request no longer stops its approval requests for 7 days or counts toward pausing them, so declining a false one does not block its real ones. A 7-day stop from an earlier release is lifted; a pause already in place stays until you resume it.",
+          "When a connection changes its key twice in a row, your vault now follows both changes. Before, it could refuse the second and treat it as an unexplained change of key.",
+          "If your vault were ever moved back to an older release, a phone move would no longer change its keys, a failed save could again send unsaved changes, a key change could again break a connection, and declining an approval request would again block that service for 7 days.",
+          "Time scale: 1 day = 1 hour (staging)",
+          "Built from vettid-vault commit 0ee0078 (tag release/staging/28) and independently rebuilt on 2026-11-05 with a matching PCR0."
+        ],
+        "security": "recommended",
+        "security_text": "Release 28 fixes three faults and closes a gap left by a move to a new phone. If a save failed during a move to a new phone and your vault then locked, it could still tell VettID's relay to cut off your old phone, so that neither phone could open your vault. If your vault crashed or restarted just after changing its keys, it could finish setting up your phone's session with a key your phone did not expect, and that session stayed broken. A connection request or reconnection begun before a change of keys and still open after your vault locked could be finished with the wrong key: that connection stayed broken, and if it was new, you were not told. And a move did not change the key your credential signs with, so your old phone, with your PIN, your password and an old copy of your vault's stored data, could still sign in your name. We know of no use of any of these against any vault. Your PIN and credential password were not exposed. Vaults on releases 7 to 27 are affected."
+      }
     }
   ]
 }
