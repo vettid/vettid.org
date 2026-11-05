@@ -4,8 +4,8 @@ status: draft
 version: 0.1.16
 date: 2026-11-05
 changelog:
-  - 0.1.16: editorial (status as of 2026-11-05); no rule changes. V6
-    status: V1 to V5 built, staging releases 1 to 27; the desktop on the
+  - 0.1.16: editorial (status as of 2026-11-05); no rule changes. The V6
+    status has V1 to V5 built, staging releases 1 to 27; the desktop on the
     relay and its staging run of 2026-11-05 (two fail-secure display
     faults open, vettid-desktop #79 and #80); Android #291, iOS I4
   - 0.1.15: owner decision 2026-11-02: §8 follow-up 1 (a retention hint
@@ -273,11 +273,11 @@ session; `vault.status` returns a device's own session, VAULT-MESSAGING
 - iOS: under way (IOS-PLAN), through I4's network and performance work
   (vettid-ios #211, #212).
 - Desktop: on the relay. NATS is removed, and pairing, sessions and
-  access sessions run through the relay (vettid-desktop #50 to #64). The
-  saved pairing is protected at rest by DPAPI on Windows and by the TPM
-  or the Secret Service on Linux (#67, #69, #70). The Windows
-  uninstaller deletes a saved pairing and confirms it (#71, #73). The
-  scripted staging run (vettid-desktop `docs/STAGING-CHECKLIST.md`) ran
+  access sessions run through the relay (vettid-desktop #50 to #59,
+  #61 to #64). The saved pairing is protected at rest by DPAPI on
+  Windows and by the TPM or the Secret Service on Linux (#67, #69,
+  #70). The Windows uninstaller deletes a saved pairing and confirms
+  it (#71), also for managed installs (#73). The scripted staging run (vettid-desktop `docs/STAGING-CHECKLIST.md`) ran
   on 2026-11-05 against staging release 27 with Android #291. Pairing,
   End session, the vault locked on the phone, Log out and the uninstall
   passed. Two fail-secure display faults are open: a rejected pairing
