@@ -29,13 +29,13 @@ related:
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.86.0: 2026-11-05, DRAFT for owner decision (§15 item 50; open PRs
-    take 0.85.2 and 0.85.4). A lost `hs.fin` split a pair across two
-    epochs. New §6.3.1: handshake lifetimes stated; in a rekey or
-    reconnect the initiator activates only when the responder confirms
-    (new `hs.confirm`, or any message under the new epoch), else
-    abandons it after 32 days; the responder accepts the last epoch the
-    peer used until it confirms, fork checks first. Adjusted: §6.2 `ctx`,
-    §6.3, §6.5, §6.6 "Accepting `ctx`", §3.4.1 H5, S5 and I1, §10.
+    take 0.85.2 and 0.85.4). A lost `hs.fin` split a pair (finding C).
+    New §6.3.1: lifetimes; the initiator activates at the responder's
+    `hs.confirm` (or any message), else abandons after 32 days; the
+    responder keeps the epoch the peer last used. Trust-model findings
+    in §3.4.1: H, G, E (unconfirmed epochs destroyed, one fork rule), I
+    (S5 drops answers; `identity.rotate` resent), J, A (seen links in
+    rule C), B (relay forks recorded while suspended); I1.
   - 0.85.3: 2026-11-05, owner decisions of 2026-11-05 for the agent
     connector (option b, thread 01M6PBG2YHEEPDQ9ETQEBWK0EB: pin a
     bound program's content; option a, thread
@@ -4010,7 +4010,8 @@ these rules hold against anyone but the relay and its host (§13.5).
   handshake (§6.3). The reasons: `suspended`, `foreign_sender`,
   `superseded_relay`, `relay_rollback`, `relay_unlinked`,
   `token_unusable`, `ancestor_ik`, `rejected_ik`, `unknown_ik`,
-  `ik_rollback`, `conflict`, `unexpected`.
+  `ik_rollback`, `conflict`, `unexpected`, (0.86.0 draft)
+  `superseded_epoch` (§6.3.1).
 - **defer**: left unacked, unprocessed, so the relay delivers it again;
   only for a token rule T says to defer, for at most two of the relay's
   visibility timeouts (RELAY-PROTOCOL §6.3) after Q first saw it (that
@@ -4023,7 +4024,10 @@ these rules hold against anyone but the relay and its host (§13.5).
 
 **`acceptFrom`.** One function decides every message from P, wherever a
 message is taken (the collect loop, the handshake, the handlers), in
-this order: (1) Q's record of P is suspended: refuse; (2) the `sender`
+this order: (1) Q's record of P is suspended: refuse ((0.86.0 draft)
+after checking the message's relay links by rule C if its `sender` is
+not foreign, so that a relay fork is still recorded and
+`connection.rotation.resolve` answers `not_found`); (2) the `sender`
 is foreign: refuse; (3) **evidence first**: every identity link and
 relay link the message carries is checked by rule C, whatever the
 `sender`'s position, before step 4; (4) Table A, by the `sender`'s
@@ -4064,15 +4068,22 @@ Q sends nothing to P until a new epoch is established, starts a rekey
 sealed to the link's `new_kem`, and refuses messages under the demoted
 epoch deposited after x (`ancestor_ik`). A rekey or reconnect from P under
 the new `ik` whose `ctx` names an epoch Q superseded by one signed by an
-ancestor `ik` is fork evidence: Q suspends (§6.6 "Fork detection",
+ancestor `ik` **and established by a message deposited after the link
+that made that `ik` an ancestor** ((0.86.0 draft) the same condition as
+§6.3.1) is fork evidence: Q suspends (§6.6 "Fork detection",
 `ref` = `epoch`). An epoch established before this release counts as
 signed by the `ik` current for P at the upgrade. *Corner case:* a P whose
 answer **expired** before Q's `hs.fin` arrived, and that then rotated,
-is reported as two copies (S5 keeps an answer still awaiting `hs.fin`
-from causing this).
+is reported as two copies; (0.86.0 draft) under §6.3.1 it is not: Q's
+epoch stays pending and is abandoned when Q follows P's link.
 
 **Rule C, one successor per key.** A link whose old key already has a
-followed successor other than its new key is a second successor.
+followed ((0.86.0 draft) or seen) successor other than its new key is a
+second successor. (0.86.0 draft) Q keeps every valid link that passes
+step 3 as **seen**, followed or not (one in an unfinished handshake's
+`rotations`, or in a message Table A or B then refuses), at most one
+per old key (another is a conflict), except a link dropped at
+`connection.rotation.resolve`.
 - **Identity links** (in `identity.rotate`, `hs.init`, `hs.resp`): §3.4
   "One successor per key".
 - **Relay links** (in an update): the connection is suspended as a fork
@@ -4198,7 +4209,16 @@ each recipient Q).
   new `ik` current, P abandons its own open rekeys and reconnects with
   every peer and starts them again under the new `ik` after the
   `identity.rotate`, so it never sends an `hs.fin` signed by a superseded
-  `ik` ((0.86.0 draft) and abandons its pending epochs, §6.3.1). After
+  `ik` ((0.86.0 draft) and abandons its pending epochs and drops its
+  answers awaiting `hs.fin`, revoking their tokens: their epochs would
+  be signed by the superseded `ik`; Q abandons the matching pending
+  epoch when it follows the link and rekeys from its current epoch,
+  §6.3.1; a later `hs.fin` for a dropped answer is acked and dropped).
+  (0.86.0 draft) **Resend.** P sends `identity.rotate` to Q again (with
+  S8's links) when Q's view is evidently stale: a session message from
+  Q under an epoch whose P-side signer is an ancestor of P's `ik`,
+  deposited after P's rotation; at most once per batch and once per
+  hour per peer. After
   the rotation ((0.86.0 draft) and at any time, §6.5) P starts no rekey with a peer while one of its
   answers to that peer still awaits `hs.fin`, until that answer is
   established or expires (§6.3: a responder activates only at `hs.fin`,
@@ -4269,7 +4289,8 @@ PR):
 - **I1, liveness.** At quiescence (every party unlocked and online, no
   action pending, every lease expired and every message delivered and
   processed, time past every resend and handshake retry and (0.86.0
-  draft) every confirmation bound `B` of §6.3.1, less than 30 days
+  draft) every confirmation bound `B` of §6.3.1 and one rekey interval
+  (§6.5) after the last rotation, less than 30 days
   after the last rotation or, if `B` ends later, before S1 could make
   the pair `stale`), for every pair not suspended, removed
   or `stale`: each side's current relay key and `ik` for the other are
@@ -6214,7 +6235,10 @@ leave the two sides on different epochs (§15 item 50).
 | A responder's confirmed epoch (below) | its keys 46 days (`B` + `T`) from the first activation that superseded it; its id until the peer confirms a newer epoch or the connection ends |
 
 An expired handshake or answer is destroyed and the tokens it carried are
-revoked (§6.6); a later message for it is acked and dropped.
+revoked (§6.6); a later message for it is acked and dropped. An answer
+to a rekey that `R` cannot deposit (it holds no valid standing token for
+`I`) is destroyed the same way at once, so §6.6's "no reconnect while an
+answer awaits `hs.fin`" does not hold `R` back: it may reconnect.
 
 **Initiator.** Once `I` has sent `hs.fin`, the new epoch is **pending**:
 established (its signer recorded, §3.4.1) but not current. Until it is
@@ -6257,7 +6281,10 @@ it: it stays until `I` sends under a newer epoch, however many epochs
   (the demoted epochs of "Epochs after an `ik` link"); otherwise it is
   fork evidence and `R` suspends (`ref` = `epoch`). An `hs.fin` that
   `I` sent before its own rotation (S5) is deposited before that link,
-  so it is not counted.
+  so it is not counted. When `R` accepts such a rekey or reconnect, in
+  the same write it destroys every later epoch with `I` that `I` never
+  confirmed (an abandoned pending epoch of `I`'s, or an old copy's)
+  and refuses any message under one from then on (`superseded_epoch`).
 - A reconnect needs only the id: after the keys are gone, a reconnect
   naming it is still accepted.
 
@@ -6272,8 +6299,9 @@ establishes `I`'s at `hs.fin`). A later one shows that `R`'s answer ended
 without `hs.fin` (§6.5): `I` abandons the pending epoch and answers it.
 
 **§3.4.1.** A pending epoch counts as an open handshake of `I`: H5 and S5
-abandon it when its pinned `ik` stops being current, and "Epochs after
-an `ik` link" abandons one whose signer is demoted; the rekey started
+abandon it when its pinned `ik` stops being current, and following a
+link of `R`'s abandons a pending epoch whose `sig_R` was made by the
+link's `old_ik` (`R` dropped that answer at its rotation, S5); the rekey started
 again names the current epoch, which `R` accepts as current or as its
 confirmed epoch.
 
@@ -26487,7 +26515,8 @@ Follow-ups:
     relay client's review, lead 2026-11-02): a retried open-token
     `hs.init` answered `token_used` or `token_revoked` waits for
     `hs.resp` until `exp` + 60 s.
-50. **A lost `hs.fin` (0.86.0, DRAFT for owner decision).** In a rekey
+50. **A lost `hs.fin`, and the trust model's findings (0.86.0, DRAFT
+    for owner decision).** In a rekey
     or reconnect the initiator activated at `hs.fin`, the responder at
     processing it. An `hs.fin` lost (relay TTL while the responder is
     locked; after its answer expired; with a mailbox deleted, §3.4.1)
@@ -26518,7 +26547,10 @@ Follow-ups:
     older device that sends no `hs.confirm` is not a practical gap:
     online, its own token refresh (about day 20) confirms before `B`;
     offline, it goes `stale` at 30 days. (The trust model finds the
-    split gone under A.)
+    split gone under A.) The model's checks of this draft also gave
+    H, G, E, I, J (§6.3.1) and, in §3.4.1 itself, A (rule C compares
+    seen links) and B (a relay fork is recorded while suspended); each
+    is fixed in the text.
 
 ## 16. Test vectors
 
