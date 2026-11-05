@@ -1,7 +1,7 @@
 ---
 title: AGENT-SEPARATE-ACCOUNT
 status: approved by the owner 2026-11-05 (§9); design note. Nothing here is built; AGENT-PLAN and the code follow
-version: 0.1.0
+version: 0.1.1
 date: 2026-11-05
 owner: Al Liebl (Mesmer)
 component: vettid-agent (the agent connector): install, process model, keys at rest, runs and proxies
@@ -9,6 +9,11 @@ related:
   - AGENT-PLAN.md (0.1.9; 0.1.10 in vettid.org #538) AG1a, AG3, AG4, AG11, §4.2, §4.6, §4.7, §4.9, A3.8, A3.9, A5
   - VAULT-MESSAGING.md (0.84.0; 0.85.0 in #538) §10.11 "Ways to use a secret"
 changelog:
+  - 0.1.1: 2026-11-05, with AGENT-PLAN 0.1.11 (A5.4). §5: the elevated
+    commands' absolute path per platform (macOS: inside the app, a path
+    with a space). §4: on macOS the socket's parent is a persistent
+    root-owned folder, since launchd's `Sockets` doesn't create parents
+    and `/var/run` is cleared at boot. No decision changes
   - 0.1.0: first draft, 2026-11-05. Owner decision of 2026-11-05
     (thread 01M6PDSRYVSZW19F68VE55KWSA): option c, the connector
     runs in an account of its own before runs and proxies ship, as the
@@ -275,7 +280,10 @@ and the service never takes another name.
   systemd socket activation (`ListenStream=/run/vettid-agent/<n>.sock`,
   `SocketUser=` the connector's account, `SocketGroup=` a group holding
   only the member, `SocketMode=0660`), and launchd's `Sockets` with the
-  same owner and mode. The gate is the peer check, not the mode: the
+  same owner and mode. On macOS the socket's parent is a persistent
+  root-owned folder, `/Library/Application Support/VettID/agent/run/`
+  (0755): launchd's `Sockets` doesn't create parents, and `/var/run` is
+  cleared at boot (AGENT-PLAN A5.4). The gate is the peer check, not the mode: the
   service compares the peer's uid (`SO_PEERCRED`, `getpeereid`, never
   the pid) with the recorded uid. The stub `lstat`s the socket (a
   symbolic link is refused) and checks that its owner is the
@@ -297,10 +305,13 @@ and the service never takes another name.
   of its own. Its own connector would then show its own SAS, the member
   would approve it, and that connector could ask for `item.run` itself.
   So these three run elevated, from the administrator-only absolute
-  path (`/usr/bin/sudo /usr/local/libexec/vettid-agent/vettid-agent
-  pair`, `sudo` by its absolute path too, since an rc file can alias it;
-  or the Start menu's elevated shortcut on Windows), and the README says
-  to start them only that way. Said plainly: a member with password-less
+  path, with `sudo` by its absolute path too, since an rc file can alias
+  it: on Linux `/usr/bin/sudo /usr/local/libexec/vettid-agent/vettid-agent
+  pair`; on macOS `/usr/bin/sudo "/Library/Application
+  Support/VettID/agent/vettid-agent.app/Contents/MacOS/vettid-agent" pair`
+  (quoted: the path has a space; AGENT-PLAN A5.4); on Windows the Start
+  menu's elevated shortcut. The README gives these lines as written, and
+  says to start them only that way. Said plainly: a member with password-less
   `sudo` (NOPASSWD), or UAC set to "never notify", gets no protection
   from this elevation, since the agent can elevate the same way. `status` needs no elevation. The SAS and the
   texts of AGENT-PLAN §11 are shown by the command, as today. The
