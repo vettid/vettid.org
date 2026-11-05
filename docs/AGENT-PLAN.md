@@ -16,8 +16,9 @@ changelog:
     which replaces a first choice that a program must be one only an
     administrator can change); and a program's variables are an
     allowlist in that binding (option a). §4.9 now says how the
-    connector runs exactly the file it hashed and what the pin does not
-    cover. A3.8 is split into A3.8a and A3.8b (§6). New texts in §11
+    connector runs exactly the file it hashed on each platform (and
+    where macOS falls short), that it refuses `#!` scripts and non-NTFS
+    Windows volumes, and what the pin does not cover. A3.8 is split into A3.8a and A3.8b (§6). New texts in §11
     are marked NEW, for the owner's approval
   - 0.1.9: editorial (status as of 2026-10-26); no rule changes. §6
     status paragraph: nothing has merged in vettid-agent since
@@ -686,9 +687,9 @@ allowed ways, so the agent can choose again.
   (`cmd.exe` parses its arguments again, so they can run other
   commands), a name found with another extension than `.exe` or `.com`,
   a UNC path, a stream name (`file:stream`), a drive that is not a
-  fixed local drive, and a junction or other reparse point anywhere in
-  the resolved path; on every platform, a path that is not a regular
-  file the operator may run. Each is `program_not_found`, with the
+  fixed local NTFS drive, and a junction or other reparse point
+  anywhere in the resolved path; on every platform, a path that is not
+  a regular file the operator may run, and a script (`#!`, below). Each is `program_not_found`, with the
   reason in the log.
 - **The program's content** (VAULT-MESSAGING 0.85.0; owner decision of
   2026-11-05, option b). The connector reads the resolved file once,
@@ -702,31 +703,56 @@ allowed ways, so the agent can choose again.
   file then runs under the item's settings as before.
 - **Run exactly what was hashed** (the lead's design note,
   2026-11-05). Never hash by path and then start by path: the file
-  could be swapped in between. (chosen; not in the spec) On Windows the
-  connector opens the file with sharing that refuses writing and
-  deleting, hashes it through that handle, and holds the handle until
-  the process has started from the same resolved path (as
-  `lpApplicationName`, with `NoDefaultCurrentDirectoryInExePath` set),
-  so the file cannot be changed, renamed or deleted in between;
-  A3.8a's tests check that renaming the file or a folder above it
-  fails while it is held. On Linux it starts the opened file itself
-  (`execveat` with `AT_EMPTY_PATH`). On macOS, which has neither, it
-  copies the file into `run/<id>/bin/` (owner-only) while hashing and
-  starts the copy; a program that finds its own files beside itself
-  may then fail, and says so in its error. Just before the start the
-  connector resolves `argv[0]` again and refuses the run
-  (`program_not_found`) if the path changed. The `program` sent and
-  shown stays the resolved original path.
-- **What the pin does not cover, said plainly.** It pins the one file
-  started. It does not pin what that program loads: libraries beside
-  it (on Windows, a DLL in the program's folder is loaded first),
-  a script's interpreter (`#!`), modules, plugins or configuration
-  files in folders the agent's user can change. An agent running as
-  the same user that changes those can run code inside the program that
-  receives the secret. A program installed where only an administrator
-  can change it (System32, Program Files, `/usr/bin`) does not have
-  this gap. The README says so, and that the connector must not run as
-  an administrator or root.
+  could be swapped in between, or, on Linux and macOS, written in
+  place. (chosen; not in the spec, to be confirmed by A3.8a's tests)
+  - **Windows** (NTFS volumes only; others are refused): the
+    connector opens the file with sharing that refuses writing and
+    deleting (an open that fails because another process has it open
+    for writing refuses the run), hashes it through that handle, and
+    holds the handle until the process has started. It starts the
+    process suspended from the same resolved path (as
+    `lpApplicationName`), checks that the started image is the held
+    file (the same volume and file ID), and only then resumes it;
+    otherwise it ends the process and refuses the run. The child's
+    environment holds `NoDefaultCurrentDirectoryInExePath=1`, so the
+    programs it starts are not looked up in its directory.
+  - **Linux**: the connector copies the file into a sealed memory file
+    (`memfd_create`, then `F_SEAL_WRITE`, `F_SEAL_GROW`,
+    `F_SEAL_SHRINK`, `F_SEAL_SEAL`) while hashing it, and starts that
+    (through its `/proc/self/fd/<n>` path, which Go's process start
+    can use). No one can change sealed content. A program that finds
+    its own files beside itself (through `/proc/self/exe`) may then
+    fail.
+  - **Scripts**: a file that starts with `#!` is refused as a program
+    (`program_not_found`), on every platform: its interpreter, which
+    does the work, is not pinned, and on Linux a script cannot start
+    from a sealed memory file. The agent can run the interpreter with
+    the script as an argument; that run is always referred
+    (VAULT-MESSAGING §10.11).
+  - **macOS**, which has neither a write-refusing open nor sealed
+    files: the connector copies the file into `run/<id>/bin/` while
+    hashing and starts the copy. This narrows the gap but does not
+    close it: an agent running as the same user can rewrite the copy
+    between the hash and the start. A program that finds its own files
+    beside itself may fail.
+
+  Just before the start the connector resolves `argv[0]` again and
+  refuses the run (`program_not_found`) if the path changed. The
+  `program` sent and shown stays the resolved original path.
+- **What the pin does not cover, said plainly** (VAULT-MESSAGING
+  0.85.0). It pins the one file started, at its path. It does not pin
+  what that program loads or reads: libraries beside it (on Windows a
+  DLL in the program's folder is loaded first, and one in its `cwd`
+  can be too), modules and plugins, or configuration in the user's own
+  profile (`HOME`, `USERPROFILE` and `APPDATA` are passed, and a
+  `~/.gitconfig` can make even `/usr/bin/git` run a command). Nor does
+  it stop a process of the same user from opening the running program
+  and reading its memory or environment (the lead's L4 of 2026-11-05:
+  inherent to a same-user agent). On macOS the copy narrows the swap
+  gap without closing it (above). So a program installed where only an
+  administrator can change it is safer, but not safe, against an agent
+  that runs as the connector's user. The README says so, and that the
+  connector must not run as an administrator or root.
 - **The directory.** `cwd` is an absolute path to an existing directory;
   absent, the run's `work/` (below).
 - **The run's own directory** (the lead's answer, 2026-11-05). Each run
@@ -738,15 +764,15 @@ allowed ways, so the agent can choose again.
 - **The environment.** The process never inherits the connector's
   environment. It gets only this minimal set, each copied from the
   connector's environment when present: on POSIX `HOME`, `USER`,
-  `LOGNAME`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`; on Windows `SystemRoot`,
-  `SystemDrive`, `windir`, `PATHEXT`, `USERPROFILE`, `USERNAME`,
-  `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA`. Set by the
-  connector: `PATH` (the fixed search path above), `TMPDIR` (POSIX) or
-  `TEMP` and `TMP` (Windows), pointing at the run's `tmp/`; (chosen;
-  not in the spec) on Windows also `SystemRoot` and `windir` from the
-  system's Windows directory, `SystemDrive` from its volume, and
-  `PATHEXT` as `.COM;.EXE`, never copied from the connector's
-  environment. Then the names the operator allows with `--run-env NAME`
+  `LOGNAME`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`; on Windows
+  `USERPROFILE`, `USERNAME`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`,
+  `LOCALAPPDATA`. Set by the connector: `PATH` (the fixed search path
+  above), `TMPDIR` (POSIX) or `TEMP` and `TMP` (Windows), pointing at
+  the run's `tmp/`; (0.1.10; chosen, not in the spec) on Windows also
+  `SystemRoot` and `windir` from the system's Windows directory,
+  `SystemDrive` from its volume, and `PATHEXT` as `.COM;.EXE`, never
+  copied from the connector's environment. All of these belong to the
+  minimal set for the name rule below. Then the names the operator allows with `--run-env NAME`
   (never the agent), then the request's `env` (at most 32 names, values
   at most 4,096 bytes), then the secret's variable. A name in `env` or
   `name` must match `^[A-Z_][A-Z0-9_]{0,63}$` and must not be one of the
@@ -796,24 +822,30 @@ allowed ways, so the agent can choose again.
   is true. Each is redacted (below) and then returned up to 64 KiB, as
   UTF-8 with invalid bytes replaced. `truncated` is true whenever what
   is returned is shorter than what the process wrote, the 64 KiB cut
-  included (the lead's answer, 2026-11-05).
+  included (the lead's answer, 2026-11-05). The answer is `{exit_code,
+  signal?, timed_out, stdout, stderr, truncated, redacted}`, where
+  `redacted` counts the replacements. It holds no value, so it is sent
+  in both MCP forms as other tools are.
 - **The operator's flags** (the lead's answer and the owner's decision
   of 2026-11-05, option a). `--run-path DIR`: an absolute path to an
   existing directory, at most 16. `--run-env NAME`: at most 32, each by
   the name rule above. The connector refuses to start on a bad value,
   with the texts of §11. It also refuses a `--run-path` directory that
-  the connector's user, or anyone else who is not an administrator, can
-  change, or one with such a directory above it, or one that is a
-  junction or other reparse point: a program found there could be
-  replaced by an agent running as that user. (chosen; not in the spec)
-  On Windows "can change" is the Windows access check for the
-  connector's own token (adding files, writing, deleting or changing
-  permissions); on POSIX it is a directory writable by its group or
-  others, owned by another user than root, or writable by the
-  connector's user. The answer is `{exit_code, signal?,
-  timed_out, stdout, stderr, truncated, redacted}`, where `redacted`
-  counts the replacements. It holds no value, so it is sent in both
-  MCP forms as other tools are.
+  the connector's user can change, or that sits below a folder the
+  user could replace, or that is a junction or other reparse point: a
+  program found there could be replaced by an agent running as that
+  user. (chosen; not in the spec) On Windows this is the Windows access
+  check for the connector's own token: for the directory itself,
+  adding files or folders, writing, deleting, or changing its
+  permissions or owner; for each folder above it, only what replaces
+  it: deleting or renaming it (`DELETE` on it, or deleting children of
+  its parent) or changing its permissions or owner, since every user
+  may add folders to `C:\`. On POSIX it is the directory, or a folder
+  above it, writable by its group or others, owned by a user other
+  than root, or writable by the connector's user (`access(W_OK)`, so
+  ACLs count). The check is for the connector's user; another
+  non-administrator user who can change the folder is caught only by
+  the group and others bits on POSIX, not on Windows.
 - **The value** stays in the connector's memory from the vault's answer
   until the process ends, then it is zeroed. It is never logged.
 - **The limit, said plainly.** A command chosen by a hijacked agent can
@@ -1018,7 +1050,7 @@ recorded as decided in the table and the changelog (0.1.4, 0.1.5).
 | A3.5 | Grant-set sequence numbers (§4.5; after AV7): the highest `grant_seq` kept in the state file; a higher one replaces the set; a lower one ignored; an equal one gives only fresher statements; `gen` kept for marks learned outside the sets; the `leash` state member at `"v": 2` | Unit tests: a list sent before a revocation and received after it does not bring the grant back; a higher-numbered update adds a grant; an equal number keeps the set and refreshes statements; a grant marked `not_found` stays dead under an equal or higher number until this process's own list answers; the pairing batch's number is not recorded; a re-paired state starts with none; a list or update without `grant_seq`, or with 0, is ignored and paced as a failed list, with `vault_too_old`; a `"v": 1` state member reads as number unknown |
 | A3.6 | **README note now** (AG13; before any vault change): the note of §11 "README note" in vettid-agent's README, in the MCP section. **Done** in vettid-agent #36 (`5cd72fe`), with the text as merged | The README carries the text exactly |
 | A3.7 | **Reveal as the last resort** (§4.9 "Reveal"; after AV9): `leash.request_secret`, and `leash.check_status` for an `item.get`, answer in one text block, no `structuredContent`, no output schema; descriptions in AG13's order; `ways`, `programs` and `hosts` in `leash.list_available`; `way_not_allowed` with the allowed ways | Golden files: `tools/list` shows no output schema for `leash.request_secret`, and its answer has exactly one content block and no `structuredContent`; the value appears once in the serialized answer; `way_not_allowed` gives its text with the ways; dev stack: an item without `reveal` refuses `leash.request_secret`, one with it is referred every time and returns the value once approved |
-| A3.8a | **`leash.run_with_secret`, part 1** (§4.9 "Run"; after AV9, AV10): resolution and what is refused as a program; the hash, and running exactly what was hashed; the run's own directory; the minimal environment, the `env` allowlist and the code-loading refusals; the three ways to pass the secret; the operator's flags and their startup checks | Unit tests: the child's environment is exactly the minimal set plus the request's (a test program prints it); `LD_PRELOAD`, `NODE_OPTIONS` and `PATH` in `env` refused, also when the binding lists them; a name the binding does not list refused; a bare name is resolved on the fixed path only; a relative path with a separator refused (on Windows also `\` and a volume); `.bat` and `.cmd` refused; a junction in the path refused; the `sha256` sent is the file's; a file renamed or replaced between the hash and the start does not run (Windows: the rename fails while held; macOS: the copy runs); the secret file is owner-only and gone after the run, and `run/` is emptied at start after a simulated crash; `--run-path` refuses a missing, relative or changeable directory or one below a changeable one, and more than 16; `--run-env` refuses a bad name and more than 32. Dev stack: a bound program's first run is referred with `program_unrecorded`, a matching later one runs without a prompt with `each: false`, a changed file is referred with `program_changed`; a bound shell or interpreter is still referred; an unbound one is referred and the approval shows argv, directory and how; a shell is flagged |
+| A3.8a | **`leash.run_with_secret`, part 1** (§4.9 "Run"; after AV9, AV10): resolution and what is refused as a program; the hash, and running exactly what was hashed; the run's own directory; the minimal environment, the `env` allowlist and the code-loading refusals; the three ways to pass the secret; the operator's flags and their startup checks | Unit tests: the child's environment is exactly the minimal set plus the request's (a test program prints it); `LD_PRELOAD`, `NODE_OPTIONS` and `PATH` in `env` refused, also when the binding lists them; a name the binding does not list refused; a bare name is resolved on the fixed path only; a relative path with a separator refused (on Windows also `\` and a volume); `.bat` and `.cmd` refused; a junction in the path refused; the `sha256` sent is the file's; a file renamed, replaced or written in place between the hash and the start does not run (Windows: the write and the rename fail while held, and a started image that is not the held file is ended; Linux: the sealed copy runs; macOS: the copy runs, the remaining gap stated); a `#!` script and a non-NTFS volume refused; the secret file is owner-only and gone after the run, and `run/` is emptied at start after a simulated crash; `--run-path` refuses a missing, relative or changeable directory or one below a changeable one, and more than 16; `--run-env` refuses a bad name and more than 32. Dev stack: a bound program's first run is referred with `program_unrecorded`, a matching later one runs without a prompt with `each: false`, a changed file is referred with `program_changed`; a bound shell or interpreter is still referred; an unbound one is referred and the approval shows argv, directory and how; a shell is flagged |
 | A3.8b | **`leash.run_with_secret`, part 2** (§4.9 "Run" and "Redaction"): output redaction, process group or job and its kill, the time, size and concurrency limits, `truncated`, referred runs started at once | Unit tests: each of the redacted forms of §4.9 is replaced, also when split across reads and in standard error; a value never appears in the answer, the logs or the run directory after the run; the time limit kills the whole process group; output past 1 MiB is truncated and flagged, and so is output cut at 64 KiB; a third run is `rate_limited_local` and no `item.run` is sent for it; a referred run starts when the approval arrives and its redacted answer is kept for `check_status`; runs are killed when the connector exits |
 | A3.9 | **`leash.open_proxy`, `leash.close_proxy`** (§4.9 "Proxy"; after AV9, AV11) | Unit tests against a local TLS test server with a test root: the header is added only to the bound host; an incoming copy of the header is dropped; a wrong token, a wrong `Host`, an `Origin` header, an absolute-form or `CONNECT` request get 403 or 405 and reach nothing; a redirect to another host becomes 502 `redirect_refused`, one to the same host is rewritten; the value and its encodings in response headers and body (also across chunk boundaries) are replaced; a compressed response is refused; a certificate not valid for the host fails; the proxy closes at `expires_at`, at `leash.close_proxy` and when the session ends. Dev stack: opening is referred and the approval shows host, header name and length |
 
@@ -1092,7 +1124,7 @@ AV7 and AV8 change the enclave and ship in a staging release.
 | AV7 | **Grant-set sequence numbers** (VAULT-MESSAGING 0.41.0 §10.11). **Not started.** One counter in the vault's sealed state; every change to an agent's grant set (a grant issued, replaced or revoked, a share rule of the agent set or deleted, a grant revoked with its connection, suspension, resumption, the set a pairing completes with) takes its next value; `leash.grant.updated` and the agent's `leash.grant.list` answer carry it as `grant_seq`; never reset, never reused; tests for each change and for a re-paired agent | §10.11, §8.4 | Without it, a `leash.grant.list` answer sent before a revocation can arrive after it and bring the grant back | A3.5 |
 | AV8 | **The device's own session in `vault.status`** (VAULT-MESSAGING 0.41.0 §10.2). **Not started.** `vault.status` to a desktop or agent also returns `session: {session_id, expires_at}` for the caller's own current access session, or `null`; never another device's | §10.2, §6.8 | An agent has no message that returns its own session; the connector probes with `leash.grant.list` (§4.3 step 4) | — |
 | AV9 | **Ways to use a secret: settings, catalog, reveal off** (VAULT-MESSAGING 0.42.0 §10.11). **Not started.** `leash.item.set` and `.list`, the settings per agent and item, the unlock window to widen, deletion when the item is no longer included, `sync.event{leash.item.changed}`; `ways`, `programs` and `hosts` in `catalog`; `item.get` only with `reveal` (`way_not_allowed`, counted as refused) and always referred; `approval.pending{flags}`; every existing agent item starts with `["use"]`. (0.1.10, VAULT-MESSAGING 0.85.0) `programs` entries are `{program, sha256?, env}`: `sha256` recorded by the vault, never the app, when the member approves a run flagged `program_unrecorded` or `program_changed`, and kept or dropped (never set) by `leash.item.set`; `env` names checked by the name rule, adding one widens; the catalog's entries without `sha256` | §10.11, §10.12, §6.8 | `item.get` hands every included item's value to the agent's app, which may keep it in its history | A3.7 |
-| AV10 | **`item.run`** (§10.11). **Not started.** Checks of `program`, `argv`, `cwd`, `how`, `name` and `env`; `programs` binding (`program_not_allowed`); referral when `each`, unbound, or a shell or interpreter; `flags` (`shell`, `inline_code`, `unbound_program`); (0.1.10, VAULT-MESSAGING 0.85.0) `sha256` checked against the matched entry, a missing or different hash referred with `program_unrecorded` or `program_changed` (with `previous_sha256`) and recorded on approval unless the settings changed meanwhile; `env` names only from the matched entry's `env`, none for an unbound item (`env_not_allowed`, counted as refused); the code-loading names refused; the windows and `uses` counted; `leash.item.run` audited and in the feed. Tests for each refusal, each flag and each referral case | §10.11 | The second way needs the value released to the connector for one approved command | A3.8 |
+| AV10 | **`item.run`** (§10.11). **Not started.** Checks of `program`, `argv`, `cwd`, `how`, `name` and `env`; `programs` binding (`program_not_allowed`); referral when `each`, unbound, or a shell or interpreter; `flags` (`shell`, `inline_code`, `unbound_program`); (0.1.10, VAULT-MESSAGING 0.85.0) `sha256` checked against the matched entry, a missing or different hash referred with `program_unrecorded` or `program_changed` (with `previous_sha256`) and recorded on approval unless the settings changed meanwhile; `env` names only from the matched entry's `env`, none for an unbound item (`env_not_allowed`, counted as refused); the code-loading names refused; the windows and `uses` counted; `leash.item.run` audited and in the feed. Tests for each refusal, each flag and each referral case | §10.11 | The second way needs the value released to the connector for one approved command | A3.8a, A3.8b |
 | AV11 | **`item.proxy`** (§10.11). **Not started.** Always referred; `host` among the item's `hosts`; `seconds` bounded by 3,600 and the access session; a value that is not header-safe refused; `leash.item.proxy` audited and in the feed; tests for each | §10.11 | The third way needs the value released to the connector for one host and a bounded time | A3.9 |
 
 ### 7.2 vettid-android (ANDROID-PLAN "Devices & agents", owner approval)
@@ -1332,9 +1364,22 @@ approval, each marked NEW except where the owner already chose it:
   start), NEW: "The program changed while it was being started, so it
   was not run. Try again."
 - **Not a plain local path** (`program_not_found`), NEW: "The program's
-  path goes through a link, a network share or a removable drive, so
-  it cannot be run with a secret. Give the program's own path on a
-  local drive."
+  path goes through a link, a network share, a removable drive or a
+  file stream, so it cannot be run with a secret. Give the program's
+  own path on a local drive."
+- **Not a program** (`program_not_found`: not a regular file, or on
+  Windows an extension other than .exe or .com), NEW: "This is not a
+  program that can be run with a secret. Give the path of a program
+  file (on Windows, an .exe or .com file)."
+- **Script** (`program_not_found`), NEW: "This program is a script. Run
+  its interpreter with the script as an argument instead; your phone
+  will ask each time."
+- **File in use** (`program_not_found`, Windows: open for writing
+  elsewhere), NEW: "The program is being changed by another program,
+  so it was not run. Try again when it is finished."
+- **Copy failed** (`run_failed`, macOS: the private copy could not be
+  made or started), NEW: "The program could not be copied to run it
+  safely, so it was not run."
 - **`--run-path`, bad value** (startup), NEW: "--run-path <dir>: give
   an absolute path to an existing directory."
 - **`--run-path`, too many** (startup), NEW: "--run-path: at most 16
@@ -1355,9 +1400,11 @@ approval, each marked NEW except where the owner already chose it:
   The first time a program runs with a secret, and after every update
   to it, your phone asks you to approve it and shows its fingerprint.
   Approving pins that exact file. The pin does not cover what the
-  program loads from folders you can change, such as its libraries,
-  plugins or settings. Programs installed for all users (in Program
-  Files, System32 or /usr/bin) do not have this gap."
+  program loads or reads, such as its libraries, plugins or your own
+  settings files, and it does not stop another program running as you
+  from looking inside it. An agent that runs as you can still misuse
+  those. Programs installed for all users (in Program Files, System32
+  or /usr/bin) are harder to tamper with, but not immune."
 - **`leash.request_secret` description**, added: "The value becomes
   part of this conversation, and your app may keep it in its history.
   Use leash.execute_action, leash.run_with_secret or leash.open_proxy
