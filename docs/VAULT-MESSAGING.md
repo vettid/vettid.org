@@ -35,9 +35,10 @@ changelog:
     copies and 64 MiB per connection; a copy's size is its inner
     plaintext, a drop is counted in its own peer's
     `connection.epoch_reverted`, and copies end at a revert, at removal
-    and at their `exp` without counting as dropped. 0.86.0's figures, which nothing sized: the copies are in the vault's state,
-    rewritten whole at every flush (§8.3), and are needed only toward
-    peers without `hs_confirm` during an upgrade. §15 item 50 follows.
+    and at their `exp` without counting as dropped. 0.86.0's figures
+    were not sized: the copies are in the vault's state, rewritten whole
+    at every flush (§8.3), and are needed only toward peers without
+    `hs_confirm` during an upgrade. §15 item 50 follows.
   - 0.86.0: 2026-11-05, owner decision R1 of 2026-11-05 (§15 item 50; open PRs
     take 0.85.2 and 0.85.4). A lost `hs.fin` split a pair (finding C).
     New §6.3.1: lifetimes; the initiator activates at `hs.confirm` (or
