@@ -28,7 +28,7 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.86.0: 2026-11-05, DRAFT for owner decision (§15 item 50; open PRs
+  - 0.86.0: 2026-11-05, owner decision R1 of 2026-11-05 (§15 item 50; open PRs
     take 0.85.2 and 0.85.4). A lost `hs.fin` split a pair (finding C).
     New §6.3.1: lifetimes; the initiator activates at `hs.confirm` (or
     any message), else abandons after 32 days; the responder keeps the
@@ -4060,7 +4060,7 @@ these rules hold against anyone but the relay and its host (§13.5).
   handshake (§6.3). The reasons: `suspended`, `foreign_sender`,
   `superseded_relay`, `relay_rollback`, `relay_unlinked`,
   `token_unusable`, `ancestor_ik`, `rejected_ik`, `unknown_ik`,
-  `ik_rollback`, `conflict`, `unexpected`, (0.86.0 draft)
+  `ik_rollback`, `conflict`, `unexpected`, (0.86.0)
   `superseded_epoch` (§6.3.1).
 - **defer**: left unacked, unprocessed, so the relay delivers it again;
   only for a token rule T says to defer, for at most two of the relay's
@@ -4074,7 +4074,7 @@ these rules hold against anyone but the relay and its host (§13.5).
 
 **`acceptFrom`.** One function decides every message from P, wherever a
 message is taken (the collect loop, the handshake, the handlers), in
-this order: (1) Q's record of P is suspended: refuse ((0.86.0 draft)
+this order: (1) Q's record of P is suspended: refuse ((0.86.0)
 after checking the message's relay links by rule C if its `sender` is
 not foreign, so that a relay fork is still recorded and
 `connection.rotation.resolve` answers `not_found`); (2) the `sender`
@@ -4117,7 +4117,7 @@ was established by a message deposited after x stops being current:
 Q sends nothing to P until a new epoch is established, starts a rekey
 sealed to the link's `new_kem`, and refuses messages under the demoted
 epoch deposited after x (`ancestor_ik`). For a rekey or reconnect from P
-under the new `ik`, (0.86.0 draft) a `ctx` naming Q's current or
+under the new `ik`, (0.86.0) a `ctx` naming Q's current or
 confirmed epoch (§6.3.1) is ordinary; a `ctx` naming an epoch older
 than Q's confirmed epoch, where an epoch after it up to the confirmed
 one has as its epoch signer (P's side, Terms) an ancestor of P's `ik`,
@@ -4139,7 +4139,7 @@ link arrives. (An initiator's confirmed epoch is
 its current one. In the S5 case Q received only `hs.fin` under the
 later epoch, so the earlier one stays confirmed.) An epoch established
 before this release counts as signed by the `ik` current for P at the
-upgrade. (0.86.0 draft) Following a link abandons Q's pending epoch with
+upgrade. (0.86.0) Following a link abandons Q's pending epoch with
 P (§6.3.1) whose `sig_R` was made by the link's `old_ik` (P dropped
 that answer at its rotation, S5), unless the message carrying the link
 traveled under that pending epoch (it has just confirmed it). A link
@@ -4156,8 +4156,8 @@ then rotated, was reported as two copies; under §6.3.1 Q's epoch stays
 pending, so it is not.
 
 **Rule C, one successor per key.** A link whose old key already has a
-followed ((0.86.0 draft) or seen) successor other than its new key is a
-second successor. (0.86.0 draft) Q keeps every valid link that passes
+followed ((0.86.0) or seen) successor other than its new key is a
+second successor. (0.86.0) Q keeps every valid link that passes
 step 3 as **seen**, followed or not (one in an unfinished handshake's
 `rotations`, or in a message Table A or B then refuses), at most one
 per old key (another is a conflict), except a link dropped at
@@ -4235,7 +4235,7 @@ matter.
 **H5, restart.** Whenever Q's current `ik` for P changes, by any message,
 and when Q suspends for a conflict or at `connection.rotation.resolve`,
 every open handshake with P pinned to an `ik` that is no longer current
-((0.86.0 draft) a pending epoch included, §6.3.1),
+((0.86.0) a pending epoch included, §6.3.1),
 other than the one whose message made the change, is abandoned: no
 `hs.fin` is sent for it, a later answer to it is dropped, and the tokens
 it carried are revoked (§6.6). Q's own rekeys and reconnects are started
@@ -4287,7 +4287,7 @@ each recipient Q).
   new `ik` current, P abandons its own open rekeys and reconnects with
   every peer and starts them again under the new `ik` after the
   `identity.rotate`, so it never sends an `hs.fin` signed by a superseded
-  `ik` ((0.86.0 draft) and abandons its pending epochs). (0.86.0 draft)
+  `ik` ((0.86.0) and abandons its pending epochs). (0.86.0)
   **Answers awaiting `hs.fin`.** To a peer that advertises `hs_confirm`
   (§6.3.1 "Deployment"), P drops them and revokes their tokens: their
   epochs would be signed by the superseded `ik`. Q abandons the matching
@@ -4296,13 +4296,13 @@ each recipient Q).
   other peer, which activates at `hs.fin`, P keeps the answer: it
   establishes the epoch at that `hs.fin` (S8 carries the links to the
   new `ik`) and then at once starts a rekey under the new `ik`.
-  (0.86.0 draft) **Resend.** P sends `identity.rotate` to Q again (with
+  (0.86.0) **Resend.** P sends `identity.rotate` to Q again (with
   S8's links) when Q's view is evidently stale: a session message from
   Q under an epoch whose P-side signer is an ancestor of P's `ik`,
   with an inner `ts` more than 1 hour after P's first `identity.rotate`
   to Q; at most 3 times per peer per rotation,
   and at most once per hour. After
-  the rotation ((0.86.0 draft) and at any time, §6.5) P starts no rekey with a peer while one of its
+  the rotation ((0.86.0) and at any time, §6.5) P starts no rekey with a peer while one of its
   answers to that peer still awaits `hs.fin`, until that answer is
   established or expires (§6.3: a responder activates only at `hs.fin`,
   so a rekey started earlier would name an epoch the peer has
@@ -4329,7 +4329,7 @@ each recipient Q).
   `rotations` P's links from the signer of the epoch it travels in up to
   its `rotation`; a rekey's `hs.init` and `hs.resp` carry in `rotations`
   P's links from the signer of the epoch they rekey (§6.2), as a
-  reconnect's do from its `ctx`. (0.86.0 draft) It is always the whole
+  reconnect's do from its `ctx`. (0.86.0) It is always the whole
   chain since that signer: a vault that rotates again before the epoch
   moves on carries every link since the epoch's signer, in
   `identity.rotate` `rotations` and in its rekey `hs.init`, not only
@@ -4344,7 +4344,7 @@ each recipient Q).
   `connection.fork_suspected` (`ref` = `relay_revoked`) with a feed item
   (NEW: "<connection name> may have connected to an old copy of your
   vault. Contact <connection name>.").
-- (0.86.0 draft) **Rule L, a peer without `features` that missed a
+- (0.86.0) **Rule L, a peer without `features` that missed a
   link.**
   Toward a peer that has not advertised `features` (§10.8; release 28
   or earlier), P infers that its rekey was refused when: its rekey
@@ -4365,7 +4365,7 @@ each recipient Q).
   confirmed on vettid-vault `0ee0078`).
 
 **Residuals.**
-- (0.86.0 draft) A second successor carried only by messages from a
+- (0.86.0) A second successor carried only by messages from a
   key Q does not know for P (step 2 refuses them as `foreign_sender`;
   for example an old copy that took the original's mail from its live
   mailbox before Q followed) is not detected until it arrives from a
@@ -4424,7 +4424,7 @@ PR):
   suspends.
 - **I4, fork.** If two different successors of one `ik` or relay key of
   P each reach Q in messages Q can still open (an epoch it keeps,
-  §6.5), in any order and from keys Q knows for P ((0.86.0 draft) its
+  §6.5), in any order and from keys Q knows for P ((0.86.0) its
   current relay key, an earlier one Q keeps, or a handshake Q can
   attribute to P), Q ends suspended (for a
   device or agent: refuses the second and tells the member), unless one
@@ -5964,7 +5964,7 @@ The inner plaintext is a UTF-8 JSON object, followed by padding:
 | `exp` | MAY | Discard the message if it is still unprocessed after this time. REQUIRED for ephemeral types (§8.5). |
 | `status`, `error` | responses | `ok` or `error` |
 | `body` | MUST | Type-specific. The schema is TBD per feature unless this document defines it. |
-| `features` | (0.86.0 draft) see §10.8 | The sender's capability names as it advertises them to this recipient (§10.8): an array of `[a-z0-9_]{1,32}`, sorted in ascending byte order, each once, never empty. Older receivers ignore it as an unknown field. |
+| `features` | (0.86.0) see §10.8 | The sender's capability names as it advertises them to this recipient (§10.8): an array of `[a-z0-9_]{1,32}`, sorted in ascending byte order, each once, never empty. Older receivers ignore it as an unknown field. |
 
 - Binary values are encoded as standard base64 with padding. Receivers
   MUST reject non-canonical base64 and base64 containing CR or LF.
@@ -6192,7 +6192,7 @@ Field rules:
   - `connection`: the `invite_id`; `app`, `desktop`, `agent`: the pairing
     id (the bundle's `invite_id`, §6.4);
   - `rekey`: the standard base64 of the 16-byte `epoch_id` of the epoch
-    the `hs.init` travels under: the current epoch ((0.86.0 draft) or
+    the `hs.init` travels under: the current epoch ((0.86.0) or
     the responder's confirmed epoch, §6.3.1); the responder MUST reject
     any other value;
   - `reconnect`: the standard base64 of the stored `epoch_id` of the
@@ -6227,7 +6227,7 @@ Field rules:
   `eph`.
 - On **rekey**, `hs.init` travels in session mode under the current epoch,
   and `K_s` is the current (soon previous) epoch's `rk`. A rekey `hs.init`
-  is accepted only under the current epoch ((0.86.0 draft) or the
+  is accepted only under the current epoch ((0.86.0) or the
   responder's confirmed epoch, §6.3.1), and names the epoch it travels
   under.
 
@@ -6293,7 +6293,7 @@ Verification and activation:
   §6.4 and §6.7 say for a pending request.
 - **A new epoch's messages before `hs.fin`** (0.23.0, owner decision of
   2026-10-09, §15 item 31). `I` may send in the new epoch as soon as it
-  has sent `hs.fin` ((0.86.0 draft) for a rekey or reconnect, only at
+  has sent `hs.fin` ((0.86.0) for a rekey or reconnect, only at
   confirmation, §6.3.1; an earlier initiator still does), and the mailbox does not keep order (§8.4), so `R`
   can receive a message of the new epoch while it still awaits `hs.fin`:
   under the handshake's keys it decrypts as a message other than
@@ -6408,7 +6408,7 @@ itself at confirmation; it never moves back. While it is not current:
   epoch that it has not yet sent, with its outbox entry. An
   authenticated message under one of them with a later inner `ts` is
   fork evidence (§6.6 "Fork detection", `ref` = `epoch`); one with an
-  earlier `ts` is refused (`superseded_epoch`). (0.86.0 draft) **Toward
+  earlier `ts` is refused (`superseded_epoch`). (0.86.0) **Toward
   a peer that has not advertised `hs_confirm`** such a later-`ts`
   message is not fork evidence: the peer activated at `hs.fin` and
   never learned of rule E. `R` starts a reconnect instead, naming the
@@ -6449,7 +6449,8 @@ peer without the gate `I` activates at `hs.fin` as before, but keeps the
 old epoch's send keys, `rk` and receive keys, and a copy of each durable
 message (§8.5) it sends under the new epoch, until it receives anything
 under the new epoch, at most 48 days. It keeps at most 10,000 copies
-(an epoch's message limit, §6.5) and 64 MiB of them (content sent by
+(an epoch's message limit, §6.5) and 64 MiB of them (owner-approved,
+2026-11-05) (content sent by
 claim-check counts as its reference); past either, the oldest copy is
 dropped. If before that it receives from the peer a
 session message or a rekey `hs.init` under the old epoch whose inner
@@ -7073,7 +7074,7 @@ Either side MAY rekey sooner. The side that hits the limit initiates. A
 new connection's or device's first epoch counts from its activation
 (§6.3), not from `hs.fin`; a pending one is never rekeyed (0.10.3). If both
 sides initiate at once, the `hs.init` with the lower `th1` wins (compared as
-big-endian byte strings). (0.86.0 draft) The lower-`th1` rule applies to
+big-endian byte strings). (0.86.0) The lower-`th1` rule applies to
 any two crossing handshakes of a connection, whatever their purposes
 (between a service and a member, §6.6 "Crossing reconnects" decides
 two reconnects).
@@ -7084,7 +7085,7 @@ own new epoch awaits confirmation (§6.3.1; S5 in general).
 Reaching the limit does not stop sending: both sides keep sending in the
 old epoch until the new epoch activates (at the initiator, at
 confirmation, §6.3.1), so that a locked peer does not block delivery.
-(0.86.0 draft) So the 10,000-message limit is exceeded while an epoch
+(0.86.0) So the 10,000-message limit is exceeded while an epoch
 is pending, for up to 32 days (`B`). That is safe: session mode draws a
 fresh random 192-bit nonce for each message (§4.2), so no count of
 messages under one key brings a nonce repeat within reach; the limit
@@ -7099,7 +7100,7 @@ until the epoch is established (§6.3, 0.23.0).
   margin).
 - Send keys of previous epochs, and their `rk`, are deleted when the new
   epoch activates. A rekey is therefore possible only from the current
-  epoch ((0.86.0 draft) and from a responder's confirmed epoch, whose
+  epoch ((0.86.0) and from a responder's confirmed epoch, whose
   receive keys and `rk` it keeps as §6.3.1 says). Only the epoch *ids* of a service connection are kept longer,
   35 days, for the reconnect of §6.6 (0.72.0).
 
@@ -7175,7 +7176,7 @@ ids per connection, the oldest dropped first. The cap costs availability
 only: a busy connection that rekeys every 10,000 messages could push out
 entries still inside the window, and a reconnect naming one is refused.
 The history is part of the vault's state, so a backup holds it. Person
-connections and a service vault keep no history. (0.86.0 draft) An
+connections and a service vault keep no history. (0.86.0) An
 epoch enters it only once it has been current; a pending epoch, and one
 destroyed by §6.3.1 rule E or a revert, never does.
 
@@ -7183,7 +7184,7 @@ destroyed by §6.3.1 rule E or a revert, never does.
 `hs.init` on a `peer_kind` `"service"` connection whose `ctx` names its
 current epoch or any epoch in that history. On every other connection
 (person-to-person, and a service vault answering a member) the `ctx` must
-equal the responder's last epoch, as before. (0.86.0 draft) "Last
+equal the responder's last epoch, as before. (0.86.0) "Last
 epoch" means the current epoch; a reconnect names its initiator's
 current epoch, never a pending one. On every connection the responder
 also accepts its pending epoch, and its confirmed epoch while that is
@@ -7226,7 +7227,7 @@ peer), audits `connection.fork_suspected` and makes a feed item of
 priority `high` with the text "<connection name> may be running from two
 copies of its data. The connection is paused. Contact <connection
 name> before you connect again." (text approved by the owner
-2026-10-28). (0.86.0 draft) A suspension with `ref` = `epoch` (§3.4.1
+2026-10-28). (0.86.0) A suspension with `ref` = `epoch` (§3.4.1
 "Epochs after an `ik` link", §6.3.1 rule E) shows §3.4.1's neutral
 feed item instead. A single genuine
 restore never triggers it. *Corner case:* a second restore from a backup
@@ -8388,7 +8389,7 @@ an answer to an unknown or expired id is dropped.
 | | `vault.owner-check` | D→V | req | The daily owner check: PIN and credential password together (§3.6, 0.13.0; spelled `vault.owner_check` before 0.15.2) |
 | | `vault.held` | V→D | | The vault is held: content-free counts of what is waiting (§3.6.3, 0.13.0) |
 | Sessions | `hs.init`, `hs.resp`, `hs.fin` | D↔V, V↔V | | Handshake, rekey, reconnect (§6) |
-| | `hs.confirm` | D↔V, V↔V | | (0.86.0 draft) The responder's confirmation of a rekey's or reconnect's new epoch (§6.3.1) |
+| | `hs.confirm` | D↔V, V↔V | | (0.86.0) The responder's confirmation of a rekey's or reconnect's new epoch (§6.3.1) |
 | | `relay.token.issued` / `relay.token.refresh` | any | — / req | Deliver or request a token |
 | | `relay.address.update`, `identity.rotate` | any | | Rotation (§3.4) |
 | Credential | `credential.create`, `.get`, `.version`, `.unlock`, `.lock`, `.rotate`, `.password.change`, `.recover`, `.reset` | D→V | req | Protean Credential lifecycle (§3.5, §10.6) |
@@ -8763,7 +8764,7 @@ an answer to an unknown or expired id is dropped.
 | `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at, name_request?}`; `null` (and `version` 0) before any snapshot arrived (0.15.0); the snapshot carries the member's full `email` (0.20.0), which only this type returns and only to the app and desktops (§11.13); `name_request` (0.18.0) is the latest `account.name.set` request (§10.8). A change of `name_request` alone sends `sync.event{kind: "account.changed"}` with the stored snapshot's `version` repeated, not incremented (0.19.0): `version` counts snapshots only, so a device MUST NOT skip an `account.changed` whose `version` it already holds |
 | `vault.delete` (app: the holder, or the enrolling app before a credential exists) | `{confirm: "delete my vault", credential?, utk_id, sealed{pin, password?}}` | `{}`; then the deletion of §12.5. `bad_request` without the exact phrase or a needed member; `bad_pin`, `backoff`, `bad_password`, `credential_frozen` / `rotation_required` (holder during an alarm), (0.54.0) `credential_required` with body `{"reason": "no_holder"}` (a vault with a credential but no holder, §3.5.9), `forbidden` (a recovering app since 0.16.0: it completes the recovery first, then deletes as the holder; a member without the credential uses §11.11.9) |
 | `vault.locking` (ephemeral) | — | `{reason?}` (0.29.0, release L: `{reason?, unlock_id}`, the unlock this lock ends), with `exp` = now + 60 s; an app ignores one whose `ts` is not later than its latest successful unlock result's (§11.4, 0.23.3); `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0), `"idle"` for the idle lock (§3.6.8; 0.29.0, release L) |
-| `hs.confirm` (0.86.0 draft) | — | `{}`, session mode under the new epoch; any message under it confirms as well (§6.3.1) |
+| `hs.confirm` (0.86.0) | — | `{}`, session mode under the new epoch; any message under it confirms as well (§6.3.1) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
 | `relay.token.refresh` (req) | `{}` | `{kind: "standing", token}` |
 | `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>, rotations?}` ((0.85.0 draft) `rotations`: the links before `rotation`, §3.4.1 S8) |
@@ -11180,7 +11181,7 @@ The **profile object** holds the extras' display name and photo. Sent by
   unlock under a release whose image advertises a name the vault has not
   advertised to that connection (a feature is only ever added,
   §11.10.8), with the next `version`; if the send fails it is retried
-  with the connection's other messages (§8.6). (0.86.0 draft, with
+  with the connection's other messages (§8.6). (0.86.0, with
   vettid.org #540, which sends `features` to every connection and
   `device.features` from devices) **On every message.** A vault of this
   release also puts the list it advertises to a peer in the inner
@@ -11632,8 +11633,8 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `connection.stale`, `connection.reconnected`; (0.72.0)
   `connection.restored_reconnect` (`connection_id`, `ref` = the named
   epoch's activation time, §6.6) and `connection.fork_suspected`
-  (`connection_id`, §6.6; (0.86.0 draft) `ref` = `epoch`, `relay`,
-  `relay_revoked` or `own_copy`, §3.4.1); (0.86.0 draft)
+  (`connection_id`, §6.6; (0.86.0) `ref` = `epoch`, `relay`,
+  `relay_revoked` or `own_copy`, §3.4.1); (0.86.0)
   `connection.epoch_reverted` (`connection_id`, §6.3.1);
   `identity.rotated`;
   `credential.created`, `credential.rotated`, `credential.password_changed`,
@@ -26703,7 +26704,7 @@ Follow-ups:
     `hs.init` answered `token_used` or `token_revoked` waits for
     `hs.resp` until `exp` + 60 s.
 50. **A lost `hs.fin`: options, rollout, and the model's and review's
-    findings (0.86.0, DRAFT for owner decision).** In a rekey
+    findings (0.86.0, owner decision R1 of 2026-11-05).** In a rekey
     or reconnect the initiator activated at `hs.fin`, the responder at
     processing it. An `hs.fin` lost (relay TTL while the responder is
     locked; after its answer expired; with a mailbox deleted, §3.4.1)
@@ -26804,8 +26805,12 @@ Follow-ups:
     keeps an answer to a peer without `hs_confirm` (§3.4.1); the
     lower-`th1` rule for any two crossing handshakes (§6.5); and the
     revert that resends and waits `T` + 2 days (§6.3.1 "Deployment").
-    **To decide:** A or B; R1, R2 or R3; the lifetimes (16, 16, 32, 48
-    days); the option for release-28 initiators above.
+    **Decided (owner, 2026-11-05, thread 01M6PYXJ3ECHPTQZYE8WC4M49B):
+    R1.** That is option A, rolled out in release 29 and switched on per
+    peer by `hs_confirm`, with the lifetimes as written (16, 16, 32, 48
+    days) and the revert's cap of 10,000 copies and 64 MiB (§6.3.1
+    "Deployment"). The option for release-28 initiators above was not
+    taken up.
     **What the model shows.** The trust model finds the split gone
     under A between gated peers. Since `b400025` it also runs release
     28 as its real code behaves (`0ee0078`), a release-28 initiator with
