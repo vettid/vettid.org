@@ -54,7 +54,7 @@ changelog:
     item's runs carry no `env`. The name rule for `name`, `env` and an
     entry's `env` also refuses the code-loading, proxy and certificate
     names listed there, even when listed. The catalog's entries carry
-    no pin. The app shows a 16-digit fingerprint. A paragraph says
+    the pinned path, never the hash. The app shows a 16-digit fingerprint. A paragraph says
     plainly what the pin does not cover. "Grant-set sequence": a
     `grant_seq` of 0, or one that is not an unsigned 64-bit integer,
     counts as absent. AV9 and AV10 are not built, and no release lists
@@ -12468,7 +12468,7 @@ item's settings allow for its task:
     (the same `program`, the same values) or leave both out, which
     narrows; any other `sha256` or `path` is `bad_request`. Changing an
     entry's `program` drops them. (Owner decision of 2026-11-05, kept
-    as the fallback) When the matched entry has no `sha256` yet, the connector also refuses (`program_not_found`) a program that the connector's user can change, or that sits in a folder that user can change, by the `--run-path` check (AGENT-PLAN §4.9). A recorded pin replaces this check for that file.
+    as the fallback, AGENT-PLAN §4.9) The connector applies the check of a program only an administrator can change (`program_not_found` otherwise: a program that the connector's user can change, or that sits in a folder that user can change, by the `--run-path` check) to every resolved program except one equal to its entry's pinned `path`, which the catalog gives. So a pinned program moved to a changeable place is checked again.
   - (0.85.0) **What approving a fingerprint means.** Approving a run
     flagged `program_unrecorded` or `program_changed` lets later runs of
     that exact file, at that path, go unasked when the item's settings
@@ -12523,7 +12523,9 @@ item's settings allow for its task:
 - **The catalog** gives, per item, `ways` and, when present,
   `programs` and `hosts` (never `header` or `prefix`), so the agent can
   choose a way the item allows. (0.85.0) Its `programs` entries are
-  `{program, env}`, without `sha256` or `path`.
+  `{program, env, path?}`: `path` is the pinned path when there is a
+  pin, never the hash, so the connector knows which file needs no
+  further check (above).
 - **Decisions.** An `item.get`, `item.run` or `item.proxy` for an item
   whose settings do not hold that way is answered `way_not_allowed`
   (body `{ways}`, the item's ways) and counted as *refused* (above,
@@ -12566,8 +12568,9 @@ item's settings allow for its task:
   `_JAVA_OPTIONS`, `JDK_JAVA_OPTIONS`, `GCONV_PATH`,
   `XDG_CONFIG_HOME`, `AWS_CONFIG_FILE`, `KUBECONFIG`; (proposed; not an owner decision)
   nor `LESSOPEN`, `PAGER`, `EDITOR`, `VISUAL`, `SSH_ASKPASS`,
-  `SUDO_ASKPASS`, `GOFLAGS` or `RUSTC_WRAPPER`, nor a name that sends a
-  program's traffic elsewhere or makes it trust another certificate:
+  `SUDO_ASKPASS`, `GOFLAGS` or `RUSTC_WRAPPER`; (proposed; not an owner decision) nor a
+  name that sends a program's traffic elsewhere or makes it trust
+  another certificate:
   `HTTP_PROXY`,
   `HTTPS_PROXY`, `ALL_PROXY`, `SSL_CERT_FILE`,
   `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE` or
