@@ -590,7 +590,7 @@ opened it leaves (§5).
   - §4.9:
     - runs under the runner account, and only in this mode;
     - the `--run-path` check against the member's and runner's accounts;
-    - where the environment's `HOME`, `USERPROFILE` and `APPDATA` come from (the run slot's profile, made new after each run);
+    - where the environment's `HOME`, `USERPROFILE` and `APPDATA` come from (fresh per-run folders, the profile never loaded);
     - "when the connector exits, it kills its runs" read per §5.
   - New PRs before A3.8a ships:
     - the service, runner and stub (A3.10);
