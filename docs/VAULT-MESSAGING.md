@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.85.0
+version: 0.86.0
 date: 2026-11-05
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.86.0: 2026-11-05, DRAFT for owner decision (§15 item 50; open PRs
+    take 0.85.1 and 0.85.2). A lost `hs.fin` split a pair across two
+    epochs. New §6.3.1: handshake lifetimes stated; in a rekey or
+    reconnect the initiator activates only when the responder confirms
+    (new `hs.confirm`, or any message under the new epoch), else
+    abandons it after 32 days; the responder accepts its confirmed
+    epoch until then. Adjusted: §6.2 `ctx`, §6.3, §6.5, §6.6 "Accepting
+    `ctx`", §3.4.1 H5 and S5, §10 registry.
   - 0.85.0: 2026-11-05, DRAFT for owner decision (options in vettid.org
     #536; #528 takes 0.84.1). New §3.4.1: which of a peer's identity and
     relay keys a message may come from, one `acceptFrom` with conflict
@@ -4105,7 +4113,8 @@ matter.
 
 **H5, restart.** Whenever Q's current `ik` for P changes, by any message,
 and when Q suspends for a conflict or at `connection.rotation.resolve`,
-every open handshake with P pinned to an `ik` that is no longer current,
+every open handshake with P pinned to an `ik` that is no longer current
+((0.86.0 draft) a pending epoch included, §6.3.1),
 other than the one whose message made the change, is abandoned: no
 `hs.fin` is sent for it, a later answer to it is dropped, and the tokens
 it carried are revoked (§6.6). Q's own rekeys and reconnects are started
@@ -4157,7 +4166,8 @@ each recipient Q).
   new `ik` current, P abandons its own open rekeys and reconnects with
   every peer and starts them again under the new `ik` after the
   `identity.rotate`, so it never sends an `hs.fin` signed by a superseded
-  `ik`. After the rotation P starts no rekey with a peer while one of its
+  `ik` ((0.86.0 draft) and abandons its pending epochs, §6.3.1). After
+  the rotation ((0.86.0 draft) and at any time, §6.5) P starts no rekey with a peer while one of its
   answers to that peer still awaits `hs.fin`, until that answer is
   established or expires (§6.3: a responder activates only at `hs.fin`,
   so a rekey started earlier would name an epoch the peer has
@@ -6013,7 +6023,8 @@ Field rules:
   - `connection`: the `invite_id`; `app`, `desktop`, `agent`: the pairing
     id (the bundle's `invite_id`, §6.4);
   - `rekey`: the standard base64 of the 16-byte `epoch_id` of the current
-    epoch; the responder MUST reject any other value;
+    epoch ((0.86.0 draft) or of the responder's confirmed epoch,
+    §6.3.1); the responder MUST reject any other value;
   - `reconnect`: the standard base64 of the stored `epoch_id` of the
     initiator's last epoch; the responder requires its own last epoch,
     except a member vault on a `peer_kind` `"service"` connection, which
@@ -6046,7 +6057,8 @@ Field rules:
   `eph`.
 - On **rekey**, `hs.init` travels in session mode under the current epoch,
   and `K_s` is the current (soon previous) epoch's `rk`. A rekey `hs.init`
-  is accepted only under the current epoch.
+  is accepted only under the current epoch ((0.86.0 draft) or the
+  responder's confirmed epoch, §6.3.1).
 
 ### 6.3 Key schedule
 
@@ -6101,14 +6113,17 @@ Verification and activation:
   and audits `drop.sas_commit_mismatch`; a connection request or pairing
   it belonged to is dropped (§6.4, §6.7).
 - An established epoch is **active** at once for rekeys, reconnects and
-  handshakes answered without approval (§11.3, §11.11.5). For a
+  handshakes answered without approval (§11.3, §11.11.5); (0.86.0
+  draft) for a rekey or reconnect, at the initiator only at
+  confirmation (§6.3.1). For a
   connection it becomes active only when both members have approved
   (§6.4); for a pairing or transfer, at the owner's approval (§6.7,
   §6.7.1). Messages for an inactive epoch are left unacked, except as
   §6.4 and §6.7 say for a pending request.
 - **A new epoch's messages before `hs.fin`** (0.23.0, owner decision of
   2026-10-09, §15 item 31). `I` may send in the new epoch as soon as it
-  has sent `hs.fin`, and the mailbox does not keep order (§8.4), so `R`
+  has sent `hs.fin` ((0.86.0 draft) for a rekey or reconnect, only at
+  confirmation, §6.3.1; an earlier initiator still does), and the mailbox does not keep order (§8.4), so `R`
   can receive a message of the new epoch while it still awaits `hs.fin`:
   under the handshake's keys it decrypts as a message other than
   `hs.fin`, or it names an epoch `R` has not established. `R` MUST leave
@@ -6149,6 +6164,73 @@ Verification and activation:
   attacker could try about 10^6 `hs.init`s offline until the codes
   matched (§15 item 17). `prk` and `th` in the derivation bind the code
   to both identities, both KEM exchanges and this handshake.
+
+#### 6.3.1 Lifetimes and activation on confirmation (0.86.0, draft)
+
+For purposes `rekey` and `reconnect`, so that a lost `hs.fin` cannot
+leave the two sides on different epochs (§15 item 50).
+
+**Lifetimes** (normative; `T` is the relay TTL, 14 days):
+
+| Wait | Lifetime |
+|---|---|
+| An initiator's handshake awaiting `hs.resp` | 16 days from `hs.init` (§6.6 "After a restore": 7 days) |
+| A responder's answer awaiting `hs.fin` (`L`) | 16 days from its `hs.resp` |
+| An initiator's pending epoch awaiting confirmation (`B`) | 32 days from `hs.fin` (`L` + `T` + 2 days) |
+| A responder's confirmed epoch (below) | its keys 46 days from the activation (`B` + `T`); its id until the peer confirms |
+
+An expired handshake or answer is destroyed and the tokens it carried are
+revoked (§6.6); a later message for it is acked and dropped.
+
+**Initiator.** Once `I` has sent `hs.fin`, the new epoch is **pending**:
+established (its signer recorded, §3.4.1) but not current. Until it is
+confirmed, `I` keeps the current epoch with its send keys and `rk`,
+sends in it (after a reconnect, `I` sends nothing but the handshake: its
+outbox waits), opens messages under both epochs, and starts no rekey or
+reconnect with `R`. A message from `R` that opens under the pending
+epoch's `r2i` key, of any type, **confirms** it: in the write that
+processes it the pending epoch becomes current (§6.5 "Key retention"),
+and the outbox continues in it. A reconnect succeeds (§6.6 re-mint) at
+confirmation. If `B` passes first, `I` **abandons** the pending epoch:
+its receive keys are kept 16 days as a previous epoch's, nothing under
+it confirms any more, and `I` starts a rekey from its current epoch, or
+a reconnect naming it when its standing token for `R` has expired.
+
+**Responder.** `R` activates at a verified `hs.fin` that arrives within
+`L` (§6.3) and, in the same write, queues **`hs.confirm`**: body `{}`,
+session mode under the new epoch, durable. Until `R` receives from `I`
+a message under the new epoch other than `hs.fin`, the epoch it
+superseded remains `R`'s **confirmed epoch**:
+
+- `R` keeps its receive keys and `rk` (not its send keys) for the
+  lifetime above, and accepts `I`'s messages under it;
+- for each collected batch holding such a message, `R` queues
+  `hs.confirm` again (once per batch);
+- a rekey `hs.init` under it naming it in `ctx`, and a reconnect naming
+  it, are accepted as if it were current (§6.2, §6.6); `R` abandons its
+  own open rekey for it. This is neither a restore nor fork evidence.
+
+Then a lost `hs.fin` leaves both on the old epoch, and a lost
+`hs.confirm` is repaired by `I`'s next message, or by `I`'s rekey from
+the old epoch after `B`.
+
+**Crossing** (§6.5). `I`, holding a pending epoch, drops a rekey
+`hs.init` from `R` under the current epoch if its inner `ts` is not later
+than that of the `hs.resp` `I` processed (a crossing rekey; `R`
+establishes `I`'s at `hs.fin`). A later one shows that `R`'s answer ended
+without `hs.fin` (§6.5): `I` abandons the pending epoch and answers it.
+
+**§3.4.1.** A pending epoch counts as an open handshake of `I`: H5 and S5
+abandon it when its pinned `ik` stops being current, and "Epochs after
+an `ik` link" abandons one whose signer is demoted; the rekey started
+again names the current epoch, which `R` accepts as current or as its
+confirmed epoch.
+
+**Devices.** Devices, desktops and agents implement both roles as the
+vault does: the vault initiates every unlock's rekey and the 7-day one
+(§6.5), and a device has no reconnect. *Earlier releases:* a responder
+that sends no `hs.confirm` confirms with its first message under the new
+epoch.
 
 ### 6.4 Connections and invitations
 
@@ -6755,11 +6837,14 @@ Either side MAY rekey sooner. The side that hits the limit initiates. A
 new connection's or device's first epoch counts from its activation
 (§6.3), not from `hs.fin`; a pending one is never rekeyed (0.10.3). If both
 sides initiate at once, the `hs.init` with the lower `th1` wins (compared as
-big-endian byte strings).
+big-endian byte strings). (0.86.0 draft) A side starts no rekey with a
+peer while one of its answers to that peer awaits `hs.fin` or while its
+own new epoch awaits confirmation (§6.3.1; S5 in general).
 
 Reaching the limit does not stop sending: both sides keep sending in the
-old epoch until the new epoch activates, so that a locked peer does not
-block delivery. The initiator's first messages in the new epoch can reach
+old epoch until the new epoch activates (at the initiator, at
+confirmation, §6.3.1), so that a locked peer does not block delivery.
+An earlier initiator's first messages in the new epoch can reach
 the responder before its `hs.fin`; the responder leaves them unacked
 until the epoch is established (§6.3, 0.23.0).
 
@@ -6769,7 +6854,8 @@ until the epoch is established (§6.3, 0.23.0).
   margin).
 - Send keys of previous epochs, and their `rk`, are deleted when the new
   epoch activates. A rekey is therefore possible only from the current
-  epoch. Only the epoch *ids* of a service connection are kept longer,
+  epoch ((0.86.0 draft) and from a responder's confirmed epoch, whose
+  receive keys and `rk` it keeps as §6.3.1 says). Only the epoch *ids* of a service connection are kept longer,
   35 days, for the reconnect of §6.6 (0.72.0).
 
 **Rationale for epochs rather than a per-message ratchet:**
@@ -6850,7 +6936,12 @@ connections and a service vault keep no history.
 `hs.init` on a `peer_kind` `"service"` connection whose `ctx` names its
 current epoch or any epoch in that history. On every other connection
 (person-to-person, and a service vault answering a member) the `ctx` must
-equal the responder's last epoch, as before. Any other `ctx` is refused
+equal the responder's last epoch, as before. (0.86.0 draft) On every
+connection the responder also accepts its pending epoch and its
+confirmed epoch (§6.3.1); an initiator's last epoch is its current one,
+never a pending one. In the crossing rules below, a side that has sent
+`hs.fin` for its own reconnect counts that pending epoch as its last, so
+a peer's `hs.init` naming the epoch before it is refused as before. Any other `ctx` is refused
 (`reconnect_refused`). The binding stays: `ctx` must name an epoch of
 this connection that the responder itself recorded, and the
 authentication below is unchanged.
@@ -8046,6 +8137,7 @@ an answer to an unknown or expired id is dropped.
 | | `vault.owner-check` | D→V | req | The daily owner check: PIN and credential password together (§3.6, 0.13.0; spelled `vault.owner_check` before 0.15.2) |
 | | `vault.held` | V→D | | The vault is held: content-free counts of what is waiting (§3.6.3, 0.13.0) |
 | Sessions | `hs.init`, `hs.resp`, `hs.fin` | D↔V, V↔V | | Handshake, rekey, reconnect (§6) |
+| | `hs.confirm` | D↔V, V↔V | | (0.86.0 draft) The responder's confirmation of a rekey's or reconnect's new epoch (§6.3.1) |
 | | `relay.token.issued` / `relay.token.refresh` | any | — / req | Deliver or request a token |
 | | `relay.address.update`, `identity.rotate` | any | | Rotation (§3.4) |
 | Credential | `credential.create`, `.get`, `.version`, `.unlock`, `.lock`, `.rotate`, `.password.change`, `.recover`, `.reset` | D→V | req | Protean Credential lifecycle (§3.5, §10.6) |
@@ -8417,6 +8509,7 @@ an answer to an unknown or expired id is dropped.
 | `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at, name_request?}`; `null` (and `version` 0) before any snapshot arrived (0.15.0); the snapshot carries the member's full `email` (0.20.0), which only this type returns and only to the app and desktops (§11.13); `name_request` (0.18.0) is the latest `account.name.set` request (§10.8). A change of `name_request` alone sends `sync.event{kind: "account.changed"}` with the stored snapshot's `version` repeated, not incremented (0.19.0): `version` counts snapshots only, so a device MUST NOT skip an `account.changed` whose `version` it already holds |
 | `vault.delete` (app: the holder, or the enrolling app before a credential exists) | `{confirm: "delete my vault", credential?, utk_id, sealed{pin, password?}}` | `{}`; then the deletion of §12.5. `bad_request` without the exact phrase or a needed member; `bad_pin`, `backoff`, `bad_password`, `credential_frozen` / `rotation_required` (holder during an alarm), (0.54.0) `credential_required` with body `{"reason": "no_holder"}` (a vault with a credential but no holder, §3.5.9), `forbidden` (a recovering app since 0.16.0: it completes the recovery first, then deletes as the holder; a member without the credential uses §11.11.9) |
 | `vault.locking` (ephemeral) | — | `{reason?}` (0.29.0, release L: `{reason?, unlock_id}`, the unlock this lock ends), with `exp` = now + 60 s; an app ignores one whose `ts` is not later than its latest successful unlock result's (§11.4, 0.23.3); `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0), `"idle"` for the idle lock (§3.6.8; 0.29.0, release L) |
+| `hs.confirm` (0.86.0 draft) | — | `{}`, session mode under the new epoch; any message under it confirms as well (§6.3.1) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
 | `relay.token.refresh` (req) | `{}` | `{kind: "standing", token}` |
 | `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>, rotations?}` ((0.85.0 draft) `rotations`: the links before `rotation`, §3.4.1 S8) |
@@ -26228,6 +26321,38 @@ Follow-ups:
     relay client's review, lead 2026-11-02): a retried open-token
     `hs.init` answered `token_used` or `token_revoked` waits for
     `hs.resp` until `exp` + 60 s.
+50. **A lost `hs.fin` (0.86.0, DRAFT for owner decision).** In a rekey
+    or reconnect the initiator activated at `hs.fin`, the responder at
+    processing it. An `hs.fin` lost (relay TTL while the responder is
+    locked; after its answer expired; with a mailbox deleted, §3.4.1)
+    left the pair on two epochs with both "active": the initiator's
+    messages unreadable, the responder's read only for 16 days, every
+    later rekey refused, reconnects between persons refused. Confirmed
+    on vettid-vault release 28 and in the trust model (finding C).
+    Options:
+    - **(A) Activate on confirmation** (recommended, §6.3.1). The
+      initiator keeps sending in the old epoch until a message from the
+      responder under the new one arrives; the responder sends
+      `hs.confirm`. A lost `hs.fin` leaves both on the old epoch; a lost
+      `hs.confirm` is repaired by the next message or by a rekey from
+      the old epoch, which the responder accepts. Prevents the split
+      and loses no message. Cost: a new type; the old epoch carries
+      traffic one round trip longer (up to 32 days if the responder is
+      away); a responder keeps one superseded epoch's receive keys and
+      `rk` up to 46 days instead of 16; every device and client must
+      implement it.
+    - **(B) Detect and recover.** Keep activation at `hs.fin`; a side
+      that sees the peer still using an older epoch some time after
+      `hs.fin` starts a reconnect allowed to name its previous epoch.
+      Smaller, but the split happens first: the initiator's messages
+      until then are lost (unacked, then expired), a silent responder
+      gives no signal, a message the receiver cannot open cannot be
+      authenticated to trigger anything, and devices have no reconnect.
+    **To decide:** A or B; the lifetimes (16, 16, 32, 46 days); whether
+    the vault waits for confirmation from a device or desktop of an
+    earlier release (one that stays silent until `B` refuses the rekey
+    from the old epoch; with `device.features` the vault could keep
+    activating at `hs.fin` for such devices).
 
 ## 16. Test vectors
 
