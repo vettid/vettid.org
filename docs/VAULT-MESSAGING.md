@@ -33,7 +33,8 @@ changelog:
     most 256 copies and 1 MiB per peer (connection, device or agent) and
     8 MiB per vault, oldest dropped first, replacing 0.86.0's 10,000
     copies and 64 MiB per connection; a copy's size is its inner
-    plaintext, a drop is counted in its own peer's
+    plaintext, content over 64 KiB goes by claim-check while copies are
+    kept so a copy holds its reference (about 64 KiB at most), a drop is counted in its own peer's
     `connection.epoch_reverted`, and copies end at a revert, at removal
     and at their `exp` without counting as dropped. 0.86.0's figures
     were not sized: the copies are in the vault's state, rewritten whole
@@ -6465,8 +6466,10 @@ copies and 1 MiB of them per peer (a connection, or one of the vault's
 devices or agents), and a vault keeps at most 8 MiB of copies in all; a
 device or agent, which has one peer, has only the per-peer limits. A
 copy's size is its inner plaintext as encoded (§5.3), the bytes sealed
-again at a revert; content sent by claim-check counts as its reference,
-so a copy is never more than 245,760 bytes (§5.5). The copies are part
+again at a revert. While it keeps copies toward a peer, `I` sends any
+content over 64 KiB to that peer by claim-check (§5.5's SHOULD is a
+MUST here), and the copy holds the reference, so a copy is at most
+about 64 KiB. The copies are part
 of the vault's state, which is rewritten whole at every flush (§8.3), so
 they are kept small; they are needed only toward a peer without the
 gate, during an upgrade. Past any limit, the oldest copy by when it was
