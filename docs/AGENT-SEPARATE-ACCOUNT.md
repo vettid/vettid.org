@@ -558,10 +558,10 @@ opened it leaves (§5).
      agent can shadow the command in the member's account.
    - b: no, run from the member's account (the agent can then pair a
      connector of its own and share any folder).
-8. **Steering through shared folders (§6).** *Chosen by the owner in
-   the implementing session, 2026-11-05: a, with profiles as a general
-   mechanism for non-coding agents too; to be confirmed on Ground
-   Control.*
+8. **Steering through shared folders (§6).** *Owner's choice,
+   2026-11-05, given in the implementing session: a, with profiles as a
+   general mechanism for non-coding agents too; the lead agrees (thread
+   01M6PJBE4MSPWMVSKD6CD8VX8M).*
    - a (recommended): hardened profiles for git, ssh and curl
      (allowlisted subcommands and options, overrides, their own
      credential helper), plus pinned control files for git. Programs
@@ -573,7 +573,8 @@ opened it leaves (§5).
      catches them.
    - c: no shared folders at all (question 1 b). Runs use `work/` only,
      and the steering doesn't arise.
-9. **Handing files in and out (§6).**
+9. **Handing files in and out (§6).** *Owner's choice, 2026-11-05,
+   given in the implementing session: a; the lead agrees (same thread).*
    - a (recommended): yes. Input files are copied read-only into
      `work/`, outputs go back to a folder the member chose. Document and
      data agents then need no shared folder. This needs a VAULT-MESSAGING
