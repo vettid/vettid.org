@@ -289,6 +289,49 @@ second creates the Cognito user, which emails a temporary password). First
 sign-in sets a password and enrolls TOTP. **Removing an admin:** delete
 their Headscale node *and* disable/delete the Cognito user.
 
+## Post-quantum TLS: account and admin (ACCOUNT-ADMIN-PLAN §7)
+
+These sites carry no application cryptography exposed to "harvest now,
+decrypt later" (docs/PQC-MIGRATION.md). Their exposure is the TLS key
+exchange. **Checked 2026-11-05** from outside AWS, with Go 1.27
+`crypto/tls` and OpenSSL 3.5.7 `s_client`, on every host below:
+
+| Host | Front, policy (CDK) | Hybrid offered | X25519 only | TLS 1.2 at most |
+|---|---|---|---|---|
+| `account.vettid.org` (site and member API at `/api/*`) | CloudFront, `TLS_V1_2_2021` (`lib/constructs/static-site.ts`) | TLS 1.3, **X25519MLKEM768** | TLS 1.3, X25519 | TLS 1.2, ECDHE X25519 |
+| `admin.vettid.org` | CloudFront, `TLS_V1_2_2021` | TLS 1.3, **X25519MLKEM768** | TLS 1.3, X25519 | TLS 1.2, ECDHE X25519 |
+| `admin-api.vettid.org` | API Gateway custom domain, `TLS13_1_2_PFS_PQ_2025_09` (`lib/stacks/admin-api-stack.ts`) | TLS 1.3, **X25519MLKEM768** | TLS 1.3, X25519 | TLS 1.2, ECDHE X25519 |
+| `account.staging.vettid.org` | CloudFront, `TLS_V1_3_2025` since 2026-11-05 (vettid.org #531) | TLS 1.3, **X25519MLKEM768** | TLS 1.3, X25519 | **refused** (protocol version), re-checked 2026-11-05 13:43 UTC |
+
+The admin hosts complete the TLS handshake from anywhere: the exit-node IP
+lock (above) applies to requests, not to the handshake. Staging has no admin
+hosts.
+
+**So:** any client that offers ML-KEM (current major browsers, Go 1.24+
+with default settings, OpenSSL 3.5+) gets the hybrid exchange. A client that offers only classical groups,
+or only TLS 1.2, gets a classical one: TLS 1.2 has no hybrid group, and both
+policies still allow it.
+
+**Not checked from here:** the CloudFront → API Gateway origin leg of the
+member API (`/api/*` to the execute-api URL). It runs inside AWS and can't be
+observed from a client.
+
+**Decided (owner, 2026-11-05):** the account and admin sites go TLS 1.3 only
+at CloudFront (`tls13Only`, `SecurityPolicyProtocol.TLS_V1_3_2025`; vettid.org
+#531), which removes the classical TLS 1.2 path. Staging's account site has it
+(table above). Production's account and admin sites change on their own
+deploy go; until then the production rows above still apply. `admin-api` is
+left as it is: API Gateway's only TLS 1.3-only policy isn't one AWS lists as
+post-quantum, so switching could lose the hybrid exchange it has now.
+
+**Re-check** after a change to either policy, and from time to time:
+
+```bash
+# hybrid first; expect "Negotiated TLS1.3 group: X25519MLKEM768"
+openssl s_client -connect account.vettid.org:443 -servername account.vettid.org \
+  -groups X25519MLKEM768:X25519 </dev/null 2>/dev/null | grep -i 'negotiated tls1.3 group'
+```
+
 ## Relay (relay.vettid.org)
 
 Hosting option B (decided 2026-10-03): several identical Fargate tasks

@@ -116,6 +116,17 @@ describe('StaticSite', () => {
     });
   });
 
+  test('tls13Only serves TLS 1.3 only (TLSv1.3_2025), for hybrid post-quantum key exchange', () => {
+    const s2 = new cdk.Stack(new cdk.App(), 'Site13', { env });
+    const z2 = route53.HostedZone.fromHostedZoneAttributes(s2, 'Zone', { hostedZoneId: 'Z123', zoneName: 'vettid.org' });
+    new StaticSite(s2, 'Admin', { hostName: 'admin.vettid.org', hostedZone: z2, sourceDir: 'test/fixtures/site', tls13Only: true });
+    Template.fromStack(s2).hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        ViewerCertificate: Match.objectLike({ MinimumProtocolVersion: 'TLSv1.3_2025' }),
+      }),
+    });
+  });
+
   test('CSP allows only self-hosted script and listed connect sources', () => {
     template.hasResourceProperties('AWS::CloudFront::ResponseHeadersPolicy', {
       ResponseHeadersPolicyConfig: Match.objectLike({

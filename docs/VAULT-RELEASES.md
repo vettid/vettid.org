@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.34
-date: 2026-10-26
+version: 0.1.35
+date: 2026-11-05
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -270,6 +270,10 @@ changelog:
     class `automation` (VAULT-MESSAGING §11.7.1, §11.10.8), with an end
     date (first: 2027-06-30); production refuses both. Not live until a
     staging release carries the member
+  - 0.1.35: editorial: R1's staging keys are scheduled for deletion when
+    their release is removed, weeks after it is cut, not right after use; §11.1's
+    shared relay stays (D11), not "at first" (STAGING-DEVELOPMENT-PLAN
+    §7); no rule changes
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.37.0) §11.10 release updates, §11.10.8 release constants, §12.5 deletion, §13.5, §13.9
@@ -350,7 +354,7 @@ production release 1 is tracked in W10-READINESS.
 
 | # | Decision | Consequence in this plan |
 |---|---|---|
-| R1 | Permanent, locked keys (no policy change, ever) only for **production** releases. Development, staging and test builds use deletable keys and are clearly distinguishable. | Channels with separate manifest keys and a separate account (§3.1). Staging keys have the production shape so that the check and the retirement path are tested, but a 7-day window and are deleted after use. |
+| R1 | Permanent, locked keys (no policy change, ever) only for **production** releases. Development, staging and test builds use deletable keys and are clearly distinguishable. | Channels with separate manifest keys and a separate account (§3.1). Staging keys have the production shape so that the check and the retirement path are tested, but a 7-day window and are scheduled for deletion when their release is removed, weeks after it is cut (STAGING-DEVELOPMENT-PLAN §2.5). |
 | R2 | Member-facing releases on a **cadence** (for example monthly) plus security hotfixes, not every merge. | §3.3, §10. |
 | R3 | **Deprecated releases are move-only**: they must still unlock and let the member approve a move; nothing more. | The compatibility contract C1–C8 and its tests (§3.4, §11.3). |
 | R4 | **Retirement and key deletion** after a long window (12 months to start, configurable), with in-app prompts, emails and a final deadline. Then the release stops and its key is deleted. Confidentiality never changes; members who never move lose access. | §11.10.7 allows only scheduled deletion (and its cancellation) by a pinned principal (§4.1); the notice timeline (§3.5). |
@@ -2113,10 +2117,12 @@ with the notice job sending the emails of §3.5 automatically:
 A full copy in the staging account (`-c stage=staging`): member API,
 tables, vault stacks, the staging manifest under staging.vettid.org,
 staging keys with the production shape and a 7-day window. Relay: the
-production relay at first (test mailboxes are harmless and the staging
-image pins it), a staging relay deployed on demand when relay changes need
-testing. (0.1.11) Staging is the development channel and is not parked
-between releases; its rules are STAGING-DEVELOPMENT-PLAN §2.
+production relay, which stays shared (owner decision D11 in
+STAGING-DEVELOPMENT-PLAN §6; test mailboxes are harmless and the staging
+image pins it), and a staging relay deployed on demand when a relay change
+needs testing, not kept running. (0.1.11) Staging is the development
+channel and is not parked between releases; its rules are
+STAGING-DEVELOPMENT-PLAN §2.
 
 *As built (W9, part A: CDK).* `-c stage=staging --profile vault-staging`
 builds, all in vettid-vault-staging: `VettidOrgStageDnsStack` (zone

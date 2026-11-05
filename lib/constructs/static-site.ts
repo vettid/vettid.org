@@ -35,6 +35,12 @@ export interface StaticSiteProps {
   /** ARN of a CLOUDFRONT-scope WAF web ACL (us-east-1). */
   readonly webAclArn?: string;
   /**
+   * TLS 1.3 only at the viewer (CloudFront `TLS_V1_3_2025`), so no client
+   * falls back to TLS 1.2, which has no hybrid post-quantum key exchange
+   * (owner decision a, 2026-11-05; docs/PQC-MIGRATION.md). Default: TLS 1.2+.
+   */
+  readonly tls13Only?: boolean;
+  /**
    * Branded 404 page (path inside sourceDir, e.g. '404.html'). Requests for
    * files the site doesn't contain get this page with a real 404 status,
    * answered by the viewer-request function from a file list built at synth.
@@ -297,7 +303,9 @@ function handler(event) {
       comment: props.hostName,
       domainNames: [props.hostName],
       certificate,
-      minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
+      minimumProtocolVersion: props.tls13Only
+        ? cloudfront.SecurityPolicyProtocol.TLS_V1_3_2025
+        : cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
       defaultRootObject: 'index.html',
