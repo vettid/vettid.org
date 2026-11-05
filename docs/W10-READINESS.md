@@ -1,8 +1,8 @@
 ---
 title: W10-READINESS
 status: living checklist (update as items close; not a plan)
-version: 0.1.13
-date: 2026-10-26
+version: 0.1.14
+date: 2026-11-05
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-RELEASES.md (0.1.7) §8.8 capacity, §10.1 release steps, §12 first deployment, §13 W9/W10, §15 O1–O10
@@ -12,6 +12,9 @@ related:
   - W9-REPORT.md (PR #136) — the W9 staging record (B9)
   - vettid-vault docs/RELEASING.md, docs/SMOKE.md
 changelog:
+  - 0.1.14: editorial: §3 "Before starting" no longer names S4 as the
+    staging twin; the twin is the newest staging release that passed
+    the plan's §2.4 (STAGING-DEVELOPMENT-PLAN §7); no rule changes
   - 0.1.13: B12 implemented (vettid.org #429): `lib/vault/release-list.ts` now
     refuses a production release 1 entry without `ends_after_days: 90`,
     as a candidate and in every later status. No requirement changes
@@ -265,8 +268,7 @@ member is on release 1, retire it at once and ship release 2.
 
 Before starting: §2 is empty; `aws sso login` (default, vault-prod);
 `free -g` shows room for builds; the staging twin (0.1.6: the newest
-staging release that passed STAGING-DEVELOPMENT-PLAN §2.4; it was S4,
-the 0.15.0 release, when this was written)
+staging release that passed STAGING-DEVELOPMENT-PLAN §2.4)
 is built from the same source as the release commit except the channel
 files. From VAULT-MESSAGING 0.26.0 the channel files differ in behaviour
 too: production's `features` is empty and staging's lists all seven
