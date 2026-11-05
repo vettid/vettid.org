@@ -392,6 +392,25 @@ cannot read the member's files**. This is the main cost.
     the repository's code is what they do. In a shared folder they are
     always referred, every run, and the phone says the program runs code
     from a folder the agent can change.
+  - **Profiles in general.** A profile is data shipped with the
+    connector (in its administrator-only program folder, versioned with
+    each release). It lists a program's override flags and settings,
+    and the control files to pin. It is not a git special case: git,
+    ssh and curl come first, then the cloud and file tools agents use
+    most (`aws`, `gcloud`, `az`, `rclone`). Their own configuration
+    already comes from the runner's empty profile, never the member's.
+    A program without a profile runs in `work/` as usual. In a shared
+    folder, it is referred every run.
+  - **Handing files in and out** (for agents that work on documents
+    rather than code). The request names input files. The connector
+    copies them read-only into the run's `work/` before the start, and
+    the phone shows their names and sizes. Outputs the run writes to
+    `work/out/` are copied back, after the run, to a folder the member
+    chose for that item. A run then reads the member's documents
+    without any shared folder, so the steering above doesn't arise:
+    what the run reads is a copy made before it started. This needs a
+    VAULT-MESSAGING change for `item.run` (the file names in the
+    request and the approval).
   - **Not covered, said plainly:** file contents a program reads as data
     (a file the agent wrote that git then pushes, for example) still
     go where the command sends them. And a program with no profile, run
@@ -479,7 +498,10 @@ opened it leaves (§5).
      agent can shadow the command in the member's account.
    - b: no, run from the member's account (the agent can then pair a
      connector of its own and share any folder).
-8. **Steering through shared folders (§6).**
+8. **Steering through shared folders (§6).** *Chosen by the owner in
+   the implementing session, 2026-11-05: a, with profiles as a general
+   mechanism for non-coding agents too; to be confirmed on Ground
+   Control.*
    - a (recommended): hardened profiles for git, ssh and curl, plus
      pinned control files for git. Programs that run the folder's code
      are always referred in a shared folder, and any other program in a
@@ -488,6 +510,12 @@ opened it leaves (§5).
      gap where a profile misses a setting).
    - c: no shared folders at all (question 1 b). Runs use `work/` only,
      and the steering doesn't arise.
+9. **Handing files in and out (§6).**
+   - a (recommended): yes. Input files are copied read-only into
+     `work/`, outputs go back to a folder the member chose. Document and
+     data agents then need no shared folder. This needs a VAULT-MESSAGING
+     change.
+   - b: not now. Such agents use shared folders, under question 8.
 
 ## 10. What changes elsewhere, once approved
 
