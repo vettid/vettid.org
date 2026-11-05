@@ -2,7 +2,7 @@
 
 **Version:** 1.0 draft
 **Date:** August 2026
-**Status:** For developer implementation
+**Status:** Implemented v1 (phases 1–2), as of 2026-11-05; see §13
 **Owner:** Al Liebl (VettID)
 
 ---
@@ -405,6 +405,32 @@ This section's biggest ongoing cost is verification, not writing.
 6. Coach wizard (client-side, `coach-tree.json`, zero post-load network requests, asserted in a test).
 7. Phase 1 content (§10) authored against the style guide (§7).
 8. Pre-launch pass: DevTools network-tab audit (no third-party requests), accessibility check (the audience includes non-technical users on small screens), and a full run of every playbook on a physical device.
+
+---
+
+## 13. Status as built (2026-11-05)
+
+v1 is live: phases 1 and 2 (§10) at `vettid.org/playbooks/` (repo `vettid-playbooks`), and `/why` on the main site.
+
+**Content (§10):** all 18 playbooks in the phase tables are published.
+- **Phase 1:** the 4 universal playbooks, plus the two quick-win "Lock down" playbooks.
+- **Phase 2:** the 2 GrapheneOS playbooks, plus iOS and Android versions of the app audit, stalkerware response, network privacy and kids' first phone. The stalkerware and network playbooks also have universal companions.
+
+**Anchor articles (§5.3), owner decision 2026-11-05:**
+- **#1** is covered by "Security and privacy aren't the same thing" and "Trust is proof, not a feeling".
+- **#3** is "Privacy isn't about hiding".
+- **#2 "Your layers, explained"** and **#4 "Who's tracking you, and how"** are **still to write (v1.1)**.
+- Two articles beyond the list also shipped: "Anonymity is a tool, not a plan" and "Being known isn't the same as being watched".
+
+**The coach (§8):**
+- The tree is one question deep. There is no "Which phone?" node: a device row on the landing page scopes the results instead. It is guessed locally from the browser and can be set by the reader.
+- CI checks the built page (`scripts/coach-test.mjs`, vettid-playbooks #25). Every path, for every device choice, makes zero network requests after load (§8.2). Every leaf shows at least one published playbook, and the depth is at most 3 (§8.3). The §8.2 statement is on the page verbatim, and the test asserts it.
+
+**Still open (§11, §12 item 8):**
+- The 12 OS-specific playbooks carry `os_verified: "… (draft — pending device verification…)"`: they have not yet been run on a device. There is one issue each, vettid-playbooks #26–#37.
+- The first quarterly re-verification pass falls due around 2026-11-15. No playbook is past the 6-month rule; the first would be on 2027-02-15.
+- The staleness banner is decided at build time (vettid-playbooks #38); it should be decided in the browser, with no network request.
+- The accessibility check in §12 item 8 has no record yet.
 
 ---
 
