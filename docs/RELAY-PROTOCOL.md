@@ -425,7 +425,9 @@ repeat counts against the limit on new mailboxes (§7.2, limit 3) like
 the first, so a client retries a `429` after its `retry_after`. A rotate
 with a **different** new key while the old mailbox lives also succeeds,
 and leaves the first successor orphaned; clients SHOULD NOT do it (a
-VettID vault repeats a rotate only with the same key). After the grace
+VettID vault repeats a rotate only with the same key, and rotates with
+another key only after the relay refused the first one definitively,
+VAULT-MESSAGING §3.4). After the grace
 the old mailbox is gone and a rotate signed by its key is answered
 `mailbox_unknown` (§6.10); the new key can still register on its own
 (§6.1).
@@ -1668,7 +1670,8 @@ The push gateway API is specified separately.
   while the old mailbox lives is idempotent (the same `mailbox_id`, the
   successor created only if absent or already holding that key, the old
   mailbox's deletion time never moved later); a rotate with a different
-  new key also succeeds and leaves the first successor orphaned; after
+  new key also succeeds and leaves the first successor orphaned (a
+  VettID vault does so only after a definite refusal of the first); after
   the grace a rotate is `mailbox_unknown`. A repeat is a newly signed
   request and counts against limit 3 (§7.2) like the first. States what
   vettid-relay does; no wire change.
