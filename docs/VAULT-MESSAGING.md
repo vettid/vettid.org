@@ -1,12 +1,12 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.84.0
+version: 0.85.3
 date: 2026-11-05
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
-  - RELAY-PROTOCOL.md (0.10.1)
+  - RELAY-PROTOCOL.md (0.10.2)
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md (0.2.2)
@@ -14,12 +14,12 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md (0.3.0)
   - MEMBER-API.md (2.14.0)
-  - ANDROID-PLAN.md (0.1.119)
-  - IOS-PLAN.md (0.1.62; §9.1 VA1–VA4)
-  - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
+  - ANDROID-PLAN.md (0.1.120)
+  - IOS-PLAN.md (0.1.63; §9.1 VA1–VA4)
+  - AGENT-PLAN.md (0.1.10; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
-  - BALLOT-PROTOCOL.md (0.13.3; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at 0cf7553, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.11.1, unchanged since)
+  - BALLOT-PROTOCOL.md (0.13.7; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at 8940571, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.11.1, unchanged since)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.34; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
@@ -28,6 +28,78 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.85.3: 2026-11-05, owner decisions of 2026-11-05 for the agent
+    connector (option b, thread 01M6PBG2YHEEPDQ9ETQEBWK0EB: pin a
+    bound program's content; option a, thread
+    01M6PC7E5E3DARQSS4SE200MNR: an env allowlist in the binding), with
+    AGENT-PLAN 0.1.10. §10.11 "Ways to use a secret": an item's
+    `run.programs` entries become objects `{program, sha256?, path?,
+    env}`, and no two may match the same path. `sha256` is the SHA-256
+    of the program file and `path` where it ran from. The vault
+    records both, never the app, when the member approves a run whose
+    hash is not recorded yet, or whose hash or path differs from the
+    recorded ones (the earlier rule, a program only an administrator
+    can change, stays for a program with no pin yet). Such a run is
+    always referred, with the new flags
+    `program_unrecorded` or `program_changed` (the latter with
+    `previous_sha256` and `previous_path`), and `each: false` covers
+    only a run that matches the pin. Recording raises the settings'
+    `version`; `leash.item.set` may keep or drop a pin, never set one.
+    A run whose settings changed while it waited is decided again
+    before the value is sent. `item.run` gains `sha256`, the hash of
+    the file the connector runs. A run's `env` names must be listed in
+    the matched entry's `env` (empty by default; adding a name is a
+    widening), or the run is refused with the new code
+    `env_not_allowed` (§10.1), also counted as refused. An unbound
+    item's runs carry no `env`. The name rule for `name`, `env` and an
+    entry's `env` also refuses the code-loading, proxy and certificate
+    names listed there, even when listed (the extra names: owner
+    decision of 2026-11-05, thread 01M6PFQMMSQT0HWGDRGENKZ2Q0). The catalog's entries carry
+    the pinned path, never the hash. The app shows a 16-digit fingerprint. A paragraph says
+    plainly what the pin does not cover. "Grant-set sequence": a
+    `grant_seq` of 0, or one that is not an unsigned 64-bit integer,
+    counts as absent. AV9 and AV10 are not built, and no release lists
+    `item_ways` (§17), so nothing shipped changes
+  - 0.85.2: erratum, 2026-11-05 (owner decisions a and a/a, GC thread 01M6NPMKXNB3Q1JCNZCPFZWHW7): §11.14.10 rule 5, a new phone past its transfer deadline keeps collecting for a settlement window (the relay's visibility timeout + the long-poll cap + 5 s, about 90 s) before it drops, because a collect held by a killed app can lease `device.paired`; the window runs in the background, never cancels its own collect, retries failed collects, ends a rejection or abandon at once, and hides the comparison code. The mentions in §6.7.1 and the transfer table follow.
+  - 0.85.0: 2026-11-05, DRAFT for owner decision (options in vettid.org
+    #536; #528 takes 0.84.1). New §3.4.1: which of a peer's identity and
+    relay keys a message may come from, one `acceptFrom` with conflict
+    checks first, Table A (relay-key state) and Table B (`ik` state),
+    epochs after an `ik` link, rules C, U (signed relay links, the chain
+    from the recipient's key), T and H5, the rotating side's S1–S9,
+    residuals and invariants I1–I5. Wire: `relay.address.update` gains
+    `links`, `identity.rotate` and rekeys gain `rotations`. Adjusted:
+    §3.4 (a), (b), "The signal", "When the old key is deleted", the
+    refused state, "Device relay key", step 3, "One successor per key";
+    §6.2; §6.3; §6.6; §7.4; §10.2 types; §10.9 (`drop.peer_key`);
+    §11.14.2; RELAY-PROTOCOL 0.10.2 §6.7.
+  - 0.84.1: erratum, 2026-11-05 (as built, the lead's choices, and
+    owner decision b of 2026-11-04). (1) §3.5.3, §3.5.9: only
+    `credential.ack` confirms a credential version; presenting it in a
+    later operation does not (the vault already works this way). (2)
+    §10.19.6 step 3, §10.19.8, as built in vettid-vault #191: a `null`
+    or non-array `other_rows` is `bad_request`; `row_duplicate` wins
+    over input elsewhere, and a contradiction in the results themselves
+    wins over `row_duplicate`; an index is taken only once its entry
+    verifies; a submission that does not verify on a `rows_unavailable`
+    check is answered reason `input` while the stored reason stays; a
+    `rows_unavailable` submission keeps no results. (3) §10.19.6: the
+    re-check of a `gave_up` record does not download an unchanged
+    `rows.json` again, unless `rows.json` could not be fetched on the
+    last attempt; a re-check that skips it submits the kept row and
+    proof again or sends nothing; §10.19.2: the `problems` notice ends when the
+    count drops below 16. (4) §10.19.4, §6.4: a member's request for a
+    proposal the service holds but has not published gets no answer,
+    not `unknown_proposal` (BALLOT-PROTOCOL 0.13.7, service-vault
+    #122); the vault asks again, the cast on its schedule and
+    `vote.status` on its own. (5) §6.4, §3.4: from the vault release
+    with vettid-vault #200 (in review), an outgoing connection request,
+    reconnect or rekey that cannot be restored at an unlock or a
+    recovery's open is dropped as an aborted one; an `hs.init` queued
+    by an earlier release may still be sent. (6) §11.14.10 "The owed
+    mark": the held statement K0→K1 precedes anything signed with K1 or
+    a later key (K2), not `identity.rotate`. BALLOT-PROTOCOL in
+    `related` is now 0.13.7 (at 8940571, service-vault #122). Only (3)'s re-check rule is for the apps.
   - 0.84.0: 2026-11-05, owner decisions of 2026-11-05 (option a for
     the order, option a for the notice).
     §3.4 **The order of a relay-key rotation**: store first, then rotate, retried with the
@@ -3630,7 +3702,8 @@ create-only.
     pending key **refused** in the DEK state (a state write of its own,
     with the refusal's code), keeps the key, its tokens and its held
     updates, audits `identity.rotation_failed` with its feed item, and
-    **never generates another relay key on its own**. It makes one
+    **never generates another relay key on its own** ((0.85.0 draft) a
+    recovery's refused rotate is option O5 in vettid.org #536). It makes one
     attempt at each unlock (the rotate, then the registration; no sooner
     retries), and one that succeeds leaves the state at the second
     write. While the state lasts the vault collects from the old mailbox
@@ -3707,19 +3780,27 @@ create-only.
     the relay's grace ends, to collect from its own old mailbox (§3.4
     step 1: both mailboxes during the grace):
     never otherwise to collect, and never to rotate, delete or mint
-    tokens on any mailbox, nor for an owner operation; the vault **never registers the old key again**
+    tokens on any mailbox, nor for an owner operation, with two
+    exceptions (0.85.0 draft), both only during the grace and only on its own
+    old mailbox: it revokes tokens that mailbox issued (§3.4.1 S7), and
+    it mints the standing and reconnect tokens of a reconnect `hs.init`
+    it deposits with the old key (§3.4.1 S1), for the old mailbox; the
+    vault **never registers the old key again**
     (RELAY-PROTOCOL §6.10 would allow it). A deposit needs the recipient's token for the old `sub`
     and `X-VettID-Key` = the old key (RELAY-PROTOCOL §5.3 steps 2–7); it
     does not need the vault's own old mailbox to exist.
   - **The signal.** A recipient (each connection's vault, and each of
     the member's own devices and agents) has **acknowledged** the new
     address when the vault has received from it `relay.token.issued` for
-    the new `sub` (step 4), or any message deposited with a token the
-    vault issued for the new `sub` (its `jti` is recorded, §7.1).
+    the new `sub` (step 4). (0.85.0 draft) Nothing else counts, not even
+    a message deposited with a token the vault issued for the new `sub`;
+    until then the vault holds what it sends that recipient (§3.4.1 S1,
+    option O1 in vettid.org #536).
   - **When the old key is deleted.** When every recipient has
-    acknowledged, or when every standing token the recipients issued to
-    the old `sub` has expired (at most 30 days after the last renewal),
-    whichever is first, **and not while a notice to a removed device is
+    acknowledged, or (0.85.0 draft) each recipient that has not acknowledged
+    has become `stale` (§3.4.1 S1), whichever is first, and not before
+    the grace ends while a recipient that has not acknowledged may still
+    be reached by a reconnect with the old key (§3.4.1 S1), **and not while a notice to a removed device is
     undelivered**: a pending unlink (`device.unlinked{transferred}`,
     §11.14.10) or a recovery's `device.unlinked{replaced}` (§11.14.6
     step 6) that still holds a valid token for the old `sub`. A removed
@@ -3732,8 +3813,11 @@ create-only.
   - **(b) Resend at each unlock.** At each unlock, for each recipient
     that has not acknowledged and whose standing token for the old `sub`
     is still valid, the vault deposits `relay.address.update` again with
-    the old key and that **standing** token (the same address, the same
-    new tokens; a receiver that has it ignores the duplicate). A
+    the old key and that **standing** token (the same address; (0.85.0
+    draft) with the links and tokens made again for the recipient's
+    current relay key, §3.4.1 S1, S3, deposited to its current mailbox
+    with the newest standing token whose `sub` is the vault's key for
+    it; a receiver that has followed it answers again, §3.4.1 rule U). A
     **reconnect token cannot carry it**: it may deposit only an `hs.init`
     with purpose `reconnect` (§6.6), so a party whose standing token has
     expired is not reached this way (see (c) below). Bounded: **at most
@@ -3749,8 +3833,12 @@ create-only.
     address or an old `kem` does not grow.
   - **Limit.** A party that misses the update beyond the life of its
     tokens needs a new invite or pairing (§6.6 "Limits").
-- **Device relay key.** The device sends `relay.address.update`, and the vault
-  denylists the old `sub` after the grace period.
+- **Device relay key.** The device sends `relay.address.update`. (0.85.0 draft)
+  The device follows "The order of a relay-key rotation" above (store
+  first, then rotate, retried with the same key) and §3.4.1 S1–S3 and S7
+  as the rotating side; the vault receives it by §3.4.1 rule U and lets
+  the standing token it issued to the old `sub` expire (at most 30
+  days), in place of denylisting the old `sub` after the grace period.
 - **Vault `ik` and `kem`** rotate at a completed recovery, at a transfer
   (§11.14.10) and with the Protean Credential (PQC-MIGRATION §7). (0.68.0)
   A `credential.rotate` (§3.5.5) MUST rotate them, **and the vault relay
@@ -3763,7 +3851,14 @@ create-only.
   1. The vault sends an `identity.rotate` statement, signed by both the old
      and the new `ik`, to every device and peer.
   2. It appends the statement to its **rotation chain**.
-  3. It rekeys every session (§6.5).
+  3. It rekeys every session (§6.5), and (0.85.0 draft) abandons and starts
+     again its own open reconnects (§3.4.1 S5).
+
+  (0.84.1; from the vault release with vettid-vault #200) An outgoing
+  handshake begun under the old `ik` that has not finished when the
+  vault locks cannot be restored at the next unlock or at a recovery's
+  open; it is dropped as an aborted one is (§6.4, "An outgoing handshake
+  that cannot be restored").
 
   The credential rotation is the PQC migration vehicle (PQC-MIGRATION §7):
   the release that introduces suite 3 generates the hybrid credential key
@@ -3819,7 +3914,9 @@ sig_new = Ed25519(new_ik, "vettid/vms/2/rotate" || m)
   to every statement a receiver checks, whether it arrives in
   `identity.rotate` or in the `rotations` of a reconnect `hs.init` or
   `hs.resp` (§6.6); a reconnect that carries a second successor is not
-  answered and suspends the connection. After `connection.rotation.resolve`,
+  answered and suspends the connection. (0.85.0 draft) The check comes before
+  any refusal of an earlier relay key, and relay keys have the same rule
+  (§3.4.1 rule C). After `connection.rotation.resolve`,
   the dropped statement is remembered and a later copy of it is refused, not
   treated as a new conflict. *Residual:* the carrier, or a
   replaying host that holds an old copy of a vault, can after any
@@ -3833,6 +3930,368 @@ sig_new = Ed25519(new_ik, "vettid/vms/2/rotate" || m)
   recovery (§11.14.6 step 6) and at the completion of a transfer
   (§11.14.10).
 - **ETK** rotates at least every 24 h and on every enclave start.
+
+#### 3.4.1 Which keys a peer's messages may come from (0.85.0, draft)
+
+*Draft for owner decision. Options pending, see the PR (vettid.org #536);
+the text assumes the recommended answers to O1–O4, O7 and O8. Until it is
+approved, the rest of §3.4 and §6.6 stand.*
+
+How a receiver Q decides which of a peer P's identity keys and relay
+keys a message may come from. It binds vaults, the reference client and
+the apps, and says what "the relay key on record" and "the stored `ik`"
+mean elsewhere.
+
+**Threat.** An **old copy** of P taken before the first write of a
+rotation R (§11.14.2: the lost phone at a recovery, the old phone at a
+transfer, a state under an earlier DEK at a `credential.rotate`) holds
+what P held then: its relay key, `ik`, `kem`, epoch keys and tokens. It
+can deposit wherever it holds a valid token, sign with the old `ik`, and
+seal and open under those epochs. The relay authenticates the key that
+deposits but **asserts** `sender`, `deposited_at`, the order of `msg_id`s
+in a mailbox (RELAY-PROTOCOL §6.2) and the order across mailboxes, so
+these rules hold against anyone but the relay and its host (§13.5).
+
+**Terms.**
+- **P and Q.** P is a connection's vault, or, between a vault and its
+  own device or agent, the other side; a device rotates no `ik` (§6.7),
+  so there Table B applies only to the vault's keys.
+- **From P.** A message is from P when it opens under P's session: by
+  its `recipient_kid` (an epoch Q keeps for P, §6.5), or, for a sealed
+  `hs.init` of a rekey or reconnect, by its `ctx` (an epoch of P's) and
+  `from.ik`. Its `sender` is then judged against P's keys below.
+- **`ik` states**, for the `ik` a message is signed by or names:
+  **current** (the stored `ik`, with the **followed links** of P's chain);
+  **reached** (reached from the current `ik` through the links the
+  message carries, each checked by rule C and resolved as in §3.4);
+  **ancestor** (the `old_ik` of a followed link); **rejected** (the
+  `new_ik` of a statement dropped at `connection.rotation.resolve`, §3.4,
+  or any `ik` reached only through one); **unknown** (any other).
+- **Epoch signer.** Q records with each epoch of P the P-side `ik` that
+  signed its handshake and the position of the message that established
+  it at Q.
+- **Relay-key states**, for the message's `sender`: **current** (the
+  relay key on record); **earlier** (one Q followed P away from, kept with
+  its **followed relay link** and its **cut-off**, below, until no token
+  Q issued to it can still deposit); **foreign** (any other, including a
+  key P announced that Q has not followed: P deposits nothing with it
+  before Q's token for it arrives, S1).
+- **Cut-off.** The position of the `relay.address.update` with which Q
+  followed a link. A message deposited with an earlier key is **before**
+  the cut-off if, in the same mailbox of Q, its `msg_id` is smaller than
+  the update's, or, in another mailbox of Q, its `deposited_at` is not
+  later than the update's; otherwise **after**.
+- **Order of processing.** While Q collects from more than one mailbox
+  (its own rotation's grace, §3.4 step 1), it processes each round's
+  messages from all of them in (`deposited_at`, `msg_id`) order, and
+  processes nothing deposited after the earliest **collected-to** time of
+  its mailboxes until every mailbox is collected past it. A mailbox's
+  collected-to time is the start, by Q's clock, of its last collect that
+  returned fewer than `max` messages, less the 90-second freshness
+  window of RELAY-PROTOCOL §4.1; a mailbox answered `mailbox_unknown`
+  leaves the set.
+
+**Outcomes.**
+- **accept**: processed under the rest of this specification. *Follow*
+  (a link), *answer* (an `hs.init`: `hs.resp` sent, state changed only at
+  `hs.fin`, §6.6) and *ignore* (acked with no effect and no audit) are
+  accepts.
+- **refuse**: acked, dropped and audited `drop.peer_key` (§10.9) with
+  `ref` = the reason in parentheses. A refused `hs.resp` or `hs.fin` from
+  a foreign or earlier key leaves its handshake open (as a wrong
+  `sender` does, §6.3); *abort* is a refusal that also destroys the
+  handshake (§6.3). The reasons: `suspended`, `foreign_sender`,
+  `superseded_relay`, `relay_rollback`, `relay_unlinked`,
+  `token_unusable`, `ancestor_ik`, `rejected_ik`, `unknown_ik`,
+  `ik_rollback`, `conflict`, `unexpected`.
+- **defer**: left unacked, unprocessed, so the relay delivers it again;
+  only for a token rule T says to defer, for at most two of the relay's
+  visibility timeouts (RELAY-PROTOCOL §6.3) after Q first saw it (that
+  time is stored by `msg_id`, so a restart does not reset it), or
+  while another mailbox of Q has not been collected past its
+  `deposited_at`, and for at most 8 messages per peer and reason at
+  once. Otherwise it is refused with the reason given.
+- **restart**: H5. **suspend**: §3.4. **—** in a table: cannot occur;
+  if it does, refuse (`unexpected`).
+
+**`acceptFrom`.** One function decides every message from P, wherever a
+message is taken (the collect loop, the handshake, the handlers), in
+this order: (1) Q's record of P is suspended: refuse; (2) the `sender`
+is foreign: refuse; (3) **evidence first**: every identity link and
+relay link the message carries is checked by rule C, whatever the
+`sender`'s position, before step 4; (4) Table A, by the `sender`'s
+relay-key state; (5) Table B, by the `ik` state, for the kinds Table A
+passes to it.
+
+**Table A, relay key** (steps 1–4). A second successor in any column
+has already suspended at step 3; an `hs.init` whose `sender` is not its
+`from.relay.pk` is refused (`foreign_sender`).
+
+| `sender` | Session message | `relay.address.update` | `relay.token.issued` | `identity.rotate` | `hs.init` (rekey, reconnect) | `hs.resp`, `hs.fin` |
+|---|---|---|---|---|---|---|
+| Record suspended | refuse (`suspended`) | refuse (`suspended`) | refuse (`suspended`) | refuse (`suspended`) | refuse (`suspended`) | refuse (`suspended`) |
+| Foreign | refuse (`foreign_sender`) | refuse (`foreign_sender`) | refuse (`foreign_sender`) | refuse (`foreign_sender`) | refuse (`foreign_sender`) | refuse (`foreign_sender`), handshake kept |
+| Current | accept | rule U | accept, tokens by rule T | Table B | Table B | Table B |
+| Earlier, before its cut-off | accept | rule U | accept, tokens by rule T | Table B | Table B | Table B |
+| Earlier, after its cut-off | refuse (`superseded_relay`) | rule U | tokens by rule T only | every link already followed: ignore; else refuse (`superseded_relay`) | refuse (`superseded_relay`) | refuse (`superseded_relay`), handshake kept (S2) |
+
+**Table B, identity key** (step 5). Every message that carries an `ik`
+carries its links (S8), so the `ik` is: for an `identity.rotate`, the
+`old_ik` of its first link Q has not followed; for an `hs.init`,
+`from.ik`; for an `hs.resp`, the key `sig_R` verifies under; for an
+`hs.fin`, the `from.ik` Q's answer pinned, after the `hs.init`'s links
+are applied (§6.6).
+
+| `ik` | `identity.rotate` | `hs.init` (rekey, reconnect) | `hs.resp` to Q's handshake | `hs.fin` to Q's answer |
+|---|---|---|---|---|
+| Current | follow, then H5; refuse (`ik_rollback`) if a `new_ik` is an ancestor or rejected | answer | accept, then H5 if links were appended | accept (establish) |
+| Reached | — | answer | accept, links appended after `sig_R` verifies, then H5 | accept, links applied, then H5 |
+| Ancestor | every link already followed: ignore | refuse (`ancestor_ik`; a reconnect also `reconnect_refused`, §6.6) | abort (`ancestor_ik`) | after `sig_I` verifies: a fork-evidence answer suspends (H5), else refuse (`ancestor_ik`) |
+| Rejected | refuse (`rejected_ik`) | refuse (`rejected_ik`) | abort (`rejected_ik`) | refuse (`rejected_ik`) |
+| Unknown | refuse (`unknown_ik`) | refuse (`unknown_ik`) | abort (`unknown_ik`) | — |
+
+**Epochs after an `ik` link.** When Q follows a link at position x, an
+epoch of P whose signer is that link's `old_ik` or an ancestor and that
+was established by a message deposited after x stops being current:
+Q sends nothing to P until a new epoch is established, starts a rekey
+sealed to the link's `new_kem`, and refuses messages under the demoted
+epoch deposited after x (`ancestor_ik`). A rekey or reconnect from P under
+the new `ik` whose `ctx` names an epoch Q superseded by one signed by an
+ancestor `ik` is fork evidence: Q suspends (§6.6 "Fork detection",
+`ref` = `epoch`). An epoch established before this release counts as
+signed by the `ik` current for P at the upgrade. *Corner case:* a P whose
+answer **expired** before Q's `hs.fin` arrived, and that then rotated,
+is reported as two copies (S5 keeps an answer still awaiting `hs.fin`
+from causing this).
+
+**Rule C, one successor per key.** A link whose old key already has a
+followed successor other than its new key is a second successor.
+- **Identity links** (in `identity.rotate`, `hs.init`, `hs.resp`): §3.4
+  "One successor per key".
+- **Relay links** (in an update): the connection is suspended as a fork
+  (§6.6 "Fork detection", `connection.fork_suspected` with `ref` =
+  `relay`). While a relay fork is recorded, `connection.rotation.resolve`
+  answers `not_found`, also if an identity conflict is recorded too, and
+  the feed item says (NEW, for owner approval) "<connection name> may be
+  running from two copies of its data. The connection is paused. Ask
+  <connection name> to replace their vault's keys first, then connect
+  again with a new invitation." The only exit is a new invitation.
+- **Between a vault and its own device or agent** (nothing suspends):
+  the first successor followed stays and the other is refused
+  (`conflict`). A vault that sees it for a device sends that device
+  nothing more, with a `high` feed item (NEW) asking the member to
+  unlink the device and pair it again (§6.7; for the app, a recovery,
+  §11.11). An app that sees it for its vault shows a lasting warning
+  (NEW) with the action "Replace your vault's keys" (`credential.rotate`,
+  §3.5.5).
+
+**Rule U, a `relay.address.update`.** It carries `links`: the relay links
+from P's key for Q (S1) to P's current key, 1 to 32 of them, each
+
+```json
+{ "old": "<b64>", "new": "<b64>", "sig_old": "<b64>", "sig_new": "<b64>" }
+```
+
+```
+m       = "vettid/vms/2/relay-rotate" || old (32) || new (32)
+sig_old = Ed25519(old, m)        sig_new = Ed25519(new, m)
+```
+
+P signs a link in the rotation's first write (§3.4 step 1). Q checks
+that both signatures verify, that each link's `old` is the previous
+link's `new`, that the first `old` is the `sender` and the last `new` is
+`relay.pk`, and rule C on each link; else refuse (`relay_unlinked`).
+Then:
+- Leading links Q has already followed are skipped. If all are, the
+  update is a duplicate: Q ignores it and sends `relay.token.issued` for
+  P's current key again (fresh tokens, S3; at most one per update
+  received, within §7.2's limits), so a lost answer is replaced at P's
+  next resend.
+- Otherwise the first link not skipped must start at Q's current relay
+  key, and no `new` may be one Q keeps for P, else refuse
+  (`relay_rollback`); and the update's `token` must pass rule T for
+  `relay.pk`'s mailbox, else refuse (`token_unusable`). In one state
+  write Q records the links, each passed key with this update's
+  position as its cut-off, makes `relay.pk` current and keeps the tokens.
+  After that write it sends `relay.token.issued` for it (standing, and
+  reconnect for a connection), revokes the reconnect tokens it issued
+  to the passed keys (at the mailbox that issued them, S7) and leaves
+  the standing tokens to expire.
+- So an address changes only by a link the current key signed, from
+  whichever of P's keys the update came. A handshake does not pin P's
+  relay key: an `hs.init`'s `from.relay` only addresses the answer, and
+  `acceptFrom` decides each later message. No handshake is abandoned
+  when Q follows a relay link (S2).
+
+**Rule T, tokens.** A token in a message Q accepts, or takes tokens from,
+is kept only if it verifies, has not expired, names as `sub` Q's current
+relay key or an earlier one Q still keeps for deposits (§3.4 "Resending
+the new address" (a)), and names as `iss` the mailbox of P's current
+relay key (for an update being followed, `relay.pk`'s; for a reconnect
+`hs.init`, the mailbox its `from.relay` names, used only to deposit
+that handshake's answer). Any other token is ignored and is no reason to
+refuse the message, except an update's (rule U), and except a
+`relay.token.issued` whose `iss` is a mailbox Q does not yet know for P,
+which is deferred (it may be P's next mailbox, from an update Q has not
+processed). A token never changes P's address; who carried it does not
+matter.
+
+**H5, restart.** Whenever Q's current `ik` for P changes, by any message,
+and when Q suspends for a conflict or at `connection.rotation.resolve`,
+every open handshake with P pinned to an `ik` that is no longer current,
+other than the one whose message made the change, is abandoned: no
+`hs.fin` is sent for it, a later answer to it is dropped, and the tokens
+it carried are revoked (§6.6). Q's own rekeys and reconnects are started
+again under the current `ik`, except while suspended (a suspension
+abandons every handshake with P and starts none). Q's answers awaiting
+`hs.fin` whose pinned `ik` is no longer current are dropped; their
+initiator starts again (S5). A restarted
+reconnect spends one of the reconnect token's 4 deposits (§6.6; the
+relay cannot tell a restart), at most once per change of the current
+`ik`; a peer that rotated sends a fresh reconnect token in its own
+restarted reconnect (S5). A new reconnect `hs.init` from P that Q answers
+also ends Q's earlier answer to P's reconnect: it is dropped and its
+tokens revoked. **Exempt:** an answer that is fork evidence (a reconnect
+naming a replaced-line epoch, §6.6 "Fork detection") is kept, and its
+`hs.fin`, if `sig_I` verifies under the pinned key, suspends.
+
+**The rotating side** (a vault, or a device for its relay key; P toward
+each recipient Q).
+- **S1, P's key for Q.** P's key for Q is the newest of P's relay keys
+  whose `relay.token.issued` from Q has arrived (before any rotation,
+  P's current key). P deposits to Q only with it. While it is not P's
+  current key, P sends Q only the update, with the links from that key
+  to P's current key (made again with the current links at each resend,
+  §3.4 (b)), `relay.token.issued`, the messages of a reconnect (its
+  `hs.init` announcing that key, its `hs.fin`, an `hs.resp` to Q's
+  reconnect) and those of a first contact begun on that key's address
+  (S6); everything else for Q waits in P's outbox. An update is
+  deposited only after every earlier deposit to Q with P's key for Q has
+  had a definite answer; one without is held and deposited again with
+  the new key after Q's token (S2). P keeps every key that is some
+  recipient's key for it. A recipient whose key for P is not P's current
+  key 30 days after the second write becomes `stale` (§6.6 "Limits") and
+  no longer keeps a key.
+- **S2, when Q's token arrives** (one state write): P's key for Q
+  advances. An open reconnect whose `hs.init` announced the earlier key
+  and that has sent no `hs.fin` is abandoned and started again with the
+  new key; an `hs.resp` or `hs.fin` deposited with the earlier key whose
+  handshake is still open, and any deposit held by S1 for want of a
+  definite answer, are deposited again (the same bytes) with the new
+  key. Nothing P sends is lost to the cut-off.
+- **S3, tokens bound when sent.** Every token P puts in a message to Q
+  names as `sub` Q's relay key as P knows it when the message is
+  deposited; a held token minted for an earlier key of Q is minted again
+  then.
+- **S4.** *Note:* a vault's relay key rotates only as part of one of the
+  three paths of §3.4 (with its `ik`), though it may complete later
+  (pending, or owed).
+- **S5, own handshakes at an `ik` rotation.** In the write that makes a
+  new `ik` current, P abandons its own open rekeys and reconnects with
+  every peer and starts them again under the new `ik` after the
+  `identity.rotate`, so it never sends an `hs.fin` signed by a superseded
+  `ik`. After the rotation P starts no rekey with a peer while one of its
+  answers to that peer still awaits `hs.fin`, until that answer is
+  established or expires (§6.3: a responder activates only at `hs.fin`,
+  so a rekey started earlier would name an epoch the peer has
+  superseded). This does not override §6.6 "After a restore" (a restored side
+  issues no `identity.rotate` until its reconnects are settled).
+- **S6, first contacts** (owner decision 2026-11-05, "gap 2"). In the
+  write that makes a new `ik` current, P ends every unclaimed invitation
+  and pairing, and every first contact it began, made under the old `ik`
+  (not direct invitations made for the new `ik`, such as an
+  enrollment's or a recovered phone's, nor a transfer's pairing): each
+  is audited `invite.expired` with a feed item (NEW: "Your invitation
+  expired. Send a new one."); an outgoing one ends as an aborted one.
+  First contacts begun on the old relay key's address (invitations,
+  outgoing ones, ones awaiting approval, incoming requests) finish there
+  with the old key, not held by S1, while its mailbox lives; the new
+  peer then becomes a recipient and gets the update and new tokens (§3.4
+  step 3). Those still open when the mailbox ends end the same way.
+- **S7, revocations go to the issuing mailbox.** A token is revoked by a
+  denylist request (RELAY-PROTOCOL §5.5) signed by the key of the
+  mailbox that issued it; for an earlier mailbox, during its grace
+  (§3.4 (a)). After the grace that mailbox and its tokens are gone (the
+  tombstone, RELAY-PROTOCOL §6.7).
+- **S8, links with every `ik`.** An `identity.rotate` carries in
+  `rotations` P's links from the signer of the epoch it travels in up to
+  its `rotation`; a rekey's `hs.init` and `hs.resp` carry in `rotations`
+  P's links from the signer of the epoch they rekey (§6.2), as a
+  reconnect's do from its `ctx`. So no `ik` waits on the order in which
+  Q processes P's messages, which the relay does not keep (§8.4).
+- **S9, a sign of a fork.** If P gets `token_revoked` for a token Q
+  issued to an earlier key of P while that key is still P's key for Q,
+  and Q's token for P's current key has not arrived 24 hours after P's
+  first collect after that refusal that returns fewer than `max`
+  messages (§12.2), Q
+  has followed someone else's update: P audits
+  `connection.fork_suspected` (`ref` = `relay_revoked`) with a feed item
+  (NEW: "<connection name> may have connected to an old copy of your
+  vault. Contact <connection name>.").
+
+**Residuals.**
+- Until Q follows P's update, P's earlier key is current for Q, so an old
+  copy's deposits then count as P's, as before any rotation.
+- A copy taken after R's first write holds R's new keys (a pending relay
+  key, the new `ik`, and the signed relay links made in that write, kept
+  even if the key is later discarded, for example by a `credential.rotate`
+  in the refused state); only a later rotation ends it (§11.14.2), and
+  rule C catches a link it announces for a discarded key.
+- During the grace an old copy holding the old key can collect, ack or
+  delete the old mailbox (RELAY-PROTOCOL §6.7, §6.10), which also ends
+  the reconnect path of S1 for a recipient that has not followed.
+- For up to 30 days after Q follows, an old copy keeps the standing token
+  Q issued to the old key and can suspend the connection with a second
+  successor (O4).
+- The relay can choose which of two successors Q sees first; rule C
+  still suspends, and a second successor from it or an old copy suspends
+  the connection (§3.4's residual, now also for relay links). An
+  operator restore of P across a relay-key rotation shows as a relay
+  fork.
+- In another mailbox of Q, an old-copy deposit with the same
+  `deposited_at` as the update counts as before the cut-off.
+- A deferred token message that is refused is lost; P's next resend
+  replaces it (rule U).
+- Before the gate (deployment), the three paths rotate no relay key, and
+  an old copy keeps the vault's live mailbox, as on release 28.
+
+**Invariants**, checked after every step of a run (the harness: see the
+PR):
+- **I1, liveness.** At quiescence (every party unlocked and online, no
+  action pending, every lease expired and every message delivered and
+  processed, time past every resend and handshake retry, less than 30
+  days after the last rotation), for every pair not suspended, removed
+  or `stale`: each side's current relay key and `ik` for the other are
+  the other's own; both hold the same current epoch; each holds a token
+  that passes rule T for the other's current mailbox; a message sent
+  either way is accepted; and no outbox entry is held.
+- **I2, token form.** Every token held or sent names as `sub` a relay key
+  its holder has or keeps and as `iss` a live mailbox or one in its grace;
+  one sent to Q names Q's relay key as the sender knew it then.
+- **I3, old-copy safety.** For an old copy of P taken before the first
+  write of a rotation R: once Q has followed R's relay link, Q accepts
+  nothing the copy deposits after the cut-off except tokens that pass
+  rule T and duplicates of followed links; Q never makes current an
+  ancestor or rejected `ik`, an unknown `ik` not reached, or a relay key
+  it followed away from; Q never establishes an epoch whose handshake
+  was signed by anything but its current `ik` for P at that moment; and
+  once Q has followed R's `ik` link, Q accepts no message under an epoch
+  the copy set up that was deposited after that link, and P's first
+  rekey or reconnect under the new `ik` finds no such epoch current or
+  suspends.
+- **I4, fork.** If two different successors of one `ik` or relay key of
+  P each reach Q in messages Q can still open (an epoch it keeps,
+  §6.5), in any order and from any of P's keys, Q ends suspended (for a
+  device or agent: refuses the second and tells the member), unless one
+  was an identity link dropped at resolve.
+- **I5, durability.** Nothing leaves a party before the state write that
+  stores what it announces (§11.14.2), and a crash at any write loses no
+  outbox entry.
+
+**Deployment.** Receivers first, then a gate (form pending, see the PR)
+before any vault rotates its relay key. Until the gate the three paths
+clear their owed marks in their flush as release 28 does, except a
+"relay-key rotation owed" mark.
 
 ### 3.5 The Protean Credential
 
@@ -4000,8 +4459,10 @@ lost response therefore never loses the credential:
   request within 24 h gets the same answer.
 - **The latest blob is always kept until the app confirms it.** Even with
   `credential.backup` off (§3.5.6), the vault keeps the latest blob until
-  the app either presents that version in a later operation or sends
-  `credential.ack{version}`. The holder, answered `stale_credential` for
+  the app sends `credential.ack{version}`. (0.84.1, as built) Only
+  `credential.ack` confirms a version: presenting it in a later
+  operation does not (0.83.11 and before said either did). The holder,
+  answered `stale_credential` for
   its previous version (§3.5.9), fetches it with `credential.get` and
   retries with a fresh UTK. This is the only stale copy that is not a
   clone.
@@ -4476,7 +4937,7 @@ from the current hash:
 - **The holder's own retry is not a clone.** If the presenter is the
   holder, the blob's header `version` is exactly the current version − 1,
   and the holder has not yet confirmed the current version (by
-  `credential.ack`, or by presenting it), the answer is
+  `credential.ack`; 0.84.1: presenting it does not confirm it), the answer is
   `stale_credential`. This is the app re-fetching after a lost response
   or a crash; it fetches the latest blob with `credential.get`.
 - **Everything else is a clone:** a presenter other than the holder; an
@@ -5553,8 +6014,9 @@ Field rules:
   is disclosed to a party that has not been approved. The receiving app
   shows the names on the request as §10.8 says for a profile (account
   names, not verified). A device's `profile` is unchanged.
-- `rotations` is used only for reconnects (§6.6), in both `hs.init` and
-  `hs.resp`; it MUST be absent for every other purpose.
+- `rotations` is used only for reconnects (§6.6) and (0.85.0 draft)
+  rekeys (§3.4.1 S8), in both `hs.init` and `hs.resp`; it MUST be absent
+  for every other purpose.
 - `device_attest` is used only for purpose `app` (§6.7, §11.7).
 - `api_key` (0.15.0) is the new app's app key (§11.12). It is REQUIRED in
   the `hs.init` of a transfer (§6.7.1) and MUST be absent otherwise (an
@@ -5695,7 +6157,8 @@ Verification and activation:
 - The collect `sender` (RELAY-PROTOCOL §6.3) MUST equal `from.relay.pk` for
   `hs.init`. For every later message, `sender` MUST equal the relay key on
   record for the principal whose session decrypts it. A mismatch is acked,
-  dropped and audited.
+  dropped and audited. (0.85.0 draft) Which of a principal's relay keys and
+  identity keys count, after it rotated them, is §3.4.1.
 - **The SAS** (0.10.3). `sas` exists only once both nonces are fixed:
   `I` computes it after verifying `sig_R` (it then sends `hs.fin`), `R`
   after checking `hs.fin` as above. Neither side shows a code earlier.
@@ -6093,6 +6556,21 @@ Rules:
   - A handshake aborted on a commitment mismatch (§6.3) drops the
     incoming request, which its devices were never shown, and denylists
     every token issued to the peer.
+  - (0.84.1; from the vault release with vettid-vault #200) **An
+    outgoing handshake that cannot be restored** at an unlock or a
+    recovery's open (a connection request, a reconnect or a rekey; for
+    example one begun under an identity key that a rotation has since
+    replaced, §3.4) is dropped as an aborted one is, and audited
+    `handshake_not_restored`: its queued `hs.init` is not sent (one
+    queued by an earlier release may still be sent), and every token it
+    issued is denylisted. For
+    a new connection the vault also denylists the tokens issued to the
+    peer and sends `connection.event{connection_id, event: "failed"}`
+    with no `reason`. A dropped reconnect sends no `connection.event`;
+    a reconnect that is still needed starts afresh, as one whose
+    standing token has expired does (§6.6). A rekey of a replaced line,
+    kept as fork evidence (§6.6), is restored to verify only, as
+    before.
   - `connection.request.list` (§10.4) returns both kinds until they end,
     with their SAS, so an app can show a request again at any time; the
     ends are announced as `sync.event{kind: "connection.request"}` and
@@ -6227,7 +6705,7 @@ bytes, `proposal` and `extension` of the exact JCS bytes of the document
 | service → vault | `vote.extended` | `{proposal_id, extension, extension_sig, bundle}` | `{proposal_id}`, or `not_found`, `bad_request`, `unsupported_type` |
 | service → vault | `vote.closed` | `{proposal_id, results_hash}` | `{proposal_id}`, or `not_found`, `bad_request`, `unsupported_type` |
 | vault → service | `vote.cast` | `{proposal_id, record_tag, vk, choice_id, ballot_sig, cast_sig, pad}` (`pad`: §10.19.5) | `{proposal_id, msg_ms, receipt_sig}`, or a refusal |
-| vault → service | `vote.status` | `{proposal_id}` | `{proposal_id, proposal, proposal_sig, bundle, record_secret, record_proof, ballot?, msg_ms?, receipt_sig?, status_sig}` (`ballot` is `{vk, choice_id, ballot_sig, pad?}`, `pad`: §10.19.5; as the service vault sends it, BALLOT-PROTOCOL 0.12.3 §4.2: **`bundle` is always present**, the service answering `unknown_proposal` until it has one; `ballot` is `{vk, choice_id, ballot_sig}`; **`ballot`, `msg_ms` and `receipt_sig` come together or not at all**), or a refusal |
+| vault → service | `vote.status` | `{proposal_id}` | `{proposal_id, proposal, proposal_sig, bundle, record_secret, record_proof, ballot?, msg_ms?, receipt_sig?, status_sig}` (`ballot` is `{vk, choice_id, ballot_sig, pad?}`, `pad`: §10.19.5; as the service vault sends it, BALLOT-PROTOCOL 0.12.3 §4.2: **`bundle` is always present**: (0.84.1, BALLOT-PROTOCOL 0.13.7) while the proposal is unpublished, the service sends a member no answer (§10.19.4); `ballot` is `{vk, choice_id, ballot_sig}`; **`ballot`, `msg_ms` and `receipt_sig` come together or not at all**), or a refusal |
 
 A refusal from the service is an `error` response whose `error.code` is
 one of `not_eligible`, `not_open`, `closed`, `not_active`,
@@ -6372,7 +6850,10 @@ is unlocked and either:
 - on unlock (§12.2), its standing token for the peer has already expired.
 
 **Initiating.** The reconnect `hs.init` is sealed to the last known `ek` of
-the peer. It carries:
+the peer. (0.85.0 draft) Its `from.relay` names the relay key it is deposited
+with, which after the initiator's relay-key rotation is the old key
+until the peer's token for the new key arrives (§3.4.1 S1, S2). It
+carries:
 
 - fresh standing and reconnect tokens;
 - `ctx` = the stored `epoch_id` of the initiator's last epoch;
@@ -6588,7 +7069,8 @@ below, and a second copy is caught by the fork detection above
 The responder MUST accept the reconnect only if all of these hold:
 
 - the collect `sender` equals the relay key on record for that connection,
-  which is also the reconnect token's `sub`;
+  which is also the reconnect token's `sub` ((0.85.0 draft) or an earlier relay
+  key before its cut-off, §3.4.1 Table A);
 - `from.ik` equals the stored `ik`, or is reached from it through a valid
   `rotations` chain, resolved as in §3.4 (links already followed are
   skipped; the last of them must end at the stored `ik`) (0.69.1);
@@ -6615,8 +7097,12 @@ so that they can still open reconnect `hs.init`s sealed to an older key.
   completed recovery rotate the relay key anyway, because the old copy
   controls the old mailbox, and rely on the resend path of §3.4. A party
   whose standing token expired before it got the update is not reached
-  by the resend (a reconnect token cannot carry `relay.address.update`)
-  and needs a new invite or pairing.
+  by the resend (a reconnect token cannot carry `relay.address.update`).
+  (0.85.0 draft) During the grace a connection's vault reaches it with a
+  reconnect deposited with the old key and carrying tokens the old key
+  minted for the old mailbox (§3.4 (a), §3.4.1 S1); the reconnect's
+  fresh standing token then carries the update. After the grace, or for
+  a device, it needs a new invite or pairing.
 
 ### 6.7 Owner device and agent pairing
 
@@ -6669,7 +7155,7 @@ Rules:
   token's and the request token's `jti`. The new device shows only the
   code; its user compares it on the app, and it waits for `device.paired`
   or (0.10.5) `device.pair.rejected` until 10 minutes after its
-  `hs.init` (0.55.10, 0.56.2: a new phone of a transfer waits 11 minutes and collects its mailbox once at that deadline, §11.14.10 rule 5).
+  `hs.init` (0.55.10, 0.56.2: a new phone of a transfer waits 11 minutes and collects its mailbox for a settlement window at that deadline (0.85.2), §11.14.10 rule 5).
 - **The rejection is sent** (0.10.5; owner decision of 2026-10-05,
   "include `device.pair.rejected`"). The new device is the member's own,
   in their hand, so there is nothing to hide, and without it the device
@@ -6759,7 +7245,7 @@ PIN and password (so it can be answered `busy`), replaces the DEK in
 three writes, and the old app keeps its keys until the new phone's first
 unlock, or until, 7 days or more after the approval, its vault answers
 that the move happened (0.55.10): §11.14.10, which takes precedence over this section where they
-differ. The new phone waits 11 minutes for `device.paired`, not 10, and collects its mailbox once before it drops its keys (0.56.2). (0.68.0) The vault rotates its relay key, identity and KEM keys and wake key when the new phone has unlocked and its old phone's notice was accepted (anyway from day 7) (§11.14.10 "The vault's keys after a transfer").
+differ. The new phone waits 11 minutes for `device.paired`, not 10, and collects its mailbox for a settlement window before it drops its keys (0.56.2; 0.85.2: no longer a single collect). (0.68.0) The vault rotates its relay key, identity and KEM keys and wake key when the new phone has unlocked and its old phone's notice was accepted (anyway from day 7) (§11.14.10 "The vault's keys after a transfer").
 
 A member who still holds the old phone moves the app, and with it the
 credential, to a new phone without the 24 h wait of a recovery (owner
@@ -6905,7 +7391,7 @@ and the new app's handshake state is dropped. A commitment mismatch at
 | Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs and as a failed owner check (§3.6.4); the blob is checked first, so an approval with an old blob is answered `stale_credential` and counts nothing (0.46.1). The transfer stays pending until its 10 minutes run out; the member may retry. |
 | The vault becomes held (§3.6.3) while a transfer is open | The transfer stays open: the holder may still approve it (a check in itself) or reject it. A new `device.transfer.create` waits for a check. |
 | The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. (0.55.10) The new app of a transfer drops its handshake, attested key and epoch-1 secret after 11 minutes (§11.14.10 rule 5). |
-| The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. (0.55.10, 0.56.2) A new app that returns after its 11 minutes, without a `device.paired` applied, first collects its mailbox once (§11.14.10 rule 5); if that brings no `device.paired{transfer}` for this transfer, it drops its handshake, attested key and epoch-1 secret and cannot use them: the member recovers (§11.11). (0.56.2) At its 11-minute deadline the new app collects its mailbox once before it drops them: a `device.paired{transfer}` for this transfer, opened under its session, is applied and the move completes; otherwise, or if the collect fails or times out, it drops them and offers a new code (§11.14.10 rule 5). A transfer already paired completes at any later start, whatever its age. |
+| The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. (0.55.10, 0.56.2) A new app that returns after its 11 minutes, without a `device.paired` applied, first collects its mailbox for the settlement window (§11.14.10 rule 5, 0.85.2); if that brings no `device.paired{transfer}` for this transfer, it drops its handshake, attested key and epoch-1 secret and cannot use them: the member recovers (§11.11). (0.56.2, 0.85.2) At its 11-minute deadline the new app collects its mailbox for the settlement window before it drops them: a `device.paired{transfer}` for this transfer, opened under its session, is applied and the move completes; a rejection ends it as rejected (the app offers no abandon during the window); otherwise, when the window ends, it drops them and offers a new code (§11.14.10 rule 5). A transfer already paired completes at any later start, whatever its age. |
 | The old app goes offline before approving | The transfer times out; nothing changes. |
 | The old app goes offline after approving | Nothing is needed from it: the approval completed the transfer. The old app learns of its removal from `device.unlinked` (best effort), and then erases its local state (owner decision, 2026-10-05); (0.33.0, release R) that notice is sent only after the new phone's first unlock from storage (§11.14.10). A refused relay key alone is not proof of removal: the app offers the member an erase instead of erasing by itself. The refused relay key is a `403 token_revoked` (RELAY-PROTOCOL §5.3 step 6, §7.1) on a deposit to the device's own vault mailbox: the vault has put the device's relay key on its denylist as a `sub` (§7.4). The same holds for the old app of a recovery (§11.11.5). What the device does on that answer: §8.6. |
 | A clone alarm opens (§3.5.9) | An open transfer is aborted. |
@@ -7282,8 +7768,8 @@ The actions for each event are applied in one flush, in the order listed:
 
 | Event | Actions |
 |---|---|
-| Connection removed | Send `connection.removed` (best effort). Denylist the `jti` of every token the vault issued to the peer (standing and reconnect, including those minted in handshakes still in flight), so that none of them is accepted again. Delete the tokens held for the peer, its session keys and its outbox entries. |
-| Peer blocked | As for connection removed, plus a block entry on the peer's `ik` and relay key (§10.4) |
+| Connection removed | Send `connection.removed` (best effort). Denylist the `jti` of every token the vault issued to the peer (standing and reconnect, including those minted in handshakes still in flight, (0.85.0 draft) those issued to an earlier relay key of the peer, and those issued by an earlier mailbox of the vault still in its grace, at that mailbox, §3.4.1 S7), so that none of them is accepted again. Delete the tokens held for the peer, its session keys and its outbox entries. |
+| Peer blocked | As for connection removed, plus a block entry on the peer's `ik` and relay key (§10.4) ((0.85.0 draft) and on each earlier relay key and ancestor `ik` the vault still keeps for it, §3.4.1) |
 | Device unlinked | End its access session and drop its held and pending requests (§6.8). Send `device.unlinked` (best effort). Denylist `sub`. Remove the device from the unlock keys. Delete its wake reference. |
 | Agent revoked | As for device unlinked, plus revoke all of the agent's LEASH grants |
 | Invite or pairing cancelled or expired | Denylist the open token's `jti`. DELETE the claim. |
@@ -7782,6 +8268,9 @@ an answer to an unknown or expired id is dropped.
     `item.proxy` for an item whose settings do not allow that way, with
     body `{ways}`; `program_not_allowed`: an `item.run` whose program
     the item is not bound to (§10.11 "Ways to use a secret");
+    (0.85.3) `env_not_allowed`: an `item.run` with an `env` name the
+    matched program entry does not list, with body `{names}` (the
+    refused names);
   - `bad_password`, `backoff`, `stale_credential`, `utk_invalid`: §3.5.3,
     §3.5.4. Since 0.17.0 a `backoff` error response's body is
     `{retry_after}`: the whole seconds, rounded up and at least 1, until
@@ -7966,8 +8455,8 @@ an answer to an unknown or expired id is dropped.
 | `vault.locking` (ephemeral) | — | `{reason?}` (0.29.0, release L: `{reason?, unlock_id}`, the unlock this lock ends), with `exp` = now + 60 s; an app ignores one whose `ts` is not later than its latest successful unlock result's (§11.4, 0.23.3); `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0), `"idle"` for the idle lock (§3.6.8; 0.29.0, release L) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
 | `relay.token.refresh` (req) | `{}` | `{kind: "standing", token}` |
-| `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>}` |
-| `relay.address.update` | — | `{relay: {url, mailbox, pk}, token, reconnect_token?}` |
+| `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>, rotations?}` ((0.85.0 draft) `rotations`: the links before `rotation`, §3.4.1 S8) |
+| `relay.address.update` | — | `{relay: {url, mailbox, pk}, token, reconnect_token?, links}` ((0.85.0 draft) `links`: the signed relay links, §3.4.1 rule U) |
 
 **Locks (0.29.0, release L; approved by the owner 2026-10-12,
 VAULT-LOCK §3).** A lock from a
@@ -8051,7 +8540,7 @@ device belongs to the unlock it ends.
 | `device.session.granted` (to the device) | — | `{session_id, expires_at}` |
 | `device.session.end` (app: `{device_id}`; desktop, agent: `{}`, its own; (0.82.5) either may add `session_id`) | as left | `{}`; (0.82.5) also `{}`, with nothing changed, when `session_id` is not the device's current, unexpired session (a session suspended by the hold, §3.6.3, is current); `bad_request` for a `session_id` that is not a non-empty string (§6.8 "Ending") |
 | `device.session.ended` (to the device) | — | `{reason: "denied" \| "ended"}` |
-| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history` (§10.11) |
+| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history`, (0.85.3) `program_unrecorded`, `program_changed` (with `previous_sha256` and `previous_path`) (§10.11) |
 | `approval.waiting` (to the requester) | — | `{approval_id, request_id, exp}` |
 | `approval.decide` (app) | `{approval_id, approve: bool}` | `{result}`: `"ok"` or the error code the held request was answered with |
 
@@ -10968,8 +11457,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `drop.rate_limited`, `drop.one_app` (§6.7), the suppressed asks
   `drop.ask_muted`, `drop.ask_paused`, `drop.ask_cooldown`,
   `drop.ask_pending` and `drop.ask_rate` (§10.4.1, 0.23.0), `drop.profile_ik_mismatch`
-  and `drop.profile_malformed` (§10.8, 0.18.0) or `drop.owner_check`
-  (§3.6.3).
+  and `drop.profile_malformed` (§10.8, 0.18.0), `drop.owner_check`
+  (§3.6.3) or (0.85.0 draft) `drop.peer_key` (§3.4.1; `ref` = its reason;
+  pending option O7 of vettid.org #536, History shows a line only for the
+  reasons `superseded_relay`, `ancestor_ik` and `rejected_ik`).
 
 **History export** (0.22.0; owner decisions of 2026-10-08, §15 item
 30). The member may save the entries History shows to a file, as CSV or
@@ -12390,7 +12881,11 @@ item's settings allow for its task:
   ```json
   item_ways: { "agent_id": "<device id>", "item_id": "<ULID>", "version": 1,
                "ways": ["use", "run", "proxy"],
-               "run": { "programs": ["/usr/bin/git", "gh"], "each": true },
+               "run": { "programs": [
+                          { "program": "/usr/bin/git", "sha256": "<64 hex>",
+                            "path": "/usr/bin/git", "env": [] },
+                          { "program": "gh", "env": ["GH_HOST"] } ],
+                        "each": true },
                "proxy": { "hosts": ["api.example.com"], "header": "Authorization", "prefix": "Bearer " },
                "updated_at": "<ts>" }
   ```
@@ -12401,13 +12896,56 @@ item's settings allow for its task:
     allowing a proxy for an API key must not let any command receive it.
     Absent settings mean `["use"]`.
   - `run` is present exactly when `ways` holds `run`. `programs` (0–16)
-    binds the item to programs: an absolute path, matched exactly
-    against the request's `program`, or a bare name, matched against its
-    last path element (the connector finds names only on its fixed
-    search path, AGENT-PLAN §4.9). Empty means unbound. `each` (default
+    binds the item to programs. Each entry's `program` is an absolute
+    path, matched exactly against the request's `program`, or a bare
+    name, matched against its last path element (the connector finds
+    names only on its fixed search path, AGENT-PLAN §4.9). (0.85.3) No
+    two entries may match the same path: compared without case and
+    without a final `.exe`, no two entries are equal, and no bare name
+    equals an absolute entry's last path element (`bad_request`
+    otherwise). Empty means unbound. `each` (default
     `true`) refers every run to an app; it can be `false` only when
     `programs` is not empty, and even then a run of a shell or an
     interpreter is referred (below).
+  - (0.85.3; owner decision of 2026-11-05, option b) **The program's
+    content is pinned.** An entry's `sha256` (64 lowercase hex digits)
+    is the SHA-256 of the program file the member approved, and its
+    `path` the absolute path that file was run from (for an absolute
+    entry, `program` itself). Both are absent until then, because the
+    app cannot read a file on the agent's computer. The vault records
+    them, never the app. A run matches the pin only when its `sha256`
+    and its `program` both equal the entry's, so a pinned file copied
+    to another folder (where the agent may have put other files beside
+    it) is not covered. When the member approves a run flagged
+    `program_unrecorded` or `program_changed` (below), the vault sets
+    the matched entry's `sha256` and `path` to the run's `sha256` and
+    `program`. This changes the settings: their `version` goes up, and
+    the change is announced and audited as `leash.item.changed`.
+    A `leash.item.set` may keep an entry's recorded `sha256` and `path`
+    (the same `program`, the same values) or leave both out, which
+    narrows; any other `sha256` or `path` is `bad_request`. Changing an
+    entry's `program` drops them. (Owner decision of 2026-11-05, kept
+    as the fallback, AGENT-PLAN §4.9) The connector applies the check of a program only an administrator can change (`program_not_found` otherwise: a program that the connector's user can change, or that sits in a folder that user can change, by the `--run-path` check) to every resolved program except one equal to its entry's pinned `path`, which the catalog gives. So a pinned program moved to a changeable place is checked again.
+  - (0.85.3) **What approving a fingerprint means.** Approving a run
+    flagged `program_unrecorded` or `program_changed` lets later runs of
+    that exact file, at that path, go unasked when the item's settings
+    allow (`each: false`). The approval screen says so.
+  - (0.85.3) **Settings that change while a run waits.** When the
+    approval of an `item.run` arrives and the item's settings'
+    `version` is no longer the one the run was decided under, the vault
+    decides the run again under the current settings before it answers:
+    a run they now refuse gets that refusal (`way_not_allowed`,
+    `program_not_allowed`, `env_not_allowed`), never the value, and the
+    hash is not recorded. A run whose pin no longer matches the one now
+    recorded (another approval recorded a different one meanwhile) is
+    referred again as a new approval; the value is never sent on the
+    old one.
+  - (0.85.3; owner decision of 2026-11-05, option a) **The variables
+    a program may receive.** An entry's `env` (0–32 names, default
+    empty) lists the names a run of that program may set in its `env`.
+    Each name follows the rule given for `item.run` (below), so no
+    code-loading name can be listed. Adding a name widens the
+    settings.
   - `proxy` is present exactly when `ways` holds `proxy`. `hosts` (1–8):
     lowercase DNS names, each with an optional `:port` (default 443);
     no wildcards, no IP literals. `header`: the HTTP field that carries
@@ -12422,8 +12960,9 @@ item's settings allow for its task:
     settings are deleted, so a later inclusion starts again at
     `["use"]`.
   - **Widening needs the member.** A `leash.item.set` that adds a way or
-    a program or a host, empties `programs`, or sets `each` to `false`
-    needs the credential's unlock window, as issuing a grant does
+    a program or a host, empties `programs`, adds a name to an entry's
+    `env` (0.85.3), or sets `each` to `false` needs the credential's
+    unlock window, as issuing a grant does
     (`credential_locked` outside it). One that only narrows does not.
   - Settings are per agent and item, not per rule, so the strictest
     rule logic of §10.12 is not needed for them. They are not part of a
@@ -12440,16 +12979,24 @@ item's settings allow for its task:
   reference client, set `reveal` first.
 - **The catalog** gives, per item, `ways` and, when present,
   `programs` and `hosts` (never `header` or `prefix`), so the agent can
-  choose a way the item allows.
+  choose a way the item allows. (0.85.3) Its `programs` entries are
+  `{program, env, path?}`: `path` is the pinned path when there is a
+  pin, never the hash, so the connector knows which file needs no
+  further check (above).
 - **Decisions.** An `item.get`, `item.run` or `item.proxy` for an item
   whose settings do not hold that way is answered `way_not_allowed`
   (body `{ways}`, the item's ways) and counted as *refused* (above,
   with its cooldown). An `item.run` whose `program` does not match a
   non-empty `programs` is answered `program_not_allowed`, also counted
-  as refused. Otherwise each is decided as an `items.read` request
-  (above: the windows and `uses` of every including rule count it),
-  and in addition it is **referred** to an app: an `item.run` when
-  `each` is `true`, `programs` is empty, or `program` is a shell or an
+  as refused. (0.85.3) An `item.run` with an `env` name that the
+  matched entry's `env` does not list, or with any `env` when
+  `programs` is empty, is answered `env_not_allowed` (body `{names}`),
+  also counted as refused. Otherwise each is decided as an
+  `items.read` request (above: the windows and `uses` of every
+  including rule count it), and in addition it is **referred** to an
+  app: an `item.run` when `each` is `true`, `programs` is empty, the
+  run does not match the entry's pin (0.85.3: no `sha256` recorded, or
+  a different `sha256` or `path`), or `program` is a shell or an
   interpreter (its last path element, without `.exe` and in any case,
   is one of the `shell` names below or starts with `python`, `node`,
   `perl`, `ruby`, `php` or `osascript`), so `each: false` never covers
@@ -12457,8 +13004,11 @@ item's settings allow for its task:
   `item.get` always, every reveal asked on its own (owner decision of
   2026-10-18; it replaces, for agents' reveals, the 2026-10-03 rule
   that `ask` means one prompt per item, not per read).
-- `item.run{item_id, field_id, program, argv, cwd, how, name?, env?}`:
+- `item.run{item_id, field_id, program, sha256, argv, cwd, how, name?, env?}`:
   `program` is the absolute path the connector resolved for `argv[0]`;
+  (0.85.3) `sha256` is the SHA-256 of that file as the connector
+  read it, 64 lowercase hex digits; the connector runs exactly the
+  bytes it hashed (AGENT-PLAN §4.9);
   `argv` 1–64 strings, each at most 4,096 bytes and 32,768 in all;
   `cwd` an absolute path; `how` is `env` (the value in the variable
   `name`), `stdin` (written to standard input) or `file` (an owner-only
@@ -12466,9 +13016,29 @@ item's settings allow for its task:
   exactly `{secret_file}`); `name` matches `^[A-Z_][A-Z0-9_]{0,63}$`,
   is required for `env` and `file`, and is none of the connector's
   minimal environment, `PATH`, `TMPDIR`, `TEMP` or `TMP`, nor starts with
-  `LD_` or `DYLD_`; `env` holds 0–32 more variables `{NAME: value}`,
-  names by the same rule, values at most 4,096 bytes. Otherwise
-  `bad_request`. An `address` field cannot be used (`not_found`). The
+  `LD_` or `DYLD_`; (0.85.3) nor is a name that makes a program load
+  or run other code: it starts with `GIT_`, `COR_PROFILER`, `CORECLR_`
+  or `DOTNET_`, or is `NODE_OPTIONS`, `NODE_PATH`, `BASH_ENV`, `ENV`,
+  `SHELL`, `COMSPEC`, `PSMODULEPATH`, `PERL5OPT`, `PERL5LIB`,
+  `PERLLIB`, `PERL5DB`, `PYTHONSTARTUP`, `PYTHONPATH`, `PYTHONHOME`,
+  `PYTHONUSERBASE`, `RUBYOPT`, `RUBYLIB`, `JAVA_TOOL_OPTIONS`,
+  `_JAVA_OPTIONS`, `JDK_JAVA_OPTIONS`, `GCONV_PATH`,
+  `XDG_CONFIG_HOME`, `AWS_CONFIG_FILE`, `KUBECONFIG`; (owner decision 2026-11-05)
+  nor `LESSOPEN`, `PAGER`, `EDITOR`, `VISUAL`, `SSH_ASKPASS`,
+  `SUDO_ASKPASS`, `GOFLAGS` or `RUSTC_WRAPPER`; (owner decision 2026-11-05) nor a
+  name that sends a program's traffic elsewhere or makes it trust
+  another certificate:
+  `HTTP_PROXY`,
+  `HTTPS_PROXY`, `ALL_PROXY`, `SSL_CERT_FILE`,
+  `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE` or
+  `CURL_CA_BUNDLE`. Such a
+  list cannot be complete; it is a backstop under the allowlist (an
+  entry's `env`), and it holds even for a listed name. `env` holds
+  0–32 more variables `{NAME: value}`, names by the same rule, values
+  at most 4,096 bytes, each name listed in the matched entry's `env`
+  (`env_not_allowed` otherwise, above). Otherwise `bad_request`. The
+  name rule is checked first (`bad_request`), then the allowlist
+  (`env_not_allowed`). An `address` field cannot be used (`not_found`). The
   answer is `{item_id, field_id, value}`, for the connector to pass to
   that one process only. Recorded as `leash.item.run`.
 - `item.proxy{item_id, field_id, host, seconds?}`: `host` one of the
@@ -12483,6 +13053,21 @@ item's settings allow for its task:
   command or an API call chosen by a hijacked agent can still misuse the
   secret; this is why the approval shows the command or the host, the
   vault flags shells, and an item can bind programs.
+- (0.85.3) **What the pin covers, said plainly.** `sha256` and `path`
+  pin the one file the connector starts, so another program put in its
+  place is caught. The first approval trusts whatever file is at the
+  path then: the member cannot check a fingerprint against anything,
+  only see that it is new or changed. The pin does not cover what the
+  program loads or reads: libraries beside it or in its directory
+  (`cwd`, which the agent chooses), modules and plugins, and
+  configuration in the user's own profile (a `~/.gitconfig` can make
+  git run a command), wherever the program is installed. Nor does it
+  stop a process of the same user from reading or changing the running
+  program (on Windows, opening the process; on Linux, `ptrace` where
+  allowed). An agent running as the connector's user can use any of
+  these to get its code inside the program that receives the secret.
+  The connector refuses some of these ways (AGENT-PLAN §4.9: Windows
+  batch files, scripts, reparse points, the names above), not all.
 - **The approval** (`approval.pending`, §6.8) carries the held request's
   `body` and, since 0.42.0, `flags`, set by the vault:
   - `shell`: `program`'s last path element, without `.exe` and in any
@@ -12493,10 +13078,21 @@ item's settings allow for its task:
     `--eval`;
   - `unbound_program`: an `item.run` for an item whose `programs` is
     empty;
+  - (0.85.3) `program_unrecorded`: an `item.run` whose matched entry
+    has no `sha256` yet; approving it records the run's (above);
+  - (0.85.3) `program_changed`: an `item.run` whose `sha256` or
+    `program` differs from the matched entry's recorded `sha256` and
+    `path`. The approval then also carries `previous_sha256` and
+    `previous_path`, the recorded ones. Approving it records the new
+    ones; the old approval never covers a changed or moved file;
   - `history`: an `item.get`.
 
   The app shows, for an `item.run`: the agent, the item and field, the
-  program, every argument unabridged (characters that are not printable
+  program, (0.85.3) its fingerprint (the first 16 hex digits of
+  `sha256`, in groups of four) and, for `program_changed`, the previous
+  fingerprint and path beside them and that the program changed since
+  the member last approved it, or, when `previous_path` differs, that
+  it "moved to <path>", stressed, every argument unabridged (characters that are not printable
   shown escaped), the directory, how the secret is passed (with the
   variable's name), the other variables with their values, and a
   warning for each flag; for an `item.proxy`: the agent, the item and
@@ -12743,7 +13339,8 @@ grant set carries a `grant_seq`:
   from 0.
 - **No fallback.** An agent built for 0.41.0 ignores a list or update
   without `grant_seq`; it needs a vault of 0.41.0 or later (owner
-  decision of 2026-10-18).
+  decision of 2026-10-18). (0.85.3) A `grant_seq` of 0, or one that is
+  not an unsigned 64-bit integer, counts as absent.
 
 | Type | Request body | Response / event body |
 |---|---|---|
@@ -12753,7 +13350,7 @@ grant set carries a `grant_seq`:
 | `leash.grant.updated` (V→D, to the agent) | — | `{grants: [<grant>], suspended, grant_seq}`: all of its grants, after every change and at suspension and resumption; (0.41.0) `grant_seq` is the set's (above) |
 | `leash.agent.resume` (app) | `{agent_id}` | `{}`; `not_found` unless the agent is suspended |
 | `leash.status.get` (agent) | `{grant_id}` | `{grant_id, status, status_sig, rotations?}`; `not_found`, `forbidden` (suspended), `owner_check_required` (the vault is held, §3.6.3) |
-| `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}`; (0.42.0) `{op: "item.run", item_id, field_id, program, argv, cwd, how, name?, env?}` or `{op: "item.proxy", item_id, field_id, host, seconds?}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}`; (0.42.0) `{item_id, field_id, value}` or `{item_id, field_id, value, header, prefix, host, expires_at}`; `way_not_allowed` (body `{ways}`), `program_not_allowed` |
+| `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}`; (0.42.0) `{op: "item.run", item_id, field_id, program, sha256 (0.85.3), argv, cwd, how, name?, env?}` or `{op: "item.proxy", item_id, field_id, host, seconds?}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}`; (0.42.0) `{item_id, field_id, value}` or `{item_id, field_id, value, header, prefix, host, expires_at}`; `way_not_allowed` (body `{ways}`), `program_not_allowed`, (0.85.3) `env_not_allowed` (body `{names}`) |
 | `leash.item.set` (app; widening within the unlock window) | `{agent_id, item_id, version?, ways, run?, proxy?}` (0.42.0); `version` required to replace existing settings (`conflict`) | `<item_ways>`; `not_found` unless a rule of the agent includes the item; `credential_locked` for a widening outside the window; `bad_request` |
 | `leash.item.list` (app, desktop) | `{agent_id, item_id?}` (0.42.0) | `{items: [<item_ways>]}`: the settings of each item the agent's rules include |
 
@@ -14578,7 +15175,7 @@ Per proposal, in DEK state (`features.vote`), encrypted like all vault state and
 
 The vault also keeps the latest verified **service list** (§10.19.4) and the time it last saw it confirmed.
 
-Bounds (chosen): a `vote.proposal` body is at most 196,608 bytes, its `proposal` at most 65,536 bytes decoded and its `bundle` at most 65,536 bytes; the vault keeps at most **128 proposals**, at most **32 per connection** in all states and 16 per connection not yet closed, so that one service cannot fill the vault. **Making room** (a busy organisation must not run out): when a connection is at its cap, the vault evicts that connection's **oldest records whose check is final and clean**, `verified` or `unconfirmed` (`unconfirmed` needs a ballot), with or without a ballot, keeping for each a **compact evidence record** outside the cap. **A record is never evicted while its check is absent or `pending`** (0.83.6: for a record without a ballot, the row check is what shows a ballot cast under the member's tag); such a record holds its place until at most 7 days after its check is due, when the check gives up (§10.19.6). **A `gave_up` check is never clean** (0.83.6): the vault never saw results that verify, so it cannot know whether the service published a ballot under the member's tag, and a service that withholds or breaks its results for 7 days must not then be able to push the record out. It is a problem record until a later check settles it (§10.19.6), so an honest service's records leave the problem set by themselves and do not fill the cap of 16 below. The compact record holds what cannot be fetched again: `proposal_id`, `proposal_hash`, `record_tag`, the service's `ik`, the ballot `{vk, choice_id, ballot_sig}`, `msg_ms` and `receipt_sig`, every signed refusal verbatim, and the outcome (about 250 bytes plus refusals). The proposal and the results are public and write-once on the site and are fetched again when needed. At most 512 compact records per connection, each deleted **365 days** after its close, oldest first. **The problem set** is explicit: a proposal that is `rejected`; whose check is `failed` or `gave_up` (0.83.6: for any reason), or `pending` with reason `rows_unavailable` (0.83.3); whose ballot is in `conflict` or `disputed`, or that has conflict evidence (§10.19.3, 0.81.3); whose `site` is `mismatch` or `unpublished`; or that holds a refusal which raised a `vote.problem`. A problem record is **never evicted**, is **counted apart** (it does not count toward the 32 or the 16 not closed), and is deleted **365 days after its close** or when the member releases it. **In-progress records** (`checking`, `upcoming`, `open`, check `pending`, ballot not final; a check `pending` with reason `rows_unavailable` is a problem record, not in progress) stay under the 32 and are never evicted; `upcoming` and `open` records also count toward the 16 not yet closed. A `checking` record does not (0.83.6), so proposals that have not verified do not keep a verified one out of the 16; they still fill the 32. When a `checking` record verifies and is `open` or `upcoming`, the count of records not yet closed may pass 16; nothing is evicted for it, and a new proposal is kept only once the count is below 16 again. The cap on problem records is **16 per connection and applies only to keeping new proposals**: a record can turn into a problem after it is kept, so the count may pass 16; at 16 or more the vault keeps no new proposal from that connection, answers it `limit`, and tells the member with the `problems` notice below, deleting nothing. This cap is chosen (§15 item 48): a misbehaving service can block its own members this way, which BALLOT-PROTOCOL §1 and §9.2 already allow, and the notice names the service as its cause. **Releasing** a problem record (`vote.release`, §10.19.8) replaces it by a compact record that still holds **every signed item that is not on the public site**: the held proposal bytes, `proposal_sig` and `bundle` when `site` is not `matches`; the site's copy for a `mismatch`; every `vote.status` answer verbatim; the foreign ballot(s) of a `conflict`, of conflict evidence or of a `disputed` (the first and the latest); a `rejected` proposal with its reason. A release frees only what can be fetched again. A proposal that still cannot be kept (the cap is full of proposals that cannot be evicted, or the vault is at 128) is answered `limit` (`{limit: "votes", max}`, §10.1), audited `drop.vote_limit` and **shown to the member**: a `vote.problem` feed item (`ref` = the `connection_id`, at most one per connection per 24 hours) and a `dropped` entry in `vote.list` (`{connection_id, count, last_at}`) **until the app acknowledges it** (0.81.3: an explicit `ack_dropped: [connection_id]` in a later `vote.list` request, which removes those entries; a `vote.list` alone does not, so a notice the app did not show, because it crashed or the list was never read, is returned again). For the problem cap the entry is `problems` (`{connection_id, count}`) and stays while the count is at the cap: until a record is released or (0.83.6) a late check settles one (§10.19.6).
+Bounds (chosen): a `vote.proposal` body is at most 196,608 bytes, its `proposal` at most 65,536 bytes decoded and its `bundle` at most 65,536 bytes; the vault keeps at most **128 proposals**, at most **32 per connection** in all states and 16 per connection not yet closed, so that one service cannot fill the vault. **Making room** (a busy organisation must not run out): when a connection is at its cap, the vault evicts that connection's **oldest records whose check is final and clean**, `verified` or `unconfirmed` (`unconfirmed` needs a ballot), with or without a ballot, keeping for each a **compact evidence record** outside the cap. **A record is never evicted while its check is absent or `pending`** (0.83.6: for a record without a ballot, the row check is what shows a ballot cast under the member's tag); such a record holds its place until at most 7 days after its check is due, when the check gives up (§10.19.6). **A `gave_up` check is never clean** (0.83.6): the vault never saw results that verify, so it cannot know whether the service published a ballot under the member's tag, and a service that withholds or breaks its results for 7 days must not then be able to push the record out. It is a problem record until a later check settles it (§10.19.6), so an honest service's records leave the problem set by themselves and do not fill the cap of 16 below. The compact record holds what cannot be fetched again: `proposal_id`, `proposal_hash`, `record_tag`, the service's `ik`, the ballot `{vk, choice_id, ballot_sig}`, `msg_ms` and `receipt_sig`, every signed refusal verbatim, and the outcome (about 250 bytes plus refusals). The proposal and the results are public and write-once on the site and are fetched again when needed. At most 512 compact records per connection, each deleted **365 days** after its close, oldest first. **The problem set** is explicit: a proposal that is `rejected`; whose check is `failed` or `gave_up` (0.83.6: for any reason), or `pending` with reason `rows_unavailable` (0.83.3); whose ballot is in `conflict` or `disputed`, or that has conflict evidence (§10.19.3, 0.81.3); whose `site` is `mismatch` or `unpublished`; or that holds a refusal which raised a `vote.problem`. A problem record is **never evicted**, is **counted apart** (it does not count toward the 32 or the 16 not closed), and is deleted **365 days after its close** or when the member releases it. **In-progress records** (`checking`, `upcoming`, `open`, check `pending`, ballot not final; a check `pending` with reason `rows_unavailable` is a problem record, not in progress) stay under the 32 and are never evicted; `upcoming` and `open` records also count toward the 16 not yet closed. A `checking` record does not (0.83.6), so proposals that have not verified do not keep a verified one out of the 16; they still fill the 32. When a `checking` record verifies and is `open` or `upcoming`, the count of records not yet closed may pass 16; nothing is evicted for it, and a new proposal is kept only once the count is below 16 again. The cap on problem records is **16 per connection and applies only to keeping new proposals**: a record can turn into a problem after it is kept, so the count may pass 16; at 16 or more the vault keeps no new proposal from that connection, answers it `limit`, and tells the member with the `problems` notice below, deleting nothing. This cap is chosen (§15 item 48): a misbehaving service can block its own members this way, which BALLOT-PROTOCOL §1 and §9.2 already allow, and the notice names the service as its cause. **Releasing** a problem record (`vote.release`, §10.19.8) replaces it by a compact record that still holds **every signed item that is not on the public site**: the held proposal bytes, `proposal_sig` and `bundle` when `site` is not `matches`; the site's copy for a `mismatch`; every `vote.status` answer verbatim; the foreign ballot(s) of a `conflict`, of conflict evidence or of a `disputed` (the first and the latest); a `rejected` proposal with its reason. A release frees only what can be fetched again. A proposal that still cannot be kept (the cap is full of proposals that cannot be evicted, or the vault is at 128) is answered `limit` (`{limit: "votes", max}`, §10.1), audited `drop.vote_limit` and **shown to the member**: a `vote.problem` feed item (`ref` = the `connection_id`, at most one per connection per 24 hours) and a `dropped` entry in `vote.list` (`{connection_id, count, last_at}`) **until the app acknowledges it** (0.81.3: an explicit `ack_dropped: [connection_id]` in a later `vote.list` request, which removes those entries; a `vote.list` alone does not, so a notice the app did not show, because it crashed or the list was never read, is returned again). For the problem cap the entry is `problems` (`{connection_id, count}`) and stays while the count is 16 or more (0.84.1: the count can pass 16, above); it ends when the count drops below 16, as a release or (0.83.6) a late check that settles a record lowers it (§10.19.6).
 
 The records survive a lock, a hold, a restart, a release move, a transfer to a new phone and a recovery (they are vault state, §3.3), and the removal of the connection (they are the member's evidence); they go with the vault (§12.5). **Nothing is synced to the owner's desktops and agents**: they have no vote access (decision 4), so no `sync.event` kind is added. A desktop sees the vault's audit entries `vote.cast` and `vote.recorded` through `audit.list` like all entries (that the member took part, the proposal id and the time; never the choice). A vault has one app (§1.1 item 8); a new phone reads `vote.list`.
 
@@ -14636,7 +15233,7 @@ Every check is the vault's own; the app never decides one. **Every signature in 
 
 **Locked and held.** A locked vault does nothing (§12.1): the relay keeps the message (14 days) and the vault handles it at the next unlock with that moment's clock. A **held** vault (§3.6.3) handles all three as above, because nothing in them waits for the member: the proposal is kept and checked, the feed item is made (counted in `vault.held`'s `other`, with no wake: §14.2 does not wake a held vault for it), and the member sees it after the check.
 
-**A proposal the vault was never sent.** For each site index entry (`vote.site.sync`) of a service the vault has a `service`-kind connection with, whose proposal it does not hold, the vault asks `vote.status` (at most once an hour per proposal). The answer carries the proposal, `proposal_sig`, `bundle`, `record_secret` and `record_proof` (§6.4); they are checked as in steps 2 to 6, with `status_sig` (§10.19.5), and the proposal's bytes must equal the site's. The service always sends a `bundle` (it answers `unknown_proposal` until the proposal is anchored), but the vault is **tolerant of its absence**: an answer without one leaves the proposal `checking` (`site`) until the site's bundle arrives. An answer with only some of `ballot`, `msg_ms` and `receipt_sig` is malformed and counts as no answer. A signed `not_eligible` or `unknown_proposal` is kept as evidence and shown (decision 7).
+**A proposal the vault was never sent.** For each site index entry (`vote.site.sync`) of a service the vault has a `service`-kind connection with, whose proposal it does not hold, the vault asks `vote.status` (at most once an hour per proposal). The answer carries the proposal, `proposal_sig`, `bundle`, `record_secret` and `record_proof` (§6.4); they are checked as in steps 2 to 6, with `status_sig` (§10.19.5), and the proposal's bytes must equal the site's. The service always sends a `bundle`, but the vault is **tolerant of its absence**: an answer without one leaves the proposal `checking` (`site`) until the site's bundle arrives. An answer with only some of `ballot`, `msg_ms` and `receipt_sig` is malformed and counts as no answer. A signed `not_eligible` or `unknown_proposal` is kept as evidence and shown (decision 7). (0.84.1; BALLOT-PROTOCOL 0.13.7 §4.2, owner decision b, 2026-11-04, service-vault #122) A proposal the service holds but has not published (its anchor is missing, after a table restore or a lost publication) gets **no answer** for a member's `vote.status` or `vote.cast`, not `unknown_proposal` or `not_eligible`, which would be final for the member's vault: the service acknowledges the request and does not answer it. The vault treats it as no answer and asks again (the cast is resent; `vote.status` is asked again on its schedule: hourly for a proposal the vault was never sent, as above, and for a cast as §10.19.5 "Sending again" says), and once the proposal is published a later request is answered as usual. A party with no tag for the proposal is still refused. 0.83.11 and before said the service answered `unknown_proposal` until the proposal was anchored.
 
 **Comparing with the public site** (BALLOT-PROTOCOL §9.2, a split view; chosen). The vault keeps, per proposal, the site's proposal bytes and a `site` state, **decided from the document itself**, `p/<proposal_id>/proposal.json` (VOTES-SITE §3: immutable and kept for good), and not from the index: `index.json` lists only the last 30 days and its write can lag the document (VOTES-SITE §3, §4), so the index and `archive/<YYYY-MM>.json` serve for discovery only. The states: `matches` (the document's bytes equal the held bytes), `mismatch` (the document exists with other bytes **and is a valid proposal document with the same `proposal_id`, signed under the service's `ik`**: 0.81.2, below), `not_listed` (a site that **answered** has no document: a `404`; one `404` is only this), `unreachable` (no answer) or `unpublished` (below). **Only a positive `mismatch` blocks a cast** (`site_mismatch`): VettID's own site must not stop a member from voting (BALLOT-PROTOCOL §1, §10.1). `not_listed` and `unreachable` allow the cast with a plain warning, and the vault compares as soon as the site answers. **A service can show one member a private variant**, anchored in Rekor and never uploaded, even under its own `proposal_id`; the site is write-once and takes uploads only before the close (BALLOT-PROTOCOL §3.3, VOTES-SITE §4), so absence is a positive signal after a while:
 - a `404` for the document from an answering site **more than 10 minutes after the proposal arrived** makes a `vote.problem` feed item with a plain warning, and an audit entry `vote.proposal_conflict` (`ref` = `<proposal_id>:not_listed`); the member can still vote;
@@ -14701,11 +15298,11 @@ A code the vault does not know is no answer.
 
 #### 10.19.6 After the close: checking the results
 
-At `vote.closed`, and in any case at **`closes_at` (as extended) + 2 hours**, the vault marks the check `pending` and tells the app (`vote.event{event: "check_due"}`; `check.due_at` in `vote.list`). The app runs pending checks whenever it opens and retries with backoff; the vault gives up (`gave_up`) **7 days** after the check was due (BALLOT-PROTOCOL §8.3). The app knows why it could not finish (the site could not be reached, or `results.json` was not there) and says so (ANDROID-PLAN); the vault records only `gave_up` (with reason `rows_unavailable` when the app said it could not get the row, step 3). **A `gave_up` check is not final** (0.83.6, owner decision a, thread 01M6HK8A1VMV41M8TTASXV4BSK): the app keeps running it whenever it opens, as a `pending` one but at most once a day per record, and a later submission is judged as usual, so it can still become `verified`, `unconfirmed` or `failed`. Until then the record is in the problem set (§10.19.2). The results are public and write-once, so with a service that publishes them the record clears by itself the next time the app opens; only results that are never published or never verify keep it there. A released record (§10.19.8 `vote.release`) is not checked again. While the app stays closed past the give-up, a busy service can bring its `gave_up` records to the problem cap of 16; until the app opens and the checks clear, its new proposals are answered `limit`, and one still on the site comes back through `vote.site.sync`. This is accepted: the cap is what keeps a withholding service from evicting the records.
+At `vote.closed`, and in any case at **`closes_at` (as extended) + 2 hours**, the vault marks the check `pending` and tells the app (`vote.event{event: "check_due"}`; `check.due_at` in `vote.list`). The app runs pending checks whenever it opens and retries with backoff; the vault gives up (`gave_up`) **7 days** after the check was due (BALLOT-PROTOCOL §8.3). The app knows why it could not finish (the site could not be reached, or `results.json` was not there) and says so (ANDROID-PLAN); the vault records only `gave_up` (with reason `rows_unavailable` when the app said it could not get the row, step 3). **A `gave_up` check is not final** (0.83.6, owner decision a, thread 01M6HK8A1VMV41M8TTASXV4BSK): the app keeps running it whenever it opens, as a `pending` one but at most once a day per record, and a later submission is judged as usual, so it can still become `verified`, `unconfirmed` or `failed`. (0.84.1) Such a re-check **does not download an unchanged `rows.json` again** (it can be up to 51 MB per record): `results.json` names `rows_root`, so with the same `results.json` (compared by its hash) as at the last attempt the rows are unchanged, and the app fetches `rows.json` again only when `results.json` was absent, unreachable or changed, when `rows.json` could not be fetched on the last attempt, or when the last attempt failed on the vault's side (`trust_root`, `service_list`, `clock`). A re-check that skips the download either submits again the row and proof it kept from the last attempt, or sends nothing: the vault judges only what is submitted (steps 2 and 3), and the same results, row and proof get the same answer, still no answer (`input`) or `rows_unavailable`, so sending nothing loses nothing. Until then the record is in the problem set (§10.19.2). The results are public and write-once, so with a service that publishes them the record clears by itself the next time the app opens; only results that are never published or never verify keep it there. A released record (§10.19.8 `vote.release`) is not checked again. While the app stays closed past the give-up, a busy service can bring its `gave_up` records to the problem cap of 16; until the app opens and the checks clear, its new proposals are answered `limit`, and one still on the site comes back through `vote.site.sync`. This is accepted: the cap is what keeps a withholding service from evicting the records.
 
 1. The **app** fetches `results.json`, `rows.json`, the bundle and `results_sig` from votes.vettid.org with no session, verifies them as an observer does (BALLOT-PROTOCOL §8.4), and sends `vote.results.submit`: `results.json`, the signature, the bundle, **its own row** (the vault's tag is in `vote.get`) and the row's inclusion proof to `rows_root`. The app sends it whenever what the vault itself checks can hold (0.83.2): `results.json` parses, `results_sig` verifies under the service key, and the bundle holds. Any other failure of the observer check (the member's own row's ballot, other rows, the proposal or extensions, the tally, the published trees) is shown to the member but does not stop the submit; the vault never relies on the app's verdict. (0.83.3) "`results_sig` verifies" here is the vault's check: the app checks only the form (a 64-byte signature, the bundle an object). **What stops the app's submit of a row:** a `rows.json` larger than 512 bytes × `counts.eligible` + 4,096 (the download is capped the same way, and never at more than 51,204,096 bytes; it need not be JCS), nested deeper than 4, or holding a row or ballot that cannot be made into a leaf (a ballot that is not an object, a `record_tag` that is not 32 bytes of base64, a ballot member that is not a base64 string). When the member's row cannot be had (step 3), the app submits with `rows_unavailable: true` instead of a row. **Reported, but they do not stop it:** a `rows.json` that is not exactly `{v: 1, proposal_id, rows}` or names another proposal, a `results.json` that names another `proposal_id`, and a `tally` or `counts` that differs from the vault's own (`vote.get`, when it holds them). When `rows.json` has another row with the member's `record_tag` at a different index, the app sends the first one as `row` and adds the others (at most 4) with their inclusion proofs as `other_rows`. If those vault-checked inputs do not verify, the app does not submit and shows a problem with the published results (had it been sent, the vault would leave the check `pending` with reason `input`, step 3); the app retries at its next attempt. With `verified` or `unconfirmed` and a failed observer check, the app shows the state, shows no number (the choice counts, the turnout, the quorum line and the unhandled line) and shows the line "The rest of the published results don't add up. The service may have published them wrongly." under it; it does not show the app's text for a problem with the published results.
 2. The **vault** checks the strict JCS bytes and schema (BALLOT-PROTOCOL §8.5); `results_sig` over `proposal_hash ‖ H(results bytes)` under the service key and `"vettid/vote/1/results\x00"`; the bundle against an accepted anchor key (§10.19.4 step 6); that the `proposal` in the results is, byte for byte, the one it holds with its signature, and that the extensions are the ones it holds, in order (an extension in the results that it lacks is checked as in `vote.extended` and adopted; a held one missing from the results is a failure); that `tally` names every choice and `counts.eligible` equals the proposal's; and its row.
-3. **The row.** Its leaf is `ballot_leaf` for a row with a ballot, or the 32-byte tag for an empty one. **The proof is verified to `rows_root` before the row is judged** (0.81.3). The check is `failed` only for a **contradiction under the service's signature and the verified anchor**: a changed proposal; a missing extension; a `tally` that does not name every choice, or a wrong `counts.eligible` (the vault cannot recompute the tally); a row proof that verifies to `rows_root` at an `index` other than the `record_proof`'s (the rows and the tags are both sorted by tag, so a member's row is at its tag's index); an invalid ballot (a `choice_id` not in the proposal, or a `ballot_sig` that fails) under the member's code behind a verifying proof; `row_mismatch`, `row_unexpected` (below); `counts.eligible` not equal to the `record_proof`'s `tree_size`; and (0.83.3) `row_duplicate`: an entry of `other_rows` whose leaf begins with the member's `record_tag` and whose proof verifies to the signed `rows_root` at an index other than the main row's, a second row under the member's tag, which is a signed contradiction. It takes precedence over every other row outcome (`row_mismatch`, `row_unexpected`, `conflict`, and a row at an index other than the `record_proof`'s); `vote.evidence` includes the extra rows. An entry with another tag, at the main row's index, repeating another entry's index, or whose proof does not verify, is input that does not verify (`pending`, `input`). An entry whose leaf can be made and whose proof verifies at another index is `row_duplicate`, whatever its `choice_id`. Only an entry whose members do not decode (base64, types) is `input` for that reason. The app does not send an entry it cannot make into a leaf: `rows.json` then cannot be had (`rows_unavailable`). More than 4 entries, or `rows_unavailable` together with `row`, is `bad_request`. **Input that does not verify is no answer** (0.81.3): a results document that does not parse or whose signature fails, a bundle that does not hold for these results, a proof with a `tree_size` other than the signed `counts.eligible` or one that does not verify to the signed `rows_root`. The check **stays `pending` with reason `input`** (not `failed`, no audit entry, no feed item) and a later correct submission is judged; the app shows it as a problem with the published results (step 1). "Any difference is `failed`" of 0.81.0 is withdrawn. **A row the app cannot get** (0.83.3): a `vote.results.submit` with `rows_unavailable: true` (no `row`, `row_proof` or `other_rows`) and the results, signature and bundle, which the vault verifies as above, leaves the check `pending` with reason `rows_unavailable`, because the vault cannot check the claim. It raises `vote.problem` once. Contradictions in the results themselves are judged as usual; they rest on the service's signature, not on the claim. A later submission with a verifying row is judged as usual. If the check is still unresolved when it would give up (7 days), the vault records `gave_up` with reason `rows_unavailable` and keeps the record in the problem set (§10.19.2); it is not released or evicted as clean. The app shows its text for a problem with the published results. **Version gating:** §10.1 ignores members it does not know, so a vault before this version would ignore `other_rows` and refuse a submit without `row`. The vault release that implements 0.83.3 lists the release capability `vote_rows` (§11.10.9) and accepts both; an app that does not see it in the vault's capabilities sends neither and keeps 0.83.2's behaviour. Then:
+3. **The row.** Its leaf is `ballot_leaf` for a row with a ballot, or the 32-byte tag for an empty one. **The proof is verified to `rows_root` before the row is judged** (0.81.3). The check is `failed` only for a **contradiction under the service's signature and the verified anchor**: a changed proposal; a missing extension; a `tally` that does not name every choice, or a wrong `counts.eligible` (the vault cannot recompute the tally); a row proof that verifies to `rows_root` at an `index` other than the `record_proof`'s (the rows and the tags are both sorted by tag, so a member's row is at its tag's index); an invalid ballot (a `choice_id` not in the proposal, or a `ballot_sig` that fails) under the member's code behind a verifying proof; `row_mismatch`, `row_unexpected` (below); `counts.eligible` not equal to the `record_proof`'s `tree_size`; and (0.83.3) `row_duplicate`: an entry of `other_rows` whose leaf begins with the member's `record_tag` and whose proof verifies to the signed `rows_root` at an index other than the main row's, a second row under the member's tag, which is a signed contradiction. It takes precedence over every other row outcome (`row_mismatch`, `row_unexpected`, `conflict`, and a row at an index other than the `record_proof`'s); `vote.evidence` includes the extra rows. An entry with another tag, at the main row's index, repeating another entry's index, or whose proof does not verify, is input that does not verify (`pending`, `input`). An entry whose leaf can be made and whose proof verifies at another index is `row_duplicate`, whatever its `choice_id`. Only an entry whose members do not decode (base64, types) is `input` for that reason. The app does not send an entry it cannot make into a leaf: `rows.json` then cannot be had (`rows_unavailable`). More than 4 entries, or `rows_unavailable` together with `row`, is `bad_request`; (0.84.1, as built in vettid-vault #191) so is an `other_rows` that is `null` or not an array. **Precedence** (0.84.1, as built): `row_duplicate` also wins over an entry elsewhere in `other_rows` that is input that does not verify; a contradiction in the results themselves (a changed proposal, a missing or invalid extension, the `tally`, or `counts.eligible`; reason `results`) is judged before the extra rows and wins over `row_duplicate`. An entry's index counts as taken only once its proof verifies: an entry that does not verify is input and does not make a later entry at the same index a repeat. **Input that does not verify is no answer** (0.81.3): a results document that does not parse or whose signature fails, a bundle that does not hold for these results, a proof with a `tree_size` other than the signed `counts.eligible` or one that does not verify to the signed `rows_root`. The check **stays `pending` with reason `input`** (not `failed`, no audit entry, no feed item) and a later correct submission is judged; the app shows it as a problem with the published results (step 1). "Any difference is `failed`" of 0.81.0 is withdrawn. **A row the app cannot get** (0.83.3): a `vote.results.submit` with `rows_unavailable: true` (no `row`, `row_proof` or `other_rows`) and the results, signature and bundle, which the vault verifies as above, leaves the check `pending` with reason `rows_unavailable`, because the vault cannot check the claim. It raises `vote.problem` once. Contradictions in the results themselves are judged as usual; they rest on the service's signature, not on the claim. A later submission with a verifying row is judged as usual. (0.84.1, as built in vettid-vault #191) A submission that does not verify, for a check left `pending` (or `gave_up`) with reason `rows_unavailable`, is answered with reason `input`, and the stored reason, the one `vote.get` shows, stays `rows_unavailable`. A `rows_unavailable` submission keeps no results for `vote.evidence`: they are public. If the check is still unresolved when it would give up (7 days), the vault records `gave_up` with reason `rows_unavailable` and keeps the record in the problem set (§10.19.2); it is not released or evicted as clean. The app shows its text for a problem with the published results. **Version gating:** §10.1 ignores members it does not know, so a vault before this version would ignore `other_rows` and refuse a submit without `row`. The vault release that implements 0.83.3 lists the release capability `vote_rows` (§11.10.9) and accepts both; an app that does not see it in the vault's capabilities sends neither and keeps 0.83.2's behaviour. Then:
 
 | The vault holds | The row must be | Outcome |
 |---|---|---|
@@ -14788,7 +15385,7 @@ row_proof: { "index": 1, "tree_size": 3, "path": ["<b64 32 bytes>"] }
   - **What is checked is what is sent** (0.81.6): the strict checks apply to the bytes the app actually puts in the request. If the app re-encodes a site value, it checks the re-encoding (re-encoding can change bytes; a lone surrogate escape, which could turn two distinct names into one, is refused outright since 0.83.1, §5.3); simplest is to embed the validated value's own bytes.
   - **Index element size** (0.81.6): an `index` element over 65,536 bytes is left out before any strict parse (the vault reads only its `service_id`), so a hostile `index.json` cannot make the app parse megabytes per element.
   - **Choice ids in results** (0.81.6): before `vote.results.submit`, the app checks that the member's own row's `choice_id` is a valid choice id (1 to 32 bytes of `[a-z0-9-]`, the vault's rule); otherwise, with `vote_rows` (§11.10.9), it submits with `rows_unavailable: true`; without it, it does not submit and shows the existing problem hint.
-  - **Extra rows** (0.83.3): the app makes each `other_rows` row into a leaf as it does its own row, and does not send an entry it cannot (`rows.json` then cannot be had: `rows_unavailable`). The vault judges an entry whose leaf can be made and whose proof verifies at another index as `row_duplicate`, whatever its `choice_id`; an entry whose members do not decode (base64, types) is `input` for that entry, not `bad_request` for the call. The call-level `bad_request` cases are only more than 4 entries, and `rows_unavailable` together with `row`.
+  - **Extra rows** (0.83.3): the app makes each `other_rows` row into a leaf as it does its own row, and does not send an entry it cannot (`rows.json` then cannot be had: `rows_unavailable`). The vault judges an entry whose leaf can be made and whose proof verifies at another index as `row_duplicate`, whatever its `choice_id`; an entry whose members do not decode (base64, types) is `input` for that entry, not `bad_request` for the call. The call-level `bad_request` cases are only more than 4 entries, an `other_rows` that is `null` or not an array (0.84.1, as built), and `rows_unavailable` together with `row`.
   - **Results:** an empty `results`, one over the request limit, or a `results_sig` that is not 64 bytes is not submitted; the vote shows the existing problem hint for a check it cannot complete.
   - **Stages:** the app sends the lists (or `services_confirm`), then the entries, then each `vote.results.submit`, as separate calls, so a refusal in one does not stop the next.
 
@@ -19484,8 +20081,8 @@ notice only, and a rotation that cannot be written at all is audited
 (`identity.rotation_failed`) and tried again (a recovery's or a transfer's at the next
 unlock, from an owed mark, §11.14.10; a `credential.rotate` that could
 not be written is the member's to ask again): **it never fails the event**. The holder of an old copy also holds the old identity key and
-can announce a rotation of its own; a connection keeps the first
-successor it accepted (§3.4), and the relay and the host that carry the
+can announce a rotation of its own; a connection that sees two
+successors of one key suspends (§3.4, (0.85.0 draft) §3.4.1 rule C), and the relay and the host that carry the
 notices are VettID's. So the rotation ends the old keys against someone
 who is not on the message path, and against VettID only once the
 connections have accepted the member's rotation. (0.72.0) A service
@@ -21202,16 +21799,20 @@ under the request's `id` (§8.2).
 
    **Collect before drop** (owner decision, 2026-10-23). The 11 minutes
    are measured from the moment the app started its `hs.init`; it is one
-   deadline, and no user action extends it. The app stores that moment with the transfer, so a restart keeps the same deadline. An app that is not running at the deadline (stopped, killed, the phone off) does this at its next start, before anything else: one collect, then the drop. At the deadline the new app
-   **collects its mailbox once** before it drops anything. If that
-   collect brings a `device.paired{transfer}` for this transfer, opened
+   deadline, and no user action extends it. The app stores that moment with the transfer, so a restart keeps the same deadline. An app that is not running at the deadline (stopped, killed, the phone off) does this at its next start, before anything else, and an app running at the deadline does it then; an app stopped during the window runs a full window again at its next start, measured from that start. (0.85.2, owner decisions a and a/a of 2026-11-05) At the deadline the new app
+   **keeps collecting its mailbox for a settlement window** before it drops anything: the relay's advertised `visibility_timeout_seconds` (RELAY-PROTOCOL §6.3, clamped to at most 300) plus the long-poll cap (25 seconds) plus 5 seconds, about 90 seconds today (`visibility_timeout_seconds` from the mailbox's registration, 60 if absent, clamped to 0 to 300). The window does not extend the vault's 10 minutes (§6.7.1): an approval that reaches the vault after them is refused as before. *Why:* a collect held by an app that was killed can be handed `device.paired` and lease it for a visibility timeout, so a single collect after the restart can miss a move the vault has already completed. If a collect in the window brings a `device.paired{transfer}` for this transfer, opened
    under the transfer's session, the app applies it and completes the
    move (it takes over the credential, as for an approval within the 11
-   minutes) instead of dropping. Otherwise, or if the collect fails or
-   times out, it drops its handshake, its attested key and its epoch-1
-   secret as before and offers a new code. The collect is bounded: one collect with `wait=0` and `max` at its cap (RELAY-PROTOCOL §6.3), bounded by the app's request timeout and by 30 seconds in all, its transport retries included; if the app cannot
-   reach the relay, that is no reason to keep the keys longer, and it
-   drops them at once. A transfer whose `device.paired` has arrived
+   minutes) instead of dropping. A `device.pair.rejected` for this transfer ends the window at once, as a rejection, never as a drop. A `device.paired` or rejection from any of the app's collects in the window, its collect loop's included, counts. The app offers no abandon during the window, nor in the last minute before the deadline, from the end of the vault's 10 minutes (an approval may just have reached the vault, and abandoning while a `device.paired` may be leased could leave a vault whose only app cannot open it); an abandon chosen before then ends the transfer as abandoned. When the window ends with neither, the app
+   drops its handshake, its attested key and its epoch-1
+   secret as before and offers a new code. Rules for the window:
+   - it runs in the background: the app does not hold its start screen for it; the transfer stays pinned (no enrollment starts) until it is applied, rejected or dropped; a new code can be scanned only after the window ends; there is at most one transfer and one window at a time;
+   - the app never cancels its own collect while it is out at the relay (a canceled collect could itself lease `device.paired`): each collect's `wait` is min(25, time left − 5 s) seconds, 0 when that is negative, and its request timeout is longer than its `wait` plus 10 s; the window ends with one collect with `wait=0`, and if that collect fails, the app drops; while the app's collect loop already long-polls, the settlement uses `wait=0` collects;
+   - a collect that fails (the relay cannot be reached, a transport error) is retried with backoff until the window ends, then the app drops the keys; a short relay outage does not lose a paired move;
+   - the screen does not show the comparison code during the window: it says the app is checking whether the old phone approved in time;
+   - the app lock does not pause or end the window: a `device.paired` that arrives is applied, and Finish the move is asked after the app is unlocked;
+   - a transfer session that ends during the window (`404 mailbox_unknown` for its mailbox, RELAY-PROTOCOL §6.3, or the app signed out or wiped) is reported as ended, not as dropped.
+   A transfer whose `device.paired` has arrived
    (the move is paired) completes at any later start of the app,
    whatever its age; the deadline applies only to a transfer still
    waiting.
@@ -21492,7 +22093,10 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   statement K0→K1 first, if it was not yet sent**, so the pinned
   connections get an unbroken chain: a recovery (its open uses the
   backup copy, which holds K1) and a `credential.rotate` (its own
-  statement is K1→K2) both do. A `credential.rotate` or a recovery made
+  statement is K1→K2) both do. (0.84.1) "First" means before anything
+  signed with **K1 or a later key** (K2), not before `identity.rotate`:
+  a `credential.rotate` sends `identity.rotate`, then the rekey, then
+  the chain K0→K1→K2, all from one state write. A `credential.rotate` or a recovery made
   while the transfer's pending unlink waits first deposits the pending
   `device.unlinked{transferred}` with the old relay key, as recovery
   step 6 does, and then rotates; the old key is kept as above. A pending unlink written by a release before the mark
