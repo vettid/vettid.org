@@ -42,6 +42,9 @@ changelog:
     §3.4.1 S1: `hs.confirm` is on its list (owner decision a, GC
     01M6SDBQPVYF929T3BSF3QVQP2), which closes a wait cycle under relay-key
     rotation; release 29 rotates no relay key (A5).
+    Relay-key rotation's remaining liveness gaps are listed, and it must
+    be redesigned before it is built (owner decision a, GC
+    01M6SEADQ9DRRDG5WM6151MW53).
     §3.4.1 Residuals: rapid rotations can exhaust the reconnect token
     (owner decision a, GC 01M6S92FATG7EWNX5KZGXG277W).
     §6.3.2: the test locations at vettid-vault #206 `8647aa6`, where every
@@ -5126,9 +5129,21 @@ carries no token, address or link, it is sealed under the epoch it
 confirms (which only Q and P open), and it is deposited into Q's own
 mailbox with P's earlier key, which Q accepts before that key's cut-off
 (Table A) exactly as it accepts P's other S1 messages. Nothing in it
-depends on the relay address being changed. Whether relay-key rotation
-leaves other cycles is not argued here; it must be argued, and modelled,
-before relay-key rotation is built.
+depends on the relay address being changed.
+
+*Relay-key rotation is not deadlock-free as specified* (owner decision a,
+GC 01M6SEADQ9DRRDG5WM6151MW53). The trust model with relay-key rotation
+on (about 90 honest pairs in 10,000 end `stale`) shows two more gaps:
+- a rekey's `hs.fin` is held by S1 (only a reconnect's is on its list)
+  while a demoted Q holds `relay.token.issued` for P's new key, so each
+  waits for the other;
+- during S1, P deposits its answer to Q's reconnect with its earlier key
+  for Q, while the tokens Q's `hs.init` sent name P's new key (S3), so the
+  `hs.resp` is refused and no reconnect completes.
+Release 29 builds no relay-key rotation (A5), so neither can occur in it.
+Relay-key rotation (§3.4 for the relay key, §3.4.1 S1 to S3, rule U, the
+gate) must be redesigned, argued as above and modelled to zero honest
+`stale` ends before any release builds it.
 
 **The gate** (owner decision O6c). The receiving side is the capability
 `relay_follow`. A vault that implements this subsection lists it in its
