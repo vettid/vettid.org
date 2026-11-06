@@ -30,15 +30,23 @@ related:
 changelog:
   - 0.86.5: erratum, 2026-11-06 (lead agreements, release 29 review):
     §3.4.1 "Epochs after an `ik` link": a demoted current epoch leads to
-    a reconnect naming the newest epoch that is not demoted, pending or
-    destroyed, not to a rekey (the demoted epoch was never the peer's,
-    and sealed mode refuses the rekey purpose); one reconnect at a time,
-    its tokens revoked when it expires, and after 3 expired tries for
-    the same demoted epoch the connection goes `stale` with its feed
-    item; a device epoch is never demoted. O3a: what Q keeps of an
-    answer H5 dropped is that epoch's `k_i2r` only, to open and verify
-    its `hs.fin`, erased at the first matching `hs.fin` or after 16
-    days.
+    a reconnect, not a rekey, naming the newest epoch of P that has
+    been current at Q and is neither demoted nor destroyed (the
+    demoted epoch was never P's, and sealed mode refuses the rekey
+    purpose: §6.2 now rejects a sealed rekey `hs.init` as a malformed
+    body, and "From P" no longer lists it). Q starts one reconnect at a
+    time; a try fails when its handshake expires or its pending epoch
+    is abandoned, and its tokens are revoked; a refusal or the third
+    failure for the same demoted epoch makes the connection `stale`
+    with its feed item (also listed in §10.9). Until then Q sends P
+    only handshake messages. §6.3.1 and §6.6 name the epoch §3.4.1
+    gives after a demotion. A vault never demotes an epoch with a
+    device or agent, which rotates no `ik`; that a client does not
+    demote its vault's epoch is left open (§15). O3a: of its keys, Q
+    keeps only that epoch's `k_i2r`, with its kids, `th`, the pinned
+    `ik` and the `sender`, to open and verify the `hs.fin`; the record
+    is erased at the first `hs.fin` that opens under that key and
+    whose `sig_I` verifies, or when the answer's lifetime `L` ends.
   - 0.86.4: erratum, 2026-11-06 (the owner's yes, thread
     01M6Q5XF0HP107R1FM0XQ4SDC7; with vettid-agent #42, which already
     refuses them). §10.11 `item.run`: the name rule for `name`, `env`
@@ -4176,8 +4184,8 @@ these rules hold against anyone but the relay and its host (§13.5).
   so there Table B applies only to the vault's keys.
 - **From P.** A message is from P when it opens under P's session: by
   its `recipient_kid` (an epoch Q keeps for P, §6.5), or, for a sealed
-  `hs.init` of a rekey or reconnect, by its `ctx` (an epoch of P's) and
-  `from.ik`. Its `sender` is then judged against P's keys below.
+  `hs.init` of a reconnect, by its `ctx` (an epoch of P's) and
+  `from.ik` ((0.86.5) a sealed `hs.init` of a rekey is refused, §6.2). Its `sender` is then judged against P's keys below.
 - **`ik` states**, for the `ik` a message is signed by or names:
   **current** (the stored `ik`, with the **followed links** of P's chain);
   **reached** (reached from the current `ik` through the links the
@@ -4287,16 +4295,17 @@ accepted, §6.4) and audits `connection.stale` with its feed item
 and dropped (S5). (0.86.2) To judge that `hs.fin`, Q keeps of an
 answer H5 dropped only what checks it: the answer's epoch kids, `th`,
 the pinned `ik`, the collect `sender` and ((0.86.5) exactly) the
-`k_i2r` of that one epoch, only to open and verify its `hs.fin`. The key
-is erased at the first matching `hs.fin` or after 16 days, whichever
-comes first. Nothing under that epoch is ever processed or shown, and
+`k_i2r` of that one epoch, only to open and verify its `hs.fin`. The
+record is erased at the first `hs.fin` that opens under that key and
+whose `sig_I` verifies, or when the answer's lifetime `L` ends (16 days
+from its `hs.resp`, §6.3.1), whichever comes first. Nothing under that epoch is ever processed or shown, and
 the exposure equals §6.5's receive-key retention.
 
 **Epochs after an `ik` link.** When Q follows a link at position x, an
 epoch of P whose signer is that link's `old_ik` or an ancestor and that
 was established by a message deposited after x stops being current: Q
-sends P nothing but handshake messages (its rekey below, an `hs.resp`,
-an `hs.fin`) until a new epoch is current ((0.86.2) its durable messages
+sends P nothing but handshake messages (its reconnect below, an
+`hs.resp`, an `hs.fin`) until a new epoch is current ((0.86.2) its durable messages
 to P meanwhile are held in the outbox, unsealed, and sealed, with a new
 `ts`, under the new epoch once it is current (for Q as initiator toward
 a peer with `hs_confirm`, at confirmation, §6.3.1); held ones whose
@@ -4304,18 +4313,24 @@ a peer with `hs_confirm`, at confirmation, §6.3.1); held ones whose
 dropped. Durable entries sealed under the epoch before it was demoted
 but not yet deposited go back to held and are sealed again, with a new
 `ts`, under the new epoch; those already deposited are out of reach),
-starts a (0.86.5) reconnect (below), and refuses messages under the
+(0.86.5) starts a reconnect (below), and refuses messages under the
 demoted epoch deposited after x (`ancestor_ik`). (0.86.5) **The
-reconnect after a demotion.** It names the newest epoch of P that is
-not demoted, pending or destroyed, not the demoted one: that epoch was
-never P's, so a rekey in session mode under it cannot be opened by P,
-and sealed mode refuses the rekey purpose (§6.2). While P's current
-epoch is demoted and no reconnect of Q's own with P is open, Q starts
-one reconnect at a time; each one's tokens are revoked when it expires
-(§6.6), and after 3 expired tries for the same demoted epoch the
-connection becomes `stale` and Q audits `connection.stale` with its
-feed item (§10.9), as for rules E and L. A device rotates no `ik`
-(§6.7), so an epoch with a device is never demoted. For a rekey
+reconnect after a demotion.** It names the newest epoch of P that has
+been current at Q and is neither demoted nor destroyed; if there is
+none, the connection becomes `stale` as below. Not a rekey: the demoted
+epoch was never P's, so P cannot open a rekey in session mode under it,
+and sealed mode refuses the rekey purpose (§6.2). While Q has no
+current epoch with P after a demotion, and has no reconnect of its own
+with P open or awaiting confirmation (§6.3.1), Q starts one reconnect
+at a time. A try fails when its handshake expires or its pending epoch
+is abandoned; each failed try's tokens are revoked (§6.3.1). One that
+is refused, or the third that fails for the same demoted epoch, makes
+the connection `stale` and Q audits `connection.stale` with its feed
+item (§10.9); tries are within the reconnect token's quota (§6.6). A
+device or agent rotates no `ik` (§6.7), so a vault never demotes an
+epoch with one. (0.86.5, open) A device or agent that would demote its
+vault's epoch: release 29's client does not apply Table B's demotion;
+see §15 item 51. For a rekey
 or reconnect from P under the new `ik`, (0.86.0) a `ctx` naming Q's
 current or confirmed epoch (§6.3.1) is ordinary; a `ctx` naming an epoch
 older than Q's confirmed epoch, where an epoch after it up to the
@@ -6516,7 +6531,7 @@ Field rules:
   is accepted only under the current epoch ((0.86.0) or the
   responder's confirmed epoch, §6.3.1), and names the epoch it travels
   under. (0.86.5) A sealed-mode `hs.init` with purpose `rekey` is
-  refused: a rekey always travels in session mode.
+  rejected as a malformed body: a rekey always travels in session mode.
 
 ### 6.3 Key schedule
 
@@ -6655,7 +6670,8 @@ confirmed, `I` keeps the current epoch with its send keys and `rk`,
 sends in it (after a reconnect, nothing but the handshake: its outbox
 waits), opens messages under both epochs, and starts no rekey with `R`;
 with no valid standing token, or on `token_expired`, it abandons the
-pending epoch and reconnects naming its current epoch. A message from
+pending epoch and reconnects naming its current epoch (after a
+demotion, the one §3.4.1 names). A message from
 `R` that opens under the pending epoch's `r2i` key, of any type, and
 that `acceptFrom` does not refuse at steps 1–4 (§3.4.1; step 5 may still
 refuse it) **confirms** it. The confirmation takes effect before
@@ -6666,7 +6682,7 @@ the old epoch are deposited as they are. A reconnect succeeds (§6.6
 re-mint) at confirmation. If `B` passes first, `I` **abandons** the
 pending epoch: its receive keys are kept 16 days as a previous epoch's,
 nothing under it confirms any more, and `I` reconnects naming its
-current epoch (a device: rekeys if its standing token is valid, else
+current epoch (after a demotion, the one §3.4.1 names; a device: rekeys if its standing token is valid, else
 pairs again). `I` keeps the abandoned epoch's id, and accepts a
 reconnect naming it, until a newer epoch is confirmed. (0.86.2) Whenever
 `I` abandons a pending epoch (here, by H5 or S5, at a crossing (below),
@@ -7513,7 +7529,9 @@ current epoch or any epoch in that history. On every other connection
 (person-to-person, and a service vault answering a member) the `ctx` must
 equal the responder's last epoch, as before. (0.86.0) "Last
 epoch" means the current epoch; a reconnect names its initiator's
-current epoch, never a pending one. On every connection the responder
+current epoch, never a pending one. (0.86.5) After a demotion (§3.4.1
+"Epochs after an `ik` link"), the initiator names the epoch that
+section says. On every connection the responder
 also accepts its pending epoch, and its confirmed epoch while that is
 not current (§6.3.1), except that a side which has sent `hs.fin` for its
 own reconnect refuses its earlier epoch (the crossing rules below,
@@ -12409,7 +12427,7 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   with <name> stopped working. Send them a new invitation." (NEW, for
   wording approval with the app PRs), for every path that makes a
   connection `stale`: O3a, the gate's deadline, rule E's and rule L's
-  reconnects, §3.4.1, §6.3.1),
+  reconnects, (0.86.5) the reconnect after a demotion, §3.4.1, §6.3.1),
   `device.pair.pending` (`ref` = `pending_id`, 0.83.0),
   `device.paired`, `device.unlinked`,
   `message.received` (`ref` = `message_id`), (0.32.0, release
@@ -27240,6 +27258,16 @@ Follow-ups:
     | Lead 4: crossings of different purposes | §6.5: "The lower-`th1` rule applies to any two crossing handshakes of a connection, whatever their purposes" | random runs (the service carve-out is not modeled) |
     | Lead 5: the revert lost messages | §6.3.1 "Deployment": "`I` seals every message it sent under the new epoch again in the old one" after `T` + 2 days | revert counts and clock skew in random runs |
     | Lead 6: R2's repair | this item, R2 | random runs |
+51. **A device or agent that would demote its vault's epoch (0.86.5,
+    open, for the lead).** Table B's demotion (§3.4.1 "Epochs after an
+    `ik` link") is written for a side Q whose peer rotates its `ik`. A
+    vault never demotes an epoch with a device or agent, which rotates
+    no `ik`. The other direction is open: a device or agent follows its
+    vault's links (S8), but release 29's client does not apply the
+    demotion, so an old copy of the vault that set up an epoch with the
+    device before the rotation is not cut off by the link. To decide:
+    whether the client applies Table B's demotion, and if so how it
+    starts again (a device has no reconnect: a rekey, or pairing again).
 
 ## 16. Test vectors
 
