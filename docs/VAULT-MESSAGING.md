@@ -32,23 +32,30 @@ changelog:
     01M6R42066TVG74QBM1C619K5Q, step 4; vettid-vault `r29-oracle`) found
     five problems, and a blind reviewer a sixth. Owner decisions a (GC
     01M6RJF5NZBS92JEYXJXTWKSKM: re-invite at the upgrade, fix C in
-    0.87.1, D after 29; and a, re-enrol: a release-29 vault refuses
-    earlier state). Changes: §6.3.1 "Capability and upgrade": the
-    upgrade migration is removed, and "No upgrade: release 29 starts
-    clean" added (a state without `messaging_release` 29, new in §3.3, is
-    refused at unlock with `state_unsupported`, new in §11.4; staging
-    vaults are re-enrolled; staging only, a production upgrade path is
-    required before members), which removes findings A, B and E and
-    0.87.0's two splits at the upgrade; §3.4.1 "The neutral feed item"
-    loses its pre-29 epoch rule. Finding C: §3.4.1 "Pending epochs at a
-    link" also covers an epoch abandoned while pending whose `sig_R` is
-    by the link's `old_ik` or an ancestor and that is later than the
-    link's epoch (suspend if its received flag is set, else demoted from
-    the start); Residuals follow. Finding F: §6.3.1 Initiator, a device
-    or agent for which the vault holds no valid standing token at `B`
-    becomes `stale` (§3.4.1 S1). Finding D: the device exception in
-    §3.4.1 Invariants (item 51 stays after 29). §6.3.2: R29-U1, K2 and D1
-    restated.
+    0.87.1, D after 29; a, re-enrol: a release-29 vault refuses earlier
+    state; a, one round of fixes after the Opus review). Changes: §6.3.1
+    "Capability and upgrade" becomes "Capability", the upgrade migration
+    is removed, and "No upgrade: release 29 starts clean" is added (a
+    state without `messaging_release` 29 or more, new in §3.3, is not
+    started on any path that opens it, answered `state_unsupported`, new
+    in §11.4; staging vaults are re-enrolled, their devices set up again
+    and connections, a service vault's included, invited afresh; staging
+    only, a production upgrade path is required before members). This
+    removes findings A, B and E and 0.87.0's two splits at the upgrade;
+    §3.4.1 "The neutral feed item" loses its pre-29 epoch rule. Finding
+    C: new §3.4.1 "Epochs abandoned while pending, at P's
+    `identity.rotate`" (R29-K9): an epoch Q began and abandoned while
+    pending, later than the epoch P's `identity.rotate` travels under and
+    signed by a link's `old_ik` or an ancestor, suspends if its received
+    flag is set, and is otherwise ended (a later message under it is fork
+    evidence); judged only at `identity.rotate`, never at an `hs.resp` or
+    `hs.fin`. §6.3.1's abandon and rule E text and the Residuals follow.
+    Finding F: §6.3.1 Initiator "With no token": a pending rekey toward a
+    desktop or agent abandoned for want of a token, or at `B` with no
+    valid token, makes it `stale` (§3.4.1 S1); the member's app follows
+    S1's app branch. Finding D: the device exception in §3.4.1
+    Invariants and a note on §15 item 51. §6.3.2: R29-U1 and D1 restated,
+    R29-K9 added.
   - 0.87.0: 2026-11-06, release 29 written in one piece from the
     approved rule list (vettid.org #549: go at `bef67dc`, with the
     text-only errata at `201ee12`; cleanup plan GC
@@ -4390,24 +4397,36 @@ P's: P's side made it with a key P had already replaced.
   with no feed item and no suspension), and Q refuses messages under it
   deposited after x (`ancestor_ik`).
 
-**Pending epochs at a link** ((0.87.1) and epochs abandoned while
-pending). Following a link also ends every epoch of P that Q began as
-initiator and that never became confirmed, pending or abandoned while
-pending (§6.3.1), whose `sig_R` was made by the link's `old_ik` or an
-ancestor, and that is later than the epoch the message carrying the link
-traveled under (for a message sealed outside a session, the epoch its
-`ctx` names). P dropped every such answer at its rotation (S5), so P's
-side never activated it; a link carried under a pending epoch has just
-confirmed it and is not one of these. A pending one is abandoned (§6.3.1).
-Then, for each:
-- **if its received flag is set**, a copy used it: Q suspends, as in
-  "Epochs after an `ik` link" above;
-- **otherwise** it is demoted from the start (§6.3.1).
+**Pending epochs at a link.** Following a link also abandons Q's pending
+epoch with P (§6.3.1) whose `sig_R` was made by the link's `old_ik` (P
+dropped that answer at its rotation, S5), unless the message carrying the
+link traveled under that pending epoch (it has just confirmed it). Such an
+epoch is demoted from the start (§6.3.1).
 
-(0.87.1) An epoch abandoned while pending stays openable for 16 days
-(§6.3.1), so without this a copy that answered Q's rekey as responder
-and confirmed it could go on sending as P under it, unseen, after Q
-abandoned it and after P's link arrived (step 4's finding C).
+(0.87.1) **Epochs abandoned while pending, at P's `identity.rotate`**
+(step 4's finding C). An epoch Q began and abandoned while pending keeps
+its receive keys 16 days (§6.3.1), so an old copy of P that answered Q's
+handshake could otherwise go on sending as P under it after P's rotation.
+It is judged only when an `identity.rotate` from P arrives, because that
+is the one link-carrying message P always seals under its own current
+epoch (§3.4; resent by S5). An `hs.resp` names Q's epoch, which can be
+older than P's current one, and links applied at an `hs.fin` travel under
+the new epoch, so neither is used. When Q accepts an `identity.rotate`
+from P under an epoch E, also one whose links are all already followed
+(Table B's "ignore": the judgement below is still made), then for each of
+its links, every epoch of P that:
+- Q began as initiator and abandoned while pending (never confirmed),
+- is later than E at Q, and
+- has a `sig_R` made by that link's `old_ik` or an ancestor,
+
+was never activated by P, since P would then have sent the
+`identity.rotate` under it or a later epoch. So:
+- **if its received flag is set**, a copy used it: Q suspends (§6.6
+  "Fork detection", `ref` = `epoch`, with the neutral feed item below);
+- **otherwise** it is **ended**: from then on an authenticated message
+  under it, once step 3 has checked its links by rule C, is fork evidence
+  and Q suspends the same way, so a copy that sends only later is seen.
+  It is no longer kept for a reconnect's `ctx` either.
 
 **After a demotion of the current epoch** (by position, or by a link
 under an earlier epoch, below), until a new epoch is current:
@@ -4726,9 +4745,13 @@ each recipient Q).
   pending epoch as P until a link arrives (above). When the link
   arrives, "Epochs after an `ik` link" sees that epoch's received flag
   set and suspends. This holds for a copy acting as **responder**, which
-  confirms with `hs.confirm`; (0.87.1) and, by "Pending epochs at a
-  link", also for one whose epoch Q abandoned while pending before the
-  link arrived (the flag is set by what the copy sent under it).
+  confirms with `hs.confirm`; (0.87.1) and, by "Epochs abandoned while
+  pending, at P's `identity.rotate`", also for one whose epoch Q
+  abandoned while pending before the link arrived: what it sent under
+  that epoch before P's `identity.rotate` sets the flag, and what it sends
+  after it is fork evidence. Until P's `identity.rotate` arrives (for
+  example while S1 holds it), the copy is not seen: the exposure is the
+  one below, before a rotation is seen.
 - (0.87.0) **A copy acting as initiator is not visible** (accepted by the
   owner 2026-11-06). A copy of P from before P's rotation rekeys and sends
   `hs.fin`; Q activates the epoch and sends under it; the real P's
@@ -6764,7 +6787,7 @@ For purposes `rekey` and `reconnect`, between a vault and its connections
 and between a vault and its devices and agents. A first contact (§6.4) and
 a device pairing (§6.7) activate as before. Release 29 is written
 between release-29 vaults and their devices: there is no path toward a
-peer on an earlier release ("Capability and upgrade", below; §3.4.1 Residuals).
+peer on an earlier release ("No upgrade: release 29 starts clean", below; §3.4.1 Residuals).
 
 **Lifetimes** (normative; `T` is the relay TTL, 14 days):
 
@@ -6824,7 +6847,9 @@ write. Except after a link, the abandoned epoch's receive keys are kept
 16 days as a previous epoch's, and authenticated messages under it are
 processed without confirming it; nothing under it confirms any more. An
 epoch abandoned by a link is demoted from the start: messages under it are
-refused (`ancestor_ik`). `I` keeps an abandoned epoch's id, and accepts a
+refused (`ancestor_ik`). (0.87.1) An epoch already abandoned can still be
+ended at P's `identity.rotate`, or make Q suspend then (§3.4.1 "Epochs
+abandoned while pending, at P's `identity.rotate`"). `I` keeps an abandoned epoch's id, and accepts a
 reconnect naming it, until a newer epoch is confirmed.
 
 After abandoning a rekey's pending epoch (at `B` or for want of a token),
@@ -6834,13 +6859,23 @@ epoch, the handshake it starts next, if any, is a fresh reconnect, not a
 rekey. A pending reconnect that reaches `B` makes the connection `stale`, with
 `connection.stale` and its feed item (§3.4.1 "The reconnect bound"). A vault toward its device or agent rekeys from its
 current epoch instead (Devices and agents, below); it never reconnects to
-one. (0.87.1) If at `B` it holds no valid standing token for the device
-or agent, the rekey could not be deposited and the device would keep the
-abandoned epoch while the vault's keys for it end after 16 days, a split
-nobody sees. Instead the device or agent becomes `stale`, as one that S1 makes
-`stale` does (§3.4.1 S1: `device.list` `state` `"stale"`, which the app
-shows as "<device name> needs reconnecting. Pair it again."); the member
-unlinks it and pairs it again (§6.7).
+one. (0.87.1) **With no token** (step 4's finding F). When the vault
+abandons a pending rekey toward its device or agent for want of a token
+(no valid standing token for it, or `token_expired` once the token's
+`exp` has passed on the vault's clock), or at `B` holding no valid
+standing token for it, its rekey could not be deposited, and the device,
+which may have activated the abandoned epoch, would keep it while the
+vault's keys for it end 16 days later: a split nobody sees. Instead:
+- **a desktop or agent** becomes `stale`, as one that S1 makes `stale`
+  does (§3.4.1 S1: `device.list` `state` `"stale"`, which the app shows as
+  "<device name> needs reconnecting. Pair it again."); the member unlinks
+  it and pairs it again (§6.7), as §7.2 already says for a desktop or
+  agent that stays offline past its token;
+- **the member's app** gets a fresh token at every unlock (§7.2 "Unlock
+  exchange") and `B` is judged only after an unlock's first collect, so
+  this should not happen; if it does, the app is handled as S1's stale
+  app: the vault shows nothing for it, and it comes back by a recovery
+  (§11.11).
 
 **Responder.** Toward a vault (a peer vault, or a device's own vault), `R` activates at a verified `hs.fin`
 that arrives within `L` (§6.3). In the same write it queues **`hs.confirm`**
@@ -6877,7 +6912,8 @@ recorded: `R` suspends (§6.6 "Fork detection", `ref` = `epoch`, with
 (`superseded_epoch`). Rule E's destroyed set does not include an epoch `R`
 itself began and abandoned while pending: that one is handled as the
 Initiator paragraph says (processed without confirming it, never fork
-evidence).
+evidence by rule E; (0.87.1) §3.4.1 "Epochs abandoned while pending, at
+P's `identity.rotate`" may still end it or suspend).
 
 **Crossing** (§6.5). `I`, holding a pending epoch, drops a rekey `hs.init`
 from `R` under the current epoch if its inner `ts` is not later than that
@@ -6920,8 +6956,8 @@ vault tells the member, once per device until that device advertises
 `hs_confirm`, when a message arrives from the device whose `features`
 (§10.8) lack `hs_confirm`, when `B` passes for a pending epoch toward a
 device that still lacks it, or when it refuses that device's rekey (above).
-It does not judge at the upgrade itself: no device has sent `features`
-yet then, release-29 apps included. The notice is a feed item of the
+It does not judge a device that has sent nothing yet: before its first
+message the vault has no `features` from it, release-29 apps included. The notice is a feed item of the
 new kind **`device.update_needed`** (§10.9; with `device_id` set; priority
 `high`) to the member's app and desktops. A message the device queued
 before its app upgraded, with no inner `features`, can raise the notice
@@ -6939,7 +6975,7 @@ vettid-ios since #102, `c7fb8cc9`, 2026-10-20, so every test build has it). The 
 appears only in release-29 apps. The member is still told to update, so
 the notice is visible (accepted by the owner 2026-11-06, GC 01M6RBRZ9EENKJTY94KDYD045Q; §3.4.1 Residuals).
 
-**Capability and upgrade.** A side that implements this subsection
+**Capability.** A side that implements this subsection
 advertises the capability **`hs_confirm`** as it advertises `relay_follow`
 (§10.8: in `features` to every connection and in the inner `features` of
 every message it deposits; in `device.features` and every message's inner
@@ -6950,19 +6986,28 @@ depends on seeing it, except the notice above.
 (0.87.1) **No upgrade: release 29 starts clean** (owner decisions a, GC
 01M6RJF5NZBS92JEYXJXTWKSKM, 2026-11-06: re-invite at the upgrade, and
 re-enrol, a release-29 vault refuses earlier state). There is no
-migration of an earlier release's epochs, handshakes or connections. A
-vault enrolled under release 29 or later writes `messaging_release: 29`
-in its state (§3.3) from its first flush. At an unlock, once the state
-opens, a vault whose state lacks it, or holds a smaller value, refuses
-the unlock with `state_unsupported` (§11.4): it writes nothing, sends
-nothing, and locks again. A refused vault is re-enrolled as §11.14.14
-"Re-enrolment on staging" says (the earlier test vault is deleted and
-enrolled again; its apps and desktops are set up again; its connections
-are invited afresh). Everything the old vault held is lost with it.
-This holds for staging only: production has no vaults, and the first
-production release with members must come with an upgrade path
-(§3.4.1 Residuals). An app or desktop of release 29 keeps no record from
-an earlier release either: it is set up again with the new vault.
+migration of an earlier release's epochs, handshakes or connections.
+- **The marker.** A vault enrolled under release 29 writes
+  `messaging_release: 29` in its state (§3.3) from its first flush. A
+  later release writes the same value unless it changes these rules and
+  says so; any value of 29 or more opens.
+- **The refusal.** On any path that opens the state (an unlock, a
+  recovery's open; as for `deleting`, §11.14.14), a state that lacks the
+  marker or holds a smaller value is not started. The vault writes no
+  state and nothing else after the state opens, sends nothing, answers
+  `state_unsupported` (§11.4; to a recovery's open, the same code) and
+  locks again. This includes staging vaults built from 0.87.0-era
+  release-29 code, which wrote no marker.
+- **Re-enrolment.** A refused vault is re-enrolled as §11.14.14
+  "Re-enrolment on staging" does for release R: the earlier test vault is
+  deleted and enrolled again. Then its app, desktops and agents are set
+  up again with the new vault, keeping no record from the earlier one,
+  and its connections are invited afresh. Everything the old vault held
+  is lost with it. A service vault starts clean the same way: its
+  connections from an earlier release are removed and invited afresh.
+- **Staging only.** Production has no vaults. The first production
+  release with members must come with an upgrade path (§3.4.1
+  Residuals).
 
 #### 6.3.2 Release 29 rules and tests (0.87.0, 0.87.1)
 
@@ -6977,9 +7022,9 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 
 | Rule | Section | Test |
 |---|---|---|
-| R29-G1 | §6.3.1 Capability and upgrade; §10.8 | V/vms/envelope/features_test.go:12 |
+| R29-G1 | §6.3.1 Capability; §10.8 | V/vms/envelope/features_test.go:12 |
 | R29-G2 | §10.8; §10.2 `device.features` | gap: sticky against a later list without it |
-| R29-U1 ((0.87.1) no migration: a state without `messaging_release` 29 is refused) | §6.3.1 No upgrade: release 29 starts clean; §3.3; §11.4 | gap: an unlock of a state without it, or with a smaller value, answers `state_unsupported` and writes nothing |
+| R29-U1 ((0.87.1) no migration: a state without `messaging_release` 29 or more is refused) | §6.3.1 No upgrade: release 29 starts clean; §3.3; §11.4 | gap: an unlock and a recovery's open of a state without it, or with a smaller value, answer `state_unsupported` and write nothing after the state opens; 29 and 30 open |
 | R29-L1 | §6.3.1 Lifetimes | r29_f_test.go:210, :229 |
 | R29-I1 | §6.3.1 Initiator | r29_scenarios_test.go:281; V/vms/handshake/keyring086_test.go:14 |
 | R29-I2 | §6.3.1 Initiator | r29_f_test.go:40, :60, :83; r29_review_test.go:17 |
@@ -7001,7 +7046,8 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-X5 | §6.6 Accepting `ctx` | r29_f_test.go:252 |
 | R29-X6 | §6.2 | gap |
 | R29-K1 | §3.4.1 S8 | r29_scenarios_test.go:535; r29_review_test.go:255; V/vms/handshake/keyring086_test.go:97; V/client/rotate086_test.go:18 |
-| R29-K2 ((0.87.1) also epochs abandoned while pending) | §3.4.1 H5, S5, Pending epochs at a link | r29_f_test.go:60; r29_round6_test.go:454; r29_scenarios_test.go:619; gap: an epoch abandoned while pending whose `sig_R` is by the link's `old_ik`, later than the link's epoch, is demoted at the link, or suspends if its received flag is set (finding C) |
+| R29-K2 | §3.4.1 H5, S5, Pending epochs at a link | r29_f_test.go:60; r29_round6_test.go:454; r29_scenarios_test.go:619 |
+| R29-K9 ((0.87.1) finding C) | §3.4.1 Epochs abandoned while pending, at P's `identity.rotate` | gap: judged at P's `identity.rotate` only (also one whose links are all followed): a set flag suspends; a clear one ends the epoch and a later message under it suspends; a link first followed from an `hs.resp` naming an older epoch, or applied at an `hs.fin`, judges nothing; honest P that activated the epoch sends `identity.rotate` under it and is not judged |
 | R29-K3 | §3.4.1 S5 Resend | gap (model only: M/confirm_scenarios_test.go:167) |
 | R29-K4 | §3.4.1 Epochs after an `ik` link | r29_oldcopy_test.go:205; r29_round6_test.go:546; gap: the flag-set case |
 | R29-K5 | §3.4.1 After a demotion of the current epoch | r29_oldcopy_test.go:431, :515, :534; r29_review_test.go:65; r29_round6_test.go:161, :195 |
@@ -7010,7 +7056,7 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-K8 | §3.4.1 Rule C, acceptFrom | r29_review_test.go:223; r29_round6_test.go:302; r29_oldcopy_test.go:296 |
 | R29-F1 | §3.4.1 Fork by `ctx` | r29_oldcopy_test.go:153, :296 |
 | R29-F3 | §6.3.1 The received flag; §3.4.1 Epochs after an `ik` link, Strict F1 | gap: set by `hs.confirm` alone; a handshake message under E0 does not set E1's flag; a lost or delivered `hs.fin` leaves it clear; P rekeys E0→E1, sends `hs.fin`, rotates before any `hs.confirm` and sends `identity.rotate` under E0: Q ends demoted and reconnecting, not suspended |
-| R29-D1 ((0.87.1) `stale` at `B` with no valid token) | §6.3.1 Initiator, Devices and agents; §6.7; §3.4.1 S1 | gap on the vault side; gap: at `B` with no valid standing token the device becomes `stale` (finding F) |
+| R29-D1 ((0.87.1) with no token, `stale`) | §6.3.1 Initiator (With no token), Devices and agents; §6.7; §3.4.1 S1 | gap on the vault side; gap: a pending rekey toward a desktop or agent abandoned for want of a token, at `token_expired`, or at `B` with no valid token makes it `stale` (finding F) |
 | R29-D2 | §6.3.1 Devices and agents; §15 item 51 | V/client/rotate086_test.go:18, :71; V/client/persist_test.go:517 |
 | R29-D3 | §6.3.1 Devices and agents; §6.7; §10.9 | gap |
 | R29-D4 | §6.3.1 An app from before release 29; §10.9 | gap |
@@ -11749,7 +11795,7 @@ The **profile object** holds the extras' display name and photo. Sent by
     receiving-side capabilities `relay_follow` and (0.86.0)
     `hs_confirm`, each present exactly when the image lists that
     capability (§11.10.9), for the relay-key gate (§3.4.1 "The gate")
-    and for activation on confirmation (§6.3.1 "Capability and upgrade";
+    and for activation on confirmation (§6.3.1 "Capability";
     (0.87.0) advertised only: no rule depends on it except the notice of
     §6.3.1 "An app from before release 29").
   A person connection is sent no other name. Names are only ever added,
@@ -16816,8 +16862,8 @@ one of:
   older vault.
 - `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|signer_refused|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup|device_secret|transfer_incomplete|state_unsupported",
   "header_seq": m, "retry_after": <s>}` — `state_unsupported` (0.87.1):
-  the state opened but was written under an earlier release's messaging
-  rules (§6.3.1 "No upgrade: release 29 starts clean"); nothing is
+  the state opened but lacks `messaging_release` 29 or more (§6.3.1 "No
+  upgrade: release 29 starts clean"); nothing after the state opens is
   written, and the member re-enrols.  `signer_refused` (0.27.0):
   the device key's recorded signer is not pinned by this release, or
   the key has no recorded signer and the request brought no valid
@@ -18942,7 +18988,7 @@ account, push). The v1 app uses all of them.
   (0.85.4) Two more statements, also about the sender itself: a
   vault's `relay_follow` and (0.86.0) `hs_confirm` in `features` to
   every connection, and a device's `device.features` (both names) to
-  its vault (§3.4.1 "The gate", §6.3.1 "Capability and upgrade").
+  its vault (§3.4.1 "The gate", §6.3.1 "Capability").
   It answers no question; a service needs it before any message can
   be sent (§10.19.1). (0.28.0) For calls that is
   the intended probe: a build with calls code sends one `call.list`
@@ -19200,7 +19246,7 @@ not the optional features of §11.10.8, which the channel file chooses.
 | `item_ways` | The ways to use a secret (§10.11): each item an agent's rules include has its ways (`leash.item.set`, `leash.item.list`), and `item.get` is answered only for an item whose ways hold `reveal` (0.83.0; no release lists it yet) | the release that ships AGENT-PLAN AV9 |
 | `vote_rows` | `other_rows` and `rows_unavailable` of `vote.results.submit` (§10.19.6 step 3) | the vault release implementing 0.83.3 (added ahead of its release by owner decision with this PR's merge go, 2026-11-03, as `item_ways` was) |
 | `relay_follow` | The receiving side of §3.4.1 (`acceptFrom`, rules C, U, T, H5, S1–S9); also advertised to connections in `features` (§10.8) and by devices in `device.features` (§3.4.1 "The gate") | the vault release implementing 0.85 (added ahead of its release by owner decision O6c, 2026-11-05) |
-| `hs_confirm` | The vault implements §6.3.1, activation on confirmation (`hs.confirm`, the pending and confirmed epochs, rule E, the received flag); also advertised to connections in `features` (§10.8) and by devices in `device.features` (§6.3.1 "Capability and upgrade") | vault release 29 (owner decision R1; 0.87.0) |
+| `hs_confirm` | The vault implements §6.3.1, activation on confirmation (`hs.confirm`, the pending and confirmed epochs, rule E, the received flag); also advertised to connections in `features` (§10.8) and by devices in `device.features` (§6.3.1 "Capability") | vault release 29 (owner decision R1; 0.87.0) |
 
 A name is added to this table only with the release that implements it,
 or ahead of it by owner decision with that release in **From**
