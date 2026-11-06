@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.1
+version: 0.88.2
 date: 2026-11-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,13 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.2: 2026-11-06, owner decision a (GC 01M6S5B3N0HF7CM2ZQ8AX9V452),
+    from the release 29 review round on vettid-vault #206 and #207 (cleanup
+    plan step 6). §6.6 "Accepting `ctx`": a reconnect refused because the
+    responder's own reconnect is pending, or after its own `hs.fin`, still
+    has its verified identity links followed (rule C, H5, "Pending epochs
+    at a link", "Epochs after an `ik` link", "Strict F1"), so rapid
+    rotations on both sides no longer deadlock honest pairs into `stale`.
   - 0.88.1: 2026-11-06, erratum to 0.87.1 (owner decision a, GC
     01M6S0QVS56CD790T5KD8J30QM, asked as "0.87.2"; numbered after
     0.88.0, which merged first). Found by the Opus review of vettid-vault
@@ -7941,6 +7948,22 @@ refused
 (`reconnect_refused`). The binding stays: `ctx` must name an epoch of
 this connection that the responder itself recorded, and the
 authentication below is unchanged.
+
+(0.88.2) **The links of a refused reconnect** (owner decision a, GC
+01M6S5B3N0HF7CM2ZQ8AX9V452). A reconnect refused only because the
+responder's own reconnect is pending, or because it has sent `hs.fin` for
+its own reconnect, still has its identity links applied, in the write
+that refuses it: the links its `hs.init` carries that resolve from the
+stored `ik` (Table B "Reached"), each checked by rule C, are followed as
+an `identity.rotate`'s would be, with H5, "Pending epochs at a link",
+"Epochs after an `ik` link" and "Strict F1" (§3.4.1). The links carry
+their own signatures (§3.4), so whoever deposited the `hs.init`, following
+them follows the peer's own rotation. Nothing is answered, and R29-K9 is
+not judged (it needs P's `identity.rotate`). Without this, two vaults
+that rotate several times in quick succession while a key change between
+them is in flight can each refuse the other's reconnect and never see the
+links that would let either one move on, until both connections end
+`stale` (found by the release 29 review round, about 8 runs in 5,000).
 
 **Told to the member** (0.72.0). Accepting an older `ctx` is audited
 `connection.restored_reconnect` (`connection_id`, `ref` = the named
