@@ -32,10 +32,11 @@ changelog:
     01M6S0QVS56CD790T5KD8J30QM, asked as "0.87.2"; numbered after
     0.88.0, which merged first). Found by the Opus review of vettid-vault
     #206 (release 29, cleanup plan step 5). §6.3.1 Responder: `R` queues
-    `hs.confirm` again every `T` (14 days) while the epoch it last
-    activated is not yet its confirmed epoch, so an initiator locked past
-    `T` with a pending reconnect does not end `stale` at `B`; a device
-    does the same. §6.3.1 "The received flag": `hs.resp` removed from the
+    `hs.confirm` again 12 days after the last one while its current
+    epoch is one it activated and its confirmed epoch has not reached it
+    (not while demoted or suspended; not scaled), so an initiator locked
+    past `T` with a pending reconnect does not end `stale` at `B`; a
+    device does the same. §6.3.1 "The received flag": `hs.resp` removed from the
     messages that set it (sealed to the initiator's ephemeral key, it
     opens under no epoch). §6.3.2: R29-R3 restated.
   - 0.88.0: 2026-11-06, DRAFT for review (vettid.org #552; owner decision
@@ -6864,7 +6865,7 @@ history), and the mailbox does not keep order (§8.4), so `R`
   matched (§15 item 17). `prk` and `th` in the derivation bind the code
   to both identities, both KEM exchanges and this handshake.
 
-#### 6.3.1 Lifetimes and activation on confirmation (0.87.0, 0.87.1)
+#### 6.3.1 Lifetimes and activation on confirmation (0.87.0, 0.87.1, 0.88.1)
 
 For purposes `rekey` and `reconnect`, between a vault and its connections
 and between a vault and its devices and agents. A first contact (§6.4) and
@@ -6966,18 +6967,24 @@ itself at confirmation; it never moves back. While it is not current:
   checks of §3.4.1 "Fork by `ctx`"; `R` abandons its own
   open rekey for it.
 
-(0.88.1) **`hs.confirm` again every `T`** (owner decision a, 2026-11-06,
-GC 01M6S0QVS56CD790T5KD8J30QM). While the epoch `R` last activated as
-responder is not yet its confirmed epoch with `I`, `R` queues
-`hs.confirm` under it again every 14 days (`T`, the relay's message
-lifetime; divided by `time_scale`, §11.10.8) after the last one it
-queued, unless one to `I` is still in its outbox. It stops when that
-epoch becomes the confirmed epoch, when `R` activates a later one, when
-its keys end (Lifetimes, above) or when the connection or pairing ends.
-Without it, an `hs.confirm` that expires at the relay while `I` is
-locked is never replaced: `I` sends `R` nothing but the handshake while
-its reconnect is pending (Initiator, above), and `R` sends again only
-for a message from `I`, so the pair would reach `B` and end `stale`. A
+(0.88.1) **`hs.confirm` again** (owner decision a, 2026-11-06, GC
+01M6S0QVS56CD790T5KD8J30QM). While `R`'s current epoch with `I` is one
+`R` activated as responder, and `R`'s confirmed epoch is neither that
+epoch nor a later one (in activation order), `R` queues `hs.confirm`
+under it again **12 days** after the last one it queued (`T` less 2
+days, so that two copies overlap at the relay even if a deposit is
+late), unless one to `I` is still in its outbox. The time of the last
+one queued is kept in `R`'s state. The wait is not divided by
+`time_scale` (§11.10.8: the relay's lifetimes and timers between vaults
+never scale). Nothing is queued while the epoch is demoted or the
+connection suspended (§3.4.1 "After a demotion of the current epoch").
+It stops when the condition no longer holds: the epoch is confirmed, the
+confirmed epoch moves past it, or the epoch stops being current. Without
+it, an `hs.confirm` that expires at the relay while `I` is locked is
+replaced only if `R` sends `I` something under the epoch, which a device
+never does unprompted and a vault does only with its next rekey; `I`
+sends `R` nothing but the handshake while its reconnect is pending
+(Initiator, above), so the pair could reach `B` and end `stale`. A
 device toward its vault does the same.
 
 **Rule E.** In the write that establishes a rekey's or reconnect's epoch
@@ -7110,7 +7117,7 @@ migration of an earlier release's epochs, handshakes or connections.
   release with members must come with an upgrade path (§3.4.1
   Residuals).
 
-#### 6.3.2 Release 29 rules and tests (0.87.0, 0.87.1)
+#### 6.3.2 Release 29 rules and tests (0.87.0, 0.87.1, 0.88.1)
 
 The rules of release 29 (§6.3.1 and the `ik` parts of §3.4.1) carry the
 IDs of the approved rule list (vettid.org #549: go at `bef67dc`, errata
@@ -7136,7 +7143,7 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-I7 | §6.3.1 Initiator; §6.3 | r29_f_test.go:306; r29_review_test.go:172; r29_rr2_test.go:215 |
 | R29-R1 | §6.3.1 Responder | gap (r29_f_test.go:170 tests R3's cap) |
 | R29-R2 | §6.3.1 Responder | r29_scenarios_test.go:281 |
-| R29-R3 ((0.88.1) also every `T`) | §6.3.1 Responder; hs.confirm again every `T` | r29_f_test.go:170; gap: with `I` locked past `T` while its reconnect is pending, `R` queues `hs.confirm` again after 14 days and the pair confirms before `B`; it stops once the epoch is confirmed |
+| R29-R3 ((0.88.1) also every 12 days) | §6.3.1 Responder; hs.confirm again | r29_f_test.go:170; gap: with `I` locked past `T` while its reconnect is pending and `R`'s standing token for `I` still valid, `R` queues `hs.confirm` again at 12 days and the pair confirms before `B`; none while demoted or suspended; it stops once the epoch or a later one is confirmed |
 | R29-R4 | §6.3.1 Responder; §6.6 | r29_f_test.go:252; r29_scenarios_test.go:436 |
 | R29-R5 | §6.3.1 Rule E | r29_round6_test.go:141; r29_f_test.go:252 |
 | R29-R6 | §6.3.1 Rule E; §3.4.1 acceptFrom | r29_scenarios_test.go:744 (its "gated iteration"; the test is renamed in step 5); r29_oldcopy_test.go:266 |
