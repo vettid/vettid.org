@@ -8458,11 +8458,18 @@ sent the transfer's `hs.resp`, and a new phone that has received
   when the vault stopped without one (a crash, a restart), in the flush
   that aborts it. **After step 1 is stored and before step 2**, the
   secret is durable in the header's `next` part, and the transfer stays
-  open as §11.14.2 says: the old phone repeats the approval (rule 3's
-  `transfer_incomplete` tells the new phone so), and the repeated
+  open as §11.14.2 says: the old phone repeats the approval (the new
+  phone, which has no `device.paired`, simply keeps waiting), and the repeated
   approval's step 2 decides `device.paired`; if no repeated approval
   comes within the transfer's 10 minutes, it ends `expired`, and that
-  end discards the header's `next` part.
+  end discards the header's `next` part and reports the pending app key
+  withdrawn to the host (`app_key_next` cleared, §11.5), so the member
+  API stops accepting the dropped phone's `api_key`.
+- **A rare case.** A vault that crashes after depositing `hs.resp` and
+  before storing it may later answer the same `hs.init` with a different
+  `hs.resp`; the new phone keeps the first, its `hs.fin` cannot verify,
+  and nothing can be approved, but no outcome comes under the first
+  epoch: the member's give-up ends the wait. It is safe.
 - **A residual, as before 0.88.0.** A crash after step 2 is stored and
   before the vault deposits `device.paired` leaves the outcome queued in
   the stored state of a locked vault that no phone can unlock: the old
@@ -23044,7 +23051,9 @@ under the request's `id` (§8.2).
    sends `hs.resp` once it has received the `hs.init`, so its 10 minutes,
    which count from that receipt, have ended by then; the eleventh minute
    is margin), measured on the phone's monotonic clock while it runs and
-   from the stored moment across a restart:
+   from the stored moment across a restart (a phone clock moved forward
+   while the app was stopped can open the give-up early; the old phone's
+   check guards that too):
    - **When no outcome has come by then,** the waiting
      screen offers "Give up" (proposed text, for the owner's approval with
      the app PRs). It asks first: "Only do this if your old phone still
