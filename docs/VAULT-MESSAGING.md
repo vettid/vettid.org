@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.87.1
+version: 0.88.0
 date: 2026-11-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,20 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.0: 2026-11-06, DRAFT for review (vettid.org #552; owner decision
+    a, GC 01M6RSBMH79RKNM8P8W1DP2T7V). A transfer's new phone learns every
+    outcome from the vault and waits for it, instead of inferring it from
+    timing: new `device.transfer.ended{transfer_id, reason}` for every
+    end after the vault sent `hs.resp` other than the approval and the
+    rejection (§6.7.1 "The transfer's outcome"; §6.7 "When it can be
+    sent"), sent
+    as a queued deposit until delivered; capability `transfer_outcome`
+    (§11.10.9); §11.14.10 rule 5 "Wait for the outcome" replaces the
+    settlement window toward such a vault (the window stays toward a vault
+    without it). Owner decisions a/a (GC 01M6RW3NGZEKPWX2E06XP5YSH7): the
+    member may give up the wait 11 minutes after receiving `hs.resp`,
+    with a warning, and
+    after 14 days the app says the outcome may have expired.
   - 0.87.1: 2026-11-06, the trust model checking 0.87.0 (cleanup plan GC
     01M6R42066TVG74QBM1C619K5Q, step 4; vettid-vault `r29-oracle`) found
     five problems, and a blind reviewer a sixth. Owner decisions a (GC
@@ -4125,13 +4139,17 @@ create-only.
     be reached by a reconnect with the old key (§3.4.1 S1), **and not while a notice to a removed device is
     undelivered**: a pending unlink (`device.unlinked{transferred}`,
     §11.14.10) or a recovery's `device.unlinked{replaced}` (§11.14.6
-    step 6) that still holds a valid token for the old `sub`. A removed
-    phone is not a recipient and never acknowledges, so the key is kept
+    step 6) that still holds a valid token for the old `sub`, or (0.88.0)
+    a transfer's outcome still owed to its new phone (§6.7.1 "The
+    transfer's outcome"; a recovery that replaces a transfer, or an alarm
+    followed by a rotation, can rotate before it is delivered). A removed
+    phone, or a transfer's new phone, is not a recipient and never acknowledges, so the key is kept
     until that notice is delivered, definitively refused, or its token
     expires. This is the one place the old key is kept, and it
     replaces "in memory for the rotation's grace period" wherever that
     stood (§11.14.6 step 6, §11.14.10). The notices to removed devices
-    (`device.unlinked`) are deposited with it too.
+    (`device.unlinked`) and a transfer's owed outcome are deposited with it
+    too.
   - **(b) Resend at each unlock.** At each unlock, for each recipient
     that has not acknowledged and whose standing token for the old `sub`
     is still valid, the vault deposits `relay.address.update` again with
@@ -8149,7 +8167,8 @@ Rules:
     token; and the tokens the vault denylists (the open token and the
     request token) are those **it** issued, which the device would
     deposit with, not the one it deposits with. Best effort, retried as
-    any deposit (§8.6) until the pairing's 10 minutes end.
+    any deposit (§8.6) until the pairing's 10 minutes end; (0.88.0) for a
+    transfer, until delivered (§6.7.1 "The transfer's outcome").
   - **One type for pairing and transfer.** A transfer is a pairing of
     role `app` (QR `t: "p"`, §6.4) and ends in the same `device.paired`
     (with `transfer: true`); the new device knows which it started, so
@@ -8165,9 +8184,19 @@ Rules:
     (the device's own 10 minutes end too), a commitment mismatch
     (`failed`, §6.3), and a transfer aborted by a clone alarm (`alarm`)
     or a recovery (`replaced`) send nothing, so an unapproved device
-    learns nothing of the vault's state.
+    learns nothing of the vault's state. (0.88.0) **A transfer is the
+    exception:** once the vault has **sent its `hs.resp`** (it then
+    holds every key of the handshake's epoch, §6.3, and the new phone's
+    token), every end of the transfer is told to the new phone: the
+    owner's rejection with `device.pair.rejected`, every other end with
+    `device.transfer.ended` (§6.7.1 "The transfer's outcome"), the owner's
+    rejection before the `hs.fin` included. The new
+    phone of a transfer is the member's own, has shown the SAS the
+    holder compared, and may become the vault's only app, so it must
+    learn the outcome rather than guess it.
   - **The new device** accepts, under the handshake's epoch from its
-    vault's relay key, `device.paired` and `device.pair.rejected`. On
+    vault's relay key, `device.paired` and `device.pair.rejected`, and a
+    transfer's new phone also `device.transfer.ended` (0.88.0). On
     `device.pair.rejected` it stops waiting, drops its handshake state
     and the request token it holds, and tells its user: an app or
     desktop shows "Rejected on your phone"; an agent ends its pairing
@@ -8177,7 +8206,9 @@ Rules:
     approval completes the pairing at once (§6.7.1), so a vault never
     sends both `device.paired` and `device.pair.rejected`. A redelivery,
     or one arriving after the device's 10 minutes, finds no handshake
-    state and is dropped.
+    state and is dropped; (0.88.0) a transfer's new phone keeps its
+    handshake state until an outcome or the member's give-up
+    (§11.14.10 rule 5), so its outcome always finds it.
   - **Not forgeable.** It is sealed under the handshake's epoch, whose
     keys only the vault and the new device hold (the device authenticated
     the vault by the bundle's `ik`, §6.3), and deposited on the device's
@@ -8229,7 +8260,7 @@ PIN and password (so it can be answered `busy`), replaces the DEK in
 three writes, and the old app keeps its keys until the new phone's first
 unlock, or until, 7 days or more after the approval, its vault answers
 that the move happened (0.55.10): §11.14.10, which takes precedence over this section where they
-differ. The new phone waits 11 minutes for `device.paired`, not 10, and collects its mailbox for a settlement window before it drops its keys (0.56.2; 0.85.2: no longer a single collect). (0.68.0) The vault rotates its relay key, identity and KEM keys and wake key when the new phone has unlocked and its old phone's notice was accepted (anyway from day 7) (§11.14.10 "The vault's keys after a transfer").
+differ. The new phone waits 11 minutes for `device.paired`, not 10, and collects its mailbox for a settlement window before it drops its keys (0.56.2; 0.85.2: no longer a single collect). (0.88.0) Toward a vault that lists `transfer_outcome` it instead waits for the vault to tell it the outcome (below, "The transfer's outcome"). (0.68.0) The vault rotates its relay key, identity and KEM keys and wake key when the new phone has unlocked and its old phone's notice was accepted (anyway from day 7) (§11.14.10 "The vault's keys after a transfer").
 
 A member who still holds the old phone moves the app, and with it the
 credential, to a new phone without the 24 h wait of a recovery (owner
@@ -8282,7 +8313,9 @@ Old app (holder)           Vault                  Relay             New app
    PIN (ANDROID-PLAN §7).
    A dropped `hs.init` (a spent or expired link, a failed attestation)
    is never answered, so the new app cannot tell it from a slow vault.
-   It SHOULD stop waiting for `hs.resp` after **60 seconds** and tell its
+   It SHOULD stop waiting for `hs.resp` after **60 seconds** ((0.88.0) a
+   transfer's new phone that has stopped waiting MUST NOT answer a late
+   `hs.resp` with `hs.fin`) and tell its
    user that the code may already have been used or that this phone
    could not be verified, and offer to scan a new code (0.10.6).
 3. The holder compares the SAS and sends `device.transfer.approve` with
@@ -8369,18 +8402,119 @@ and the new app's handshake state is dropped. A commitment mismatch at
 
 | Case | What happens |
 |---|---|
-| The holder rejects (`device.transfer.reject`), before or after the scan | Aborted. Nothing else changes. After the new app's `hs.fin` the vault tells it with `device.pair.rejected` (0.10.5, §6.7); before that the new app times out. (Since 0.10.3 an approval completes the transfer, so there is nothing to reject after it.) |
+| The holder rejects (`device.transfer.reject`), before or after the scan | Aborted. Nothing else changes. After the new app's `hs.fin` the vault tells it with `device.pair.rejected` (0.10.5, §6.7); before that the new app times out ((0.88.0) toward a vault with `transfer_outcome`, it is told once the vault has sent `hs.resp`). (Since 0.10.3 an approval completes the transfer, so there is nothing to reject after it.) |
 | No scan before the link's `exp` (10 minutes after `device.transfer.create`), or no approval within 10 minutes after the new app's `hs.init` (0.10.4) | Aborted. Nothing else changes. |
 | The new app's attestation fails | Its `hs.init` is dropped; the transfer stays open until its 10 minutes run out. The new app stops waiting for `hs.resp` after 60 seconds (step 2, 0.10.6). |
 | Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs and as a failed owner check (§3.6.4); the blob is checked first, so an approval with an old blob is answered `stale_credential` and counts nothing (0.46.1). The transfer stays pending until its 10 minutes run out; the member may retry. |
 | The vault becomes held (§3.6.3) while a transfer is open | The transfer stays open: the holder may still approve it (a check in itself) or reject it. A new `device.transfer.create` waits for a check. |
-| The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. (0.55.10) The new app of a transfer drops its handshake, attested key and epoch-1 secret after 11 minutes (§11.14.10 rule 5). |
-| The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. (0.55.10, 0.56.2) A new app that returns after its 11 minutes, without a `device.paired` applied, first collects its mailbox for the settlement window (§11.14.10 rule 5, 0.85.2); if that brings no `device.paired{transfer}` for this transfer, it drops its handshake, attested key and epoch-1 secret and cannot use them: the member recovers (§11.11). (0.56.2, 0.85.2) At its 11-minute deadline the new app collects its mailbox for the settlement window before it drops them: a `device.paired{transfer}` for this transfer, opened under its session, is applied and the move completes; a rejection ends it as rejected (the app offers no abandon during the window); otherwise, when the window ends, it drops them and offers a new code (§11.14.10 rule 5). A transfer already paired completes at any later start, whatever its age. |
+| The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. (0.55.10) The new app of a transfer drops its handshake, attested key and epoch-1 secret after 11 minutes (§11.14.10 rule 5). (0.88.0) Toward a vault with `transfer_outcome`, a new app that received `hs.resp` waits for the outcome instead (`expired`, §6.7.1 "The transfer's outcome"). |
+| The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. (0.55.10, 0.56.2) A new app that returns after its 11 minutes, without a `device.paired` applied, first collects its mailbox for the settlement window (§11.14.10 rule 5, 0.85.2); if that brings no `device.paired{transfer}` for this transfer, it drops its handshake, attested key and epoch-1 secret and cannot use them: the member recovers (§11.11). (0.56.2, 0.85.2) At its 11-minute deadline the new app collects its mailbox for the settlement window before it drops them: a `device.paired{transfer}` for this transfer, opened under its session, is applied and the move completes; a rejection ends it as rejected (the app offers no abandon during the window); otherwise, when the window ends, it drops them and offers a new code (§11.14.10 rule 5). A transfer already paired completes at any later start, whatever its age. (0.88.0) Toward a vault with `transfer_outcome`, the app instead waits for the transfer's outcome and drops only on `device.transfer.ended` (§6.7.1 "The transfer's outcome", §11.14.10 rule 5). |
 | The old app goes offline before approving | The transfer times out; nothing changes. |
 | The old app goes offline after approving | Nothing is needed from it: the approval completed the transfer. The old app learns of its removal from `device.unlinked` (best effort), and then erases its local state (owner decision, 2026-10-05); (0.33.0, release R) that notice is sent only after the new phone's first unlock from storage (§11.14.10). A refused relay key alone is not proof of removal: the app offers the member an erase instead of erasing by itself. The refused relay key is a `403 token_revoked` (RELAY-PROTOCOL §5.3 step 6, §7.1) on a deposit to the device's own vault mailbox: the vault has put the device's relay key on its denylist as a `sub` (§7.4). The same holds for the old app of a recovery (§11.11.5). What the device does on that answer: §8.6. |
 | A clone alarm opens (§3.5.9) | An open transfer is aborted. |
 | The vault locks | The transfer and its pending handshake are kept in vault state; its 10 minutes still run and are checked at the next unlock, which aborts an expired one. (0.33.0, release R: the new phone's secret is held in memory only, so a lock before the approval ends the transfer, which is started again, §11.14.10.) |
 | A recovery completes (§11.11.5) | An open transfer is aborted (`replaced`). |
+
+**The transfer's outcome** (0.88.0, vettid.org #552; owner decision a of
+2026-11-06, GC 01M6RSBMH79RKNM8P8W1DP2T7V). *Why:* until 0.88.0 the new
+phone could not learn that a transfer had ended without an approval; it
+inferred it from timing (§11.14.10 rule 5's settlement window), and a
+`device.paired` leased by a lost collect made that inference fragile.
+From 0.88.0 the vault **tells the new phone every outcome** once it has
+sent the transfer's `hs.resp`, and a new phone that has received
+`hs.resp` waits for it instead of a window.
+
+- **Three outcomes, each a message to the new phone,** sealed under the
+  transfer's handshake epoch and deposited on the standing token the
+  new phone issued in its `hs.init` (the channel of `device.paired`,
+  §6.7):
+  - `device.paired{transfer: true, …}`: the approval (step 4, unchanged);
+  - `device.pair.rejected{}`: the holder's rejection (§6.7, unchanged);
+  - **`device.transfer.ended{transfer_id, reason}`** (new): every other
+    end after the vault sent `hs.resp`. `reason` is `expired` (the vault's 10 minutes
+    ran out, at once or at the next unlock), `locked` (release R: a
+    lock before the approval lost the new phone's secret, §11.14.10
+    rule 1), `alarm` (§3.5.9), `replaced` (§11.11.5) or `failed` (a
+    commitment mismatch at `hs.fin`, §6.3: the vault seals and queues the
+    outcome before it destroys the handshake state). An unknown `reason`
+    means the same as `expired`. Before the vault has verified the new
+    phone's `hs.fin` (its `sig_I`), it sends only `expired` whatever the
+    end (other than the owner's rejection), so a phone that merely
+    scanned the QR learns nothing of the vault's state. **The new phone matches an outcome by
+    the handshake's epoch it opens under**, not by `transfer_id`, which it
+    never learned (the QR does not carry it) and treats as
+    informational. Each transfer has a fresh epoch, so an outcome of an
+    earlier transfer cannot open under a later one; a redelivered one is
+    the same outcome.
+- **Exactly one outcome per transfer, and it is final.** The vault never
+  sends two of them for one `transfer_id`, and each is decided in the
+  same flush as the transfer's end: the approval's (step 4; from release
+  R, **the step-2 state write** of §11.14.10 rule 2, which removes the old
+  app, queues `device.paired`), the rejection's, or the abort's. From
+  release R, **`locked`** ends a transfer whose new phone's secret was
+  lost: a lock or a crash **before the approval's step 1 is stored**
+  (until then the secret is in memory only, §11.14.10 rule 1). It is
+  decided in the flush of an orderly `vault.lock`, or at the next unlock
+  when the vault stopped without one (a crash, a restart), in the flush
+  that aborts it. **After step 1 is stored and before step 2**, the
+  secret is durable in the header's `next` part, and the transfer stays
+  open as §11.14.2 says: the old phone repeats the approval (the new
+  phone, which has no `device.paired`, simply keeps waiting), and the repeated
+  approval's step 2 decides `device.paired`; if no repeated approval
+  comes within the transfer's 10 minutes, it ends `expired`, and that
+  end discards the header's `next` part and reports the pending app key
+  withdrawn to the host (`app_key_next` cleared, §11.5), so the member
+  API stops accepting the dropped phone's `api_key`.
+- **A rare case.** A vault that crashes after depositing `hs.resp` and
+  before storing it may later answer the same `hs.init` with a different
+  `hs.resp`; the new phone keeps the first, its `hs.fin` cannot verify,
+  and nothing can be approved, but no outcome comes under the first
+  epoch: the member's give-up ends the wait. It is safe.
+- **A residual, as before 0.88.0.** A crash after step 2 is stored and
+  before the vault deposits `device.paired` leaves the outcome queued in
+  the stored state of a locked vault that no phone can unlock: the old
+  phone was removed in step 2, and the new phone has no `device.paired`
+  (so no `user_guid`). The member then gives up (§11.14.10 rule 5) and
+  recovers (§11.11). A transfer that ends while the vault
+  is locked (its 10 minutes ran out) is ended at the next unlock, in the
+  flush that aborts it, and its `device.transfer.ended{expired}` is
+  sealed then: the transfer's handshake state (its epoch keys and the new
+  phone's token) is kept in vault state until its outcome is sealed and
+  queued, for release R too (the table above, "The vault locks").
+- **Delivered, not best effort.** The outcome's deposit is queued in the
+  same flush as the end and retried as any queued deposit (§8.6) until
+  the relay accepts it (`201`) or definitely refuses it (the new
+  phone's token expired or revoked, its mailbox gone), not only until
+  the pairing's 10 minutes end. The queued deposit keeps its own copy
+  of the new phone's token, so the denylisting of the vault's own open
+  and request tokens at the end (§7.4) does not cancel it. A deposit
+  still owed survives a lock (it is part of the stored state).
+- **Not forgeable,** as `device.pair.rejected` (§6.7): only the vault
+  and the new phone hold the handshake epoch's keys, and the token is
+  sender-bound. A relay or host can withhold or delay an outcome but
+  cannot invent or change one. The deposit uses the new phone's token
+  for the vault's relay key at the transfer's time; a relay-key rotation
+  before it is delivered keeps that key for it (§3.4 (a)).
+- **The new phone drops nothing on timing.** It applies `device.paired`,
+  stops on `device.pair.rejected` (as §6.7 says) and, on
+  `device.transfer.ended`, drops its handshake, its attested key and its
+  epoch-1 secret and offers a new code. Until one of the three arrives
+  it keeps them and the transfer stays pinned, however long that takes
+  (§11.14.10 rule 5). A new phone that has **not received `hs.resp`**
+  stops after 60 seconds (step 2) and drops: the vault cannot approve a
+  transfer without the `hs.fin` the phone never sent. A new phone whose
+  `hs.fin` deposit is **definitively refused** (`token_revoked`,
+  `token_expired`, `mailbox_unknown`; RELAY-PROTOCOL §5.3) knows the
+  transfer cannot be approved, and waits for its outcome; a vault that is
+  gone (`mailbox_unknown` for its mailbox) sends none, and the member's
+  give-up ends the wait.
+- **Capability.** A vault that sends outcomes lists `transfer_outcome`
+  in its bundle's `capabilities` (§6.4, §11.10.9). A new phone that
+  does not see it in the QR's bundle keeps 0.85.2's settlement window
+  (§11.14.10 rule 5).
+- **Audit.** Unchanged: the end is audited as before
+  (`device.transfer.aborted`, `device.transferred`); the outcome's
+  deposit is not audited separately.
 
 OWNER DECISION (recommended: as specified): the transfer does not
 re-check the old app's device attestation; its session, the PIN and the
@@ -8757,7 +8891,7 @@ The actions for each event are applied in one flush, in the order listed:
 | Device unlinked | End its access session and drop its held and pending requests (§6.8). Send `device.unlinked` (best effort). Denylist `sub`. Remove the device from the unlock keys. Delete its wake reference. |
 | Agent revoked | As for device unlinked, plus revoke all of the agent's LEASH grants |
 | Invite or pairing cancelled or expired | Denylist the open token's `jti`. DELETE the claim. |
-| Connection request or pairing ended without activation (declined, rejected, expired, aborted; 0.10.3) | If the vault's member declined (or blocked) a connection request whose handshake has given it the epoch and the peer's request token, send `connection.declined` first (0.10.5, §6.4), sealed under the epoch and queued on that token; the queued deposit keeps its own copy of the token, so deleting the held tokens below does not cancel it, and the tokens denylisted below are the vault's own, not the one it deposits with. Likewise, if the owner rejected a pairing or transfer after its `hs.fin`, send `device.pair.rejected` first, on the new device's token (0.10.5, §6.7). Denylist the `jti` of every token the vault issued to the peer in the request: the request token and, if its member approved, the standing and reconnect tokens of its `connection.approved` (0.10.4). Delete the tokens held for the peer and the handshake state. |
+| Connection request or pairing ended without activation (declined, rejected, expired, aborted; 0.10.3) | If the vault's member declined (or blocked) a connection request whose handshake has given it the epoch and the peer's request token, send `connection.declined` first (0.10.5, §6.4), sealed under the epoch and queued on that token; the queued deposit keeps its own copy of the token, so deleting the held tokens below does not cancel it, and the tokens denylisted below are the vault's own, not the one it deposits with. Likewise, if the owner rejected a pairing or transfer after its `hs.fin`, send `device.pair.rejected` first, on the new device's token (0.10.5, §6.7); (0.88.0) for a transfer, after its `hs.resp`, send its outcome first (`device.pair.rejected` or `device.transfer.ended`, §6.7.1 "The transfer's outcome"), as a queued deposit kept until delivered. Denylist the `jti` of every token the vault issued to the peer in the request: the request token and, if its member approved, the standing and reconnect tokens of its `connection.approved` (0.10.4). Delete the tokens held for the peer and the handshake state. |
 
 The relay retains denylist entries for its maximum token lifetime
 (RELAY-PROTOCOL §5.5). This is why reconnect tokens raise denylist retention
@@ -9110,7 +9244,8 @@ an answer to an unknown or expired id is dropped.
 | | `device.transfer.create`, `.approve`, `.reject` | D→V | req | Direct transfer of the app to a new phone (§6.7.1) |
 | | `device.transfer.pending` | V→D | | The new phone scanned: name and `sas` |
 | | `device.paired`, `device.unlinked` | V→D | | Welcome and removal notices |
-| | `device.pair.rejected` | V→D (the new device) | | The owner rejected the pairing or transfer after its `hs.fin` (§6.7, 0.10.5) |
+| | `device.pair.rejected` | V→D (the new device) | | The owner rejected the pairing or transfer after its `hs.fin` (§6.7, 0.10.5); (0.88.0) a transfer's, once the vault sent `hs.resp` |
+| | `device.transfer.ended` | V→D (a transfer's new phone) | | `{transfer_id, reason}`: a transfer ended after the vault sent `hs.resp`, without an approval or a rejection (`expired`, `locked`, `alarm`, `replaced`, `failed`; §6.7.1 "The transfer's outcome", 0.88.0) |
 | | `device.session.request`, `.approve`, `.deny`, `.end` | D→V | req | Access sessions of desktops and agents (§6.8) |
 | | `device.session.pending`, `.granted`, `.ended` | V→D | | Asked; granted; ended or denied |
 | | `approval.pending`, `approval.waiting` / `approval.decide` | V→D / D→V | — / req | A desktop's step-up request or an agent's referred request, held for an app (§6.8) |
@@ -9513,7 +9648,8 @@ device belongs to the unlock it ends.
 | `device.pair.pending` (to apps) | — | `{pairing_id, pending_id, role, name, sas}`; `name` is the new device's self-asserted `profile.name` |
 | `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}` (`pairing_id` or the request's `pending_id`, 0.83.0); `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window; `transfer_incomplete` while a transfer's credential-key statement is held, §11.14.10, 0.83.11) | `{device_id}`, the new device's id, as on `device.paired` (0.83.0; not yet built in the vault, which answers `{}`) |
 | `device.pair.reject` (app) | `{pairing_id}` (or the request's `pending_id`, 0.83.0) | `{}` |
-| `device.pair.rejected` (to the new device) | — | `{}`: the owner rejected the pairing or transfer after its `hs.fin` (0.10.5); sealed under the handshake's epoch, on the device's token from `hs.init`, as `device.paired`; the device stops waiting (§6.7) |
+| `device.pair.rejected` (to the new device) | — | `{}`: the owner rejected the pairing or transfer after its `hs.fin` (0.10.5; (0.88.0) a transfer's once the vault sent `hs.resp`); sealed under the handshake's epoch, on the device's token from `hs.init`, as `device.paired`; the device stops waiting (§6.7) |
+| `device.transfer.ended` (to a transfer's new phone) | — | `{transfer_id, reason}`: the transfer ended after the vault sent `hs.resp`, other than by an approval or a rejection; `reason` is `expired`, `locked`, `alarm`, `replaced` or `failed` (an unknown one means `expired`); sealed under the handshake's epoch, on the new phone's token from `hs.init`; the phone matches it by that epoch, and `transfer_id` is informational (0.88.0, §6.7.1) |
 | `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?, user_guid?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true`, the credential's `credential_version` and (0.17.0) the member's `user_guid`, which its unlocks need, for a transferred app only (§6.7.1) |
 | `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?, push?, signer?}]}`; `push` (0.24.0) only on the app's entry while it has a registration: the push state of §14.1; `signer` (0.27.0) only on an Android app's entry with a recorded signer: `{class: "vettid" \| "google_play" \| "development" \| "automation", digest: "<64 hex>"}` (`automation`: staging only, 0.66.0), the vault's signer binding (§11.7.1); (0.85.4) `state` `"stale"` for a device §3.4.1 S1 marked stale |
 | `device.unlink` (app) | `{device_id}` | `{}`; `forbidden` for the app itself (0.9.0: it leaves by a transfer or a recovery) |
@@ -19309,6 +19445,7 @@ not the optional features of §11.10.8, which the channel file chooses.
 | `vote_rows` | `other_rows` and `rows_unavailable` of `vote.results.submit` (§10.19.6 step 3) | the vault release implementing 0.83.3 (added ahead of its release by owner decision with this PR's merge go, 2026-11-03, as `item_ways` was) |
 | `relay_follow` | The receiving side of §3.4.1 (`acceptFrom`, rules C, U, T, H5, S1–S9); also advertised to connections in `features` (§10.8) and by devices in `device.features` (§3.4.1 "The gate") | the vault release implementing 0.85 (added ahead of its release by owner decision O6c, 2026-11-05) |
 | `hs_confirm` | The vault implements §6.3.1, activation on confirmation (`hs.confirm`, the pending and confirmed epochs, rule E, the received flag); also advertised to connections in `features` (§10.8) and by devices in `device.features` (§6.3.1 "Capability") | vault release 29 (owner decision R1; 0.87.0) |
+| `transfer_outcome` | §6.7.1 "The transfer's outcome": the vault tells a transfer's new phone every outcome after `hs.fin` (`device.transfer.ended`), so the new phone waits for it instead of 0.85.2's settlement window (§11.14.10 rule 5) | the first vault release implementing 0.88.0 (after release 29) |
 
 A name is added to this table only with the release that implements it,
 or ahead of it by owner decision with that release in **From**
@@ -21284,7 +21421,7 @@ such an unlock, and an open of it was a fresh attempt.
 | The run ends, or the host drops a write | What is stored | Who can unlock | What the member does |
 |---|---|---|---|
 | Before step 1 is stored | old header, old state | The old phone with the old PIN | Tries again |
-| After step 1, before step 2 | header with both, old state | The old phone with the old PIN (`DEK_0`); the new phone or new PIN reaches `DEK_0` through the `next` wrap, and a new phone's unlock is answered `transfer_incomplete`. The member API accepts the old and the pending app key | Repeats the approval or the change from the old phone, or the open from the new phone, which costs no attempt |
+| After step 1, before step 2 | header with both, old state | The old phone with the old PIN (`DEK_0`); the new phone or new PIN reaches `DEK_0` through the `next` wrap, and a new phone's unlock is answered `transfer_incomplete`. The member API accepts the old and the pending app key | Repeats the approval or the change from the old phone, or the open from the new phone, which costs no attempt. (0.88.0) A transfer not approved again within its 10 minutes ends `expired`; the end discards the `next` part and tells the new phone (§6.7.1 "The transfer's outcome") |
 | After step 2, before step 3 | header with both, new state | The new phone or new PIN (`DEK_1`); the old phone or old PIN is out from here on | Unlocks; step 3 is done then |
 | After step 3 | new header, new state | The new phone or new PIN only | Nothing |
 | The host serves the old header again later | old header, new state | Nobody through that header; the current header still works | Sees a failed unlock; this is the host's doing |
@@ -22873,7 +23010,84 @@ under the request's `id` (§8.2).
    is accepted. The vault's 10 minutes are unchanged, and so are those
    of a pairing of a desktop or an agent (§6.7).
 
-   **Collect before drop** (owner decision, 2026-10-23). The 11 minutes
+   **Wait for the outcome** (0.88.0, vettid.org #552; owner decision a
+   of 2026-11-06). With a vault that lists `transfer_outcome` (§6.7.1
+   "The transfer's outcome"), a new phone that has sent its `hs.fin`
+   **drops nothing at the 11-minute deadline**. It waits, however long
+   it takes, for `device.paired`, `device.pair.rejected` or
+   `device.transfer.ended` for this transfer, and acts only on one of
+   them: it applies `device.paired`, stops on a rejection, and drops its
+   handshake, attested key and epoch-1 secret on `device.transfer.ended`.
+   The settlement window below, and its timing rules, do not apply.
+   - **Collecting.** The app collects its mailbox as usual (its collect
+     loop, with backoff after failures); a collect that is lost, cut or
+     answered late only delays the outcome, because the outcome stays
+     in the mailbox until it is acknowledged (a leased message is handed
+     out again after the visibility timeout, RELAY-PROTOCOL §6.3). No
+     request is cancelled for timing reasons.
+   - **What the member sees.** Until the 11 minutes: the comparison code,
+     as today. After them, with no outcome yet: "Checking with your
+     vault whether the move finished…", and the transfer stays pinned (no
+     enrollment starts, no new code). The app lock does not change this.
+     An app stopped and started again keeps waiting, at once.
+   - **Leaving the wait.** Only by an outcome, or by the member's give-up
+     ("Giving up the wait", below).
+   - **The relay's message lifetime.** An outcome waits in the mailbox for
+     the relay's `message_ttl_seconds` (14 days), and can be deposited
+     only while the new phone's token lives (at most 30 days; a later
+     deposit is definitively refused, and only the give-up remains). A new
+     phone that stays
+     off longer than that can find its outcome gone; the app then says so
+     and offers the give-up ("Giving up the wait", below).
+   - **A transfer session that ends** (`404 mailbox_unknown` for its
+     mailbox, or the app signed out or wiped) is reported as ended, as
+     today.
+   - **The old phone** is unchanged: it may reject the transfer until it
+     approves it, and the new phone is told either way.
+
+   **Giving up the wait** (owner decision a/a of 2026-11-06, GC
+   01M6RW3NGZEKPWX2E06XP5YSH7). The app offers the member a way to give
+   up, and only from **11 minutes after it received `hs.resp`** (the vault
+   sends `hs.resp` once it has received the `hs.init`, so its 10 minutes,
+   which count from that receipt, have ended by then; the eleventh minute
+   is margin), measured on the phone's monotonic clock while it runs and
+   from the stored moment across a restart (a phone clock moved forward
+   while the app was stopped can open the give-up early; the old phone's
+   check guards that too):
+   - **When no outcome has come by then,** the waiting
+     screen offers "Give up" (proposed text, for the owner's approval with
+     the app PRs). It asks first: "Only do this if your old phone still
+     opens your vault. If your old phone says the move finished, don't
+     give up: this phone holds your vault's only keys." Confirmed, the app drops its handshake, attested
+     key and epoch-1 secret, as on `device.transfer.ended`, and offers a
+     new code. *Why:* the member is the one who can check the old phone;
+     a vault that stays locked, or a host or relay that withholds the
+     outcome, must not leave the new phone pinned for ever.
+   - **After 14 days without an outcome** (the relay's
+     `message_ttl_seconds`, after which an outcome may be gone), the
+     screen says so: "Your vault's answer may have expired. Check your old
+     phone." and offers the same give-up with the same warning.
+   - **The residual.** A member who gives up although the move finished
+     (the outcome withheld or lost, and the old phone's own "the move
+     finished" ignored) leaves a vault whose only app is a phone that
+     dropped its keys; it comes back by a recovery (§11.11), as a lost new
+     phone does today. The warning and the old phone check exist for that
+     case. A give-up cannot come before the vault's last possible
+     approval is decided, but it can come before that approval's
+     `device.paired` is delivered (a deposit still being retried, or a
+     collect's lease of up to 5 minutes): the old phone's check is the
+     guard there, not the clock. The bound also assumes the vault's
+     own clock is not set back across a restart (a host that moves it
+     back can stretch the vault's 10 minutes, as before 0.88.0); the old
+     phone's check covers that case too.
+   - **Stopping a move earlier.** After its `hs.fin`, the new phone offers
+     no other abandon (0.85.2's "an abandon chosen before then" is
+     withdrawn toward a vault with `transfer_outcome`): to stop a move,
+     the member rejects it on the old phone, and the new phone gets
+     `device.pair.rejected`.
+
+   **Collect before drop** (owner decision, 2026-10-23; from 0.88.0 only
+   toward a vault without `transfer_outcome`). The 11 minutes
    are measured from the moment the app started its `hs.init`; it is one
    deadline, and no user action extends it. The app stores that moment with the transfer, so a restart keeps the same deadline. An app that is not running at the deadline (stopped, killed, the phone off) does this at its next start, before anything else, and an app running at the deadline does it then; an app stopped during the window runs a full window again at its next start, measured from that start. (0.85.2, owner decisions a and a/a of 2026-11-05) At the deadline the new app
    **keeps collecting its mailbox for a settlement window** before it drops anything: the relay's advertised `visibility_timeout_seconds` (RELAY-PROTOCOL §6.3, clamped to at most 300) plus the long-poll cap (25 seconds) plus 5 seconds, about 90 seconds today (`visibility_timeout_seconds` from the mailbox's registration, 60 if absent, clamped to 0 to 300). The window does not extend the vault's 10 minutes (§6.7.1): an approval that reaches the vault after them is refused as before. *Why:* a collect held by an app that was killed can be handed `device.paired` and lease it for a visibility timeout, so a single collect after the restart can miss a move the vault has already completed. If a collect in the window brings a `device.paired{transfer}` for this transfer, opened
