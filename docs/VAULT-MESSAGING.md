@@ -23076,7 +23076,10 @@ under the request's `id` (§8.2).
      approval is decided, but it can come before that approval's
      `device.paired` is delivered (a deposit still being retried, or a
      collect's lease of up to 5 minutes): the old phone's check is the
-     guard there, not the clock.
+     guard there, not the clock. The bound also assumes the vault's
+     own clock is not set back across a restart (a host that moves it
+     back can stretch the vault's 10 minutes, as before 0.88.0); the old
+     phone's check covers that case too.
    - **Stopping a move earlier.** After its `hs.fin`, the new phone offers
      no other abandon (0.85.2's "an abandon chosen before then" is
      withdrawn toward a vault with `transfer_outcome`): to stop a move,
