@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.0
+version: 0.88.1
 date: 2026-11-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,22 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.1: 2026-11-06, erratum to 0.87.1 (owner decision a, GC
+    01M6S0QVS56CD790T5KD8J30QM, asked as "0.87.2"; numbered after
+    0.88.0, which merged first). Found by the Opus review of vettid-vault
+    #206 (release 29, cleanup plan step 5). §6.3.1 Responder: `R` queues
+    `hs.confirm` again 12 days after the last one while its current
+    epoch is one it activated and its confirmed epoch has not reached it
+    (not while demoted or suspended; not scaled), so an initiator locked
+    past `T` with a pending reconnect does not end `stale` at `B`; a
+    device does the same. §6.3.1 "The received flag": `hs.resp` removed from the
+    messages that set it (sealed to the initiator's ephemeral key, it
+    opens under no epoch). §3.4.1 Residuals: the re-send's worst case
+    (owner decision a); "The device exception": F covers any abandonment
+    of a pending rekey toward a device or agent (owner decision a, GC
+    01M6S2ECFHHGFXC7H8HPZ2FB2V); §15 item 51 follows. §6.3.1 "No upgrade": a refusal on a recovery's
+    repeat through `next` answers `attempt_used: false` (§11.14.6). §6.3.2:
+    R29-R3 restated.
   - 0.88.0: 2026-11-06, DRAFT for review (vettid.org #552; owner decision
     a, GC 01M6RSBMH79RKNM8P8W1DP2T7V). A transfer's new phone learns every
     outcome from the vault and waits for it, instead of inferring it from
@@ -4812,6 +4828,19 @@ each recipient Q).
   It is like the exposure before a rotation is seen (the second bullet
   of these Residuals; §11.14.2), but lasts up to 16 days after Q follows
   P's link; it is closed with the resume-path work after release 29.
+- (0.88.1) **`hs.confirm` again, worst case** (accepted by the owner
+  2026-11-06, decision a, GC 01M6S0QVS56CD790T5KD8J30QM). `R` sends its
+  repeated `hs.confirm` with the standing token `I`'s reconnect `hs.init`
+  carried (30 days), which is not renewed while that reconnect is
+  pending, so its last copy can be deposited at most 30 days after that
+  `hs.init` and leaves the relay 14 days later. If more than about 6 days
+  pass between `I`'s `hs.init` and `R`'s activation (for any reason: `R`
+  locked, a late `hs.resp` or `hs.fin`), or `R` is locked for long right
+  after activating, the last copy can leave the relay before `B`; if `I`
+  then stays away for more than about 26 days after its `hs.fin`, `I` ends
+  `stale` at `B`. It is visible (a new invitation). The pair recovers
+  if `I` returns before `B`: at `token_expired`, `R` starts its own
+  reconnect naming the epoch, which `I` accepts.
 - (0.87.0) **A copy acting as initiator is not visible** (accepted by the
   owner 2026-11-06). A copy of P from before P's rotation rekeys and sends
   `hs.fin`; Q activates the epoch and sends under it; the real P's
@@ -4890,13 +4919,17 @@ harness's invariants, not the rule IDs `R29-I1`… of §6.3.2:
   device exception.
   Item 51 is scheduled right after release 29.
   **With it, finding F** (owner decision a, GC 01M6RJF5NZBS92JEYXJXTWKSKM):
-  when the vault abandons a pending rekey toward its device or agent and
-  holds no valid standing token for it (at `B`, for want of a token, or
-  when the token lapses afterwards), its rekey from the current epoch may
-  never be deposited, while the device stays on the abandoned epoch and
-  the vault's keys for that epoch end after 16 days. The pair can split
-  with nothing shown to the member, so I1 and I7 do not hold for that
-  pair. Re-pairing a desktop or agent ends it (§7.2 already says one
+  when the vault abandons a pending rekey toward its device or agent, the
+  device may already have activated the abandoned epoch and stay on it.
+  (0.88.1, owner decision a, GC 01M6S2ECFHHGFXC7H8HPZ2FB2V: this covers
+  **any** abandonment, not only at `B` or for want of a token; for
+  example the vault's own rotation, S5, with the device then offline past
+  the 48 days the device keeps its confirmed epoch's keys.) The vault's
+  rekey from its current epoch may never be deposited (no valid token)
+  or never be opened (the device no longer keeps that epoch), while the
+  vault's keys for the abandoned epoch end after 16 days. The pair can
+  split with nothing shown to the member, so I1 and I7 do not hold for
+  that pair. Re-pairing a desktop or agent ends it (§7.2 already says one
   offline past its token is paired again); the member's app gets a fresh
   token at every unlock (§7.2), so its rekey is normally deposited then. F is
   closed with D in the device work right after release 29.
@@ -6854,7 +6887,7 @@ history), and the mailbox does not keep order (§8.4), so `R`
   matched (§15 item 17). `prk` and `th` in the derivation bind the code
   to both identities, both KEM exchanges and this handshake.
 
-#### 6.3.1 Lifetimes and activation on confirmation (0.87.0, 0.87.1)
+#### 6.3.1 Lifetimes and activation on confirmation (0.87.0, 0.87.1, 0.88.1)
 
 For purposes `rekey` and `reconnect`, between a vault and its connections
 and between a vault and its devices and agents. A first contact (§6.4) and
@@ -6956,6 +6989,26 @@ itself at confirmation; it never moves back. While it is not current:
   checks of §3.4.1 "Fork by `ctx`"; `R` abandons its own
   open rekey for it.
 
+(0.88.1) **`hs.confirm` again** (owner decision a, 2026-11-06, GC
+01M6S0QVS56CD790T5KD8J30QM). While `R`'s current epoch with `I` is one
+`R` activated as responder, and `R`'s confirmed epoch is neither that
+epoch nor a later one (in activation order), `R` queues `hs.confirm`
+(a new inner id) under it again **12 days** after the last one it queued (`T` less 2
+days, so that two copies overlap at the relay even if a deposit is
+late), unless one to `I` is still in its outbox. The time of the last
+one queued is kept in `R`'s state. The wait is not divided by
+`time_scale` (§11.10.8: the relay's lifetimes and timers between vaults
+never scale). Nothing is queued while the epoch is demoted or the
+connection suspended (§3.4.1 "After a demotion of the current epoch").
+It stops when the condition no longer holds: the epoch is confirmed, the
+confirmed epoch moves past it, or the epoch stops being current. Without
+it, an `hs.confirm` that expires at the relay while `I` is locked is
+replaced only if `R` sends `I` something under the epoch, which a device
+never does unprompted and a vault does only with its next rekey; `I`
+sends `R` nothing but the handshake while its reconnect is pending
+(Initiator, above), so the pair could reach `B` and end `stale`. A
+device toward its vault does the same.
+
 **Rule E.** In the write that establishes a rekey's or reconnect's epoch
 at its verified `hs.fin`, `R` destroys every other epoch with `I` later
 than the confirmed one and records them with the accepted `hs.init`'s
@@ -6990,8 +7043,10 @@ so S1 may hold it, which only delays confirmation.
 01M6QB8A3P0S7H2Q86QS3EAV2P). Q keeps with each epoch of a peer P one flag,
 "received from P". It is set, in the write that processes it, by any
 message from P that opens under that epoch and that `acceptFrom` does not
-refuse at steps 1–4, except `hs.fin`: `hs.confirm`, `hs.init`, `hs.resp`
-and session messages set it. `hs.fin` does not, because it is sealed under
+refuse at steps 1–4, except `hs.fin`: `hs.confirm`, `hs.init` (a rekey,
+in session mode) and session messages set it. ((0.88.1) An `hs.resp` is
+sealed to the initiator's ephemeral key and opens under no epoch, so it
+sets none.) `hs.fin` does not, because it is sealed under
 the new epoch by an initiator that may abandon that epoch at once (§3.4.1
 S5); it shows no use of the epoch. A message under one epoch never sets
 another epoch's flag. §3.4.1 "Epochs after an `ik` link" and "Strict F1"
@@ -7005,7 +7060,11 @@ no `ik` (§6.7), so the vault never demotes an epoch with one. The device
 (app, desktop or agent) runs the responder half toward its vault: it sends
 `hs.confirm` and keeps its confirmed epoch, and sends `hs.confirm` again
 for a collected batch holding a message under the confirmed epoch, at most
-once a minute, unless one is still in its outbox. It starts no
+once a minute, unless one is still in its outbox; (0.88.1) and again 12
+days after the last one, as "`hs.confirm` again" (Responder, above)
+says. In gap F (§3.4.1 Invariants, "The device exception") it keeps
+re-sending under an epoch the vault no longer opens (dropped, audited)
+until it is paired again. It starts no
 rekey, and it applies neither rule E nor §3.4.1's demotion (§15 item 51).
 A rekey `hs.init` from a device or agent is acked, dropped and audited
 `drop.peer_key` (`ref` = `unexpected`); the vault answers none.
@@ -7061,8 +7120,10 @@ migration of an earlier release's epochs, handshakes or connections.
   read-failure codes (`vault_missing`, `stored_mismatch`), as before. The
   vault writes no state and nothing else after the state opens, sends
   nothing, answers `state_unsupported` (§11.4; to a recovery's open, the
-  same code, with `attempt_used: true`, so a retried recovery spends
-  another attempt: accepted on staging) and locks again. It reports no
+  same code, with `attempt_used: true` after a spend, so a retried
+  recovery spends another attempt, accepted on staging; and (0.88.1)
+  `false` on a repeat through the `next` wrap, which spends none,
+  §11.14.6) and locks again. It reports no
   `unlocked`, so the member API's row stays `locked` (§11.5). Release 29
   raises `state_version` in its lifecycle reports (§11.5), as release R
   did. This includes staging vaults built from 0.87.0-era
@@ -7084,7 +7145,7 @@ migration of an earlier release's epochs, handshakes or connections.
   release with members must come with an upgrade path (§3.4.1
   Residuals).
 
-#### 6.3.2 Release 29 rules and tests (0.87.0, 0.87.1)
+#### 6.3.2 Release 29 rules and tests (0.87.0, 0.87.1, 0.88.1)
 
 The rules of release 29 (§6.3.1 and the `ik` parts of §3.4.1) carry the
 IDs of the approved rule list (vettid.org #549: go at `bef67dc`, errata
@@ -7110,7 +7171,7 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-I7 | §6.3.1 Initiator; §6.3 | r29_f_test.go:306; r29_review_test.go:172; r29_rr2_test.go:215 |
 | R29-R1 | §6.3.1 Responder | gap (r29_f_test.go:170 tests R3's cap) |
 | R29-R2 | §6.3.1 Responder | r29_scenarios_test.go:281 |
-| R29-R3 | §6.3.1 Responder | r29_f_test.go:170 |
+| R29-R3 ((0.88.1) also every 12 days) | §6.3.1 Responder; hs.confirm again | r29_f_test.go:170; gap: with `I` locked past `T` while its reconnect is pending and `R`'s standing token for `I` still valid, `R` queues `hs.confirm` again at 12 days and the pair confirms before `B`; none while demoted or suspended; it stops once the epoch or a later one is confirmed |
 | R29-R4 | §6.3.1 Responder; §6.6 | r29_f_test.go:252; r29_scenarios_test.go:436 |
 | R29-R5 | §6.3.1 Rule E | r29_round6_test.go:141; r29_f_test.go:252 |
 | R29-R6 | §6.3.1 Rule E; §3.4.1 acceptFrom | r29_scenarios_test.go:744 (its "gated iteration"; the test is renamed in step 5); r29_oldcopy_test.go:266 |
@@ -21964,7 +22025,7 @@ at register and padded to 4,096 bytes:
   | `ok`, `wrong` | `true` |
   | `quiet`, `wait`, `closed`, `exhausted` | `false` from step 3, or from a `Spend` that took nothing; `true` when step 4b refused to test a spent attempt |
   | `stored_mismatch`, `vault_missing` | `false` before the spend (step 2; a stored state that cannot be read); `true` after it (step 6: the state, the keys or the backup copy cannot be opened) |
-  | `state_unsupported` (0.87.1) | `true`: the state opens only at step 6, after the spend; it lacks `messaging_release` 29 or more (§6.3.1 "No upgrade: release 29 starts clean"). The app says "This vault was made by an earlier version of VettID and must be set up again." (wording approved by the owner 2026-11-06, GC 01M6RV1QRM1403G0Z8G2W2C6ZS) |
+  | `state_unsupported` (0.87.1) | `true` at step 6, after the spend (the state opens only then); (0.88.1) `false` on a repeat through the `next` wrap, which spends none; it lacks `messaging_release` 29 or more (§6.3.1 "No upgrade: release 29 starts clean"). The app says "This vault was made by an earlier version of VettID and must be set up again." (wording approved by the owner 2026-11-06, GC 01M6RV1QRM1403G0Z8G2W2C6ZS) |
   | `retry` | `false` from step 3b; `true` whenever the spend happened: the run ended at any point after it, before or after step 1 of the order of writes was stored, including a failure to register at the relay or to store steps 2 and 3 (the entry may have been right) |
   | every other code (`wrong_again`, `busy`, `counter_unavailable`, `not_armed`, `no_recovery`, `expired`, `attestation`, `manifest`, `wrong_release`, `bad_request`, `device_secret`) | `false` |
 
@@ -27832,8 +27893,8 @@ Follow-ups:
     finding D); owner decision a (GC 01M6RJF5NZBS92JEYXJXTWKSKM) keeps it
     a stated gap of release 29, the device exception of §3.4.1
     Invariants, scheduled right after release 29 with the resume plan.
-    Finding F (a device left on an abandoned epoch when the vault holds
-    no valid token for it) is stated with it and closed in the same
+    Finding F (a device left on an abandoned epoch; (0.88.1) after any
+    abandonment of a pending rekey toward it) is stated with it and closed in the same
     work.
 52. **`own_copy` and a pre-rotation fork (0.86.6; decided (a) by the
     owner 2026-11-06, GC 01M6QB8A3P0S7H2Q86QS3EAV2P; closed in 0.87.0).**
