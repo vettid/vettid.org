@@ -37,7 +37,7 @@ changelog:
     rotations on both sides no longer deadlock honest pairs into `stale`.
     §3.4.1 Residuals: rapid rotations can exhaust the reconnect token
     (owner decision a, GC 01M6S92FATG7EWNX5KZGXG277W).
-    §6.3.2: the test locations at vettid-vault #206 `5eaa9d7`, where every
+    §6.3.2: the test locations at vettid-vault #206 `8647aa6`, where every
     rule now has a test.
   - 0.88.1: 2026-11-06, erratum to 0.87.1 (owner decision a, GC
     01M6S0QVS56CD790T5KD8J30QM, asked as "0.87.2"; numbered after
@@ -7177,7 +7177,7 @@ IDs of the approved rule list (vettid.org #549: go at `bef67dc`, errata
 `201ee12`; owner go,
 GC 01M6RABDJ0FY3MZ8TPJ6C19QKR). Each has a test that fails without it;
 "gap" marks one still to write (cleanup plan step 5). Test locations are
-vettid-vault #206 at `5eaa9d7` ((0.88.2) every rule now has a test), in `vault/` unless prefixed (`V/` is the
+vettid-vault #206 at `8647aa6` ((0.88.2) every rule now has a test), in `vault/` unless prefixed (`V/` is the
 repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 `own_copy` exception) was withdrawn and its ID is not reused.
 
@@ -7203,14 +7203,14 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-X1 | §6.3.1 Crossing | r29_scenarios_test.go:374 |
 | R29-X2 | §6.5; §6.6 | r29_scenarios_test.go:536; r29_round6_test.go:274 |
 | R29-X3 | §6.3.1 Rule J | r29_scenarios_test.go:336 |
-| R29-X4 ((0.88.2) and the links of a refused reconnect) | §6.6 Accepting `ctx`; §3.4.1 After a demotion of the current epoch | r29_rules_test.go:88; r29_review4_test.go:300; r29_oldcopy_test.go:581; r29_review4_test.go:568 (the links of a refused reconnect) |
+| R29-X4 ((0.88.2) and the links of a refused reconnect) | §6.6 Accepting `ctx`; §3.4.1 After a demotion of the current epoch | r29_rules_test.go:88; r29_review4_test.go:300; r29_oldcopy_test.go:581; r29_review4_test.go:568 (the links of a refused reconnect); r29_review4_test.go:672 (all or nothing) |
 | R29-X5 | §6.6 Accepting `ctx` | r29_f_test.go:252 |
 | R29-X6 | §6.2 | r29_rules_test.go:111 |
 | R29-K1 | §3.4.1 S8 | r29_scenarios_test.go:470; r29_review_test.go:241; V/vms/handshake/keyring086_test.go:82; V/client/rotate086_test.go:18 |
 | R29-K2 | §3.4.1 H5, S5, Pending epochs at a link | r29_f_test.go:60; r29_round6_test.go:242; r29_scenarios_test.go:507; r29_review4_test.go:101, :568 |
 | R29-K3 | §3.4.1 S5 Resend | r29_rules_test.go:150 |
 | R29-K4 | §3.4.1 Epochs after an `ik` link | r29_oldcopy_test.go:187; r29_round6_test.go:306; r29_k4_test.go:9; r29_review4_test.go:183 |
-| R29-K5 | §3.4.1 After a demotion of the current epoch | r29_oldcopy_test.go:327, :399, :418, :443; r29_review_test.go:65; r29_round6_test.go:90, :124, :376, :391; r29_review4_test.go:332, :473, :515 |
+| R29-K5 | §3.4.1 After a demotion of the current epoch | r29_oldcopy_test.go:327, :399, :418, :443; r29_review_test.go:65; r29_round6_test.go:90, :124, :376, :391; r29_review4_test.go:332, :473, :515; r29_review4_test.go:628 (the reconnect's hs.fin while demoted) |
 | R29-K6 | §3.4.1 The reconnect bound; §6.6 | r29_oldcopy_test.go:527, :581, :606; r29_rr2_test.go:61, :78; r29_round6_test.go:323, :342; r29_bound_test.go:15, :48, :69; r29_review4_test.go:424 |
 | R29-K7 (every later epoch signed by the old `ik`; names E) | §3.4.1 Strict F1 | r29_oldcopy_test.go:153, :216; r29_rr2_test.go:37; r29_strictf1_test.go:37, :55; r29_review4_test.go:319; r29_flag_test.go:87 |
 | R29-K8 | §3.4.1 Rule C, acceptFrom | r29_review_test.go:209; r29_round6_test.go:196; r29_oldcopy_test.go:278; r29_review4_test.go:446 |
