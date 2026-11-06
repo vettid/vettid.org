@@ -4832,10 +4832,15 @@ each recipient Q).
   2026-11-06, decision a, GC 01M6S0QVS56CD790T5KD8J30QM). `R` sends its
   repeated `hs.confirm` with the standing token `I`'s reconnect `hs.init`
   carried (30 days), which is not renewed while that reconnect is
-  pending. If `R` was locked for about 10 days before answering and `I`
-  then stays locked for about 28 days or more, `R`'s last repeat cannot
-  be deposited and `I` ends `stale` at `B`. It is visible (a new
-  invitation), and it needs two long, overlapping locks.
+  pending, so its last copy can be deposited at most 30 days after that
+  `hs.init` and leaves the relay 14 days later. If more than about 6 days
+  pass between `I`'s `hs.init` and `R`'s activation (for any reason: `R`
+  locked, a late `hs.resp` or `hs.fin`), or `R` is locked for long right
+  after activating, the last copy can leave the relay before `B`; if `I`
+  then stays away for more than about 26 days after its `hs.fin`, `I` ends
+  `stale` at `B`. It is visible (a new invitation). The pair recovers
+  if `I` returns before `B`: at `token_expired`, `R` starts its own
+  reconnect naming the epoch, which `I` accepts.
 - (0.87.0) **A copy acting as initiator is not visible** (accepted by the
   owner 2026-11-06). A copy of P from before P's rotation rekeys and sends
   `hs.fin`; Q activates the epoch and sends under it; the real P's
@@ -4919,7 +4924,7 @@ harness's invariants, not the rule IDs `R29-I1`… of §6.3.2:
   (0.88.1, owner decision a, GC 01M6S2ECFHHGFXC7H8HPZ2FB2V: this covers
   **any** abandonment, not only at `B` or for want of a token; for
   example the vault's own rotation, S5, with the device then offline past
-  the 48 days the vault keeps its confirmed epoch's keys.) The vault's
+  the 48 days the device keeps its confirmed epoch's keys.) The vault's
   rekey from its current epoch may never be deposited (no valid token)
   or never be opened (the device no longer keeps that epoch), while the
   vault's keys for the abandoned epoch end after 16 days. The pair can
@@ -6988,7 +6993,7 @@ itself at confirmation; it never moves back. While it is not current:
 01M6S0QVS56CD790T5KD8J30QM). While `R`'s current epoch with `I` is one
 `R` activated as responder, and `R`'s confirmed epoch is neither that
 epoch nor a later one (in activation order), `R` queues `hs.confirm`
-under it again **12 days** after the last one it queued (`T` less 2
+(a new inner id) under it again **12 days** after the last one it queued (`T` less 2
 days, so that two copies overlap at the relay even if a deposit is
 late), unless one to `I` is still in its outbox. The time of the last
 one queued is kept in `R`'s state. The wait is not divided by
@@ -7055,7 +7060,11 @@ no `ik` (§6.7), so the vault never demotes an epoch with one. The device
 (app, desktop or agent) runs the responder half toward its vault: it sends
 `hs.confirm` and keeps its confirmed epoch, and sends `hs.confirm` again
 for a collected batch holding a message under the confirmed epoch, at most
-once a minute, unless one is still in its outbox. It starts no
+once a minute, unless one is still in its outbox; (0.88.1) and again 12
+days after the last one, as "`hs.confirm` again" (Responder, above)
+says. In gap F (§3.4.1 Invariants, "The device exception") it keeps
+re-sending under an epoch the vault no longer opens (dropped, audited)
+until it is paired again. It starts no
 rekey, and it applies neither rule E nor §3.4.1's demotion (§15 item 51).
 A rekey `hs.init` from a device or agent is acked, dropped and audited
 `drop.peer_key` (`ref` = `unexpected`); the vault answers none.
@@ -7111,9 +7120,10 @@ migration of an earlier release's epochs, handshakes or connections.
   read-failure codes (`vault_missing`, `stored_mismatch`), as before. The
   vault writes no state and nothing else after the state opens, sends
   nothing, answers `state_unsupported` (§11.4; to a recovery's open, the
-  same code, with `attempt_used: true` after a spend and (0.88.1) `false` on a
-  repeat through the `next` wrap, which spends none (§11.14.6), so a retried recovery spends
-  another attempt: accepted on staging) and locks again. It reports no
+  same code, with `attempt_used: true` after a spend, so a retried
+  recovery spends another attempt, accepted on staging; and (0.88.1)
+  `false` on a repeat through the `next` wrap, which spends none,
+  §11.14.6) and locks again. It reports no
   `unlocked`, so the member API's row stays `locked` (§11.5). Release 29
   raises `state_version` in its lifecycle reports (§11.5), as release R
   did. This includes staging vaults built from 0.87.0-era
@@ -22015,7 +22025,7 @@ at register and padded to 4,096 bytes:
   | `ok`, `wrong` | `true` |
   | `quiet`, `wait`, `closed`, `exhausted` | `false` from step 3, or from a `Spend` that took nothing; `true` when step 4b refused to test a spent attempt |
   | `stored_mismatch`, `vault_missing` | `false` before the spend (step 2; a stored state that cannot be read); `true` after it (step 6: the state, the keys or the backup copy cannot be opened) |
-  | `state_unsupported` (0.87.1) | `true`: the state opens only at step 6, after the spend; it lacks `messaging_release` 29 or more (§6.3.1 "No upgrade: release 29 starts clean"). The app says "This vault was made by an earlier version of VettID and must be set up again." (wording approved by the owner 2026-11-06, GC 01M6RV1QRM1403G0Z8G2W2C6ZS) |
+  | `state_unsupported` (0.87.1) | `true` at step 6, after the spend (the state opens only then); (0.88.1) `false` on a repeat through the `next` wrap, which spends none; it lacks `messaging_release` 29 or more (§6.3.1 "No upgrade: release 29 starts clean"). The app says "This vault was made by an earlier version of VettID and must be set up again." (wording approved by the owner 2026-11-06, GC 01M6RV1QRM1403G0Z8G2W2C6ZS) |
   | `retry` | `false` from step 3b; `true` whenever the spend happened: the run ended at any point after it, before or after step 1 of the order of writes was stored, including a failure to register at the relay or to store steps 2 and 3 (the entry may have been right) |
   | every other code (`wrong_again`, `busy`, `counter_unavailable`, `not_armed`, `no_recovery`, `expired`, `attestation`, `manifest`, `wrong_release`, `bad_request`, `device_secret`) | `false` |
 
