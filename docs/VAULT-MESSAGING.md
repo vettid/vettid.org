@@ -45,6 +45,10 @@ changelog:
     Relay-key rotation's remaining liveness gaps are listed, and it must
     be redesigned before it is built (owner decision a, GC
     01M6SEADQ9DRRDG5WM6151MW53).
+    §3.4.1 "Fork by `ctx`" skips an epoch Q began and abandoned while
+    pending (owner decision a, GC 01M6SEMS129B3R1QGQ49063G5P): it caused a
+    false suspension between honest vaults in the trust model's
+    rotation-burst search.
     §3.4.1 Residuals: rapid rotations can exhaust the reconnect token
     (owner decision a, GC 01M6S92FATG7EWNX5KZGXG277W).
     §6.3.2: the test locations at vettid-vault #206 `8647aa6`, where every
@@ -4566,9 +4570,15 @@ naming an epoch older than Q's confirmed epoch, where an epoch after it up
 to the confirmed one has as its epoch signer (P's side, Terms) an ancestor
 of the `ik` the message reaches (Table B, reached included), is fork
 evidence: Q suspends (§6.6 "Fork detection", `ref` = `epoch`). There is
-no exception for an epoch Q began: between vaults that implement §6.3.1,
-every epoch Q began that became current was confirmed by a message from
+no exception for an epoch Q began that became current: between vaults
+that implement §6.3.1, every such epoch was confirmed by a message from
 P's side under it, so "P never activated it" cannot hold for an honest P.
+(0.88.2, owner decision a, GC 01M6SEMS129B3R1QGQ49063G5P) An epoch Q
+began and abandoned while pending never became current and is skipped:
+an honest P may never have activated it (Q's own rotation, S5, abandons
+it), so it is no evidence. An old copy that used such an epoch is
+handled by R29-K9 and the Residuals ("A copy using an epoch Q abandoned
+while pending, outside R29-K9").
 Q's own rotations are no evidence. A real second successor also suspends
 by rule C when its link arrives.
 
