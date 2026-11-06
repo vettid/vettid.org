@@ -34,7 +34,8 @@ changelog:
     responder's own reconnect is pending, or after its own `hs.fin`, still
     has its verified identity links followed (rule C, H5, "Pending epochs
     at a link", "Epochs after an `ik` link", "Strict F1"), so rapid
-    rotations on both sides no longer deadlock honest pairs into `stale`.
+    rotations on both sides no longer deadlock honest pairs into `stale`;
+    a held message that cannot be sealed is audited `drop.held_unsealable`.
     §3.4.1 Residuals: rapid rotations can exhaust the reconnect token
     (owner decision a, GC 01M6S92FATG7EWNX5KZGXG277W).
     §6.3.2: the test locations at vettid-vault #206 `8647aa6`, where every
@@ -4507,7 +4508,9 @@ under an earlier epoch, below), until a new epoch is current:
   reach. Held messages are per peer, not per mailbox, so a new
   invitation's first contact to the same mailbox does not wait behind
   them. Held ones whose `exp` passes are discarded and audited, each as
-  `drop.held_expired`; ephemeral ones are not sent; no other is dropped.
+  `drop.held_expired`; ephemeral ones are not sent; (0.88.2) one that
+  cannot be sealed under the new epoch is discarded and audited
+  `drop.held_unsealable`; no other is dropped.
   When the connection becomes `stale`, is removed or is replaced, the
   held messages end with it, without an audit entry each (the
   connection's own audit entry records the end).
@@ -7998,7 +8001,8 @@ Without this rule, two vaults that rotate several times in quick
 succession while a key change between them is in flight can each refuse
 the other's reconnect and never see the links that would let either one
 move on, until both connections end `stale` (found by the release 29
-review round, about 8 runs in 5,000).
+review round; in the trust model with each vault rotating 4 to 6 times
+at once, about 4 runs in 10,000 without this rule and none with it).
 
 **Told to the member** (0.72.0). Accepting an older `ctx` is audited
 `connection.restored_reconnect` (`connection_id`, `ref` = the named
