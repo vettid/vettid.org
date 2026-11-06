@@ -38,7 +38,9 @@ changelog:
     past `T` with a pending reconnect does not end `stale` at `B`; a
     device does the same. §6.3.1 "The received flag": `hs.resp` removed from the
     messages that set it (sealed to the initiator's ephemeral key, it
-    opens under no epoch). §6.3.2: R29-R3 restated.
+    opens under no epoch). §6.3.1 "No upgrade": a refusal on a recovery's
+    repeat through `next` answers `attempt_used: false` (§11.14.6). §6.3.2:
+    R29-R3 restated.
   - 0.88.0: 2026-11-06, DRAFT for review (vettid.org #552; owner decision
     a, GC 01M6RSBMH79RKNM8P8W1DP2T7V). A transfer's new phone learns every
     outcome from the vault and waits for it, instead of inferring it from
@@ -7094,7 +7096,8 @@ migration of an earlier release's epochs, handshakes or connections.
   read-failure codes (`vault_missing`, `stored_mismatch`), as before. The
   vault writes no state and nothing else after the state opens, sends
   nothing, answers `state_unsupported` (§11.4; to a recovery's open, the
-  same code, with `attempt_used: true`, so a retried recovery spends
+  same code, with `attempt_used: true` after a spend and (0.88.1) `false` on a
+  repeat through the `next` wrap, which spends none (§11.14.6), so a retried recovery spends
   another attempt: accepted on staging) and locks again. It reports no
   `unlocked`, so the member API's row stays `locked` (§11.5). Release 29
   raises `state_version` in its lifecycle reports (§11.5), as release R
