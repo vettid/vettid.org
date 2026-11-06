@@ -4404,7 +4404,12 @@ P's: P's side made it with a key P had already replaced.
 epoch with P (§6.3.1) whose `sig_R` was made by the link's `old_ik` (P
 dropped that answer at its rotation, S5), unless the message carrying the
 link traveled under that pending epoch (it has just confirmed it). Such an
-epoch is demoted from the start (§6.3.1).
+epoch is demoted from the start (§6.3.1). (0.87.1) When the link comes in
+P's `identity.rotate`, the epoch it abandons here is then judged by
+R29-K9 below in the same write and, its flag being clear, **ended**, not
+demoted: a later message under it is fork evidence and Q suspends, with
+K9's audit entry. S5 drops an honest P's open answers at its rotation, so
+an honest P never sends under it.
 
 (0.87.1) **Epochs abandoned while pending, at P's `identity.rotate`**
 (step 4's finding C). An epoch Q began and abandoned while pending keeps
@@ -4418,12 +4423,14 @@ next epoch that becomes current, which is later at Q, so the argument
 below still holds. An `hs.resp` names Q's epoch, which can be
 older than P's current one, and links applied at an `hs.fin` travel under
 the new epoch, so neither is used. When Q follows or ignores an `identity.rotate`
-from P under an epoch E, that is also one whose links are all already followed
+from P under an epoch E, including one whose links are all already followed
 (Table B's Ancestor "ignore" and Table A's "Earlier, after its cut-off"
 "ignore": the judgement below is still made), then, in the write that
 processes it, for each of its links, every epoch of P that:
 - Q began as initiator and abandoned while pending (never confirmed),
-- is later than E at Q, and
+- is later than E at Q (in the order Q established them, by the
+  position of the establishing message, as "Epochs after an `ik` link"
+  uses), and
 - has a `sig_R` made by that link's `old_ik` or an ancestor,
 
 was never activated by P, since P would then have sent the
@@ -4434,7 +4441,10 @@ was never activated by P, since P would then have sent the
   under it, once step 3 has checked its links by rule C, is fork evidence
   and Q suspends the same way, so a copy that sends only later is seen.
   Q audits `connection.fork_suspected` (`ref` = `epoch`, no feed item)
-  for each epoch it ends. An ended epoch is no longer kept for a
+  for each epoch it ends. Honest sequences can lead here too (a lost
+  `hs.fin` and then a rotation; a crossing): the audit entry alone then
+  marks an epoch P never activated, not a fork, and nothing suspends
+  unless a message under it arrives. An ended epoch is no longer kept for a
   reconnect's `ctx`: a reconnect naming it is refused as one naming an
   epoch Q does not keep (§6.6), and is not fork evidence.
 
@@ -4760,10 +4770,13 @@ each recipient Q).
   abandoned while pending before the link arrived, when that epoch is
   later than the one P's `identity.rotate` travels under: what it sent
   under that epoch before P's `identity.rotate` sets the flag, and what
-  it sends after it is fork evidence. Until P's `identity.rotate` arrives
-  (for example while S1 holds it), the copy is not seen: that is the
-  exposure before a rotation is seen (the second bullet of these
-  Residuals, "Until Q follows P's update"; §11.14.2).
+  it sends after it is fork evidence. Two windows remain. Until Q
+  follows P's relay-key update, the copy's deposits count as P's (the
+  second bullet of these Residuals, "Until Q follows P's update";
+  §11.14.2). After that, until P's `identity.rotate` arrives (for example
+  while S1 holds it), K9 has not yet judged the epoch, so the copy's
+  messages under it are still accepted where Table A accepts the
+  `sender` (its current key, or an earlier key before its cut-off).
 - (0.87.1) **A copy using an epoch Q abandoned while pending, outside
   R29-K9** (accepted by the owner 2026-11-06, decision b, GC
   01M6RJF5NZBS92JEYXJXTWKSKM). "Epochs abandoned while pending, at P's
@@ -4772,7 +4785,9 @@ each recipient Q).
   of P that activated, as responder, an epoch Q later abandoned, which is
   earlier than P's current one (an honest P may have used such an
   epoch, so it cannot be judged), can still have its messages under it
-  accepted as P's until Q's 16-day keep ends. Dropping its keys at a
+  accepted as P's until Q's 16-day keep ends, for the deposits Table A
+  still accepts (from P's current relay key, or an earlier one before
+  its cut-off). Dropping its keys at a
   later confirmation would close this, but it loses an honest peer's
   messages after an ordinary failed write (the trust model: 21 runs in
   10,000 against 4 for this residual), so release 29 keeps the 16 days.
@@ -4865,7 +4880,7 @@ harness's invariants, not the rule IDs `R29-I1`… of §6.3.2:
   with nothing shown to the member, so I1 and I7 do not hold for that
   pair. Re-pairing a desktop or agent ends it (§7.2 already says one
   offline past its token is paired again); the member's app gets a fresh
-  token at every unlock (§7.2), so its rekey is deposited then. F is
+  token at every unlock (§7.2), so its rekey is normally deposited then. F is
   closed with D in the device work right after release 29.
 
 **The gate** (owner decision O6c). The receiving side is the capability
@@ -7024,13 +7039,18 @@ migration of an earlier release's epochs, handshakes or connections.
   `deleting` never runs"), a state that lacks the marker or holds a
   smaller value is not started. A state that records `deleting` is
   handled by §12.5 first: its deletion completes, and this check is not
-  reached. The vault writes no
-  state and nothing else after the state opens, sends nothing, answers
-  `state_unsupported` (§11.4; to a recovery's open, the same code) and
-  locks again. This includes staging vaults built from 0.87.0-era
+  reached; a state that cannot be read is answered with the existing
+  read-failure codes (`vault_missing`, `stored_mismatch`), as before. The
+  vault writes no state and nothing else after the state opens, sends
+  nothing, answers `state_unsupported` (§11.4; to a recovery's open, the
+  same code, with `attempt_used: true`, so a retried recovery spends
+  another attempt: accepted on staging) and locks again. It reports no
+  `unlocked`, so the member API's row stays `locked` (§11.5). Release 29
+  raises `state_version` in its lifecycle reports (§11.5), as release R
+  did. This includes staging vaults built from 0.87.0-era
   release-29 code, which wrote no marker.
-- **Re-enrolment.** A refused vault is re-enrolled as §11.14.14
-  "Re-enrolment on staging" does for release R: the earlier test vault is
+- **Re-enrolment.** A refused vault is re-enrolled, an operator step, as
+  §11.14.14 "Re-enrolment on staging" does for release R: the earlier test vault is
   deleted and enrolled again. Then its app, desktops and agents are set
   up again with the new vault, keeping no record from the earlier one,
   and its connections are invited afresh. Everything the old vault held
@@ -7477,7 +7497,8 @@ Rules:
     example one begun under an identity key that a rotation has since
     replaced, §3.4) is dropped as an aborted one is, and audited
     `handshake_not_restored`: its queued `hs.init` is not sent (one
-    queued by an earlier release may still be sent), and every token it
+    queued by an earlier release may still be sent; (0.87.1) no state of
+    an earlier release is loaded any more, §6.3.1), and every token it
     issued is denylisted. For
     a new connection the vault also denylists the tokens issued to the
     peer and sends `connection.event{connection_id, event: "failed"}`
@@ -16904,8 +16925,8 @@ one of:
   the state opened but lacks `messaging_release` 29 or more (§6.3.1 "No
   upgrade: release 29 starts clean"); nothing after the state opens is
   written, and the member re-enrols; the app says "This vault was made
-  by an earlier version of VettID and must be set up again." (NEW, for
-  wording approval with the app PRs). `signer_refused` (0.27.0):
+  by an earlier version of VettID and must be set up again." (wording
+  approved by the owner 2026-11-06, GC 01M6RV1QRM1403G0Z8G2W2C6ZS). `signer_refused` (0.27.0):
   the device key's recorded signer is not pinned by this release, or
   the key has no recorded signer and the request brought no valid
   `chain`; decided after `sig` and the assertion verified and before
@@ -21806,7 +21827,7 @@ at register and padded to 4,096 bytes:
   | `ok`, `wrong` | `true` |
   | `quiet`, `wait`, `closed`, `exhausted` | `false` from step 3, or from a `Spend` that took nothing; `true` when step 4b refused to test a spent attempt |
   | `stored_mismatch`, `vault_missing` | `false` before the spend (step 2; a stored state that cannot be read); `true` after it (step 6: the state, the keys or the backup copy cannot be opened) |
-  | `state_unsupported` (0.87.1) | `true`: the state opens only at step 6, after the spend; it lacks `messaging_release` 29 or more (§6.3.1 "No upgrade: release 29 starts clean"). The app says "This vault was made by an earlier version of VettID and must be set up again." (NEW, for wording approval with the app PRs) |
+  | `state_unsupported` (0.87.1) | `true`: the state opens only at step 6, after the spend; it lacks `messaging_release` 29 or more (§6.3.1 "No upgrade: release 29 starts clean"). The app says "This vault was made by an earlier version of VettID and must be set up again." (wording approved by the owner 2026-11-06, GC 01M6RV1QRM1403G0Z8G2W2C6ZS) |
   | `retry` | `false` from step 3b; `true` whenever the spend happened: the run ended at any point after it, before or after step 1 of the order of writes was stored, including a failure to register at the relay or to store steps 2 and 3 (the entry may have been right) |
   | every other code (`wrong_again`, `busy`, `counter_unavailable`, `not_armed`, `no_recovery`, `expired`, `attestation`, `manifest`, `wrong_release`, `bad_request`, `device_secret`) | `false` |
 
