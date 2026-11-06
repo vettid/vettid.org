@@ -35,6 +35,8 @@ changelog:
     has its verified identity links followed (rule C, H5, "Pending epochs
     at a link", "Epochs after an `ik` link", "Strict F1"), so rapid
     rotations on both sides no longer deadlock honest pairs into `stale`.
+    §3.4.1 Residuals: rapid rotations can exhaust the reconnect token
+    (owner decision a, GC 01M6S92FATG7EWNX5KZGXG277W).
     §6.3.2: the test locations at vettid-vault #206 `5eaa9d7`, where every
     rule now has a test.
   - 0.88.1: 2026-11-06, erratum to 0.87.1 (owner decision a, GC
@@ -4850,6 +4852,20 @@ each recipient Q).
   `stale` at `B`. It is visible (a new invitation). The pair recovers
   if `I` returns before `B`: at `token_expired`, `R` starts its own
   reconnect naming the epoch, which `I` accepts.
+- (0.88.2) **Rapid rotations exhaust the reconnect token** (accepted by
+  the owner 2026-11-06, decision a, GC 01M6S92FATG7EWNX5KZGXG277W). A
+  reconnect token allows 4 deposits (§6.6). When a vault rotates 4 or
+  more times in quick succession while a key change with a peer is in
+  flight, each rotation restarts its reconnect (H5), and a refused
+  reconnect's fresh tokens are not taken ("The links of a refused
+  reconnect", §6.6), so the token can run out: the relay answers
+  `quota_exceeded` and the connection becomes `stale` ("The reconnect
+  bound"). It is visible (a new invitation). As at every `stale` end,
+  the messages held for that peer end with the connection and are not
+  listed one by one (above, "After a demotion of the current epoch");
+  showing the member which messages were not delivered is post-29 work.
+  In the trust model with each vault rotating 4 to 6 times at once, about
+  57 runs in 10,000 end this way; in ordinary runs, none.
 - (0.87.0) **A copy acting as initiator is not visible** (accepted by the
   owner 2026-11-06). A copy of P from before P's rotation rekeys and sends
   `hs.fin`; Q activates the epoch and sends under it; the real P's
