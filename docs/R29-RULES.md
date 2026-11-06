@@ -1,4 +1,4 @@
-# Release 29: the rule list (draft 3, 2026-11-06)
+# Release 29: the rule list (draft 4, 2026-11-06)
 
 Step 2 of the cleanup plan (GC plan 01M6R42066TVG74QBM1C619K5Q, approved by
 the owner 2026-11-06). Scope: the owner's decision **a** (GC
@@ -17,8 +17,8 @@ unmarked). Draft 3 drops the gate between vaults: both halves always run.
 
 Approval order (the lead, GC 01M6R4R897Y14D7NF3MESHJHQV): an Opus review of this
 list against the model (done for draft 1), the lead's independent check (done
-for draft 2: "go after fixes"; draft 3 makes those fixes), then the owner's
-go. **No spec text and no code until the owner's go.** See the review log at
+for draft 2 and its recheck of draft 3: "go after fixes" each time; draft 4
+makes the last fixes), then the owner's go. **No spec text and no code until the owner's go.** See the review log at
 the end.
 
 Sources: spec VAULT-MESSAGING 0.86.6 (vettid.org #548 at 8ee7dc2); model
@@ -39,8 +39,8 @@ the model rule (M = `internal/trustmodel/`). **Code** = #206 (V = vettid-vault).
 | ID | Rule | Spec | Model | Code | Test |
 |---|---|---|---|---|---|
 | R29-G1 | A release-29 vault advertises `hs_confirm` in `features` to every connection, in the inner `features` of every message it deposits, and in its §11.10.9 list; a device sends it in `device.features` and in every message's inner `features`. It is advertised only; **no rule below depends on seeing it** (Change: 0.86.6 gates the initiator half on it). | §6.3.1 Deployment, §10.8 | `PeerA` M/state_test.go:142 (always true in the both-29 config) | V/vault/features086.go:27, :40-139 | V/vms/envelope/features_test.go:12 |
-| R29-G2 | **Receiving features.** A side counts a peer's `features` from any message that passes acceptFrom steps 1–4, even one in a handshake later abandoned; names are only ever added (sticky); unknown names are ignored; a malformed `device.features` is dropped (`drop.features_malformed`). | §10.8, §10.2 | `seeFeatures` M/upgrade_test.go:37 | V/vault/features086.go:96-117; V/vault/inbound.go:433 | *gap*: sticky against a later list without it |
-| R29-U1 | **Upgrade migration.** At the first load under release 29, each connection's stored epoch becomes its only epoch record: confirmed = current, signer = the stored `ik`, received flag (F3) clear. An outgoing handshake in flight at the upgrade is restored under these rules if it can be, otherwise dropped as `handshake_not_restored` (vettid-vault #200) and started again; an answer awaiting `hs.fin` runs the responder half (§3). | §6.3.1 (new text) | — (the model starts on 29) | `upgradeEpochs` V/vault/confirm.go:101 | *gap*: migration, and a handshake in flight at the upgrade |
+| R29-G2 | **Receiving features.** A side counts a peer's `features` from any message that passes acceptFrom steps 1–4, even one in a handshake later abandoned; names are only ever added (sticky); unknown names are ignored; a malformed `device.features` is dropped (`drop.features_malformed`). Used by D4. | §10.8, §10.2 | `seeFeatures` M/upgrade_test.go:37 | V/vault/features086.go:96-117; V/vault/inbound.go:433 | *gap*: sticky against a later list without it |
+| R29-U1 | **Upgrade migration.** At the first load under release 29, each connection's stored epoch becomes its only epoch record: confirmed = current, signer = the stored `ik`, received flag (F3) clear. An outgoing handshake in flight at the upgrade is restored under these rules if it can be; otherwise it is cleaned up as an aborted one (`restoreLive`, vettid-vault #200): audited `handshake_not_restored`, its `hs.init` not sent, the tokens it minted denied. It is not started again; a reconnect still needed starts afresh as one whose standing token has expired does (§6.6), and a rekey waits for the next rekey interval. An answer awaiting `hs.fin` runs the responder half (§3). Two splits at the upgrade are not visible (§11). | §6.3.1 (new text) | — (the model starts on 29) | `upgradeEpochs` V/vault/confirm.go:101; `restoreLive` V/vault/manager.go:826-848 | *gap*: migration, and a handshake in flight at the upgrade |
 
 ## 2. The initiator: activation on confirmation
 
@@ -95,7 +95,7 @@ the model rule (M = `internal/trustmodel/`). **Code** = #206 (V = vettid-vault).
 | ID | Rule | Spec | Model | Code | Test |
 |---|---|---|---|---|---|
 | R29-F1 | **Fork by `ctx`.** For a rekey or reconnect from P under the new `ik`, a `ctx` naming an epoch older than Q's confirmed epoch, where an epoch after it up to the confirmed one has as P-side signer an ancestor of the `ik` the message reaches, is fork evidence: Q suspends (`ref` = `epoch`, the neutral feed item "<name> or your vault may be running from an old copy. The connection is paused…"). **There is no `own_copy` exception** (Change: fix A goes; between release-29 vaults every epoch Q began that became current was confirmed by P's side, so "P never activated it" cannot hold for an honest P). | §3.4.1 Epochs after an `ik` link | `forkEpoch` M/accept_test.go:653 (fix A :681-683 and `acceptOwnCopy` :1251 go) | `forkEpoch` V/vault/iklinks.go:555 (`acceptOwnCopy` :579, `rekeyOtherEpoch` :624 go) | r29_oldcopy_test.go:153, :296 |
-| R29-F3 | **S13, owner decision a: the received flag.** Q keeps one "received from peer" flag per epoch, set by **any** message from P that opens under **that** epoch and passes acceptFrom steps 1–4, `hs.confirm` and handshake messages included (Change: #206 skips `hs.*`; the model sets it before steps 1–4). A set flag turns K4 and K7 into F1's outcome: suspension and the fork feed item. A lost `hs.fin` leaves it clear (P sent nothing under the epoch), so the honest case stays quiet. | §3.4.1 (new text) | `GotFromPeer` M/accept_test.go:60-62 (*to change*) | `GotFromPeer` V/vault/confirm.go:428 (*to change*); `OwnCopyGotFromPeerSuspends` V/vault/iklinks.go:684 goes with F2 | *gap*: set by `hs.confirm` alone; **a handshake message under E0 does not set E1's flag**; a lost `hs.fin` leaves it clear |
+| R29-F3 | **S13, owner decision a: the received flag.** Q keeps one "received from peer" flag per epoch, set by any message from P that opens under **that** epoch and passes acceptFrom steps 1–4, **except `hs.fin`**, as in I2 and R2: `hs.fin` is sealed under the new epoch's keys by an initiator that may abandon the epoch at once (K2), so it shows no use. `hs.confirm`, `hs.init`, `hs.resp` and session messages set it (Change: #206 skips every `hs.*`; the model sets it before steps 1–4). A set flag turns K4 and K7 into F1's outcome: suspension and the fork feed item. A lost or a delivered `hs.fin` leaves it clear, so the honest cases stay quiet. | §3.4.1 (new text) | `GotFromPeer` M/accept_test.go:60-62 (*to change*) | `GotFromPeer` V/vault/confirm.go:428 (*to change*); `OwnCopyGotFromPeerSuspends` V/vault/iklinks.go:684 goes with F2 | *gap*: set by `hs.confirm` alone; a handshake message under E0 does not set E1's flag; a lost or delivered `hs.fin` leaves it clear; **P rekeys E0→E1, sends `hs.fin`, rotates before any `hs.confirm` and sends `identity.rotate` under E0: Q ends demoted and reconnecting, not suspended** |
 
 (R29-F2, the `own_copy` exception, is withdrawn in draft 3; the ID is not
 reused.)
@@ -104,9 +104,10 @@ reused.)
 
 | ID | Rule | Spec | Model | Code | Test |
 |---|---|---|---|---|---|
-| R29-D1 | Toward its device or agent the vault is always the initiator. Where a connection would reconnect (I5, I6, K5), the vault rekeys from its current epoch, also at `B` with no valid token. A vault never demotes an epoch with a device (devices rotate no `ik`). There is **no marker** toward devices (decision a: apps from before release 29 are not supported; a device that sends anything under the new epoch confirms it anyway, I2). | §6.3.1 Initiator, §3.4.1, §6.7 | M/confirm_test.go:142; M/rotate_test.go:182, :253, :377 (*differs*: at `B` with no token the model marks the device `stale`, M/confirm_test.go:146) | V/vault/confirm.go:299; V/vault/outbox.go:374; V/vault/iklinks.go:297, :463 | *gap* on the vault side |
+| R29-D1 | Toward its device or agent the vault is always the initiator. Where a connection would reconnect (I5, I6, K5), the vault rekeys from its current epoch, also at `B` with no valid token. A vault never demotes an epoch with a device (devices rotate no `ik`). There is **no marker** toward devices (decision a: apps from before release 29 are not supported, but they are told so visibly, D4; a device that sends anything under the new epoch confirms it, I2). | §6.3.1 Initiator, §3.4.1, §6.7 | M/confirm_test.go:142; M/rotate_test.go:182, :253, :377 (*differs*: at `B` with no token the model marks the device `stale`, M/confirm_test.go:146) | V/vault/confirm.go:299; V/vault/outbox.go:374; V/vault/iklinks.go:297, :463 | *gap* on the vault side |
 | R29-D2 | The device (reference client) runs **only the responder half** toward its vault: `hs.confirm`, the confirmed epoch, and re-sending `hs.confirm` at most once a minute, unless one is still in its outbox (Change: the spec says per collected batch). It starts no rekey, and applies neither rule E nor Table B's demotion (§15 item 51, deferred past 29). | §6.3.1, §15 item 51 | *differs*: devices run the full rules and start rekeys | V/client/confirm.go:13-112 (:22-25, :31-33); V/client/client.go:258-262, :1595 | V/client/rotate086_test.go:18, :71; V/client/persist_test.go:517 |
 | R29-D3 | A rekey `hs.init` from a device or agent is acked, dropped and audited `drop.peer_key` (`ref` = `unexpected`); the vault answers none. The vault's responder-half paths toward a device (rule E's device branch, V/vault/confirm.go:479-482) go. | §6.7 (new text) | — | `handleRekeyInit` V/vault/handshakes.go:527 (*to change*) | *gap* |
+| R29-D4 | **An app from before release 29 is told, not stuck silently.** Such an app activates at `hs.fin` and may never send under the new epoch; at `B` the vault rekeys from the old epoch (D1), which the app refuses, so the pair is stuck. So: while a device's `features` (G2) lack `hs_confirm`, including a device that has sent none since the upgrade, the vault shows the member a visible notice to update that app (a `high` feed item; NEW, wording for the owner), once per device until it advertises `hs_confirm`; a D3 refusal of its rekey shows the same notice (no audit entry alone). | §6.7, §10.9 (new text) | — | — (*new*) | *gap* |
 
 ## 8. Dropped by decision a and the lead's H2
 
@@ -118,7 +119,7 @@ Removed from the spec (0.87.0), the model and #206:
 | Revert keep: copies, the 256 / 1 MiB / 8 MiB caps, 64 KiB claim-check while keeping, revert, `connection.epoch_reverted`, its History line | §6.3.1 Deployment (from "Toward a peer without the gate…") | `revertRule`/`revert` M/confirm_test.go:73-80, :204-263; `RevOld`/`RevSent` | V/vault/ungated.go:12-320 and hooks; keyring `KeepSend`/`Reinstate` V/vms/handshake/epoch.go:274, :355. **Move first** the shared `reconnectNaming` (ungated.go:326) and `markStale` (:391). |
 | Activation at `hs.fin` without confirmation; ungated `HoldFor` (0.86.6 S4); `EpochMeta.Unconfirmed` | §3.4.1 "Toward a peer without the gate the reconnect gets no revert keep…" | — | V/vault/handshakes.go:1232-1256; V/vault/confirm.go:432-445; V/vault/iklinks.go:374; V/vault/state.go:368 and writers |
 | Rule E's reconnect toward a peer without `hs_confirm` (3 tries, then `stale`) | §6.3.1 rule E (0.86.0) paragraph | M/ungated_test.go | V/vault/confirm.go:489-492 |
-| Rule L and its retries | §3.4.1 Rule L | M/ungated_test.go | V/vault/iklinks.go:788-809 and hooks; `RuleLState`; `RuleRC`/`ruleRCExpired` V/vault/ungated.go:363. **Keep** the shared reconnect and quota paths used by K5–K7 (V/vault/handshakes.go:614-623; V/vault/outbox.go:403-416, incl. :408's `RuleRC` check). |
+| Rule L and its retries | §3.4.1 Rule L | M/ungated_test.go | V/vault/iklinks.go:788-809 and hooks; `RuleLState`; `RuleRC`/`ruleRCExpired` V/vault/ungated.go:363. **Keep** the shared reconnect and quota paths used by K5–K7 (V/vault/handshakes.go:614-623; V/vault/outbox.go:403-416, where :408 keeps only the `og.Why` check). |
 | S5: an answer kept toward an ungated peer, then a rekey | §3.4.1 S5 "To any other peer…" | — | V/vault/handshakes.go:808-812; the drop at V/vault/iklinks.go:737-743 **stays**, unconditional (K2) |
 | S8's "no links toward a peer without `features`" | §3.4.1 S8 (0.86.2) | — | V/vault/handshakes.go:635, :1312 |
 | Fix A, the `own_copy` exception, and its History line | §3.4.1 "Except…", "When the exception applies" | fix A M/accept_test.go:681-683; `acceptOwnCopy` :1251; `ownCopyStrict` | `acceptOwnCopy` V/vault/iklinks.go:579-612; `rekeyOtherEpoch` :624-649; `OwnCopyGotFromPeerSuspends` :684; `EpochMeta.OwnCopy`; V/vault/handshakes.go:435-438, :844-851 |
@@ -137,11 +138,11 @@ Removed from the spec (0.87.0), the model and #206:
 2. **Divergences to fix:** K5 (reconnect, not rekey; let its `hs.fin` out
    while demoted); I3 (hold `hs.confirm` while a reconnect is pending); I6
    (own-clock `exp`; the reconnect exception; `stale` at `B`); F3 (the flag
-   after steps 1–4, `hs.confirm` included, per epoch) and its use in K4 and
+   after steps 1–4, per epoch, every message but `hs.fin`) and its use in K4 and
    K7; D1 (rekey at `B`, not `stale`); D2 (the device runs only the
    responder half, without rule E or demotion, and starts no rekey); D3.
 3. **Not modelled yet:** X4, X6, K6, the K4 audit, the held queue as explicit
-   state (K5), U1.
+   state (K5), U1, D4 (an old app that never sends under the new epoch).
 4. **Reach.** In 13,000 both-29 runs of today's model, demotion by position
    and rule E's fork evidence each fired about once, and F1-by-rekey and the
    ancestor `hs.fin` never. So: add action generators for an old copy that
@@ -170,6 +171,11 @@ is gone with decision a.)
   earlier may lose a connection with a release-29 vault; it is re-invited (or
   re-paired). Decision a; upgrade compatibility is a requirement again from
   the first production users on.
+- **Two splits at the upgrade that are not visible** (one-time, for the
+  owner to accept): (a) an `hs.fin` lost before the upgrade: E1 is current at
+  I and migrated as confirmed (U1), while R's answer expires at `L`; (b) an
+  answer that cannot be restored at the upgrade after I activated. Remedy:
+  re-invite the test connection.
 - An old copy that collects P's live mailbox can confirm Q's pending epoch as
   P until a link arrives (§3.4.1 Residual, unchanged). When the link arrives,
   K4 or K7 sees the epoch's received flag set and suspends.
@@ -188,6 +194,10 @@ is gone with decision a.)
   one is still in its outbox. Lead: yes.
 - **Q6 (I6, K6):** write in #206's two behaviours, with every reconnect
   bounded by `stale`. Lead: yes.
+- **Q7 (owner):** accept §11's two invisible upgrade splits (one-time; remedy
+  re-invite)? Recommended: yes, under decision a.
+- **Q8 (owner):** D4's notice wording. Proposed: "<device name> needs an
+  update to keep working with your vault. Update the app." (`high`).
 
 ## Review log
 
@@ -203,3 +213,10 @@ is gone with decision a.)
   from devices) → D3. M2 (migration) → U1. M3 (F2 tests) → F2 withdrawn. M4
   (bounds) → K6 covers every reconnect; I5/I6 end in `stale`. Lows: X6
   cited; the flag's per-epoch test added to F3.
+- **Draft 3, the lead's recheck of the diff** (GC 01M6R78JJB5E3MXF47T6G4N7HA,
+  "go after fixes"): High (F3 counted `hs.fin`, so an honest pair, P
+  rotating right after its `hs.fin`, got a fork alert from K7) → F3 excludes
+  `hs.fin`, with that sequence as a test. M1 (U1 wording; two invisible
+  upgrade splits) → U1 reworded to `restoreLive`; §11 residuals, Q7. M2 (old
+  apps stuck silently) → D4 notice, Q8. Lows: §8's `RuleRC` line; G2 now used
+  by D4.
