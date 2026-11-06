@@ -53,7 +53,10 @@ changelog:
     Finding F: §6.3.1 Initiator "With no token": a pending rekey toward a
     desktop or agent abandoned for want of a token, or at `B` with no
     valid token, makes it `stale` (§3.4.1 S1); the member's app follows
-    S1's app branch. Finding D: the device exception in §3.4.1
+    S1's app branch. A copy using an abandoned epoch earlier than P's
+    current one (or before P's `identity.rotate` arrives) is a stated
+    residual (owner decision b: the 16-day keep stays). Finding D: the
+    device exception in §3.4.1
     Invariants and a note on §15 item 51. §6.3.2: R29-U1 and D1 restated,
     R29-K9 added.
   - 0.87.0: 2026-11-06, release 29 written in one piece from the
@@ -4752,6 +4755,20 @@ each recipient Q).
   after it is fork evidence. Until P's `identity.rotate` arrives (for
   example while S1 holds it), the copy is not seen: the exposure is the
   one below, before a rotation is seen.
+- (0.87.1) **A copy using an epoch Q abandoned while pending, outside
+  R29-K9** (accepted by the owner 2026-11-06, decision b, GC
+  01M6RJF5NZBS92JEYXJXTWKSKM). "Epochs abandoned while pending, at P's
+  `identity.rotate`" judges only epochs later than the one P's
+  `identity.rotate` travels under, and only once it arrives. An old copy
+  of P that confirmed, as responder, an epoch Q later abandoned, which is
+  earlier than P's current one (an honest P may have used such an
+  epoch, so it cannot be judged), can still have its messages under it
+  accepted as P's until Q's 16-day keep ends. Dropping its keys at a
+  later confirmation would close this, but it loses an honest peer's
+  messages after an ordinary failed write (the trust model: 21 runs in
+  10,000 against 4 for this residual), so release 29 keeps the 16 days.
+  It sits with "before a rotation is seen" below, and is closed with the
+  resume-path work after release 29.
 - (0.87.0) **A copy acting as initiator is not visible** (accepted by the
   owner 2026-11-06). A copy of P from before P's rotation rekeys and sends
   `hs.fin`; Q activates the epoch and sends under it; the real P's
