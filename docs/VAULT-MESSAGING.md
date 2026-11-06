@@ -39,6 +39,9 @@ changelog:
     §3.4.1: new "Liveness between honest vaults" (the written argument,
     with its assumptions and bounds); "The reconnect bound" says when a
     refused try counts. §6.3.1 Initiator: the hold's wording.
+    §3.4.1 S1: `hs.confirm` is on its list (owner decision a, GC
+    01M6SDBQPVYF929T3BSF3QVQP2), which closes a wait cycle under relay-key
+    rotation; release 29 rotates no relay key (A5).
     §3.4.1 Residuals: rapid rotations can exhaust the reconnect token
     (owner decision a, GC 01M6S92FATG7EWNX5KZGXG277W).
     §6.3.2: the test locations at vettid-vault #206 `8647aa6`, where every
@@ -4683,7 +4686,8 @@ each recipient Q).
   to P's current key (made again with the current links at each resend,
   §3.4 (b)), `relay.token.issued`, the messages of a reconnect (its
   `hs.init` announcing that key, its `hs.fin`, an `hs.resp` to Q's
-  reconnect) and those of a first contact begun on that key's address
+  reconnect), (0.88.2, owner decision a, GC 01M6SDBQPVYF929T3BSF3QVQP2)
+  `hs.confirm`, and those of a first contact begun on that key's address
   (S6); everything else for Q waits in P's outbox. An update is
   deposited only after every earlier deposit to Q with P's key for Q has
   had a definite answer; one without is held and deposited again with
@@ -4996,10 +5000,13 @@ harness. This argument does not replace that check.
   holder with at least 10 − 2`U` ≥ 2 days left.
 - **A4, finite rotations.** Each side rotates its `ik` a finite number of
   times. `t_r` is the write of the last rotation by either side.
-- **A5, no relay-key rotation.** Release 29 builds none. Table A then has
+- **A5, no relay-key rotation.** Release 29 does not rotate a vault's
+  **relay key** (its mailbox key and address, §3.4 step 1: the key S1 to
+  S3, rule U and the gate are about), and does not advertise
+  `relay_follow` (§11.10.9). It does rotate the `ik`, `kem` and wake key,
+  at a transfer, a recovery and a `credential.rotate`. Table A then has
   only its Current and Foreign rows, S1 never holds anything, and rule U
-  and the gate never run. The final paragraph covers what changes when
-  relay keys rotate.
+  and the gate never run. The final paragraph covers relay-key rotation.
 
 *Progress measure.* Φ = (λ, δ, ρ), compared in that order:
 - λ is the number of links in either side's chain that the other side
@@ -5100,21 +5107,28 @@ converged, in these cases:
 - "`hs.confirm` again, worst case": outside A3;
 - any lock longer than A3 allows, which ends by "The reconnect bound"
   (a third failed try, `quota_exceeded`, no reconnect token, or `B`);
-- a relay-key rotation (A5).
+- a relay-key rotation (A5), until it is argued as the last paragraph
+  says.
 Device pairs ("The device exception") and earlier releases fall outside
 this argument.
 
-*Not proved.* The argument depends on A5. When relay keys rotate,
-holds can wait on each other in a cycle. A side whose reconnect is
-pending sends nothing but the handshake (§6.3.1 Initiator), and a
-demoted side sends nothing but handshake messages, so either one holds
-`relay.token.issued` for P's new key. S1 then holds P's `hs.confirm`,
-`identity.rotate` and rekeys until that token arrives. The
-pending side waits for P's confirmation or link, and P waits for the
-pending side's token. That cycle ends only at `B`, with `stale`, and
-nothing here lists it as a residual. Before relay-key rotation is
-built, either `relay.token.issued` must pass both holds or `hs.confirm`
-must join S1's list.
+*When relay keys rotate.* The argument above assumes A5. One wait cycle
+was found for when relay keys rotate, and 0.88.2 closes it (owner
+decision a, GC 01M6SDBQPVYF929T3BSF3QVQP2). A side whose reconnect is
+pending, or that is demoted, sends nothing but handshake messages, so it
+holds `relay.token.issued` for P's new relay key; before 0.88.2, S1 held
+P's `hs.confirm` until that token arrived, and each side waited for the
+other until `B`. `hs.confirm` is now on S1's list, so P confirms with its
+earlier key and the pending side's hold ends; the demoted side's
+reconnect runs, since S1 already lets the messages of a reconnect
+through. Sending `hs.confirm` during S1 is safe: its body is `{}`, it
+carries no token, address or link, it is sealed under the epoch it
+confirms (which only Q and P open), and it is deposited into Q's own
+mailbox with P's earlier key, which Q accepts before that key's cut-off
+(Table A) exactly as it accepts P's other S1 messages. Nothing in it
+depends on the relay address being changed. Whether relay-key rotation
+leaves other cycles is not argued here; it must be argued, and modelled,
+before relay-key rotation is built.
 
 **The gate** (owner decision O6c). The receiving side is the capability
 `relay_follow`. A vault that implements this subsection lists it in its
@@ -7219,8 +7233,9 @@ of the `hs.resp` `I` processed (a crossing rekey; `R` establishes `I`'s at
 (§6.5): `I` abandons the pending epoch and answers it.
 
 A pending epoch counts as an open handshake of `I` for H5 and S5. In
-§3.4.1 Table A `hs.confirm` is a session message; it is not on S1's list,
-so S1 may hold it, which only delays confirmation.
+§3.4.1 Table A `hs.confirm` is a session message; (0.88.2) it is on S1's
+list, so a relay-key rotation does not hold it ("Liveness between honest
+vaults", A5).
 
 **The received flag** (owner decision S13 a, 2026-11-06, GC
 01M6QB8A3P0S7H2Q86QS3EAV2P). Q keeps with each epoch of a peer P one flag,
