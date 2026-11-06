@@ -38,7 +38,8 @@ changelog:
     past `T` with a pending reconnect does not end `stale` at `B`; a
     device does the same. §6.3.1 "The received flag": `hs.resp` removed from the
     messages that set it (sealed to the initiator's ephemeral key, it
-    opens under no epoch). §6.3.1 "No upgrade": a refusal on a recovery's
+    opens under no epoch). §3.4.1 Residuals: the re-send's worst case
+    (owner decision a). §6.3.1 "No upgrade": a refusal on a recovery's
     repeat through `next` answers `attempt_used: false` (§11.14.6). §6.3.2:
     R29-R3 restated.
   - 0.88.0: 2026-11-06, DRAFT for review (vettid.org #552; owner decision
@@ -4825,6 +4826,14 @@ each recipient Q).
   It is like the exposure before a rotation is seen (the second bullet
   of these Residuals; §11.14.2), but lasts up to 16 days after Q follows
   P's link; it is closed with the resume-path work after release 29.
+- (0.88.1) **`hs.confirm` again, worst case** (accepted by the owner
+  2026-11-06, decision a, GC 01M6S0QVS56CD790T5KD8J30QM). `R` sends its
+  repeated `hs.confirm` with the standing token `I`'s reconnect `hs.init`
+  carried (30 days), which is not renewed while that reconnect is
+  pending. If `R` was locked for about 10 days before answering and `I`
+  then stays locked for about 28 days or more, `R`'s last repeat cannot
+  be deposited and `I` ends `stale` at `B`. It is visible (a new
+  invitation), and it needs two long, overlapping locks.
 - (0.87.0) **A copy acting as initiator is not visible** (accepted by the
   owner 2026-11-06). A copy of P from before P's rotation rekeys and sends
   `hs.fin`; Q activates the epoch and sends under it; the real P's
