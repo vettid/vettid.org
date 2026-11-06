@@ -37,8 +37,9 @@ changelog:
     as a queued deposit until delivered; capability `transfer_outcome`
     (§11.10.9); §11.14.10 rule 5 "Wait for the outcome" replaces the
     settlement window toward such a vault (the window stays toward a vault
-    without it). Owner questions Q1 (giving up the wait) and Q2 (an
-    outcome lost to the relay's 14 days) open. Rebases onto 0.87.1.
+    without it). Owner decisions a/a (GC 01M6RW3NGZEKPWX2E06XP5YSH7): the
+    member may give up the wait after the 11 minutes, with a warning, and
+    after 14 days the app says the outcome may have expired.
   - 0.87.1: 2026-11-06, the trust model checking 0.87.0 (cleanup plan GC
     01M6R42066TVG74QBM1C619K5Q, step 4; vettid-vault `r29-oracle`) found
     five problems, and a blind reviewer a sixth. Owner decisions a (GC
@@ -22971,12 +22972,12 @@ under the request's `id` (§8.2).
      vault whether the move finished…", and the transfer stays pinned (no
      enrollment starts, no new code). The app lock does not change this.
      An app stopped and started again keeps waiting, at once.
-   - **Leaving the wait.** OWNER QUESTION Q1 (below): whether the member
-     may give up the wait, and how.
+   - **Leaving the wait.** Only by an outcome, or by the member's give-up
+     ("Giving up the wait", below).
    - **The relay's message lifetime.** An outcome waits in the mailbox for
      the relay's `message_ttl_seconds` (14 days). A new phone that stays
-     off longer than that can find its outcome gone and would wait for
-     ever. OWNER QUESTION Q2 (below).
+     off longer than that can find its outcome gone; the app then says so
+     and offers the give-up ("Giving up the wait", below).
    - **A transfer session that ends** (`404 mailbox_unknown` for its
      mailbox, or the app signed out or wiped) is reported as ended, as
      today.
@@ -22985,17 +22986,26 @@ under the request's `id` (§8.2).
      (an approval completes the transfer at the vault; a rejection or an
      expiry is told to the new phone).
 
-   OWNER QUESTION Q1: **may the member give up the wait?**
-   (a, recommended) Yes, after the 11 minutes, with a warning and the
-   old phone as the check: "Only do this if your old phone still opens
-   your vault. If the move finished, this phone holds your vault's only
-   keys." (b) No: the wait ends only with an outcome, or when the member
-   removes VettID.
-
-   OWNER QUESTION Q2: **an outcome lost to the relay's 14 days.**
-   (a, recommended) After 14 days of waiting, the app says the outcome
-   could not be confirmed and offers the same give-up as Q1 (a), with
-   the same warning. (b) Keep waiting: only removing VettID ends it.
+   **Giving up the wait** (owner decision a/a of 2026-11-06, GC
+   01M6RW3NGZEKPWX2E06XP5YSH7). The app offers the member a way to give
+   up, and only after the 11 minutes:
+   - **When no outcome has come after the 11 minutes,** the waiting
+     screen offers "Give up" (proposed text, for the owner's approval with
+     the app PRs). It asks first: "Only do this if your old phone still
+     opens your vault. If the move finished, this phone holds your
+     vault's only keys." Confirmed, the app drops its handshake, attested
+     key and epoch-1 secret, as on `device.transfer.ended`, and offers a
+     new code. *Why:* the member is the one who can check the old phone;
+     a vault that stays locked, or a host or relay that withholds the
+     outcome, must not leave the new phone pinned for ever.
+   - **After 14 days without an outcome** (the relay's
+     `message_ttl_seconds`, after which an outcome may be gone), the
+     screen says so: "Your vault's answer may have expired. Check your old
+     phone." and offers the same give-up with the same warning.
+   - **The residual.** A member who gives up although the move finished
+     leaves a vault whose only app is a phone that dropped its keys; it
+     comes back by a recovery (§11.11), as a lost new phone does today.
+     The warning and the old phone check exist for that case.
 
    **Collect before drop** (owner decision, 2026-10-23; from 0.88.0 only
    toward a vault without `transfer_outcome`). The 11 minutes
