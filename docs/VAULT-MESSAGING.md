@@ -27259,15 +27259,16 @@ Follow-ups:
     | Lead 5: the revert lost messages | §6.3.1 "Deployment": "`I` seals every message it sent under the new epoch again in the old one" after `T` + 2 days | revert counts and clock skew in random runs |
     | Lead 6: R2's repair | this item, R2 | random runs |
 51. **A device or agent that would demote its vault's epoch (0.86.5,
-    open, for the lead).** Table B's demotion (§3.4.1 "Epochs after an
+    open; lead decision 2026-11-06: not in release 29).** Table B's demotion (§3.4.1 "Epochs after an
     `ik` link") is written for a side Q whose peer rotates its `ik`. A
     vault never demotes an epoch with a device or agent, which rotates
     no `ik`. The other direction is open: a device or agent follows its
     vault's links (S8), but release 29's client does not apply the
     demotion, so an old copy of the vault that set up an epoch with the
-    device before the rotation is not cut off by the link. To decide:
-    whether the client applies Table B's demotion, and if so how it
-    starts again (a device has no reconnect: a rekey, or pairing again).
+    device before the rotation is not cut off by the link. Release 28
+    is the same, so release 29 is no worse. The intended fix, a task
+    for the apps and the reference client after release 29: the device
+    applies Table B's demotion and, having no reconnect, pairs again.
 
 ## 16. Test vectors
 
