@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.86.3
+version: 0.86.4
 date: 2026-11-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,19 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.86.4: erratum, 2026-11-06 (the owner's yes, thread
+    01M6Q5XF0HP107R1FM0XQ4SDC7; with vettid-agent #42, which already
+    refuses them). §10.11 `item.run`: the name rule for `name`, `env`
+    and an entry's `env` also refuses `OPENSSL_CONF`, `OPENSSL_ENGINES`,
+    `OPENSSL_MODULES`, `SSLKEYLOGFILE`, `XDG_CONFIG_DIRS`,
+    `XDG_DATA_HOME`, `XDG_DATA_DIRS`, `ELECTRON_RUN_AS_NODE`,
+    `PYTHONWARNINGS`, `LUA_INIT` and the `LUA_INIT_` names, `VIMINIT`,
+    `EXINIT`, `CLASSPATH`, the `NPM_CONFIG_` and `PIP_` names, and on
+    Windows `__COMPAT_LAYER`, `PROGRAMFILES`, `COMMONPROGRAMFILES` and
+    `PROGRAMDATA`, each with the reason. As before, a backstop under the
+    allowlist that holds even for a listed name; not applied to the
+    operator's `--run-env` (AGENT-PLAN §4.9). Vault: the same check in
+    `item.run` and `leash.item.set`, after release 29
   - 0.86.3: erratum, 2026-11-06 (Opus review of 0.86.2):
     - M1, §3.4.1 "Epochs after an `ik` link": durable messages to P
       while its current epoch is demoted are held, unsealed, until the
@@ -13674,7 +13687,36 @@ item's settings allow for its task:
   `HTTP_PROXY`,
   `HTTPS_PROXY`, `ALL_PROXY`, `SSL_CERT_FILE`,
   `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE` or
-  `CURL_CA_BUNDLE`. Such a
+  `CURL_CA_BUNDLE`; (0.86.4) nor one of these, compared without case on
+  Windows:
+  - `OPENSSL_CONF`, `OPENSSL_ENGINES`, `OPENSSL_MODULES`: OpenSSL reads
+    the configuration and loads the engine or provider modules they
+    name, as code inside the program;
+  - `SSLKEYLOGFILE`: TLS libraries write the session keys to that file,
+    which decrypts the program's traffic, the secret included when it
+    is sent over TLS;
+  - `XDG_CONFIG_DIRS`, `XDG_DATA_HOME`, `XDG_DATA_DIRS`: like
+    `XDG_CONFIG_HOME`, they move where programs read configuration and
+    data that can name commands to run;
+  - `ELECTRON_RUN_AS_NODE`: makes an Electron program a Node.js
+    interpreter that runs the script its arguments name;
+  - `PYTHONWARNINGS`: a warning filter's category is a module name,
+    which Python imports;
+  - `LUA_INIT`, and names starting with `LUA_INIT_`: Lua runs that code,
+    or the file it names, at start;
+  - `VIMINIT`, `EXINIT`: vim and ex run them as commands at start, and a
+    command can run a shell;
+  - `CLASSPATH`: the JVM loads classes from where it points;
+  - names starting with `NPM_CONFIG_` or `PIP_`: npm and pip take any of
+    their settings from these, among them the registry or index to
+    install from and npm's `script-shell`;
+  - on Windows, `__COMPAT_LAYER`: applies compatibility shims, some of
+    which change which files and libraries a program loads; and
+    `PROGRAMFILES`, `COMMONPROGRAMFILES`, `PROGRAMDATA`: programs find
+    their own components and plugins through them, so another value
+    points them at a folder the agent can write.
+
+  Such a
   list cannot be complete; it is a backstop under the allowlist (an
   entry's `env`), and it holds even for a listed name. `env` holds
   0–32 more variables `{NAME: value}`, names by the same rule, values
