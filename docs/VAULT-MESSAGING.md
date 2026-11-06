@@ -36,6 +36,9 @@ changelog:
     at a link", "Epochs after an `ik` link", "Strict F1"), so rapid
     rotations on both sides no longer deadlock honest pairs into `stale`;
     a held message that cannot be sealed is audited `drop.held_unsealable`.
+    §3.4.1: new "Liveness between honest vaults" (the written argument,
+    with its assumptions and bounds); "The reconnect bound" says when a
+    refused try counts. §6.3.1 Initiator: the hold's wording.
     §3.4.1 Residuals: rapid rotations can exhaust the reconnect token
     (owner decision a, GC 01M6S92FATG7EWNX5KZGXG277W).
     §6.3.2: the test locations at vettid-vault #206 `8647aa6`, where every
@@ -4542,7 +4545,9 @@ last (§6.6). (So Q never names an epoch P never had.)
 demotion, by strict F1, after an abandoned pending epoch, §6.3.1, or for
 any other reason, §6.6) is bounded the same way. A try fails only when
 its handshake expires unanswered; its tokens are revoked (§6.3.1). A
-refusal is silent, so it is not counted. The connection becomes `stale`,
+refusal is silent: (0.88.2) a refused try counts only if it then
+expires unanswered, and one abandoned before that (for example when the
+peer's `hs.fin` is established, §6.6) is not counted. The connection becomes `stale`,
 and Q audits `connection.stale` with its feed item (§10.9), at the third
 try that fails for the same named epoch, when a relay refuses a try's
 `hs.init` with `quota_exceeded` (the reconnect token's quota, §6.6), when
@@ -4961,6 +4966,155 @@ harness's invariants, not the rule IDs `R29-I1`… of §6.3.2:
   offline past its token is paired again); the member's app gets a fresh
   token at every unlock (§7.2), so its rekey is normally deposited then. F is
   closed with D in the device work right after release 29.
+
+**Liveness between honest vaults (0.88.2).** Not a rule: why the rules
+of this subsection, §6.3.1, §6.5, §6.6 and §7 bring two honest vaults
+to I1's end state, and where that stops. I1 checks the outcome in the
+harness. This argument does not replace that check.
+
+*Assumptions.*
+- **A1, honest.** Two vaults of release 29 (no device; for a device see
+  "The device exception"). There is no old copy and no operator restore
+  (§6.6 "After a restore" does not run), and nobody removes or blocks.
+  That no rule suspends or demotes an honest pair is a claim made
+  elsewhere in this specification, and the argument relies on it without
+  proving it again: "Fork by `ctx`", §6.3.1 rule E's `ts` rule, R29-K9
+  ("Honest sequences can lead here too") and §6.6 "The links of a
+  refused reconnect".
+- **A2, the relay.** Every deposit it answers `201` can be collected,
+  at least once and in any order, until it is acked or `T` = 14 days
+  pass. Tokens, quotas and the denylist work as §7 says. Nothing is lost
+  except by `T`.
+- **A3, presence.** Each vault unlocks, finishes a collect that returns
+  fewer than `max` messages and deposits its outbox at least once every
+  `U` ≤ 4 days. A **hop** (a deposit until the peer processes it) then
+  takes at most `U`. A **round** (`hs.init`, `hs.resp`, `hs.fin`,
+  `hs.confirm`) takes at most 4`U` ≤ 16 days. The lifetimes then hold
+  with room to spare: 2`U` ≤ 8 < 16 days for `hs.resp` and for `hs.fin`
+  within `L`, 2`U` < `B` = 32 days, and `U` < `T`. A standing token
+  re-minted at an unlock with less than 10 days left (§7.2) reaches its
+  holder with at least 10 − 2`U` ≥ 2 days left.
+- **A4, finite rotations.** Each side rotates its `ik` a finite number of
+  times. `t_r` is the write of the last rotation by either side.
+- **A5, no relay-key rotation.** Release 29 builds none. Table A then has
+  only its Current and Foreign rows, S1 never holds anything, and rule U
+  and the gate never run. The final paragraph covers what changes when
+  relay keys rotate.
+
+*Progress measure.* Φ = (λ, δ, ρ), compared in that order:
+- λ is the number of links in either side's chain that the other side
+  has not followed;
+- δ is the number of sides that have no current epoch with the other (a
+  demotion) or that hold a pending epoch;
+- ρ is the number of open handshakes and answers between the two sides.
+
+λ never grows after `t_r`: only a rotation adds a link, and a link once
+followed stays followed. Every rule that can raise δ or restart a
+handshake without completing one runs only when a link is followed: H5,
+S5, "Pending epochs at a link", "Epochs after an `ik` link", "Strict F1"
+and R29-K9. So once λ = 0, δ and ρ change only through handshakes, and
+each handshake ends within one round (below).
+
+*Step 1: λ reaches 0 by `t_r` + 3`U`.* In the rotation's write, P seals
+`identity.rotate` under its current epoch. Q holds the keys for that
+epoch: it is Q's current epoch, Q's pending epoch (the message then
+confirms it), Q's confirmed epoch, or one Q superseded at most 2`U` ago
+(Q keeps receive keys 16 days, §6.5). With an honest P, Q has destroyed
+none of these (rule E) and ended none (R29-K9). Q processes the message
+through Table B's Current row, which follows, within `U`.
+
+P may have no current epoch, because it has been demoted, or its message
+may not arrive. Either way the links reach Q in other messages. S8 puts
+the links into every rekey and reconnect `hs.init` and `hs.resp` that P
+starts, and S5 and H5 restart those handshakes under the new `ik`. If Q
+answers, the links are applied at `hs.fin` (Table B's Reached row), so
+they arrive within 3`U`. If Q refuses only because its own reconnect is
+pending, "The links of a refused reconnect" applies them in the write
+that refuses, within `U`.
+
+*Step 2: every wait ends, and none waits on the other.*
+
+| Wait | Ended by | Bound under A3 / hard bound | Why it cannot form a cycle |
+|---|---|---|---|
+| `hs.resp` awaited (initiator) | `hs.resp`; "Own `th1` higher" (§6.6, §6.5); a verified `hs.fin` for this side's answer ("A verified `hs.fin` comes first"); H5, S5 | 2`U` / 16 days | A responder answers without waiting for anything of its own. §6.6 requires it ("answers the peer's reconnect `hs.init` as usual, even while its own is open"), and §6.5 does the same for rekeys. Once λ = 0, an honest side refuses an `hs.init` only if it has itself sent `hs.fin`: its own reconnect is pending ("Accepting `ctx`"), or it is a pending initiator that drops an earlier crossing rekey (§6.3.1 "Crossing"). That `hs.fin` reaches the waiting side within `U` (next row). |
+| `hs.fin` awaited (responder's answer) | a verified `hs.fin` (§6.3.1 Responder); `L`; rule J; H5, S5; "Own `th1` lower" at the peer's `hs.resp`; a newer reconnect `hs.init` (H5) | 2`U` / `L` = 16 days | The initiator sends `hs.fin` as soon as `hs.resp` arrives. Neither a demotion nor a pending reconnect holds `hs.fin` (§3.4.1, §6.3.1). An open answer stops only its own side from starting a rekey or reconnect (§6.5, §6.6), never the peer. |
+| Pending epoch (initiator) | any message from R under it except `hs.fin`; the abandonments in §6.3.1 | 2`U` / `B` = 32 days | R queues `hs.confirm` in the write that activates the epoch. Nothing holds it there: R has a current epoch again, and activating abandons R's own pending epoch. For R to lack the answer, an honest R must have rotated (S5). R's link then ends this pending epoch ("Pending epochs at a link", step 1). |
+| Held outbox (§3.4.1 "After a demotion"; §6.3.1 Initiator) | the next epoch that becomes current; `exp`; `stale` | ends with the handshake that holds it | No handshake needs a held message. `hs.init`, `hs.resp` and `hs.fin` pass the hold. The `hs.confirm` comes from the peer, which as responder has a current epoch again when it activates. |
+| Demotion | the reconnect after the demotion, which names E or the newest epoch that is neither demoted nor destroyed. P accepts that name as its current, confirmed, pending or abandoned-while-pending epoch (§6.6 "Accepting `ctx`") | waits at most one round for the side's own reconnect, then runs one round / "The reconnect bound" | Demotions happen only when a link is followed, so there are at most λ of them and none after step 1. |
+| Refused reconnect | the refuser's own `hs.fin` (rows 1–2); or, if the refuser's answer is gone, the links it carries under 0.88.2, with H5 then restarting the refuser's own reconnect under the new `ik` | one round / the try's 16 days | The refusal is silent, but the refuser has sent `hs.fin`, or else it has had its pending epoch ended by a link. The try that was refused is abandoned when the peer's `hs.fin` is established, so it does not expire and is not counted. |
+| Crossing (any two handshakes, §6.5) | the lower `th1` wins; "A verified `hs.fin` comes first"; a service yields to a member (§6.6 "Crossing reconnects") | one round | Both sides compare the same two `th1` values, so at most one side keeps its own handshake. At most one side sends `hs.fin`. A side drops its answer only at the peer's `hs.resp` to its own handshake, and only a side that has sent `hs.fin` drops the peer's (§6.6). |
+| Token refresh (§7.2) | `relay.token.issued`. If a token lapses, the holder reconnects (§6.6 "When to use it") | — / 30 days | A lapse turns into rows 1 and 6. It costs one of the reconnect token's deposits, and the next successful reconnect mints a fresh token on each side. |
+| "`hs.confirm` again" | not a wait: it re-sends every 12 days until R's confirmed epoch catches up | — | Its worst-case residual needs `I` to be away more than about 26 days after `hs.fin`, which A3 excludes. |
+
+*Two pending reconnects.* Suppose A holds pending epoch e_A and B holds
+pending epoch e_B. Each side sent `hs.fin`, so each had the other's
+`hs.resp`. Each answered the other's `hs.init` before sending its own
+`hs.fin`, because a side with a pending reconnect accepts only that
+epoch ("Accepting `ctx`"). So at some point each side held both its own
+open reconnect and an answer to the other's. Each then compared the same
+two `th1` values, and the side with the higher one abandoned its own
+reconnect without sending `hs.fin`, which contradicts the supposition.
+
+The supposition therefore needs one of the answers to have been
+dropped. Under A1–A3, with no expiry and no suspension, only the
+answering side's own rotation drops it (S5). But that rotation also
+abandons that side's own pending epoch. At most one pending epoch, say
+A's, can therefore outlast a hop. B's `hs.fin` for it is acked and
+dropped ("An `hs.fin` for an answer Q dropped"). B's link reaches A as
+step 1 describes: in `identity.rotate`, or, while B has no current
+epoch, in B's restarted reconnect. A refuses that reconnect but still
+follows its links under 0.88.2.
+
+The link ends e_A ("Pending epochs at a link"), and H5 restarts A's
+reconnect under B's new `ik`. B answers it. If B's own reconnect wins
+on `th1`, A answers it and completes it. Otherwise A's `hs.fin` is
+established at B first ("A verified `hs.fin` comes first"). Either way
+the pair is back in the crossing row of the table above. Without 0.88.2
+neither side would have seen the other's link, and both would have
+reached `B` and ended `stale`.
+
+*The bound.* By `t_r` + 3`U`, λ = 0. After that, each open handshake
+completes or gives way to a crossing one within one round. A demotion's
+reconnect waits at most one round for the side's own reconnect, then
+runs for one more. So by `t_r` + 11`U` (44 days at `U` = 4 days; a few
+collect cycles when both vaults stay unlocked and online after `t_r` and
+the last lock):
+- both sides hold the same current epoch;
+- each side's epoch signer is the other's current `ik`;
+- each side holds a standing token that passes rule T.
+
+From that state, a rekey or a crossing pair of handshakes completes
+within one round and leads back to the same state. At I1's quiescence
+nothing is open, pending or held. If rekeys come due faster than rounds
+complete (24 hours, §6.5), a handshake may be in flight at any given
+moment, but none outlives its round.
+
+*What ends `stale` instead, visibly.* Every wait in the table has a
+hard bound that each side judges on its own clock and that does not
+depend on the peer. A wait that runs out therefore leads to a retry
+with a bounded count or to `stale`, with `connection.stale` and its feed
+item. It never becomes a deadlock. The pair ends `stale`, not
+converged, in these cases:
+- "Rapid rotations exhaust the reconnect token": 4 or more restarts
+  under H5 while a key change is in flight;
+- "`hs.confirm` again, worst case": outside A3;
+- any lock longer than A3 allows, which ends by "The reconnect bound"
+  (a third failed try, `quota_exceeded`, no reconnect token, or `B`);
+- a relay-key rotation (A5).
+Device pairs ("The device exception") and earlier releases fall outside
+this argument.
+
+*Not proved.* The argument depends on A5. When relay keys rotate,
+holds can wait on each other in a cycle. A side whose reconnect is
+pending sends nothing but the handshake (§6.3.1 Initiator), and a
+demoted side sends nothing but handshake messages, so either one holds
+`relay.token.issued` for P's new key. S1 then holds P's `hs.confirm`,
+`identity.rotate` and rekeys until that token arrives. The
+pending side waits for P's confirmation or link, and P waits for the
+pending side's token. That cycle ends only at `B`, with `stale`, and
+nothing here lists it as a residual. Before relay-key rotation is
+built, either `relay.token.issued` must pass both holds or `hs.confirm`
+must join S1's list.
 
 **The gate** (owner decision O6c). The receiving side is the capability
 `relay_follow`. A vault that implements this subsection lists it in its
@@ -6949,7 +7103,8 @@ established (its signer recorded, §3.4.1) but not current. Until it is
 confirmed, `I` keeps the current epoch with its send keys and `rk`, sends
 in it, opens messages under both epochs, and starts no rekey with `R`
 (§6.5). While a pending epoch is a reconnect's, `I` sends `R` nothing but
-the handshake, `hs.confirm` included: its outbox waits.
+the handshake (`hs.init`, `hs.resp`, `hs.fin`): everything else waits in
+its outbox, ((0.88.2) wording) an `hs.confirm` of `I`'s own included.
 
 A message from `R` of any type other than `hs.fin` that opens
 under the pending epoch's `r2i` key and that `acceptFrom` does not refuse
