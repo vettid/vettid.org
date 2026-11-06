@@ -1,4 +1,4 @@
-# Release 29: the rule list (draft 4, 2026-11-06)
+# Release 29: the rule list (draft 5, 2026-11-06)
 
 Step 2 of the cleanup plan (GC plan 01M6R42066TVG74QBM1C619K5Q, approved by
 the owner 2026-11-06). Scope: the owner's decision **a** (GC
@@ -107,7 +107,7 @@ reused.)
 | R29-D1 | Toward its device or agent the vault is always the initiator. Where a connection would reconnect (I5, I6, K5), the vault rekeys from its current epoch, also at `B` with no valid token. A vault never demotes an epoch with a device (devices rotate no `ik`). There is **no marker** toward devices (decision a: apps from before release 29 are not supported, but they are told so visibly, D4; a device that sends anything under the new epoch confirms it, I2). | §6.3.1 Initiator, §3.4.1, §6.7 | M/confirm_test.go:142; M/rotate_test.go:182, :253, :377 (*differs*: at `B` with no token the model marks the device `stale`, M/confirm_test.go:146) | V/vault/confirm.go:299; V/vault/outbox.go:374; V/vault/iklinks.go:297, :463 | *gap* on the vault side |
 | R29-D2 | The device (reference client) runs **only the responder half** toward its vault: `hs.confirm`, the confirmed epoch, and re-sending `hs.confirm` at most once a minute, unless one is still in its outbox (Change: the spec says per collected batch). It starts no rekey, and applies neither rule E nor Table B's demotion (§15 item 51, deferred past 29). | §6.3.1, §15 item 51 | *differs*: devices run the full rules and start rekeys | V/client/confirm.go:13-112 (:22-25, :31-33); V/client/client.go:258-262, :1595 | V/client/rotate086_test.go:18, :71; V/client/persist_test.go:517 |
 | R29-D3 | A rekey `hs.init` from a device or agent is acked, dropped and audited `drop.peer_key` (`ref` = `unexpected`); the vault answers none. The vault's responder-half paths toward a device (rule E's device branch, V/vault/confirm.go:479-482) go. | §6.7 (new text) | — | `handleRekeyInit` V/vault/handshakes.go:527 (*to change*) | *gap* |
-| R29-D4 | **An app from before release 29 is told, not stuck silently.** Such an app activates at `hs.fin` and may never send under the new epoch; at `B` the vault rekeys from the old epoch (D1), which the app refuses, so the pair is stuck. So: while a device's `features` (G2) lack `hs_confirm`, including a device that has sent none since the upgrade, the vault shows the member a visible notice to update that app (a `high` feed item; NEW, wording for the owner), once per device until it advertises `hs_confirm`; a D3 refusal of its rekey shows the same notice (no audit entry alone). | §6.7, §10.9 (new text) | — | — (*new*) | *gap* |
+| R29-D4 | **An app from before release 29 is told, not stuck silently.** Such an app activates at `hs.fin` and may never send under the new epoch; at `B` the vault rekeys from the old epoch (D1), which the app refuses, so the pair is stuck. So the vault shows the member a visible notice to update that app (NEW, wording for the owner), once per device until it advertises `hs_confirm`, only when: a message arrives from the device whose `features` lack `hs_confirm`; `B` passes for a pending epoch toward a device that still lacks it; or D3 refuses its rekey (no audit entry alone). Not at the upgrade itself: right after it no device has sent `features` yet, release-29 apps included. **Where:** a `high` feed item to the member's app and desktops; *to check in step 3*: that an app from before release 29 displays a feed item of a kind it does not know. If it does not, the item uses a kind that app already shows, so the notice reaches a member whose only phone runs the old app. | §6.7, §10.9 (new text) | — | — (*new*) | *gap* |
 
 ## 8. Dropped by decision a and the lead's H2
 
@@ -178,7 +178,18 @@ is gone with decision a.)
   re-invite the test connection.
 - An old copy that collects P's live mailbox can confirm Q's pending epoch as
   P until a link arrives (§3.4.1 Residual, unchanged). When the link arrives,
-  K4 or K7 sees the epoch's received flag set and suspends.
+  K4 or K7 sees the epoch's received flag set and suspends. This holds only
+  for a copy acting as **responder** (it confirms with `hs.confirm`).
+- **A copy acting as initiator is not visible** (for the owner to see
+  plainly): a copy of P from before P's rotation rekeys E0→E1 and sends
+  `hs.fin`; Q activates E1 and sends under it; the real P's `identity.rotate`
+  then arrives under E0. The flag is clear (`hs.fin` does not set it, F3, and
+  an honest P rotating right after its own `hs.fin` looks the same), so K7
+  demotes E1 with an audit entry and reconnects. No suspension, no feed item,
+  and what Q sent under E1 before the link may have been read by the copy.
+  A copy that also sent anything else under E1 sets the flag and is caught.
+  The exposure is the one §3.4.1 already accepts: before a rotation is seen,
+  an old copy can make any handshake as P.
 - The §3.4.1 Residuals list, unchanged.
 
 ## 12. Questions (the lead answered Q1–Q6 for draft 2; the owner decides)
@@ -196,6 +207,9 @@ is gone with decision a.)
   bounded by `stale`. Lead: yes.
 - **Q7 (owner):** accept §11's two invisible upgrade splits (one-time; remedy
   re-invite)? Recommended: yes, under decision a.
+- **Q9 (owner):** accept §11's invisible initiator-copy case? Recommended:
+  yes. Catching it would mean counting `hs.fin`, which raises false fork
+  alerts between honest vaults (draft 3's High).
 - **Q8 (owner):** D4's notice wording. Proposed: "<device name> needs an
   update to keep working with your vault. Update the app." (`high`).
 
@@ -220,3 +234,9 @@ is gone with decision a.)
   upgrade splits) → U1 reworded to `restoreLive`; §11 residuals, Q7. M2 (old
   apps stuck silently) → D4 notice, Q8. Lows: §8's `RuleRC` line; G2 now used
   by D4.
+- **Draft 4, the lead's recheck of the diff** (GC 01M6R7CETVECHA3V9VN7NZ3ZM3,
+  "go after fixes", text only): M1 (the initiator mirror of the F3 fix) →
+  §11 residual, Q9; the responder-only scope of "suspends" stated. M2 (D4
+  false alarm at the upgrade; where it shows) → D4 triggers narrowed to a
+  message without `hs_confirm`, `B`, or a D3 refusal; where it shows, with a
+  check for old apps.
