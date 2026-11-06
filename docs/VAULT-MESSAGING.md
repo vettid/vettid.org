@@ -35,6 +35,8 @@ changelog:
     has its verified identity links followed (rule C, H5, "Pending epochs
     at a link", "Epochs after an `ik` link", "Strict F1"), so rapid
     rotations on both sides no longer deadlock honest pairs into `stale`.
+    §6.3.2: the test locations at vettid-vault #206 `5eaa9d7`, where every
+    rule now has a test.
   - 0.88.1: 2026-11-06, erratum to 0.87.1 (owner decision a, GC
     01M6S0QVS56CD790T5KD8J30QM, asked as "0.87.2"; numbered after
     0.88.0, which merged first). Found by the Opus review of vettid-vault
@@ -7159,50 +7161,50 @@ IDs of the approved rule list (vettid.org #549: go at `bef67dc`, errata
 `201ee12`; owner go,
 GC 01M6RABDJ0FY3MZ8TPJ6C19QKR). Each has a test that fails without it;
 "gap" marks one still to write (cleanup plan step 5). Test locations are
-vettid-vault #206 at `e19f99c`, in `vault/` unless prefixed (`V/` is the
+vettid-vault #206 at `5eaa9d7` ((0.88.2) every rule now has a test), in `vault/` unless prefixed (`V/` is the
 repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 `own_copy` exception) was withdrawn and its ID is not reused.
 
 | Rule | Section | Test |
 |---|---|---|
 | R29-G1 | §6.3.1 Capability; §10.8 | V/vms/envelope/features_test.go:12 |
-| R29-G2 | §10.8; §10.2 `device.features` | gap: sticky against a later list without it |
-| R29-U1 ((0.87.1) no migration: a state without `messaging_release` 29 or more is refused) | §6.3.1 No upgrade: release 29 starts clean; §3.3; §11.4; §11.14.6; §12.5 | gap: an unlock and a recovery's open of a state without it, or with a smaller value, answer `state_unsupported` and write nothing after the state opens; 29 and 30 open; a state recording `deleting` completes its deletion (§12.5) first; the service vault's clean start is an operator step (its runbook) |
+| R29-G2 | §10.8; §10.2 `device.features` | r29_rules_test.go:20 |
+| R29-U1 ((0.87.1) no migration: a state without `messaging_release` 29 or more is refused) | §6.3.1 No upgrade: release 29 starts clean; §3.3; §11.4; §11.14.6; §12.5 | r29_u1_test.go:65, :88, :102, :133, :183 |
 | R29-L1 | §6.3.1 Lifetimes | r29_f_test.go:210, :229 |
-| R29-I1 | §6.3.1 Initiator | r29_scenarios_test.go:281; V/vms/handshake/keyring086_test.go:14 |
+| R29-I1 | §6.3.1 Initiator | r29_scenarios_test.go:253; V/vms/handshake/keyring086_test.go:14 |
 | R29-I2 | §6.3.1 Initiator | r29_f_test.go:40, :60, :83; r29_review_test.go:17 |
-| R29-I3 | §6.3.1 Initiator | gap |
-| R29-I4 | §6.3.1 Initiator; §6.5 | r29_scenarios_test.go:388 |
-| R29-I5 | §6.3.1 Initiator | r29_scenarios_test.go:334; r29_f_test.go:210, :229 |
-| R29-I6 | §6.3.1 Initiator | r29_f_test.go:123 |
-| R29-I7 | §6.3.1 Initiator; §6.3 | r29_f_test.go:306; r29_review_test.go:172; r29_rr2_test.go:215 |
-| R29-R1 | §6.3.1 Responder | gap (r29_f_test.go:170 tests R3's cap) |
-| R29-R2 | §6.3.1 Responder | r29_scenarios_test.go:281 |
-| R29-R3 ((0.88.1) also every 12 days) | §6.3.1 Responder; hs.confirm again | r29_f_test.go:170; gap: with `I` locked past `T` while its reconnect is pending and `R`'s standing token for `I` still valid, `R` queues `hs.confirm` again at 12 days and the pair confirms before `B`; none while demoted or suspended; it stops once the epoch or a later one is confirmed |
-| R29-R4 | §6.3.1 Responder; §6.6 | r29_f_test.go:252; r29_scenarios_test.go:436 |
-| R29-R5 | §6.3.1 Rule E | r29_round6_test.go:141; r29_f_test.go:252 |
-| R29-R6 | §6.3.1 Rule E; §3.4.1 acceptFrom | r29_scenarios_test.go:744 (its "gated iteration"; the test is renamed in step 5); r29_oldcopy_test.go:266 |
-| R29-X1 | §6.3.1 Crossing | r29_scenarios_test.go:402 |
-| R29-X2 | §6.5; §6.6 | r29_scenarios_test.go:670; r29_round6_test.go:514 |
-| R29-X3 | §6.3.1 Rule J | r29_scenarios_test.go:364 |
-| R29-X4 | §6.6 Accepting `ctx`; §3.4.1 After a demotion of the current epoch | gap (r29_rr2_test.go:104 covers the demotion trigger only) |
+| R29-I3 | §6.3.1 Initiator | r29_rules_test.go:42 |
+| R29-I4 | §6.3.1 Initiator; §6.5 | r29_scenarios_test.go:360 |
+| R29-I5 | §6.3.1 Initiator | r29_scenarios_test.go:306; r29_f_test.go:229; r29_bound_test.go:48 |
+| R29-I6 | §6.3.1 Initiator | r29_f_test.go:123; r29_bound_test.go:85 |
+| R29-I7 | §6.3.1 Initiator; §6.3 | r29_f_test.go:277; r29_review_test.go:158; r29_rr2_test.go:138 |
+| R29-R1 | §6.3.1 Responder | r29_rules_test.go:74 |
+| R29-R2 | §6.3.1 Responder | r29_scenarios_test.go:253; r29_flag_test.go:23 |
+| R29-R3 ((0.88.1) also every 12 days) | §6.3.1 Responder; hs.confirm again | r29_f_test.go:170; r29_reconfirm_test.go:39, :61, :84, :104, :128, :152; V/client/reconfirm_test.go:16, :125, :162 |
+| R29-R4 | §6.3.1 Responder; §6.6 | r29_f_test.go:252; r29_scenarios_test.go:408 |
+| R29-R5 | §6.3.1 Rule E | r29_round6_test.go:70; r29_f_test.go:252; r29_review4_test.go:231 |
+| R29-R6 | §6.3.1 Rule E; §3.4.1 acceptFrom | r29_scenarios_test.go:442; r29_oldcopy_test.go:248 |
+| R29-X1 | §6.3.1 Crossing | r29_scenarios_test.go:374 |
+| R29-X2 | §6.5; §6.6 | r29_scenarios_test.go:536; r29_round6_test.go:274 |
+| R29-X3 | §6.3.1 Rule J | r29_scenarios_test.go:336 |
+| R29-X4 | §6.6 Accepting `ctx`; §3.4.1 After a demotion of the current epoch | r29_rules_test.go:88; r29_review4_test.go:300; r29_oldcopy_test.go:581 |
 | R29-X5 | §6.6 Accepting `ctx` | r29_f_test.go:252 |
-| R29-X6 | §6.2 | gap |
-| R29-K1 | §3.4.1 S8 | r29_scenarios_test.go:535; r29_review_test.go:255; V/vms/handshake/keyring086_test.go:97; V/client/rotate086_test.go:18 |
-| R29-K2 | §3.4.1 H5, S5, Pending epochs at a link | r29_f_test.go:60; r29_round6_test.go:454; r29_scenarios_test.go:619 |
-| R29-K3 | §3.4.1 S5 Resend | gap (model only: M/confirm_scenarios_test.go:167) |
-| R29-K4 | §3.4.1 Epochs after an `ik` link | r29_oldcopy_test.go:205; r29_round6_test.go:546; gap: the flag-set case |
-| R29-K5 | §3.4.1 After a demotion of the current epoch | r29_oldcopy_test.go:431, :515, :534; r29_review_test.go:65; r29_round6_test.go:161, :195 |
-| R29-K6 | §3.4.1 The reconnect bound; §6.6 | r29_oldcopy_test.go:724, :778, :803; r29_rr2_test.go:135; r29_round6_test.go:563; gap: the K7 reconnect |
-| R29-K7 (every later epoch signed by the old `ik`; names E) | §3.4.1 Strict F1 | r29_oldcopy_test.go:153, :234; `TestR29RR2OwnCopyNoRKLostReconnectWedges` V/vault/r29_rr2_test.go:38 (flips to "suspended"); gap: both-29 versions |
-| R29-K8 | §3.4.1 Rule C, acceptFrom | r29_review_test.go:223; r29_round6_test.go:302; r29_oldcopy_test.go:296 |
-| R29-K9 ((0.87.1) finding C) | §3.4.1 Epochs abandoned while pending, at P's `identity.rotate` | gap: judged at P's `identity.rotate` only, in the write that processes it (also one whose links are all followed, by Table B's Ancestor row or Table A's "after its cut-off" row): a set flag suspends; a clear one ends the epoch and a later message under it suspends; a link first followed from an `hs.resp` naming an older epoch, or applied at an `hs.fin`, judges nothing; honest P that activated the epoch sends `identity.rotate` under it and is not judged; each ended epoch is audited `connection.fork_suspected` (`ref` = `epoch`); a reconnect naming an ended epoch is refused, not fork evidence |
-| R29-F1 | §3.4.1 Fork by `ctx` | r29_oldcopy_test.go:153, :296 |
-| R29-F3 | §6.3.1 The received flag; §3.4.1 Epochs after an `ik` link, Strict F1 | gap: set by `hs.confirm` alone; a handshake message under E0 does not set E1's flag; a lost or delivered `hs.fin` leaves it clear; P rekeys E0→E1, sends `hs.fin`, rotates before any `hs.confirm` and sends `identity.rotate` under E0: Q ends demoted and reconnecting, not suspended |
-| R29-D1 | §6.3.1 Devices and agents; §6.7 | gap on the vault side ((0.87.1) finding F is a stated gap, §3.4.1 Invariants) |
-| R29-D2 | §6.3.1 Devices and agents; §15 item 51 | V/client/rotate086_test.go:18, :71; V/client/persist_test.go:517 |
-| R29-D3 | §6.3.1 Devices and agents; §6.7; §10.9 | gap |
-| R29-D4 | §6.3.1 An app from before release 29; §10.9 | gap |
+| R29-X6 | §6.2 | r29_rules_test.go:111 |
+| R29-K1 | §3.4.1 S8 | r29_scenarios_test.go:470; r29_review_test.go:241; V/vms/handshake/keyring086_test.go:82; V/client/rotate086_test.go:18 |
+| R29-K2 | §3.4.1 H5, S5, Pending epochs at a link | r29_f_test.go:60; r29_round6_test.go:242; r29_scenarios_test.go:507; r29_review4_test.go:101, :568 |
+| R29-K3 | §3.4.1 S5 Resend | r29_rules_test.go:150 |
+| R29-K4 | §3.4.1 Epochs after an `ik` link | r29_oldcopy_test.go:187; r29_round6_test.go:306; r29_k4_test.go:9; r29_review4_test.go:183 |
+| R29-K5 | §3.4.1 After a demotion of the current epoch | r29_oldcopy_test.go:327, :399, :418, :443; r29_review_test.go:65; r29_round6_test.go:90, :124, :376, :391; r29_review4_test.go:332, :473, :515 |
+| R29-K6 | §3.4.1 The reconnect bound; §6.6 | r29_oldcopy_test.go:527, :581, :606; r29_rr2_test.go:61, :78; r29_round6_test.go:323, :342; r29_bound_test.go:15, :48, :69; r29_review4_test.go:424 |
+| R29-K7 (every later epoch signed by the old `ik`; names E) | §3.4.1 Strict F1 | r29_oldcopy_test.go:153, :216; r29_rr2_test.go:37; r29_strictf1_test.go:37, :55; r29_review4_test.go:319; r29_flag_test.go:87 |
+| R29-K8 | §3.4.1 Rule C, acceptFrom | r29_review_test.go:209; r29_round6_test.go:196; r29_oldcopy_test.go:278; r29_review4_test.go:446 |
+| R29-K9 ((0.87.1) finding C) | §3.4.1 Epochs abandoned while pending, at P's `identity.rotate` | r29_k9_test.go:47, :63, :80, :96, :129; r29_round6_test.go:242 (the K2 case) |
+| R29-F1 | §3.4.1 Fork by `ctx` | r29_oldcopy_test.go:153, :278; r29_review4_test.go:27, :77; r29_round6_test.go:437 |
+| R29-F3 | §6.3.1 The received flag; §3.4.1 Epochs after an `ik` link, Strict F1 | r29_flag_test.go:23, :51, :87 |
+| R29-D1 | §6.3.1 Devices and agents; §6.7 | r29_rules_test.go:174; r29_gapf_test.go:231, :262 (gap F pinned) |
+| R29-D2 | §6.3.1 Devices and agents; §15 item 51 | V/client/rotate086_test.go:18, :71; V/client/persist_test.go:485 |
+| R29-D3 | §6.3.1 Devices and agents; §6.7; §10.9 | r29_device_test.go:18 |
+| R29-D4 | §6.3.1 An app from before release 29; §10.9 | r29_device_test.go:85, :116, :147 |
 
 ### 6.4 Connections and invitations
 
