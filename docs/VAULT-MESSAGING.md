@@ -6865,7 +6865,11 @@ abandons a pending rekey toward its device or agent for want of a token
 `exp` has passed on the vault's clock), or at `B` holding no valid
 standing token for it, its rekey could not be deposited, and the device,
 which may have activated the abandoned epoch, would keep it while the
-vault's keys for it end 16 days later: a split nobody sees. Instead:
+vault's keys for it end 16 days later: a split nobody sees. The vault
+rekeys from its current epoch as soon as it holds a valid standing token
+for it (a missing token can be passing: the device sends a fresh one,
+§7.2). If it still holds none 16 days after the abandon, when the
+abandoned epoch's keys end:
 - **a desktop or agent** becomes `stale`, as one that S1 makes `stale`
   does (§3.4.1 S1: `device.list` `state` `"stale"`, which the app shows as
   "<device name> needs reconnecting. Pair it again."); the member unlinks
@@ -7056,7 +7060,7 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-K8 | §3.4.1 Rule C, acceptFrom | r29_review_test.go:223; r29_round6_test.go:302; r29_oldcopy_test.go:296 |
 | R29-F1 | §3.4.1 Fork by `ctx` | r29_oldcopy_test.go:153, :296 |
 | R29-F3 | §6.3.1 The received flag; §3.4.1 Epochs after an `ik` link, Strict F1 | gap: set by `hs.confirm` alone; a handshake message under E0 does not set E1's flag; a lost or delivered `hs.fin` leaves it clear; P rekeys E0→E1, sends `hs.fin`, rotates before any `hs.confirm` and sends `identity.rotate` under E0: Q ends demoted and reconnecting, not suspended |
-| R29-D1 ((0.87.1) with no token, `stale`) | §6.3.1 Initiator (With no token), Devices and agents; §6.7; §3.4.1 S1 | gap on the vault side; gap: a pending rekey toward a desktop or agent abandoned for want of a token, at `token_expired`, or at `B` with no valid token makes it `stale` (finding F) |
+| R29-D1 ((0.87.1) with no token, `stale`) | §6.3.1 Initiator (With no token), Devices and agents; §6.7; §3.4.1 S1 | gap on the vault side; gap: a pending rekey toward a desktop or agent abandoned for want of a token, at `token_expired`, or at `B` with no valid token makes it `stale` if no valid token arrives within 16 days, and rekeys if one does (finding F) |
 | R29-D2 | §6.3.1 Devices and agents; §15 item 51 | V/client/rotate086_test.go:18, :71; V/client/persist_test.go:517 |
 | R29-D3 | §6.3.1 Devices and agents; §6.7; §10.9 | gap |
 | R29-D4 | §6.3.1 An app from before release 29; §10.9 | gap |
