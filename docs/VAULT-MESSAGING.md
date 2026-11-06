@@ -6515,7 +6515,8 @@ Field rules:
   and `K_s` is the current (soon previous) epoch's `rk`. A rekey `hs.init`
   is accepted only under the current epoch ((0.86.0) or the
   responder's confirmed epoch, §6.3.1), and names the epoch it travels
-  under.
+  under. (0.86.5) A sealed-mode `hs.init` with purpose `rekey` is
+  refused: a rekey always travels in session mode.
 
 ### 6.3 Key schedule
 
