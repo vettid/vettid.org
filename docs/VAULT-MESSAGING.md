@@ -52,8 +52,10 @@ changelog:
     6. §3.4.1 `acceptFrom`: rule C (step 3) runs before a demoted or
        destroyed epoch refuses a message (steps 4–5).
     7. §3.4.1 H5 and O3a: what a side keeps of an answer H5 dropped.
-    8. Vault-originated content over 64 KiB: owner question pending (GC
-       01M6Q3Z7PGDB83J9HN69S1A08K).
+    8. §6.3.1 "Deployment" (owner decision b, GC thread
+       01M6Q3Z7PGDB83J9HN69S1A08K): in release 29 a vault-originated
+       message over 64 KiB goes inline and keeps no copy, counted as
+       dropped; the vault's own claim-check upload follows later.
   - 0.86.1: erratum, 2026-11-05 (owner decision a, GC thread
     01M6Q17YWAD9X7Y9ME7SPYG00T): §6.3.1 "Deployment", the revert keeps at
     most 256 copies and 1 MiB per peer (connection, device or agent) and
@@ -6652,7 +6654,15 @@ copy's size is its inner plaintext as encoded (§5.3), the bytes sealed
 again at a revert. While it keeps copies toward a peer, `I` sends any
 content over 64 KiB to that peer by claim-check (§5.5's SHOULD is a
 MUST here), and the copy holds the reference, so a copy is at most
-about 64 KiB. The copies are part
+about 64 KiB. (0.86.2, owner decision b of 2026-11-06, GC thread
+01M6Q3Z7PGDB83J9HN69S1A08K) Release 29's vault cannot yet send its own
+content by claim-check: a message the vault itself originates whose
+inner plaintext is over 64 KiB (a `profile.update`, a `data.value` or
+`data.catalog`, a response to a device or agent) goes inline as
+before, and no copy of it is kept; it is counted as dropped in
+`connection.epoch_reverted`. A later release adds the vault's own
+claim-check upload, and the MUST then applies to it too. The copies
+are part
 of the vault's state, which is rewritten whole at every flush (§8.3), so
 they are kept small; they are needed only toward a peer without the
 gate, during an upgrade. Past any limit, the oldest copy by when it was
