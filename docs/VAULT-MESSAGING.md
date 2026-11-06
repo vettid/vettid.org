@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.86.4
+version: 0.86.5
 date: 2026-11-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,17 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.86.5: erratum, 2026-11-06 (lead agreements, release 29 review):
+    §3.4.1 "Epochs after an `ik` link": a demoted current epoch leads to
+    a reconnect naming the newest epoch that is not demoted, pending or
+    destroyed, not to a rekey (the demoted epoch was never the peer's,
+    and sealed mode refuses the rekey purpose); one reconnect at a time,
+    its tokens revoked when it expires, and after 3 expired tries for
+    the same demoted epoch the connection goes `stale` with its feed
+    item; a device epoch is never demoted. O3a: what Q keeps of an
+    answer H5 dropped is that epoch's `k_i2r` only, to open and verify
+    its `hs.fin`, erased at the first matching `hs.fin` or after 16
+    days.
   - 0.86.4: erratum, 2026-11-06 (the owner's yes, thread
     01M6Q5XF0HP107R1FM0XQ4SDC7; with vettid-agent #42, which already
     refuses them). §10.11 `item.run`: the name rule for `name`, `env`
@@ -4274,10 +4285,12 @@ marks the connection `stale` (so a new invitation from that peer is
 accepted, §6.4) and audits `connection.stale` with its feed item
 (§10.9), once per connection. From a peer with `features` it is acked
 and dropped (S5). (0.86.2) To judge that `hs.fin`, Q keeps of an
-answer H5 dropped only what checks it: the answer's epoch kids, the key that
-opens its `hs.fin`, `th`, the pinned `ik` and the collect `sender`,
-until the answer's lifetime ends (`L`, §6.3.1), and nothing that sends
-or decrypts session traffic.
+answer H5 dropped only what checks it: the answer's epoch kids, `th`,
+the pinned `ik`, the collect `sender` and ((0.86.5) exactly) the
+`k_i2r` of that one epoch, only to open and verify its `hs.fin`. The key
+is erased at the first matching `hs.fin` or after 16 days, whichever
+comes first. Nothing under that epoch is ever processed or shown, and
+the exposure equals §6.5's receive-key retention.
 
 **Epochs after an `ik` link.** When Q follows a link at position x, an
 epoch of P whose signer is that link's `old_ik` or an ancestor and that
@@ -4291,8 +4304,18 @@ a peer with `hs_confirm`, at confirmation, §6.3.1); held ones whose
 dropped. Durable entries sealed under the epoch before it was demoted
 but not yet deposited go back to held and are sealed again, with a new
 `ts`, under the new epoch; those already deposited are out of reach),
-starts a rekey sealed to the link's `new_kem`, and refuses messages
-under the demoted epoch deposited after x (`ancestor_ik`). For a rekey
+starts a (0.86.5) reconnect (below), and refuses messages under the
+demoted epoch deposited after x (`ancestor_ik`). (0.86.5) **The
+reconnect after a demotion.** It names the newest epoch of P that is
+not demoted, pending or destroyed, not the demoted one: that epoch was
+never P's, so a rekey in session mode under it cannot be opened by P,
+and sealed mode refuses the rekey purpose (§6.2). While P's current
+epoch is demoted and no reconnect of Q's own with P is open, Q starts
+one reconnect at a time; each one's tokens are revoked when it expires
+(§6.6), and after 3 expired tries for the same demoted epoch the
+connection becomes `stale` and Q audits `connection.stale` with its
+feed item (§10.9), as for rules E and L. A device rotates no `ik`
+(§6.7), so an epoch with a device is never demoted. For a rekey
 or reconnect from P under the new `ik`, (0.86.0) a `ctx` naming Q's
 current or confirmed epoch (§6.3.1) is ordinary; a `ctx` naming an epoch
 older than Q's confirmed epoch, where an epoch after it up to the
