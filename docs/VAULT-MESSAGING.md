@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.86.1
+version: 0.86.2
 date: 2026-11-05
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,34 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.86.2: erratum, 2026-11-06 (lead agreements from building release
+    29, vettid-vault branch r29-hs-confirm):
+    1. §3.4.1 S8: toward a peer that has advertised no `features`, a
+       rekey's `hs.init` and `hs.resp` carry no `rotations` (release 28
+       refuses them at parse); `identity.rotate` still does, and rule L
+       recovers the peer. Until rule L's reconnect, rekeys between the
+       two fail.
+    2. §3.4.1 "Epochs after an `ik` link": the `own_copy` exception for
+       a reconnect applies at the verified `hs.fin`, not at the
+       `hs.init`; for a rekey only if the named epoch still has its
+       `rk`, else that epoch is audited `own_copy` and demoted and Q
+       reconnects naming it.
+    3. §6.3.1 rule E: a destroyed epoch's send key and `rk` are erased;
+       its receive key is kept as a superseded epoch's (16 days), only
+       to authenticate later messages as evidence.
+    4. §6.3.1 "Initiator": an abandoned pending epoch's tokens are
+       revoked in the same write; an abandoned reconnect is followed by
+       a fresh reconnect, not a rekey.
+    5. §3.4.1 "Epochs after an `ik` link": messages to P while its
+       current epoch is demoted are held in the outbox and sealed under
+       the new epoch; none is dropped.
+    6. §3.4.1 `acceptFrom`: rule C (step 3) runs before a demoted or
+       destroyed epoch refuses a message (steps 4–5).
+    7. §3.4.1 H5 and O3a: what a side keeps of an answer H5 dropped.
+    8. §6.3.1 "Deployment" (owner decision b, GC thread
+       01M6Q3Z7PGDB83J9HN69S1A08K): in release 29 a vault-originated
+       message over 64 KiB goes inline and keeps no copy, counted as
+       dropped; the vault's own claim-check upload follows later.
   - 0.86.1: erratum, 2026-11-05 (owner decision a, GC thread
     01M6Q17YWAD9X7Y9ME7SPYG00T): §6.3.1 "Deployment", the revert keeps at
     most 256 copies and 1 MiB per peer (connection, device or agent) and
@@ -4145,7 +4173,10 @@ is foreign: refuse; (3) **evidence first**: every identity link and
 relay link the message carries is checked by rule C, whatever the
 `sender`'s position, before step 4; (4) Table A, by the `sender`'s
 relay-key state; (5) Table B, by the `ik` state, for the kinds Table A
-passes to it.
+passes to it. (0.86.2) A demoted or destroyed epoch (below, §6.3.1
+rule E) refuses a message only at steps 4–5, after step 3 has checked
+its links by rule C, so a second successor that arrives under such an
+epoch is still seen.
 
 **Table A, relay key** (steps 1–4). A second successor in any column
 has already suspended at step 3; an `hs.init` whose `sender` is not its
@@ -4182,12 +4213,18 @@ rotated while its own reconnect was open), so the connection fails: Q
 marks the connection `stale` (so a new invitation from that peer is
 accepted, §6.4) and audits `connection.stale` with its feed item
 (§10.9), once per connection. From a peer with `features` it is acked
-and dropped (S5).
+and dropped (S5). (0.86.2) To judge that `hs.fin`, Q keeps of an
+answer H5 dropped only what checks it: the answer's kids, the key that
+opens its `hs.fin`, `th`, the pinned `ik` and the collect `sender`,
+until the answer's lifetime ends (`L`, §6.3.1), and nothing that sends
+or decrypts session traffic.
 
 **Epochs after an `ik` link.** When Q follows a link at position x, an
 epoch of P whose signer is that link's `old_ik` or an ancestor and that
 was established by a message deposited after x stops being current:
-Q sends nothing to P until a new epoch is established, starts a rekey
+Q sends nothing to P until a new epoch is established ((0.86.2) its
+messages to P meanwhile are held in the outbox and sealed under the new
+epoch once it is established; none is dropped), starts a rekey
 sealed to the link's `new_kem`, and refuses messages under the demoted
 epoch deposited after x (`ancestor_ik`). For a rekey or reconnect from P
 under the new `ik`, (0.86.0) a `ctx` naming Q's current or
@@ -4207,7 +4244,12 @@ and audits `connection.fork_suspected` (`ref` = `own_copy`) with a
 History line (NEW, for wording approval with the app PRs) "<connection name> restarted its secure session
 with you." and no feed item: benign cases reach it (an S5 drop while
 the sides disagree on the gate; a lost `hs.fin` toward an ungated peer
-followed by a rotation). A real second successor still suspends by rule C when its
+followed by a rotation). (0.86.2) For a reconnect, the exception is
+applied at its verified `hs.fin`, not at the `hs.init`, so nothing
+changes before `sig_I` (§6.6). For a rekey, it applies only if the
+named epoch still has its `rk`; otherwise Q audits that epoch
+`own_copy`, demotes it, and reconnects naming it instead of answering.
+A real second successor still suspends by rule C when its
 link arrives. (An initiator's confirmed epoch is
 its current one. In the S5 case Q received only `hs.fin` under the
 later epoch, so the earlier one stays confirmed.) An epoch established
@@ -4316,7 +4358,8 @@ other than the one whose message made the change, is abandoned: no
 it carried are revoked (§6.6). Q's own rekeys and reconnects are started
 again under the current `ik`, except while suspended (a suspension
 abandons every handshake with P and starts none). Q's answers awaiting
-`hs.fin` whose pinned `ik` is no longer current are dropped; their
+`hs.fin` whose pinned `ik` is no longer current are dropped ((0.86.2)
+keeping only what checks their `hs.fin`, O3a above); their
 initiator starts again (S5). A restarted
 reconnect spends one of the reconnect token's 4 deposits (§6.6; the
 relay cannot tell a restart), at most once per change of the current
@@ -4417,6 +4460,12 @@ each recipient Q).
   `identity.rotate` `rotations` and in its rekey `hs.init`, not only
   its newest one. So no `ik` waits on the order in which
   Q processes P's messages, which the relay does not keep (§8.4).
+  (0.86.2) **Except toward a peer that has advertised no `features`**
+  (release 28 or earlier): release 28 refuses `rotations` in a rekey's
+  `hs.init` or `hs.resp` at parse, so toward such a peer they carry
+  none; `identity.rotate` still carries its links. Until that peer
+  follows the link, rekeys between the two fail; rule L's reconnect,
+  which carries the whole chain, recovers it.
 - **S9, a sign of a fork.** If P gets `token_revoked` for a token Q
   issued to an earlier key of P while that key is still P's key for Q,
   and Q's token for P's current key has not arrived 24 hours after P's
@@ -6520,7 +6569,12 @@ its receive keys are kept 16 days as a previous epoch's, nothing under
 it confirms any more, and `I` reconnects naming its current epoch (a
 device: rekeys if its standing token is valid, else pairs again). `I`
 keeps the abandoned epoch's id, and accepts a reconnect naming it,
-until a newer epoch is confirmed.
+until a newer epoch is confirmed. (0.86.2) Whenever `I` abandons a
+pending epoch (here, by H5 or S5, at a crossing, or by a link,
+§3.4.1), it revokes in the same write the tokens its `hs.init` carried
+(the standing and reconnect tokens of a reconnect, §6.6). Where the
+abandoned epoch was a reconnect's, the handshake it starts next is a
+fresh reconnect, not a rekey.
 
 **Responder.** `R` activates at a verified `hs.fin` that arrives within
 `L` (§6.3). In the same write it queues **`hs.confirm`** (body `{}`,
@@ -6542,7 +6596,12 @@ itself at confirmation; it never moves back. While it is not current:
 - **rule E:** in the write that establishes such a handshake's epoch at
   its verified `hs.fin`, `R` destroys every other epoch with `I` later
   than the confirmed one and records them with the accepted `hs.init`'s
-  inner `ts`. In the same write it drops any `hs.fin` for a destroyed
+  inner `ts`. (0.86.2) "Destroyed" means: its send key and `rk` are
+  erased, and its receive key is kept as a superseded epoch's (§6.5
+  "Key retention", 16 days), only to authenticate later messages as
+  evidence. The `ts` rule below needs the inner `ts`, which is inside
+  the AEAD, and XChaCha20-Poly1305 has no key that verifies without
+  decrypting. In the same write it drops any `hs.fin` for a destroyed
   epoch that it has not yet sent, with its outbox entry. An
   authenticated message under one of them with a later inner `ts` is
   fork evidence (§6.6 "Fork detection", `ref` = `epoch`); one with an
@@ -6595,7 +6654,15 @@ copy's size is its inner plaintext as encoded (§5.3), the bytes sealed
 again at a revert. While it keeps copies toward a peer, `I` sends any
 content over 64 KiB to that peer by claim-check (§5.5's SHOULD is a
 MUST here), and the copy holds the reference, so a copy is at most
-about 64 KiB. The copies are part
+about 64 KiB. (0.86.2, owner decision b of 2026-11-06, GC thread
+01M6Q3Z7PGDB83J9HN69S1A08K) Release 29's vault cannot yet send its own
+content by claim-check: a message the vault itself originates whose
+inner plaintext is over 64 KiB (a `profile.update`, a `data.value` or
+`data.catalog`, a response to a device or agent) goes inline as
+before, and no copy of it is kept; it is counted as dropped in
+`connection.epoch_reverted`. A later release adds the vault's own
+claim-check upload, and the MUST then applies to it too. The copies
+are part
 of the vault's state, which is rewritten whole at every flush (§8.3), so
 they are kept small; they are needed only toward a peer without the
 gate, during an upgrade. Past any limit, the oldest copy by when it was
