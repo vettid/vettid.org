@@ -39,7 +39,9 @@ changelog:
     device does the same. §6.3.1 "The received flag": `hs.resp` removed from the
     messages that set it (sealed to the initiator's ephemeral key, it
     opens under no epoch). §3.4.1 Residuals: the re-send's worst case
-    (owner decision a). §6.3.1 "No upgrade": a refusal on a recovery's
+    (owner decision a); "The device exception": F covers any abandonment
+    of a pending rekey toward a device or agent (owner decision a, GC
+    01M6S2ECFHHGFXC7H8HPZ2FB2V); §15 item 51 follows. §6.3.1 "No upgrade": a refusal on a recovery's
     repeat through `next` answers `attempt_used: false` (§11.14.6). §6.3.2:
     R29-R3 restated.
   - 0.88.0: 2026-11-06, DRAFT for review (vettid.org #552; owner decision
@@ -4912,13 +4914,17 @@ harness's invariants, not the rule IDs `R29-I1`… of §6.3.2:
   device exception.
   Item 51 is scheduled right after release 29.
   **With it, finding F** (owner decision a, GC 01M6RJF5NZBS92JEYXJXTWKSKM):
-  when the vault abandons a pending rekey toward its device or agent and
-  holds no valid standing token for it (at `B`, for want of a token, or
-  when the token lapses afterwards), its rekey from the current epoch may
-  never be deposited, while the device stays on the abandoned epoch and
-  the vault's keys for that epoch end after 16 days. The pair can split
-  with nothing shown to the member, so I1 and I7 do not hold for that
-  pair. Re-pairing a desktop or agent ends it (§7.2 already says one
+  when the vault abandons a pending rekey toward its device or agent, the
+  device may already have activated the abandoned epoch and stay on it.
+  (0.88.1, owner decision a, GC 01M6S2ECFHHGFXC7H8HPZ2FB2V: this covers
+  **any** abandonment, not only at `B` or for want of a token; for
+  example the vault's own rotation, S5, with the device then offline past
+  the 48 days the vault keeps its confirmed epoch's keys.) The vault's
+  rekey from its current epoch may never be deposited (no valid token)
+  or never be opened (the device no longer keeps that epoch), while the
+  vault's keys for the abandoned epoch end after 16 days. The pair can
+  split with nothing shown to the member, so I1 and I7 do not hold for
+  that pair. Re-pairing a desktop or agent ends it (§7.2 already says one
   offline past its token is paired again); the member's app gets a fresh
   token at every unlock (§7.2), so its rekey is normally deposited then. F is
   closed with D in the device work right after release 29.
@@ -27877,8 +27883,8 @@ Follow-ups:
     finding D); owner decision a (GC 01M6RJF5NZBS92JEYXJXTWKSKM) keeps it
     a stated gap of release 29, the device exception of §3.4.1
     Invariants, scheduled right after release 29 with the resume plan.
-    Finding F (a device left on an abandoned epoch when the vault holds
-    no valid token for it) is stated with it and closed in the same
+    Finding F (a device left on an abandoned epoch; (0.88.1) after any
+    abandonment of a pending rekey toward it) is stated with it and closed in the same
     work.
 52. **`own_copy` and a pre-rotation fork (0.86.6; decided (a) by the
     owner 2026-11-06, GC 01M6QB8A3P0S7H2Q86QS3EAV2P; closed in 0.87.0).**
