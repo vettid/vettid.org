@@ -34,7 +34,8 @@ changelog:
       new epoch is current (for an initiator toward a peer with
       `hs_confirm`, at confirmation), then sealed with a new `ts`; held
       ones past their `exp` are discarded, ephemeral ones not sent;
-      entries sealed before the demotion are deposited as they are.
+      entries sealed before the demotion but not yet deposited go back
+      to held and are sealed again; those deposited are out of reach.
     - M2, same paragraph: for a rekey whose named epoch has lost its
       `rk`, Q demotes the later epochs, audits
       `connection.fork_suspected` (`ref` = `own_copy`), and instead of
@@ -44,7 +45,7 @@ changelog:
       `hs.fin`; the 0.86.2 sentences move after the "(An initiator's
       confirmed epoch …)" parenthetical.
     - M4, §6.3.1 "Deployment": the revert's `ref` also counts copies
-      not kept (content over 64 KiB).
+      not kept (inner plaintext over 64 KiB, §5.3, as encoded).
     - L1, §6.3.1 "Initiator": every way a pending epoch is abandoned;
       the revocation is recorded in the same write and sent after it,
       for a rekey's standing token too; "the handshake it starts next,
@@ -57,7 +58,8 @@ changelog:
     - L4: Table B's intro, S5 and §6.2 say a rekey carries no
       `rotations` toward a peer without `features` (S8).
     - L5, §6.3.1 "Deployment": "MUST here, except as below"; one
-      measure, content over 64 KiB; "a message whose content the vault
+      measure, inner plaintext over 64 KiB (§5.3, as encoded), as 0.86.1
+      measures a copy; "a message whose content the vault
       itself produces".
     - Style: the date; "thread" for "GC thread" in the body; the
       claim-check paragraph rewrapped; "the answer's epoch kids" (O3a).
@@ -4261,8 +4263,10 @@ durable messages to P meanwhile are held in the outbox, unsealed, and
 sealed, with a new `ts`, under the new epoch once it is current (for Q
 as initiator toward a peer with `hs_confirm`, at confirmation, §6.3.1);
 held ones whose `exp` passes are discarded; ephemeral ones are not
-sent; no other is dropped. Entries already sealed under the demoted
-epoch before the demotion are deposited as they are), starts a rekey
+sent; no other is dropped. Entries sealed under the epoch before it
+was demoted but not yet deposited go back to held and are sealed again,
+with a new `ts`, under the new epoch; those already deposited are out
+of reach), starts a rekey
 sealed to the link's `new_kem`, and refuses messages under the demoted
 epoch deposited after x (`ancestor_ik`). For a rekey or reconnect from P
 under the new `ik`, (0.86.0) a `ctx` naming Q's current or
@@ -6702,12 +6706,14 @@ devices or agents), and a vault keeps at most 8 MiB of copies in all; a
 device or agent, which has one peer, has only the per-peer limits. A
 copy's size is its inner plaintext as encoded (§5.3), the bytes sealed
 again at a revert. While it keeps copies toward a peer, `I` sends any
-content over 64 KiB to that peer by claim-check (§5.5's SHOULD is a
-MUST here, except as below), and the copy holds the reference, so a
+message whose inner plaintext would be over 64 KiB (§5.3, as encoded)
+with its content by claim-check (§5.5's SHOULD is a MUST here, except
+as below), and the copy holds the reference, so a
 copy is at most about 64 KiB. (0.86.2, owner decision b of 2026-11-06,
 thread 01M6Q3Z7PGDB83J9HN69S1A08K) Release 29's vault cannot yet send
 its own content by claim-check: a message whose content the vault
-itself produces and is over 64 KiB (a `profile.update`, a `data.value`
+itself produces and whose inner plaintext is over 64 KiB (§5.3, as
+encoded) (a `profile.update`, a `data.value`
 or `data.catalog`, a response to a device or agent) goes inline as
 before, and no copy of it is kept; it is counted as dropped in
 `connection.epoch_reverted`. A later release adds the vault's own
@@ -6731,7 +6737,8 @@ new epoch again in the old one, with the same inner id and a new `ts`
 (receivers dedupe by inner id, §8.2), skipping ephemeral ones and any
 whose `exp` has passed; it audits `connection.epoch_reverted`
 (`connection_id`; `ref` = the number of copies dropped by the cap, or
-not kept (content over 64 KiB, above), if any) and shows in History (NEW, for wording approval with the app PRs)
+not kept (inner plaintext over 64 KiB, §5.3, as encoded, above), if
+any) and shows in History (NEW, for wording approval with the app PRs)
 "<connection name>: some messages were resent."; then it answers the
 peer's rekey, or starts one from the old epoch. If the two sides
 disagree on the gate (one has not yet seen the other's `features`), an
