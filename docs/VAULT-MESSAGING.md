@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.0
+version: 0.88.1
 date: 2026-11-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,16 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.1: 2026-11-06, erratum to 0.87.1 (owner decision a, GC
+    01M6S0QVS56CD790T5KD8J30QM, asked as "0.87.2"; numbered after
+    0.88.0, which merged first). Found by the Opus review of vettid-vault
+    #206 (release 29, cleanup plan step 5). §6.3.1 Responder: `R` queues
+    `hs.confirm` again every `T` (14 days) while the epoch it last
+    activated is not yet its confirmed epoch, so an initiator locked past
+    `T` with a pending reconnect does not end `stale` at `B`; a device
+    does the same. §6.3.1 "The received flag": `hs.resp` removed from the
+    messages that set it (sealed to the initiator's ephemeral key, it
+    opens under no epoch). §6.3.2: R29-R3 restated.
   - 0.88.0: 2026-11-06, DRAFT for review (vettid.org #552; owner decision
     a, GC 01M6RSBMH79RKNM8P8W1DP2T7V). A transfer's new phone learns every
     outcome from the vault and waits for it, instead of inferring it from
@@ -6956,6 +6966,20 @@ itself at confirmation; it never moves back. While it is not current:
   checks of §3.4.1 "Fork by `ctx`"; `R` abandons its own
   open rekey for it.
 
+(0.88.1) **`hs.confirm` again every `T`** (owner decision a, 2026-11-06,
+GC 01M6S0QVS56CD790T5KD8J30QM). While the epoch `R` last activated as
+responder is not yet its confirmed epoch with `I`, `R` queues
+`hs.confirm` under it again every 14 days (`T`, the relay's message
+lifetime; divided by `time_scale`, §11.10.8) after the last one it
+queued, unless one to `I` is still in its outbox. It stops when that
+epoch becomes the confirmed epoch, when `R` activates a later one, when
+its keys end (Lifetimes, above) or when the connection or pairing ends.
+Without it, an `hs.confirm` that expires at the relay while `I` is
+locked is never replaced: `I` sends `R` nothing but the handshake while
+its reconnect is pending (Initiator, above), and `R` sends again only
+for a message from `I`, so the pair would reach `B` and end `stale`. A
+device toward its vault does the same.
+
 **Rule E.** In the write that establishes a rekey's or reconnect's epoch
 at its verified `hs.fin`, `R` destroys every other epoch with `I` later
 than the confirmed one and records them with the accepted `hs.init`'s
@@ -6990,8 +7014,10 @@ so S1 may hold it, which only delays confirmation.
 01M6QB8A3P0S7H2Q86QS3EAV2P). Q keeps with each epoch of a peer P one flag,
 "received from P". It is set, in the write that processes it, by any
 message from P that opens under that epoch and that `acceptFrom` does not
-refuse at steps 1–4, except `hs.fin`: `hs.confirm`, `hs.init`, `hs.resp`
-and session messages set it. `hs.fin` does not, because it is sealed under
+refuse at steps 1–4, except `hs.fin`: `hs.confirm`, `hs.init` (a rekey,
+in session mode) and session messages set it. ((0.88.1) An `hs.resp` is
+sealed to the initiator's ephemeral key and opens under no epoch, so it
+sets none.) `hs.fin` does not, because it is sealed under
 the new epoch by an initiator that may abandon that epoch at once (§3.4.1
 S5); it shows no use of the epoch. A message under one epoch never sets
 another epoch's flag. §3.4.1 "Epochs after an `ik` link" and "Strict F1"
@@ -7110,7 +7136,7 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-I7 | §6.3.1 Initiator; §6.3 | r29_f_test.go:306; r29_review_test.go:172; r29_rr2_test.go:215 |
 | R29-R1 | §6.3.1 Responder | gap (r29_f_test.go:170 tests R3's cap) |
 | R29-R2 | §6.3.1 Responder | r29_scenarios_test.go:281 |
-| R29-R3 | §6.3.1 Responder | r29_f_test.go:170 |
+| R29-R3 ((0.88.1) also every `T`) | §6.3.1 Responder; hs.confirm again every `T` | r29_f_test.go:170; gap: with `I` locked past `T` while its reconnect is pending, `R` queues `hs.confirm` again after 14 days and the pair confirms before `B`; it stops once the epoch is confirmed |
 | R29-R4 | §6.3.1 Responder; §6.6 | r29_f_test.go:252; r29_scenarios_test.go:436 |
 | R29-R5 | §6.3.1 Rule E | r29_round6_test.go:141; r29_f_test.go:252 |
 | R29-R6 | §6.3.1 Rule E; §3.4.1 acceptFrom | r29_scenarios_test.go:744 (its "gated iteration"; the test is renamed in step 5); r29_oldcopy_test.go:266 |
