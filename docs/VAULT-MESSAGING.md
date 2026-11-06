@@ -29,7 +29,8 @@ related:
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.87.0: 2026-11-06, release 29 written in one piece from the
-    approved rule list (vettid.org #549 at `bef67dc`; cleanup plan GC
+    approved rule list (vettid.org #549: go at `bef67dc`, with the
+    text-only errata at `201ee12`; cleanup plan GC
     01M6R42066TVG74QBM1C619K5Q, step 3). Replaces the layered 0.86.0 to
     0.86.6 text of §6.3.1 and the `ik` parts of §3.4.1 for release 29
     (vettid.org #548 is closed in its favour). Owner decisions: a, release
@@ -4433,7 +4434,7 @@ P's side under it, so "P never activated it" cannot hold for an honest P.
 Q's own rotations are no evidence. A real second successor also suspends
 by rule C when its link arrives.
 
-A suspension with `ref` = `epoch`, here, above, or by §6.3.1 rule E, shows
+**The neutral feed item.** A suspension with `ref` = `epoch`, here, above, or by §6.3.1 rule E, shows
 not §6.6's feed item but this one, which accuses neither side (NEW, for
 wording approval with the app PRs): "<connection name> or your vault may
 be running from an old copy. The connection is paused. Contact
@@ -4706,7 +4707,9 @@ each recipient Q).
   only as "Activity: device.update_needed", with a detail line telling the
   member to update (§6.3.1); the approved sentence appears only in
   release-29 apps. This is the result of D4's step-3 check, for the
-  owner to accept.
+  owner to accept. Also for the owner: a message the device queued before
+  its app upgraded, with no inner `features`, can raise the notice once
+  for an app that has already upgraded.
 
 **Invariants**, checked after every step of a run of the randomized
 two-sided harness (described in vettid.org #536). I1–I7 are the
@@ -6872,7 +6875,8 @@ yet then, release-29 apps included. The notice is a feed item of the
 new kind **`device.update_needed`** (§10.9; with `device_id` set; priority
 `high`) to the member's app and desktops. A message the device queued
 before its app upgraded, with no inner `features`, can raise the notice
-once for an app that has upgraded; that is accepted. A release-29 app shows it as
+once for an app that has upgraded (§3.4.1 Residuals, for the owner to
+accept). A release-29 app shows it as
 (wording approved by the owner 2026-11-06) "<device name> needs an update
 to keep working with your vault. Update the app." An app from before
 release 29 lists an unknown kind as "Activity: <kind>", never hidden, with
@@ -6908,7 +6912,8 @@ answer awaiting `hs.fin` at the upgrade runs the responder half.
 #### 6.3.2 Release 29 rules and tests (0.87.0)
 
 The rules of release 29 (§6.3.1 and the `ik` parts of §3.4.1) carry the
-IDs of the approved rule list (vettid.org #549 at `bef67dc`; owner go,
+IDs of the approved rule list (vettid.org #549: go at `bef67dc`, errata
+`201ee12`; owner go,
 GC 01M6RABDJ0FY3MZ8TPJ6C19QKR). Each has a test that fails without it;
 "gap" marks one still to write (cleanup plan step 5). Test locations are
 vettid-vault #206 at `e19f99c`, in `vault/` unless prefixed (`V/` is the
@@ -7728,8 +7733,8 @@ peer), audits `connection.fork_suspected` and makes a feed item of
 priority `high` with the text "<connection name> may be running from two
 copies of its data. The connection is paused. Contact <connection
 name> before you connect again." (text approved by the owner
-2026-10-28). (0.86.0) A suspension with `ref` = `epoch` (§3.4.1, the
-paragraph after "Fork by `ctx`"; §6.3.1 rule E) shows §3.4.1's neutral
+2026-10-28). (0.86.0) A suspension with `ref` = `epoch` (§3.4.1 "The neutral
+feed item"; §6.3.1 rule E) shows §3.4.1's neutral
 feed item instead. A single genuine
 restore never triggers it. *Corner case:* a second restore from a backup
 newer than the first named epoch is reported as two copies (an operator
