@@ -35,9 +35,10 @@ changelog:
     `OPENSSL_MODULES`, `SSLKEYLOGFILE`, `XDG_CONFIG_DIRS`,
     `XDG_DATA_HOME`, `XDG_DATA_DIRS`, `ELECTRON_RUN_AS_NODE`,
     `PYTHONWARNINGS`, `LUA_INIT` and the `LUA_INIT_` names, `VIMINIT`,
-    `EXINIT`, `CLASSPATH`, the `NPM_CONFIG_` and `PIP_` names, and on
-    Windows `__COMPAT_LAYER`, `PROGRAMFILES`, `COMMONPROGRAMFILES` and
-    `PROGRAMDATA`, each with the reason. As before, a backstop under the
+    `EXINIT`, `CLASSPATH`, the `NPM_CONFIG_` and `PIP_` names,
+    `__COMPAT_LAYER`, `PROGRAMFILES`, `COMMONPROGRAMFILES` and
+    `PROGRAMDATA` (the last four for every connector, not only on
+    Windows), each with the reason. As before, a backstop under the
     allowlist that holds even for a listed name; not applied to the
     operator's `--run-env` (AGENT-PLAN §4.9). Vault: the same check in
     `item.run` and `leash.item.set`, after release 29
@@ -13687,14 +13688,14 @@ item's settings allow for its task:
   `HTTP_PROXY`,
   `HTTPS_PROXY`, `ALL_PROXY`, `SSL_CERT_FILE`,
   `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE` or
-  `CURL_CA_BUNDLE`; (0.86.4) nor one of these, compared without case on
-  Windows:
+  `CURL_CA_BUNDLE`; (0.86.4) nor one of these:
   - `OPENSSL_CONF`, `OPENSSL_ENGINES`, `OPENSSL_MODULES`: OpenSSL reads
-    the configuration and loads the engine or provider modules they
-    name, as code inside the program;
-  - `SSLKEYLOGFILE`: TLS libraries write the session keys to that file,
-    which decrypts the program's traffic, the secret included when it
-    is sent over TLS;
+    the configuration file the first names, which can load modules
+    itself, and takes engine and provider modules from the folders the
+    others name, as code inside the program;
+  - `SSLKEYLOGFILE`: many TLS libraries and programs write the session
+    keys to that file, which decrypts the program's traffic, the secret
+    included when it is sent over TLS;
   - `XDG_CONFIG_DIRS`, `XDG_DATA_HOME`, `XDG_DATA_DIRS`: like
     `XDG_CONFIG_HOME`, they move where programs read configuration and
     data that can name commands to run;
@@ -13710,11 +13711,13 @@ item's settings allow for its task:
   - names starting with `NPM_CONFIG_` or `PIP_`: npm and pip take any of
     their settings from these, among them the registry or index to
     install from and npm's `script-shell`;
-  - on Windows, `__COMPAT_LAYER`: applies compatibility shims, some of
-    which change which files and libraries a program loads; and
-    `PROGRAMFILES`, `COMMONPROGRAMFILES`, `PROGRAMDATA`: programs find
-    their own components and plugins through them, so another value
-    points them at a folder the agent can write.
+  - `__COMPAT_LAYER`: Windows applies the compatibility shims it names,
+    some of which change which files and libraries a program loads; and
+    `PROGRAMFILES`, `COMMONPROGRAMFILES`, `PROGRAMDATA`: some Windows
+    programs find their own components and plugins through them, so
+    another value points them at a folder the agent can write. These
+    four are refused for every connector, whatever its system, so the
+    vault needs no knowledge of it.
 
   Such a
   list cannot be complete; it is a backstop under the allowlist (an
