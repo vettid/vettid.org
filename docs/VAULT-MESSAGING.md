@@ -31,33 +31,34 @@ changelog:
   - 0.87.1: 2026-11-06, the trust model checking 0.87.0 (cleanup plan GC
     01M6R42066TVG74QBM1C619K5Q, step 4; vettid-vault `r29-oracle`) found
     five problems, and a blind reviewer a sixth. Owner decisions a (GC
-    01M6RJF5NZBS92JEYXJXTWKSKM: re-invite at the upgrade, fix C in
-    0.87.1, D after 29; a, re-enrol: a release-29 vault refuses earlier
-    state; a, one round of fixes after the Opus review). Changes: §6.3.1
-    "Capability and upgrade" becomes "Capability", the upgrade migration
-    is removed, and "No upgrade: release 29 starts clean" is added (a
-    state without `messaging_release` 29 or more, new in §3.3, is not
-    started on any path that opens it, after §12.5's `deleting` check,
-    answered `state_unsupported`, new in §11.4 and in
-    `vault.recovery.open.result`, §11.14.6; staging vaults are re-enrolled, their devices set up again
-    and connections, a service vault's included, invited afresh; staging
-    only, a production upgrade path is required before members). This
-    removes findings A, B and E and 0.87.0's two splits at the upgrade;
-    §3.4.1 "The neutral feed item" loses its pre-29 epoch rule. Finding
-    C: new §3.4.1 "Epochs abandoned while pending, at P's
-    `identity.rotate`" (R29-K9): an epoch Q began and abandoned while
-    pending, later than the epoch P's `identity.rotate` travels under and
-    signed by a link's `old_ik` or an ancestor, suspends if its received
-    flag is set, and is otherwise ended (a later message under it is fork
-    evidence); judged only at `identity.rotate`, never at an `hs.resp` or
-    `hs.fin`. §6.3.1's abandon and rule E text and the Residuals follow.
-    Finding F (a device left on an abandoned epoch with no token) is a
-    stated gap next to D (owner decision a; the 0.87.0 text stays). A copy using an abandoned epoch earlier than P's
-    current one (or before P's `identity.rotate` arrives) is a stated
-    residual (owner decision b: the 16-day keep stays). Finding D: the
-    device exception in §3.4.1
-    Invariants and a note on §15 item 51. §6.3.2: R29-U1 and D1 restated,
-    R29-K9 added.
+    01M6RJF5NZBS92JEYXJXTWKSKM: re-invite at the upgrade, fix C in 0.87.1,
+    D after 29; a, re-enrol: a release-29 vault refuses earlier state; a,
+    one round of fixes after the Opus review; b, the 16-day keep stays and
+    an earlier-epoch copy is a residual; a, F stated as a gap next to D).
+    Changes: §6.3.1 "Capability and upgrade" becomes "Capability", the
+    upgrade migration is removed, and "No upgrade: release 29 starts
+    clean" is added (a state without `messaging_release` 29 or more, new
+    in §3.3, is not started on any path that opens it, after §12.5's
+    `deleting` check, answered `state_unsupported`, new in §11.4 and in
+    `vault.recovery.open.result`, §11.14.6; staging vaults are
+    re-enrolled, their devices set up again and connections, a service
+    vault's included, invited afresh; staging only, a production upgrade
+    path is required before members). This removes findings A, B and E and
+    0.87.0's two splits at the upgrade; §3.4.1 "The neutral feed item"
+    loses its pre-29 epoch rule. Finding C: new §3.4.1 "Epochs abandoned
+    while pending, at P's `identity.rotate`" (R29-K9): an epoch Q began
+    and abandoned while pending, later than the epoch P's
+    `identity.rotate` travels under and signed by a link's `old_ik` or an
+    ancestor, suspends if its received flag is set, and is otherwise ended
+    (a later message under it is fork evidence); judged only at
+    `identity.rotate`, never at an `hs.resp` or `hs.fin`. §6.3.1's abandon
+    and rule E text and the Residuals follow. Finding F (a device left on
+    an abandoned epoch with no token) is a stated gap next to D (owner
+    decision a; the 0.87.0 text stays). A copy using an abandoned epoch
+    earlier than P's current one (or before P's `identity.rotate` arrives)
+    is a stated residual (owner decision b: the 16-day keep stays).
+    Finding D: the device exception in §3.4.1 Invariants and a note on §15
+    item 51. §6.3.2: R29-U1 and D1 restated, R29-K9 added.
   - 0.87.0: 2026-11-06, release 29 written in one piece from the
     approved rule list (vettid.org #549: go at `bef67dc`, with the
     text-only errata at `201ee12`; cleanup plan GC
@@ -4361,7 +4362,7 @@ has already suspended at step 3; an `hs.init` whose `sender` is not its
 | Foreign | refuse (`foreign_sender`) | refuse (`foreign_sender`) | refuse (`foreign_sender`) | refuse (`foreign_sender`) | refuse (`foreign_sender`) | refuse (`foreign_sender`), handshake kept |
 | Current | accept | rule U | accept, tokens by rule T | Table B | Table B | Table B |
 | Earlier, before its cut-off | accept | rule U | accept, tokens by rule T | Table B | Table B | Table B |
-| Earlier, after its cut-off | refuse (`superseded_relay`) | rule U | tokens by rule T only | every link already followed: ignore; else refuse (`superseded_relay`) | refuse (`superseded_relay`) | refuse (`superseded_relay`), handshake kept (S2) |
+| Earlier, after its cut-off | refuse (`superseded_relay`) | rule U | tokens by rule T only | every link already followed: ignore ((0.87.1) R29-K9 is still judged); else refuse (`superseded_relay`) | refuse (`superseded_relay`) | refuse (`superseded_relay`), handshake kept (S2) |
 
 **Table B, identity key** (step 5). Every message that carries an `ik`
 carries its links (S8), so the `ik`
@@ -4374,7 +4375,7 @@ the `hs.init`'s links are applied (§6.6).
 |---|---|---|---|---|
 | Current | follow, then H5; refuse (`ik_rollback`) if a `new_ik` is an ancestor or rejected | answer | accept, then H5 if links were appended | accept (establish) |
 | Reached | — | answer | accept, links appended after `sig_R` verifies, then H5 | accept, links applied, then H5 |
-| Ancestor | every link already followed: ignore | refuse (`ancestor_ik`; a reconnect also `reconnect_refused`, §6.6) | abort (`ancestor_ik`) | after `sig_I` verifies: a fork-evidence answer suspends (H5); else refuse (`ancestor_ik`). An `hs.fin` for an answer Q dropped does not reach this table (below) |
+| Ancestor | every link already followed: ignore ((0.87.1) R29-K9 is still judged) | refuse (`ancestor_ik`; a reconnect also `reconnect_refused`, §6.6) | abort (`ancestor_ik`) | after `sig_I` verifies: a fork-evidence answer suspends (H5); else refuse (`ancestor_ik`). An `hs.fin` for an answer Q dropped does not reach this table (below) |
 | Rejected | refuse (`rejected_ik`) | refuse (`rejected_ik`) | abort (`rejected_ik`) | refuse (`rejected_ik`) |
 | Unknown | refuse (`unknown_ik`) | refuse (`unknown_ik`) | abort (`unknown_ik`) | — |
 
@@ -4416,11 +4417,11 @@ demotion, below) it holds the `identity.rotate` and seals it under the
 next epoch that becomes current, which is later at Q, so the argument
 below still holds. An `hs.resp` names Q's epoch, which can be
 older than P's current one, and links applied at an `hs.fin` travel under
-the new epoch, so neither is used. When Q accepts an `identity.rotate`
-from P under an epoch E, also one whose links are all already followed
+the new epoch, so neither is used. When Q follows or ignores an `identity.rotate`
+from P under an epoch E, that is also one whose links are all already followed
 (Table B's Ancestor "ignore" and Table A's "Earlier, after its cut-off"
 "ignore": the judgement below is still made), then, in the write that
-accepts it, for each of its links, every epoch of P that:
+processes it, for each of its links, every epoch of P that:
 - Q began as initiator and abandoned while pending (never confirmed),
 - is later than E at Q, and
 - has a `sig_R` made by that link's `old_ik` or an ancestor,
@@ -4775,9 +4776,9 @@ each recipient Q).
   later confirmation would close this, but it loses an honest peer's
   messages after an ordinary failed write (the trust model: 21 runs in
   10,000 against 4 for this residual), so release 29 keeps the 16 days.
-  It sits with the exposure before a rotation is seen (the second bullet
-  of these Residuals; §11.14.2), and is closed with the resume-path work
-  after release 29.
+  It is like the exposure before a rotation is seen (the second bullet
+  of these Residuals; §11.14.2), but lasts up to 16 days after Q follows
+  P's link; it is closed with the resume-path work after release 29.
 - (0.87.0) **A copy acting as initiator is not visible** (accepted by the
   owner 2026-11-06). A copy of P from before P's rotation rekeys and sends
   `hs.fin`; Q activates the epoch and sends under it; the real P's
@@ -4861,9 +4862,11 @@ harness's invariants, not the rule IDs `R29-I1`… of §6.3.2:
   when the token lapses afterwards), its rekey from the current epoch may
   never be deposited, while the device stays on the abandoned epoch and
   the vault's keys for that epoch end after 16 days. The pair can split
-  with nothing shown to the member; re-pairing the device ends it (§7.2
-  already says a desktop or agent offline past its token is paired
-  again). F is closed with D in the device work right after release 29.
+  with nothing shown to the member, so I1 and I7 do not hold for that
+  pair. Re-pairing a desktop or agent ends it (§7.2 already says one
+  offline past its token is paired again); the member's app gets a fresh
+  token at every unlock (§7.2), so its rekey is deposited then. F is
+  closed with D in the device work right after release 29.
 
 **The gate** (owner decision O6c). The receiving side is the capability
 `relay_follow`. A vault that implements this subsection lists it in its
@@ -6887,7 +6890,8 @@ epoch abandoned by a link is demoted from the start: messages under it are
 refused (`ancestor_ik`). (0.87.1) An epoch already abandoned can still be
 ended at P's `identity.rotate`, or make Q suspend then (§3.4.1 "Epochs
 abandoned while pending, at P's `identity.rotate`"). `I` keeps an abandoned epoch's id, and accepts a
-reconnect naming it, until a newer epoch is confirmed.
+reconnect naming it, until a newer epoch is confirmed, unless that rule
+has ended it.
 
 After abandoning a rekey's pending epoch (at `B` or for want of a token),
 a connection's vault reconnects naming its current epoch (after a
@@ -7035,8 +7039,9 @@ migration of an earlier release's epochs, handshakes or connections.
   has no marker. At the release an operator step in its runbook removes
   every connection it made before release 29, with its relay
   registrations, auditing each, and the members connect to it again
-  with fresh invitations. Its own check is the service vault's to
-  specify.
+  with fresh invitations. Its own check, and whether it sends members a
+  removal message, are the service vault's to specify; a member's side
+  that receives none stays until the member connects again.
 - **Staging only.** Production has no vaults. The first production
   release with members must come with an upgrade path (§3.4.1
   Residuals).
@@ -7056,7 +7061,7 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 |---|---|---|
 | R29-G1 | §6.3.1 Capability; §10.8 | V/vms/envelope/features_test.go:12 |
 | R29-G2 | §10.8; §10.2 `device.features` | gap: sticky against a later list without it |
-| R29-U1 ((0.87.1) no migration: a state without `messaging_release` 29 or more is refused) | §6.3.1 No upgrade: release 29 starts clean; §3.3; §11.4 | gap: an unlock and a recovery's open of a state without it, or with a smaller value, answer `state_unsupported` and write nothing after the state opens; 29 and 30 open; a state recording `deleting` completes its deletion (§12.5) first; the service vault's clean start is an operator step (its runbook) |
+| R29-U1 ((0.87.1) no migration: a state without `messaging_release` 29 or more is refused) | §6.3.1 No upgrade: release 29 starts clean; §3.3; §11.4; §11.14.6; §12.5 | gap: an unlock and a recovery's open of a state without it, or with a smaller value, answer `state_unsupported` and write nothing after the state opens; 29 and 30 open; a state recording `deleting` completes its deletion (§12.5) first; the service vault's clean start is an operator step (its runbook) |
 | R29-L1 | §6.3.1 Lifetimes | r29_f_test.go:210, :229 |
 | R29-I1 | §6.3.1 Initiator | r29_scenarios_test.go:281; V/vms/handshake/keyring086_test.go:14 |
 | R29-I2 | §6.3.1 Initiator | r29_f_test.go:40, :60, :83; r29_review_test.go:17 |
@@ -7085,7 +7090,7 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-K6 | §3.4.1 The reconnect bound; §6.6 | r29_oldcopy_test.go:724, :778, :803; r29_rr2_test.go:135; r29_round6_test.go:563; gap: the K7 reconnect |
 | R29-K7 (every later epoch signed by the old `ik`; names E) | §3.4.1 Strict F1 | r29_oldcopy_test.go:153, :234; `TestR29RR2OwnCopyNoRKLostReconnectWedges` V/vault/r29_rr2_test.go:38 (flips to "suspended"); gap: both-29 versions |
 | R29-K8 | §3.4.1 Rule C, acceptFrom | r29_review_test.go:223; r29_round6_test.go:302; r29_oldcopy_test.go:296 |
-| R29-K9 ((0.87.1) finding C) | §3.4.1 Epochs abandoned while pending, at P's `identity.rotate` | gap: judged at P's `identity.rotate` only (also one whose links are all followed): a set flag suspends; a clear one ends the epoch and a later message under it suspends; a link first followed from an `hs.resp` naming an older epoch, or applied at an `hs.fin`, judges nothing; honest P that activated the epoch sends `identity.rotate` under it and is not judged |
+| R29-K9 ((0.87.1) finding C) | §3.4.1 Epochs abandoned while pending, at P's `identity.rotate` | gap: judged at P's `identity.rotate` only, in the write that processes it (also one whose links are all followed, by Table B's Ancestor row or Table A's "after its cut-off" row): a set flag suspends; a clear one ends the epoch and a later message under it suspends; a link first followed from an `hs.resp` naming an older epoch, or applied at an `hs.fin`, judges nothing; honest P that activated the epoch sends `identity.rotate` under it and is not judged; each ended epoch is audited `connection.fork_suspected` (`ref` = `epoch`); a reconnect naming an ended epoch is refused, not fork evidence |
 | R29-F1 | §3.4.1 Fork by `ctx` | r29_oldcopy_test.go:153, :296 |
 | R29-F3 | §6.3.1 The received flag; §3.4.1 Epochs after an `ik` link, Strict F1 | gap: set by `hs.confirm` alone; a handshake message under E0 does not set E1's flag; a lost or delivered `hs.fin` leaves it clear; P rekeys E0→E1, sends `hs.fin`, rotates before any `hs.confirm` and sends `identity.rotate` under E0: Q ends demoted and reconnecting, not suspended |
 | R29-D1 | §6.3.1 Devices and agents; §6.7 | gap on the vault side ((0.87.1) finding F is a stated gap, §3.4.1 Invariants) |
@@ -7825,7 +7830,9 @@ destroyed, and after strict F1 the earlier epoch E (§3.4.1 "Strict F1"). A vaul
 whatever the trigger; each is bounded (§3.4.1 "The reconnect bound"). On
 every connection the responder also accepts its own pending epoch, its
 confirmed epoch while that is not current (§6.3.1), and an epoch it
-abandoned while pending, until a newer one is confirmed (§6.3.1). While
+abandoned while pending, until a newer one is confirmed (§6.3.1), unless
+§3.4.1 "Epochs abandoned while pending, at P's `identity.rotate`" has
+ended it. While
 its own reconnect is pending it accepts only that pending epoch. A side
 that has sent `hs.fin` for its own reconnect refuses its earlier epoch
 (the crossing rules below, where "its last epoch has moved on" means
@@ -21701,7 +21708,10 @@ binding and replay rules of §11.3 and §11.6 and then, **in this order**:
    changed after step 2, or the state does not decrypt under the DEK the
    `opener` gave, the answer is `stored_mismatch` with the attempt used
    and ended by the success record, and nothing changes); loads the state (with `state.state_seq >=
-   header.state_seq`, §13.2); opens the vault's backup copy of the
+   header.state_seq`, §13.2; (0.87.1) then §12.5's `deleting` check, and
+   then §6.3.1 "No upgrade: release 29 starts clean": a state without
+   `messaging_release` 29 or more is answered `state_unsupported` and
+   nothing further is written); opens the vault's backup copy of the
    credential with the same password (§3.5.6); and then, in the order of
    writes of §11.14.2: rotates the CEK and re-keys every critical item
    (§10.7); makes the phone the vault's app and the credential's holder;
@@ -21796,7 +21806,7 @@ at register and padded to 4,096 bytes:
   | `ok`, `wrong` | `true` |
   | `quiet`, `wait`, `closed`, `exhausted` | `false` from step 3, or from a `Spend` that took nothing; `true` when step 4b refused to test a spent attempt |
   | `stored_mismatch`, `vault_missing` | `false` before the spend (step 2; a stored state that cannot be read); `true` after it (step 6: the state, the keys or the backup copy cannot be opened) |
-| `state_unsupported` (0.87.1) | `true`: the state opens only at step 6, after the spend; it lacks `messaging_release` 29 or more (§6.3.1 "No upgrade: release 29 starts clean"). The app says "This vault was made by an earlier version of VettID and must be set up again." (NEW, for wording approval with the app PRs) |
+  | `state_unsupported` (0.87.1) | `true`: the state opens only at step 6, after the spend; it lacks `messaging_release` 29 or more (§6.3.1 "No upgrade: release 29 starts clean"). The app says "This vault was made by an earlier version of VettID and must be set up again." (NEW, for wording approval with the app PRs) |
   | `retry` | `false` from step 3b; `true` whenever the spend happened: the run ended at any point after it, before or after step 1 of the order of writes was stored, including a failure to register at the relay or to store steps 2 and 3 (the entry may have been right) |
   | every other code (`wrong_again`, `busy`, `counter_unavailable`, `not_armed`, `no_recovery`, `expired`, `attestation`, `manifest`, `wrong_release`, `bad_request`, `device_secret`) | `false` |
 
@@ -27587,6 +27597,9 @@ Follow-ups:
     finding D); owner decision a (GC 01M6RJF5NZBS92JEYXJXTWKSKM) keeps it
     a stated gap of release 29, the device exception of §3.4.1
     Invariants, scheduled right after release 29 with the resume plan.
+    Finding F (a device left on an abandoned epoch when the vault holds
+    no valid token for it) is stated with it and closed in the same
+    work.
 52. **`own_copy` and a pre-rotation fork (0.86.6; decided (a) by the
     owner 2026-11-06, GC 01M6QB8A3P0S7H2Q86QS3EAV2P; closed in 0.87.0).**
     *Closed: 0.87.0 removes the `own_copy` exception altogether and keeps
