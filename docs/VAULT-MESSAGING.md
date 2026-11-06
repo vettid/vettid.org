@@ -6896,7 +6896,7 @@ history), and the mailbox does not keep order (§8.4), so `R`
   matched (§15 item 17). `prk` and `th` in the derivation bind the code
   to both identities, both KEM exchanges and this handshake.
 
-#### 6.3.1 Lifetimes and activation on confirmation (0.87.0, 0.87.1, 0.88.1)
+#### 6.3.1 Lifetimes and activation on confirmation (0.87.0, 0.87.1, 0.88.1, 0.88.2)
 
 For purposes `rekey` and `reconnect`, between a vault and its connections
 and between a vault and its devices and agents. A first contact (§6.4) and
@@ -7154,7 +7154,7 @@ migration of an earlier release's epochs, handshakes or connections.
   release with members must come with an upgrade path (§3.4.1
   Residuals).
 
-#### 6.3.2 Release 29 rules and tests (0.87.0, 0.87.1, 0.88.1)
+#### 6.3.2 Release 29 rules and tests (0.87.0, 0.87.1, 0.88.1, 0.88.2)
 
 The rules of release 29 (§6.3.1 and the `ik` parts of §3.4.1) carry the
 IDs of the approved rule list (vettid.org #549: go at `bef67dc`, errata
@@ -7187,7 +7187,7 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-X1 | §6.3.1 Crossing | r29_scenarios_test.go:374 |
 | R29-X2 | §6.5; §6.6 | r29_scenarios_test.go:536; r29_round6_test.go:274 |
 | R29-X3 | §6.3.1 Rule J | r29_scenarios_test.go:336 |
-| R29-X4 | §6.6 Accepting `ctx`; §3.4.1 After a demotion of the current epoch | r29_rules_test.go:88; r29_review4_test.go:300; r29_oldcopy_test.go:581 |
+| R29-X4 ((0.88.2) and the links of a refused reconnect) | §6.6 Accepting `ctx`; §3.4.1 After a demotion of the current epoch | r29_rules_test.go:88; r29_review4_test.go:300; r29_oldcopy_test.go:581; r29_review4_test.go:568 (the links of a refused reconnect) |
 | R29-X5 | §6.6 Accepting `ctx` | r29_f_test.go:252 |
 | R29-X6 | §6.2 | r29_rules_test.go:111 |
 | R29-K1 | §3.4.1 S8 | r29_scenarios_test.go:470; r29_review_test.go:241; V/vms/handshake/keyring086_test.go:82; V/client/rotate086_test.go:18 |
@@ -7952,20 +7952,37 @@ this connection that the responder itself recorded, and the
 authentication below is unchanged.
 
 (0.88.2) **The links of a refused reconnect** (owner decision a, GC
-01M6S5B3N0HF7CM2ZQ8AX9V452). A reconnect refused only because the
-responder's own reconnect is pending, or because it has sent `hs.fin` for
-its own reconnect, still has its identity links applied, in the write
-that refuses it: the links its `hs.init` carries that resolve from the
-stored `ik` (Table B "Reached"), each checked by rule C, are followed as
-an `identity.rotate`'s would be, with H5, "Pending epochs at a link",
-"Epochs after an `ik` link" and "Strict F1" (§3.4.1). The links carry
-their own signatures (§3.4), so whoever deposited the `hs.init`, following
-them follows the peer's own rotation. Nothing is answered, and R29-K9 is
-not judged (it needs P's `identity.rotate`). Without this, two vaults
-that rotate several times in quick succession while a key change between
-them is in flight can each refuse the other's reconnect and never see the
-links that would let either one move on, until both connections end
-`stale` (found by the release 29 review round, about 8 runs in 5,000).
+01M6S5B3N0HF7CM2ZQ8AX9V452). A reconnect `hs.init` that Q refuses only
+because Q's own reconnect with P is pending (from Q's `hs.fin` until that
+epoch is confirmed or abandoned, §6.3.1) still has its identity links
+applied, in the write that refuses it. "Only because" means it has passed,
+in order: the replay check; the collect `sender` check and the 0.72.1
+second-successor check (below); `acceptFrom` steps 1–5 (not suspended,
+not foreign, rule C, Table A current or earlier before its cut-off,
+Table B Current or Reached); the Authentication bullets (below), with
+the whole chain of links resolving from the stored `ik` to `from.ik` and
+`from.kem` equal to its last `new_kem`; the replaced-line rule does not
+apply; and its `ctx` would otherwise be accepted under the rules above.
+Then each of those links is followed as an `identity.rotate`'s would be:
+H5, "Pending epochs at a link", "Epochs after an `ik` link" (with this
+`hs.init` as position x) and "Strict F1", taking as E the epoch its `ctx`
+names (§3.4.1). A link Table B would refuse (`ik_rollback`, `rejected_ik`)
+makes Q follow none of them. Nothing is answered (`reconnect_refused`).
+Not run here: R29-K9 (it needs P's `identity.rotate`), so an epoch
+abandoned here is demoted from the start rather than ended; and "Fork by
+`ctx`" (§3.4.1), whose evidence needs `sig_I`, which only an `hs.fin`
+carries. The `ctx` is not authenticated before `hs.fin`, so the E it
+gives Strict F1 is only claimed; an honest P names its current epoch,
+and any epoch Q holds that is later than it and signed by the link's
+`old_ik` was either never activated by P or already brought in its link,
+so no honest pair is suspended or demoted by it; only a copy taken after
+P's first write of the rotation could choose it, and that copy already
+counts as P (Residuals). The links carry their own signatures (§3.4).
+Without this rule, two vaults that rotate several times in quick
+succession while a key change between them is in flight can each refuse
+the other's reconnect and never see the links that would let either one
+move on, until both connections end `stale` (found by the release 29
+review round, about 8 runs in 5,000).
 
 **Told to the member** (0.72.0). Accepting an older `ctx` is audited
 `connection.restored_reconnect` (`connection_id`, `ref` = the named
@@ -7986,7 +8003,7 @@ at `hs.fin`. Traffic the restored peer sent before its crash and that
 arrives late (the relay holds up to 14 days, unordered and redelivered)
 has an earlier `ts` and is processed normally. A reconnect is judged at
 `hs.fin`: the vault answers the `hs.init`, and when `hs.fin` verifies it
-suspends instead of activating (no state changes before `sig_I`, below).
+suspends instead of activating (no state changes before `sig_I`, below, except as "The links of a refused reconnect" says).
 **Precedence:** a `ctx` naming a replaced-line epoch is never accepted as
 a restore; it is a fork sign, subject to the `ts` rule (one whose inner
 `ts` is not later than the accepted reconnect's is refused,
@@ -8023,7 +8040,8 @@ changes **no state** (tokens, rotation chain, active or stale) until
 `sig_I` verifies at `hs.fin`; the answer `hs.resp` is the only thing sent
 before. A restored responder loses its marks with the state it
 restores, which is why the deferral to `hs.fin` matters. (0.72.1, owner
-decision 2026-10-28) **One exception:** a statement in the `hs.init`'s
+decision 2026-10-28) **Two exceptions** ((0.88.2) the second is "The
+links of a refused reconnect", above). **One:** a statement in the `hs.init`'s
 `rotations` that is valid (§3.4, both signatures verify) and whose
 `old_ik` already has an accepted successor in the receiver's stored
 chain, with a different `new_ik`, suspends the connection at once under
