@@ -4390,9 +4390,10 @@ under an earlier epoch, below), until a new epoch is current:
   When the connection becomes `stale`, is removed or is replaced, the
   held messages end with it, without an audit entry each (the
   connection's own audit entry records the end).
-- Q starts **the reconnect after a demotion**. It names the newest epoch
-  of P that has been current at Q and is neither demoted nor destroyed;
-  if there is none, the connection becomes `stale` as the reconnect
+- Q starts **the reconnect after a demotion**. After strict F1 it names
+  E (below). After a demotion by position it names the newest epoch of P
+  that has been current at Q and is neither demoted nor destroyed; if
+  there is none, the connection becomes `stale` as the reconnect
   bound says. It is not a rekey: the demoted epoch was never P's, so P
   cannot open a rekey in session mode under it, and sealed mode refuses
   the rekey purpose (§6.2). Q starts it only while it has no current
@@ -4406,10 +4407,12 @@ vault's epochs (§15 item 51).
 
 **Strict F1, a link under an earlier epoch.** A link carried under an
 epoch E of P, while Q's current epoch is later than E and signed by the
-link's `old_ik`, shows that P never activated that later epoch, or that a
-copy did. If the later epoch's received flag is set, Q suspends as above.
-Otherwise Q demotes it and reconnects naming E, which P accepts as its
-last (§6.6).
+link's `old_ik`, shows that P never activated the epochs after E signed
+by that key, or that a copy did. Q takes together **every** epoch of P
+after E whose P-side signer is the link's `old_ik` or an ancestor. If
+**any** of them has its received flag set, Q suspends as above. Otherwise
+Q demotes all of them and reconnects naming E, which P accepts as its
+last (§6.6). (So Q never names an epoch P never had.)
 
 **The reconnect bound.** Every reconnect Q starts with P (after a
 demotion, by strict F1, after an abandoned pending epoch, §6.3.1, or for
@@ -4706,10 +4709,10 @@ each recipient Q).
 - (0.87.0) **An app from before release 29** shows `device.update_needed`
   only as "Activity: device.update_needed", with a detail line telling the
   member to update (§6.3.1); the approved sentence appears only in
-  release-29 apps. This is the result of D4's step-3 check, for the
-  owner to accept. Also for the owner: a message the device queued before
-  its app upgraded, with no inner `features`, can raise the notice once
-  for an app that has already upgraded.
+  release-29 apps. Also: a message the device queued before its app
+  upgraded, with no inner `features`, can raise the notice once for an app
+  that has already upgraded. Both were found by D4's step-3 check and
+  accepted by the owner 2026-11-06, GC 01M6RBRZ9EENKJTY94KDYD045Q.
 
 **Invariants**, checked after every step of a run of the randomized
 two-sided harness (described in vettid.org #536). I1–I7 are the
@@ -6875,8 +6878,7 @@ yet then, release-29 apps included. The notice is a feed item of the
 new kind **`device.update_needed`** (§10.9; with `device_id` set; priority
 `high`) to the member's app and desktops. A message the device queued
 before its app upgraded, with no inner `features`, can raise the notice
-once for an app that has upgraded (§3.4.1 Residuals, for the owner to
-accept). A release-29 app shows it as
+once for an app that has upgraded (§3.4.1 Residuals; accepted by the owner 2026-11-06, GC 01M6RBRZ9EENKJTY94KDYD045Q). A release-29 app shows it as
 (wording approved by the owner 2026-11-06) "<device name> needs an update
 to keep working with your vault. Update the app." An app from before
 release 29 lists an unknown kind as "Activity: <kind>", never hidden, with
@@ -6887,8 +6889,8 @@ on `guide` items): the member sees the generic row and notification
 line for an unknown kind, "A newer kind of notification. Update VettID to
 see more." (in vettid-android since #99, `6263b0be`, 2026-10-09, and in
 vettid-ios since #102, `c7fb8cc9`, 2026-10-20, so every test build has it). The owner's approved sentence
-appears only in release-29 apps. That is visible. This is the result of
-D4's step-3 check, for the owner to accept (§3.4.1 Residuals).
+appears only in release-29 apps. The member is still told to update, so
+the notice is visible (accepted by the owner 2026-11-06, GC 01M6RBRZ9EENKJTY94KDYD045Q; §3.4.1 Residuals).
 
 **Capability and upgrade.** A side that implements this subsection
 advertises the capability **`hs_confirm`** as it advertises `relay_follow`
@@ -6899,7 +6901,9 @@ once seen it stays. It is advertised only: no rule of this subsection
 depends on seeing it, except the notice above. At the first load under
 release 29, each connection's and device's stored epoch becomes its only
 epoch record: confirmed is current, its signer is the stored `ik` (unused
-for a device, which rotates no `ik`), and its received flag is clear. An outgoing handshake in flight then is restored
+for a device, which rotates no `ik`), and its received flag is clear. A
+device does the same with its own record of its vault when its app first
+runs release 29: its confirmed epoch is its current one. An outgoing handshake in flight then is restored
 under these rules if it can be; otherwise it is cleaned up as an aborted
 one (§6.4 Rules, "An outgoing handshake that cannot be restored":
 audited `handshake_not_restored`, its `hs.init` not sent, the tokens it
@@ -6951,7 +6955,7 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-K4 | §3.4.1 Epochs after an `ik` link | r29_oldcopy_test.go:205; r29_round6_test.go:546; gap: the flag-set case |
 | R29-K5 | §3.4.1 After a demotion of the current epoch | r29_oldcopy_test.go:431, :515, :534; r29_review_test.go:65; r29_round6_test.go:161, :195 |
 | R29-K6 | §3.4.1 The reconnect bound; §6.6 | r29_oldcopy_test.go:724, :778, :803; r29_rr2_test.go:135; r29_round6_test.go:563; gap: the K7 reconnect |
-| R29-K7 | §3.4.1 Strict F1 | r29_oldcopy_test.go:153, :234; `TestR29RR2OwnCopyNoRKLostReconnectWedges` V/vault/r29_rr2_test.go:38 (flips to "suspended"); gap: both-29 versions |
+| R29-K7 (every later epoch signed by the old `ik`; names E) | §3.4.1 Strict F1 | r29_oldcopy_test.go:153, :234; `TestR29RR2OwnCopyNoRKLostReconnectWedges` V/vault/r29_rr2_test.go:38 (flips to "suspended"); gap: both-29 versions |
 | R29-K8 | §3.4.1 Rule C, acceptFrom | r29_review_test.go:223; r29_round6_test.go:302; r29_oldcopy_test.go:296 |
 | R29-F1 | §3.4.1 Fork by `ctx` | r29_oldcopy_test.go:153, :296 |
 | R29-F3 | §6.3.1 The received flag; §3.4.1 Epochs after an `ik` link, Strict F1 | gap: set by `hs.confirm` alone; a handshake message under E0 does not set E1's flag; a lost or delivered `hs.fin` leaves it clear; P rekeys E0→E1, sends `hs.fin`, rotates before any `hs.confirm` and sends `identity.rotate` under E0: Q ends demoted and reconnecting, not suspended |
@@ -7686,9 +7690,9 @@ current epoch or any epoch in that history. On every other connection
 equal the responder's last epoch, as before. (0.87.0) "Last epoch"
 means the current epoch. A reconnect names its initiator's current
 epoch, never a pending one, with one exception: after a demotion
-(§3.4.1 "After a demotion of the current epoch") it names the newest epoch that has
-been current and is neither demoted nor destroyed, and after strict F1
-the earlier epoch E. A vault runs one reconnect at a time per peer,
+by position (§3.4.1 "After a demotion of the current epoch") it names
+the newest epoch that has been current and is neither demoted nor
+destroyed, and after strict F1 the earlier epoch E (§3.4.1 "Strict F1"). A vault runs one reconnect at a time per peer,
 whatever the trigger; each is bounded (§3.4.1 "The reconnect bound"). On
 every connection the responder also accepts its own pending epoch, its
 confirmed epoch while that is not current (§6.3.1), and an epoch it
