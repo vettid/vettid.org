@@ -1,8 +1,8 @@
 ---
 title: RELEASE-UPDATES
 status: draft
-version: 0.3.3
-date: 2026-10-12
+version: 0.3.4
+date: 2026-11-07
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-PLAN.md (D1 re-sealing per release, D3 reproducible builds)
@@ -11,6 +11,16 @@ related:
   - ANDROID-PLAN.md (0.1.37) §4 "Vault update", "What's new" (the app's side of §2)
   - ARCHITECTURE.md
 changelog:
+  - 0.3.4: owner decision a, 2026-11-07 (Ground Control thread
+    01M6SQ6VMNMB0C2CRPNZYNWKBB): on the unlock screen the PIN comes
+    first, and the release offer is a short notice with the release
+    number, the security line and the fingerprint; What's new is one
+    tap away, and approving there does not require opening it (§2 step
+    2). The update screen is unchanged. ANDROID-PLAN 0.1.122, IOS-PLAN
+    0.1.65. VAULT-MESSAGING §13's out-of-scope line ("after being shown
+    its release number, notes and PCR0") and §11.10.3 ("It shows the
+    release number, the notes, and a fingerprint") follow in its next
+    erratum
   - 0.3.3: `related` brought up to date (VAULT-MESSAGING 0.27.4,
     VAULT-RELEASES 0.1.16, ANDROID-PLAN 0.1.37); no other change
   - 0.3.2: as built (vettid.org #224, MEMBER-API 2.4.2; approved by
@@ -85,13 +95,21 @@ manifest.
    runs alongside the old ones.
 2. The app notices the newer release in the manifest and offers it: as
    a banner and a notification, in Settings, and the next time you
-   unlock your vault with your PIN. Before you approve, it shows:
+   unlock your vault with your PIN. On the update screen, before you
+   approve, it shows:
    - the release number;
    - **What's new in release N**: the release's summary, its list of
      changes and whether it fixes a security problem, from the release
      log (§5), with a link to the full release notes;
    - a fingerprint of the release's PCR0, which you (or anyone) can compare
      with an independent rebuild.
+
+   (0.3.4) On the update screen all of this is shown in full. On the
+   unlock screen your PIN comes first, and the offer is a short notice:
+   the release number, the security line ("No security fix", "Security
+   fix: update recommended" or "Security fix: update urgently") and the
+   fingerprint, with What's new one tap away. Approving there does not
+   require opening it.
 
    What's new is there so that you know what is changing. It is not what
    protects your vault: that is the signed manifest and the fingerprint.
