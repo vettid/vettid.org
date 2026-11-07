@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.64
-date: 2026-11-05
+version: 0.1.65
+date: 2026-11-07
 changelog:
+  - 0.1.65: erratum, 2026-11-07 (ANDROID-PLAN 0.1.122, RELEASE-UPDATES 0.3.4; owner decision a). The unlock screen's release offer follows ANDROID-PLAN §4 "What's new": PIN first, a compact notice with the security line and the fingerprint, What's new one tap away in a sheet, approval not gated on opening it.
   - 0.1.64: erratum, 2026-11-05 (ANDROID-PLAN 0.1.121, VAULT-MESSAGING 0.85.2; owner decisions a and a/a). The iPhone's transfer-in follows ANDROID-PLAN §4 "Transfer (new phone)": past the 11-minute deadline it collects for the settlement window (about 90 s) in the background, never cancels its own collect, retries failed collects, ends a rejection as rejected and hides the comparison code meanwhile.
   - 0.1.63: erratum, 2026-11-05 (ANDROID-PLAN 0.1.120, VAULT-MESSAGING
     0.84.1). §6.6: what holds the daily check back, the lead's reading
