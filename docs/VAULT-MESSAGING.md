@@ -54,8 +54,10 @@ changelog:
     pinned to the same ik until one hs.fin verifies (no order judged), at
     most 4; Fork by ctx also skips an epoch demoted with its flag clear;
     the rapid-rotation residual covers 3 or more rotations; F's losses can
-    outlast F; the copy-as-initiator residual covers late processing; two
-    further old-copy cases are stated.
+    outlast F; a flag set on a demoted epoch is judged whenever it is set,
+    so a copy acting as initiator that sends anything but `hs.fin` is
+    caught even when processed late (owner decision a, GC
+    01M6SQNDPRKRMEXQFA7XFMGACH); two further old-copy cases are stated.
     §3.4.1 Residuals: rapid rotations can exhaust the reconnect token
     (owner decision a, GC 01M6S92FATG7EWNX5KZGXG277W).
     §6.3.2: the test locations at vettid-vault #206 `8647aa6`, where every
@@ -4465,6 +4467,13 @@ P's: P's side made it with a key P had already replaced.
   (if it was), Q audits `connection.fork_suspected` (`ref` = `epoch`,
   with no feed item and no suspension), and Q refuses messages under it
   deposited after x (`ancestor_ik`).
+- (0.88.2, owner decision a, GC 01M6SQNDPRKRMEXQFA7XFMGACH) **The flag is
+  judged whenever it is set.** A message Q accepts under an epoch demoted
+  with its flag clear (here or by "Strict F1", below; for example one
+  deposited before x and processed after the demotion), and that would
+  set the flag, makes Q suspend as in the first case: an honest P never
+  sends a flag-setting message under such an epoch (only `hs.fin`, which
+  sets none), so P's side using it is a copy.
 
 **Pending epochs at a link.** Following a link also abandons Q's pending
 epoch with P (§6.3.1) whose `sig_R` was made by the link's `old_ik` (P
@@ -4556,7 +4565,9 @@ by that key, or that a copy did. Q takes together **every** epoch of P
 after E whose P-side signer is the link's `old_ik` or an ancestor. If
 **any** of them has its received flag set, Q suspends as above. Otherwise
 Q demotes all of them and reconnects naming E, which P accepts as its
-last (§6.6). (So Q never names an epoch P never had.)
+last (§6.6). (So Q never names an epoch P never had.) (0.88.2) A flag
+set on one of them later still suspends ("The flag is judged whenever it
+is set", above).
 
 **The reconnect bound.** Every reconnect Q starts with P (after a
 demotion, by strict F1, after an abandoned pending epoch, §6.3.1, or for
@@ -4921,11 +4932,8 @@ each recipient Q).
   with an audit entry and reconnects: no suspension and no feed item, and
   what Q sent under that epoch before the link may have been read by the
   copy. A copy that also sent anything else under it sets the flag and
-  is caught, (0.88.2) unless those messages, deposited before P's link,
-  are processed only after strict F1 has demoted the epoch: the flag is
-  then set too late, and nothing judges the epoch again (found by the
-  release 29 search; owner decision a, GC 01M6SPZ1QXHR5G7DRR96CHW17P).
-  That copy is not visible either. The exposure is the one before a rotation is seen (the
+  is caught ((0.88.2) also when its messages are processed only after the
+  demotion: "The flag is judged whenever it is set"). The exposure is the one before a rotation is seen (the
   second bullet of these Residuals; §11.14.2): an old copy can make any
   handshake as P.
 - (0.88.2) **Two old-copy cases the release 29 search found** (owner
