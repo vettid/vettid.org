@@ -58,6 +58,11 @@ changelog:
     so a copy acting as initiator that sends anything but `hs.fin` is
     caught even when processed late (owner decision a, GC
     01M6SQNDPRKRMEXQFA7XFMGACH); two further old-copy cases are stated.
+    §8.6: between two vaults, `token_revoked` on a standing token ends
+    that token only; with no other valid token the vault reconnects
+    under the reconnect bound, instead of ending the connection (owner
+    decision a, GC 01M6SRQ1B7NM0Q00G0CEGHFES8; found by comparing the
+    trust model with the vault code).
     §3.4.1 Residuals: rapid rotations can exhaust the reconnect token
     (owner decision a, GC 01M6S92FATG7EWNX5KZGXG277W).
     §6.3.2: the test locations at vettid-vault #206 `8647aa6`, where every
@@ -9410,7 +9415,7 @@ How each error is handled:
 | Error | Handling |
 |---|---|
 | `token_expired` | Refresh the token, or reconnect (§6.6). |
-| `token_revoked` | Terminal. Stop sending to that mailbox (0.83.0: for a retried open-token `hs.init`, see `token_used`). |
+| `token_revoked` | Terminal. Stop sending to that mailbox (0.83.0: for a retried open-token `hs.init`, see `token_used`). (0.88.2, owner decision a, GC 01M6SRQ1B7NM0Q00G0CEGHFES8) **Between two vaults**, for a deposit to a connection with a standing token (one held, or one an `hs.init` or `hs.resp` carried): the answer ends **that token only**, not the connection. The vault drops the token and never uses it again; the entry waits in the outbox for a valid token. If the vault holds no other valid standing token for the peer, it is in the "no valid standing token" case: a pending rekey is abandoned (§6.3.1), and the vault reconnects (§6.6), bounded by §3.4.1 "The reconnect bound"; a reconnect's own `hs.init` answered `token_revoked` is a failed try there. Honest pairs reach this when a peer revokes a token in flight (S5 at its rotation, H5, an abandoned pending epoch), so it is not a sign of an end. It revives no revoked token, and a copy gains nothing by it: the reconnect needs the reconnect token and is authenticated as any other. Toward a device's own vault, and S9's relay-key case, as before. |
 | `token_used` | The open token is already spent. Restart first contact; except that (0.83.0) when the client retried its own `hs.init` with that token after a lost or failed answer, `token_used` and `token_revoked` both mean the first attempt may have been delivered: it waits for `hs.resp` until the token's `exp` plus 60 s, and restarts first contact only then. For a pairing or transfer this is at most the link's 10 minutes; a vault's accepted connection request stays `waiting` (§6.4) until then, and its member can decline it. |
 | `mailbox_unknown` | Re-resolve the address, or mark the connection `stale`. |
 | `quota_exceeded` (0.32.0) | Not retried at once, and handled by what is used up (RELAY-PROTOCOL 0.9.2 §7.1 `quota`): **`token`**: a peer vault MAY ask for a fresh token (§7.2) and retries once with it; **`mailbox` or `mailbox_blobs` or `sender_blobs`**: a fresh token does not help; a deposit waits in the outbox and is retried with backoff, and a blob upload is not retried: the vault waits until the recipient asks for it (§10.5.1 "Delivery to the peer"). A relay that sends no `quota` is read as `token` the first time and as the mailbox after a fresh token. A device does not upload again on its own: it tells the member and retries later. |
