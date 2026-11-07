@@ -58,6 +58,8 @@ changelog:
     so a copy acting as initiator that sends anything but `hs.fin` is
     caught even when processed late (owner decision a, GC
     01M6SQNDPRKRMEXQFA7XFMGACH); two further old-copy cases are stated.
+    "Strict F1" says its demotion is by position (x = the link's
+    message), as "Epochs after an `ik` link" does.
     §8.6: between two vaults, `token_revoked` on a standing token ends
     that token only; with no other valid token the vault reconnects
     under the reconnect bound, instead of ending the connection (owner
@@ -4570,9 +4572,14 @@ by that key, or that a copy did. Q takes together **every** epoch of P
 after E whose P-side signer is the link's `old_ik` or an ancestor. If
 **any** of them has its received flag set, Q suspends as above. Otherwise
 Q demotes all of them and reconnects naming E, which P accepts as its
-last (§6.6). (So Q never names an epoch P never had.) (0.88.2) A flag
-set on one of them later still suspends ("The flag is judged whenever it
-is set", above).
+last (§6.6). (So Q never names an epoch P never had.) (0.88.2) The
+demotion is by position, as in "Epochs after an `ik` link": x is the
+position of the message that carries the link; a message under one of
+these epochs deposited after x is refused (`ancestor_ik`), and one
+deposited before x, if Q processes it only after the demotion, is
+accepted and judged: if it would set the flag, Q suspends ("The flag is
+judged whenever it is set", above). (Until 0.88.2 the text did not say
+whether this demotion was by position or from the start.)
 
 **The reconnect bound.** Every reconnect Q starts with P (after a
 demotion, by strict F1, after an abandoned pending epoch, §6.3.1, or for
