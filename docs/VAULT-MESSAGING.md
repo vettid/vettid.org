@@ -49,6 +49,13 @@ changelog:
     pending (owner decision a, GC 01M6SEMS129B3R1QGQ49063G5P): it caused a
     false suspension between honest vaults in the trust model's
     rotation-burst search.
+    From the full release 29 search (owner decision a, GC
+    01M6SPZ1QXHR5G7DRR96CHW17P): H5 keeps every answer to P's reconnects
+    pinned to the same ik until one hs.fin verifies (no order judged), at
+    most 4; Fork by ctx also skips an epoch demoted with its flag clear;
+    the rapid-rotation residual covers 3 or more rotations; F's losses can
+    outlast F; the copy-as-initiator residual covers late processing; two
+    further old-copy cases are stated.
     §3.4.1 Residuals: rapid rotations can exhaust the reconnect token
     (owner decision a, GC 01M6S92FATG7EWNX5KZGXG277W).
     §6.3.2: the test locations at vettid-vault #206 `8647aa6`, where every
@@ -4578,7 +4585,11 @@ began and abandoned while pending never became current and is skipped:
 an honest P may never have activated it (Q's own rotation, S5, abandons
 it), so it is no evidence. An old copy that used such an epoch is
 handled by R29-K9 and the Residuals ("A copy using an epoch Q abandoned
-while pending, outside R29-K9").
+while pending, outside R29-K9"). (0.88.2, owner decision a, GC
+01M6SPZ1QXHR5G7DRR96CHW17P) So is an epoch Q demoted ("Epochs after an
+`ik` link", "Strict F1") whose received flag is clear: P's side never
+used it, so it is no evidence either; one whose flag is set made Q
+suspend when it was demoted.
 Q's own rotations are no evidence. A real second successor also suspends
 by rule C when its link arrives.
 
@@ -4684,9 +4695,18 @@ initiator starts again (S5). A restarted
 reconnect spends one of the reconnect token's 4 deposits (§6.6; the
 relay cannot tell a restart), at most once per change of the current
 `ik`; a peer that rotated sends a fresh reconnect token in its own
-restarted reconnect (S5). A new reconnect `hs.init` from P that Q answers
-also ends Q's earlier answer to P's reconnect: it is dropped and its
-tokens revoked. **Exempt:** an answer that is fork evidence (a reconnect
+restarted reconnect (S5). (0.88.2, owner decision a, GC
+01M6SPZ1QXHR5G7DRR96CHW17P) A new reconnect `hs.init` from P that Q
+answers does **not** end Q's earlier answer to P's reconnect pinned to
+the same `ik`: Q keeps both, the first `hs.fin` whose `sig_I` verifies
+is established ("A verified `hs.fin` comes first", §6.6), and the
+others are dropped in that write with their tokens revoked. No order
+between the answers is judged: neither arrival order (the relay
+reorders) nor any time the sender sets. Q keeps at most 4 such answers
+per peer (one per deposit of the reconnect token, §6.6), dropping the
+oldest beyond that. (Until 0.88.2 a new answer ended the earlier one; a
+reconnect delivered late then ended the answer to P's newer one, whose
+`hs.fin` found nothing, and the pair ended `stale`.) **Exempt:** an answer that is fork evidence (a reconnect
 naming a replaced-line epoch, §6.6 "Fork detection") is kept, and its
 `hs.fin`, if `sig_I` verifies under the pinned key, suspends.
 
@@ -4879,9 +4899,10 @@ each recipient Q).
   reconnect naming the epoch, which `I` accepts.
 - (0.88.2) **Rapid rotations exhaust the reconnect token** (accepted by
   the owner 2026-11-06, decision a, GC 01M6S92FATG7EWNX5KZGXG277W). A
-  reconnect token allows 4 deposits (§6.6). When a vault rotates 4 or
-  more times in quick succession while a key change with a peer is in
-  flight, each rotation restarts its reconnect (H5), and a refused
+  reconnect token allows 4 deposits (§6.6). When a vault rotates
+  repeatedly in quick succession ((0.88.2, owner decision a, GC
+  01M6SPZ1QXHR5G7DRR96CHW17P) 3 or more times, for example within an
+  hour) while a key change with a peer is in flight, each rotation restarts its reconnect (H5), and a refused
   reconnect's fresh tokens are not taken ("The links of a refused
   reconnect", §6.6), so the token can run out: the relay answers
   `quota_exceeded` and the connection becomes `stale` ("The reconnect
@@ -4890,7 +4911,7 @@ each recipient Q).
   listed one by one (above, "After a demotion of the current epoch");
   showing the member which messages were not delivered is post-29 work.
   In the trust model with each vault rotating 4 to 6 times at once, about
-  57 runs in 10,000 end this way; in ordinary runs, none.
+  57 runs in 10,000 end this way; in ordinary runs, about 3 in 100,000.
 - (0.87.0) **A copy acting as initiator is not visible** (accepted by the
   owner 2026-11-06). A copy of P from before P's rotation rekeys and sends
   `hs.fin`; Q activates the epoch and sends under it; the real P's
@@ -4900,9 +4921,21 @@ each recipient Q).
   with an audit entry and reconnects: no suspension and no feed item, and
   what Q sent under that epoch before the link may have been read by the
   copy. A copy that also sent anything else under it sets the flag and
-  is caught. The exposure is the one before a rotation is seen (the
+  is caught, (0.88.2) unless those messages, deposited before P's link,
+  are processed only after strict F1 has demoted the epoch: the flag is
+  then set too late, and nothing judges the epoch again (found by the
+  release 29 search; owner decision a, GC 01M6SPZ1QXHR5G7DRR96CHW17P).
+  That copy is not visible either. The exposure is the one before a rotation is seen (the
   second bullet of these Residuals; §11.14.2): an old copy can make any
   handshake as P.
+- (0.88.2) **Two old-copy cases the release 29 search found** (owner
+  decision a, GC 01M6SPZ1QXHR5G7DRR96CHW17P), for the post-29 work:
+  (1) after a copy of Q forks and R suspends and resolves, R's strict F1
+  reconnect can name an epoch Q, the real one, takes as fork evidence,
+  so Q pauses R (visible, a new invitation); (2) a further successor of
+  P's `ik`, from a copy, that arrives while Q's record is suspended is
+  not kept as seen (step 1 checks relay links only), so after the
+  resolution Q can be active with a successor it never recorded.
 - (0.87.0) **An app from before release 29** shows `device.update_needed`
   only as "Activity: device.update_needed", with a detail line telling the
   member to update (§6.3.1); the approved sentence appears only in
@@ -4979,7 +5012,12 @@ harness's invariants, not the rule IDs `R29-I1`… of §6.3.2:
   or never be opened (the device no longer keeps that epoch), while the
   vault's keys for the abandoned epoch end after 16 days. The pair can
   split with nothing shown to the member, so I1 and I7 do not hold for
-  that pair. Re-pairing a desktop or agent ends it (§7.2 already says one
+  that pair. (0.88.2, owner decision a, GC 01M6SPZ1QXHR5G7DRR96CHW17P) A
+  loss caused this way can outlast F: a message the device sent under
+  the abandoned epoch (a token refresh, for example) is lost even if a
+  newer epoch is confirmed afterwards, and its effects (such as the vault
+  holding no token for the device) remain until the device sends again
+  or is paired again. Re-pairing a desktop or agent ends it (§7.2 already says one
   offline past its token is paired again); the member's app gets a fresh
   token at every unlock (§7.2), so its rekey is normally deposited then. F is
   closed with D in the device work right after release 29.
