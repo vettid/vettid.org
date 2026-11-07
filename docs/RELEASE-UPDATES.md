@@ -18,7 +18,9 @@ changelog:
     tap away, and approving there does not require opening it (§2 step
     2). The update screen is unchanged. ANDROID-PLAN 0.1.122, IOS-PLAN
     0.1.65. VAULT-MESSAGING §13's out-of-scope line ("after being shown
-    its release number, notes and PCR0") follows in its next erratum
+    its release number, notes and PCR0") and §11.10.3 ("It shows the
+    release number, the notes, and a fingerprint") follow in its next
+    erratum
   - 0.3.3: `related` brought up to date (VAULT-MESSAGING 0.27.4,
     VAULT-RELEASES 0.1.16, ANDROID-PLAN 0.1.37); no other change
   - 0.3.2: as built (vettid.org #224, MEMBER-API 2.4.2; approved by
@@ -93,7 +95,8 @@ manifest.
    runs alongside the old ones.
 2. The app notices the newer release in the manifest and offers it: as
    a banner and a notification, in Settings, and the next time you
-   unlock your vault with your PIN. Before you approve, it shows:
+   unlock your vault with your PIN. On the update screen, before you
+   approve, it shows:
    - the release number;
    - **What's new in release N**: the release's summary, its list of
      changes and whether it fixes a security problem, from the release
