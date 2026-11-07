@@ -4910,10 +4910,11 @@ each recipient Q).
   reconnect naming the epoch, which `I` accepts.
 - (0.88.2) **Rapid rotations exhaust the reconnect token** (accepted by
   the owner 2026-11-06, decision a, GC 01M6S92FATG7EWNX5KZGXG277W). A
-  reconnect token allows 4 deposits (§6.6). When a vault rotates
-  repeatedly in quick succession ((0.88.2, owner decision a, GC
-  01M6SPZ1QXHR5G7DRR96CHW17P) 3 or more times, for example within an
-  hour) while a key change with a peer is in flight, each rotation restarts its reconnect (H5), and a refused
+  reconnect token allows 4 deposits (§6.6). When the two vaults change
+  their keys repeatedly in quick succession ((0.88.2, owner decisions a,
+  GC 01M6SPZ1QXHR5G7DRR96CHW17P and GC 01M6SR938X9RP3XC3TJNPSAJD1) 3 or
+  more changes, on either side or both, for example within an hour)
+  while a key change between them is in flight, each rotation restarts its reconnect (H5), and a refused
   reconnect's fresh tokens are not taken ("The links of a refused
   reconnect", §6.6), so the token can run out: the relay answers
   `quota_exceeded` and the connection becomes `stale` ("The reconnect
