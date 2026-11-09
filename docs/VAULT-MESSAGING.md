@@ -4607,7 +4607,9 @@ and Q audits `connection.stale` with its feed item (§10.9), at the third
 try that fails for the same named epoch, when a relay refuses a try's
 `hs.init` with `quota_exceeded` (the reconnect token's quota, §6.6), when
 Q cannot start a try because it holds no reconnect token for P, or when a
-try's pending epoch reaches `B` (§6.3.1: it has waited 32 days).
+try's pending epoch reaches `B` (§6.3.1: it has waited 32 days). (0.88.2)
+"No reconnect token" is not judged while §6.3.1 "No reconnect while
+carried tokens wait" holds.
 
 **Fork by `ctx`.** For a rekey or reconnect from P under the new `ik`, a
 `ctx` naming Q's current or confirmed epoch (§6.3.1) is ordinary. A `ctx`
@@ -7355,7 +7357,10 @@ any rekey or reconnect that carries tokens. In release 29 only a
 reconnect does (§6.6: `I`'s `hs.init` carries fresh standing and
 reconnect tokens for `R`, and `R`'s `hs.resp` fresh ones for `I`); no
 rekey's `hs.init` or `hs.resp` carries one. Until they are adopted, these
-are the **carried tokens** of that handshake's epoch.
+are the **carried tokens** of that handshake, kept per handshake (a vault
+can hold carried tokens of several handshakes with one peer, and an
+answer has no epoch before `hs.fin`). A service vault (vettid/service-vault)
+follows this paragraph on either side as a member vault does.
 
 - **When they are adopted.** `I` adopts the tokens of `R`'s `hs.resp` in
   the write that confirms its pending epoch (Initiator, above), before
@@ -7369,31 +7374,38 @@ are the **carried tokens** of that handshake's epoch.
   crossing, its own key change) and revoke what its `hs.init` carried. A
   carried token replaces the held token of its kind only if its `exp` is
   later.
-- **Discarded, never adopted.** The carried tokens of an epoch are
-  discarded, and never adopted, when before its adoption that epoch is
-  abandoned (at `I`), destroyed by rule E or demoted (§3.4.1) (at `R`), or
-  one of its carried tokens is answered `token_revoked` (below). Their
-  revocation by the issuer harms nothing.
+- **Discarded, never adopted.** A handshake's carried tokens are
+  discarded, and never adopted, when before their adoption its pending
+  epoch is abandoned (at `I`); its answer is dropped, expires or is
+  destroyed before `hs.fin` (at `R`); its epoch is destroyed by rule E or
+  demoted (§3.4.1) (at `R`); or one of them is answered `token_revoked`
+  (below). Their revocation by the issuer harms nothing. In the write
+  that discards them, if `R` holds no valid standing token for `I`, it is
+  in §8.6's "no valid standing token" case and reconnects (§6.6), bounded
+  by §3.4.1 "The reconnect bound".
 - **What they are used for before.** Only the handshake's own messages,
   each deposited with the carried standing token: `R`'s `hs.resp` (after
   a long lock `R`'s held token has often expired, and the answer could not
   be deposited otherwise; this is unchanged), `I`'s `hs.fin`, and `R`'s
   `hs.confirm` and its re-sends. The outbox entry of an `hs.confirm`
-  records that token; a re-send may instead use a held standing token
-  whose `exp` is later. Everything else uses the held tokens, and a
+  records that token. While `I`'s epoch is pending, `R`'s held standing
+  token for `I` never outlives the carried one: `I` minted the carried
+  token at its `hs.init`, after every token `R` holds, and sends `R`
+  nothing but the handshake until it confirms (Initiator, above), so no
+  later one reaches `R` first. Everything else uses the held tokens, and a
   reconnect `hs.init` is deposited only with the held reconnect token,
   never a carried one. An entry with no valid held standing token waits in
   the outbox until one is adopted or refreshed. "`hs.confirm` again"
-  (above) stops once the epoch's carried tokens are discarded.
+  (above) stops once the handshake's carried tokens are discarded.
 - **A carried token refused.** The issuer revokes a carried token only
   before it confirms or activates (Revocation by the issuer, below), so a
   carried token answered `token_revoked` shows that the issuer abandoned
   or dropped that handshake. The holder drops the refused `hs.resp`,
-  `hs.fin` or `hs.confirm` entry and discards all of that epoch's carried
-  tokens (§8.6). That ends "No reconnect while carried tokens wait" and
-  "`hs.confirm` again" for the epoch; the refusal alone does not make the
-  "no valid standing token" case, which the held tokens decide as
-  before.
+  `hs.fin` or `hs.confirm` entry and discards all of that handshake's
+  carried tokens (§8.6), with the consequence above. That ends "No
+  reconnect while carried tokens wait" and "`hs.confirm` again" for it;
+  the refusal alone does not make the "no valid standing token" case,
+  which the held tokens decide.
 - **The prompt to adopt.** In the write that confirms its pending epoch,
   `I` re-mints a standing and a reconnect token for `R` and queues them
   as `relay.token.issued` under the newly current epoch (§6.6 "Re-minted
@@ -7406,9 +7418,10 @@ are the **carried tokens** of that handshake's epoch.
   §7.2 "On unlock" step 3, §8.6 `token_expired` and `token_revoked`) and
   does not judge "no reconnect token" (§3.4.1 "The reconnect bound"). It is
   one message away from adopting. The wait is bounded on `R`'s own clock:
-  at the carried standing token's `exp`, or 32 days (`B`) after `R`
-  activated the epoch, whichever comes first, `R` discards that epoch's
-  carried tokens and the held tokens decide again.
+  at the carried standing token's `exp` (at most 30 days, §6.6), with a
+  cap of 32 days (`B`) after `R` activated the epoch, `R` discards that
+  handshake's carried tokens, with the consequence above. Since the held
+  token never outlives the carried one (above), `R` then reconnects.
 
 **Revocation by the issuer** (the lead's condition, GC
 01M6SWQAJCMFSWHQY9C5CN48BH). The issuer cannot see when the holder adopts.
@@ -8279,7 +8292,8 @@ is unlocked and either:
 - on unlock (§12.2), its standing token for the peer has already expired;
 
 (0.88.2) except while §6.3.1 "No reconnect while carried tokens wait"
-holds.
+holds; or (0.88.2) when it discards a handshake's carried tokens and holds
+no valid standing token for the peer (§6.3.1 "Discarded, never adopted").
 
 **Initiating.** The reconnect `hs.init` is sealed to the last known `ek` of
 the peer. (0.85.0) Its `from.relay` names the relay key it is deposited
@@ -9552,7 +9566,7 @@ How each error is handled:
 | Error | Handling |
 |---|---|
 | `token_expired` | Refresh the token, or reconnect (§6.6); (0.88.2) not while §6.3.1 "No reconnect while carried tokens wait" holds. |
-| `token_revoked` | Terminal. Stop sending to that mailbox (0.83.0: for a retried open-token `hs.init`, see `token_used`). (0.88.2, owner decision a, GC 01M6SRQ1B7NM0Q00G0CEGHFES8) **Between two vaults**, for a deposit to a connection with a held standing token: the answer ends **that token only**, not the connection. The vault drops the token and never uses it again; the entry waits in the outbox for a valid token. If the vault holds no other valid standing token for the peer, it is in the "no valid standing token" case: a pending rekey is abandoned (§6.3.1), and the vault reconnects (§6.6), bounded by §3.4.1 "The reconnect bound"; a reconnect's own `hs.init` answered `token_revoked` is a failed try there. Honest pairs reach this when a peer revokes a token in flight (S5 at its rotation, H5, an abandoned pending epoch), so it is not a sign of an end. It revives no revoked token, and a copy gains nothing by it: the reconnect needs the reconnect token and is authenticated as any other. (0.88.2) A **carried** token (one an `hs.init` or `hs.resp` carried and the vault has not adopted, §6.3.1 "A handshake's tokens are adopted at confirmation") answered `token_revoked` is handled by §6.3.1 "A carried token refused": the refused `hs.resp`, `hs.fin` or `hs.confirm` entry is dropped and the epoch's carried tokens are discarded; the refusal alone does not make the "no valid standing token" case. Toward a device's own vault, and S9's relay-key case, as before. |
+| `token_revoked` | Terminal. Stop sending to that mailbox (0.83.0: for a retried open-token `hs.init`, see `token_used`). (0.88.2, owner decision a, GC 01M6SRQ1B7NM0Q00G0CEGHFES8) **Between two vaults**, for a deposit to a connection with a held standing token (for a carried one, below and §6.3.1 "A carried token refused"): the answer ends **that token only**, not the connection. The vault drops the token and never uses it again; the entry waits in the outbox for a valid token. If the vault holds no other valid standing token for the peer, it is in the "no valid standing token" case: a pending rekey is abandoned (§6.3.1), and the vault reconnects (§6.6), bounded by §3.4.1 "The reconnect bound"; a reconnect's own `hs.init` answered `token_revoked` is a failed try there. Honest pairs reach this when a peer revokes a token in flight (S5 at its rotation, H5, an abandoned pending epoch), so it is not a sign of an end. It revives no revoked token, and a copy gains nothing by it: the reconnect needs the reconnect token and is authenticated as any other. (0.88.2) A **carried** token (one an `hs.init` or `hs.resp` carried and the vault has not adopted, §6.3.1 "A handshake's tokens are adopted at confirmation") answered `token_revoked` is handled by §6.3.1 "A carried token refused": the refused `hs.resp`, `hs.fin` or `hs.confirm` entry is dropped and the epoch's carried tokens are discarded; the refusal alone does not make the "no valid standing token" case. Toward a device's own vault, and S9's relay-key case, as before. |
 | `token_used` | The open token is already spent. Restart first contact; except that (0.83.0) when the client retried its own `hs.init` with that token after a lost or failed answer, `token_used` and `token_revoked` both mean the first attempt may have been delivered: it waits for `hs.resp` until the token's `exp` plus 60 s, and restarts first contact only then. For a pairing or transfer this is at most the link's 10 minutes; a vault's accepted connection request stays `waiting` (§6.4) until then, and its member can decline it. |
 | `mailbox_unknown` | Re-resolve the address, or mark the connection `stale`. |
 | `quota_exceeded` (0.32.0) | Not retried at once, and handled by what is used up (RELAY-PROTOCOL 0.9.2 §7.1 `quota`): **`token`**: a peer vault MAY ask for a fresh token (§7.2) and retries once with it; **`mailbox` or `mailbox_blobs` or `sender_blobs`**: a fresh token does not help; a deposit waits in the outbox and is retried with backoff, and a blob upload is not retried: the vault waits until the recipient asks for it (§10.5.1 "Delivery to the peer"). A relay that sends no `quota` is read as `token` the first time and as the mailbox after a fresh token. A device does not upload again on its own: it tells the member and retries later. |
