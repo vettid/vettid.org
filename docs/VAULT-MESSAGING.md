@@ -69,6 +69,15 @@ changelog:
     (owner decision a, GC 01M6S92FATG7EWNX5KZGXG277W).
     §6.3.2: the test locations at vettid-vault #206 `8647aa6`, where every
     rule now has a test.
+    §6.3.1 new "A handshake's tokens are adopted at confirmation"
+    (owner decision a, 2026-11-09, GC 01M6SWPHVH6WFYJ8096KX0D5GC; found
+    by the random-pair search on the real code): a reconnect's tokens are
+    adopted by the initiator at confirmation and by the responder when
+    its confirmed epoch reaches the epoch, not at `hs.resp` or `hs.fin`;
+    until then the held tokens are kept. "Revocation by the issuer": a
+    superseded token is left to expire, never revoked before the holder
+    can have adopted its successor (the lead's condition). §6.6 and §7.4
+    refer to it. §6.3.2: new R29-T1.
   - 0.88.1: 2026-11-06, erratum to 0.87.1 (owner decision a, GC
     01M6S0QVS56CD790T5KD8J30QM, asked as "0.87.2"; numbered after
     0.88.0, which merged first). Found by the Opus review of vettid-vault
@@ -7321,6 +7330,47 @@ A pending epoch counts as an open handshake of `I` for H5 and S5. In
 list, so a relay-key rotation does not hold it ("Liveness between honest
 vaults", A5).
 
+(0.88.2) **A handshake's tokens are adopted at confirmation** (owner
+decision a, 2026-11-09, GC 01M6SWPHVH6WFYJ8096KX0D5GC; R29-T1). The
+standing and reconnect tokens a reconnect carried (§6.6: `I`'s in its
+`hs.init`, `R`'s in its `hs.resp`) are **carried tokens** of that
+handshake's epoch until they are adopted. A vault adopts them, in place of
+the tokens it holds for the peer, only in the write in which that epoch is
+confirmed at its side:
+- `I` adopts the tokens of `R`'s `hs.resp` in the write that confirms its
+  pending epoch (Initiator, above);
+- `R` adopts the tokens of `I`'s `hs.init` in the write in which its
+  confirmed epoch with `I` reaches that epoch (Responder, above), not at
+  `hs.fin`. Until then `I` may still abandon the epoch after `hs.fin`
+  (S5, H5, a crossing, its own key change) and revoke what its `hs.init`
+  carried.
+
+Until then the vault keeps the tokens it holds, uses them for everything
+else, and starts any reconnect with its held reconnect token, never a
+carried one. The carried tokens are used only for the handshake's own
+messages: `I`'s `hs.fin` and `R`'s `hs.confirm` (and its re-sends) are
+deposited with the carried standing token. [OPEN POINT for review:
+whether `R`, holding no valid standing token of its own, may deposit its
+other messages under the epoch with the carried standing token, or holds
+them in its outbox as `I` does; see the PR description.] A carried token
+answered `token_revoked` is discarded and nothing else is done (§8.6 does
+not apply to it): its handshake was abandoned at the peer, which ends the
+epoch by the rules above. An epoch that is abandoned, destroyed (rule E)
+or ended before it is confirmed takes its carried tokens with it; they
+were never adopted, so their revocation by the issuer harms nothing.
+
+**Revocation by the issuer** (the lead's condition, GC #6198). The issuer
+cannot see when the holder adopts, so a vault MUST NOT revoke a standing
+or reconnect token it issued to a connection, other than at an event of
+§7.4 or at the abandonment, expiry or destruction of the handshake that
+carried it (above; §6.6 crossings). A token superseded by a reconnect's
+fresh ones is left to expire (standing: at most 30 days; reconnect: at
+most 365 days, §6.6). This holds for both peers and in both orders of a
+crossing, so a vault that has not yet adopted keeps depositing on its
+held tokens until they expire or are refreshed (§7.2). [OPEN POINT for
+review: the alternative is to revoke superseded tokens at the issuer's own
+confirmation plus a margin; see the PR description.]
+
 **The received flag** (owner decision S13 a, 2026-11-06, GC
 01M6QB8A3P0S7H2Q86QS3EAV2P). Q keeps with each epoch of a peer P one flag,
 "received from P". It is set, in the write that processes it, by any
@@ -7478,6 +7528,7 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-D2 | §6.3.1 Devices and agents; §15 item 51 | V/client/rotate086_test.go:18, :71; V/client/persist_test.go:485 |
 | R29-D3 | §6.3.1 Devices and agents; §6.7; §10.9 | r29_device_test.go:18 |
 | R29-D4 | §6.3.1 An app from before release 29; §10.9 | r29_device_test.go:85, :116, :147 |
+| R29-T1 ((0.88.2) a handshake's tokens adopted at confirmation; no revocation of a superseded token) | §6.3.1 A handshake's tokens are adopted at confirmation; §6.6; §7.4 | gap (unit test from a failing seed's trace; the random-pair harness asserts that no vault holds as adopted a token its peer revoked, in both orders of a crossing) |
 
 ### 6.4 Connections and invitations
 
@@ -8145,7 +8196,7 @@ outage.
 | Binding | Sender-bound: `sub` = the peer's relay key |
 | Lifetime | ≤ 365 days, and ≤ the relay's `max_token_lifetime_seconds` |
 | `quota` | `{"msgs": 4, "bytes": 65536}` |
-| Delivered in | `connection.approved` (a new connection, 0.10.3), `hs.init` and `hs.resp` of a reconnect, `relay.token.issued` |
+| Delivered in | `connection.approved` (a new connection, 0.10.3), `hs.init` and `hs.resp` of a reconnect ((0.88.2) adopted only once the reconnect's epoch is confirmed at the receiving side, §6.3.1 "A handshake's tokens are adopted at confirmation"), `relay.token.issued` |
 | Re-minted | After every successful reconnect and every relay-key rotation, and when less than 60 days remain |
 
 **Permitted use.** A reconnect token MAY only be used to deposit an `hs.init`
@@ -8171,7 +8222,9 @@ with, which after the initiator's relay-key rotation is the old key
 until the peer's token for the new key arrives (§3.4.1 S1, S2). It
 carries:
 
-- fresh standing and reconnect tokens;
+- fresh standing and reconnect tokens ((0.88.2) the responder adopts them
+  only once its confirmed epoch reaches the reconnect's epoch, and the
+  initiator adopts those of the `hs.resp` only at confirmation, §6.3.1);
 - `ctx` = the stored `epoch_id` of the initiator's last epoch (the
   exceptions after a demotion and after strict F1: "Accepting `ctx`",
   below);
@@ -9259,6 +9312,12 @@ deleted, and the refusal is audited `drop.attachment_rate` (bounded
 like every `drop.*` entry, §10.9).
 
 ### 7.4 Revocation
+
+(0.88.2) A standing or reconnect token issued to a connection is revoked
+only at an event below or when the handshake that carried it is
+abandoned, expires or is destroyed (§6.3.1 "A handshake's tokens are
+adopted at confirmation", "Revocation by the issuer"); a token superseded
+by a reconnect's fresh ones is left to expire.
 
 The actions for each event are applied in one flush, in the order listed:
 
