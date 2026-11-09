@@ -7259,7 +7259,13 @@ A reconnect succeeds (§6.6 re-mint) at confirmation.
 In the write that abandons it, `I` records the revocation of the tokens
 its `hs.init` carried (a rekey's standing token, if it carried one, (0.88.2) which no release-29 rekey does; a
 reconnect's standing and reconnect tokens, §6.6) and sends it after that
-write. Except after a link, the abandoned epoch's receive keys are kept
+write. (0.88.2) In the same write `I` drops its `hs.fin` for the epoch if
+it has not been deposited yet (for example refused `token_expired` and
+waiting for a token), with its outbox entry; it is never sent later, as
+rule E's `R` drops its own. Sent after a newer epoch was established at
+`R`, it would make `R`'s rule E destroy that epoch while `I` sends under
+it, a false fork (found by the release 29 search after R29-T1, where a
+reconnect's `hs.fin` on its carried token overtakes a waiting one). Except after a link, the abandoned epoch's receive keys are kept
 16 days as a previous epoch's, and authenticated messages under it are
 processed without confirming it; nothing under it confirms any more. An
 epoch abandoned by a link is demoted from the start: messages under it are
