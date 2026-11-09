@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.1
-date: 2026-11-06
+version: 0.88.3
+date: 2026-11-09
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -28,6 +28,16 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.3: 2026-11-09, erratum (owner decision a, GC
+    01M70WNHJ7XWD53XD3FTNZKCPK; numbered after 0.88.2, vettid.org #555,
+    which is still open, and independent of it). Found by the blind
+    reviews of vettid-ios #233. §11.14.10 rule 5 "A second scan of the
+    same code": while a transfer the new app started is open, the app
+    refuses a scan of that transfer's own code ("a move is waiting") and
+    changes nothing; a scan of a different code is unchanged. Before this,
+    such a re-scan dropped the open transfer's keys while the old app could
+    still approve it, which moved the vault to a phone that cannot open it.
+    Apps only; no vault change.
   - 0.88.1: 2026-11-06, erratum to 0.87.1 (owner decision a, GC
     01M6S0QVS56CD790T5KD8J30QM, asked as "0.87.2"; numbered after
     0.88.0, which merged first). Found by the Opus review of vettid-vault
@@ -23070,6 +23080,23 @@ under the request's `id` (§8.2).
    cannot open it. A `device.paired` that arrives within the 11 minutes
    is accepted. The vault's 10 minutes are unchanged, and so are those
    of a pairing of a desktop or an agent (§6.7).
+
+   **A second scan of the same code** (0.88.3, owner decision a, GC
+   01M70WNHJ7XWD53XD3FTNZKCPK). While a transfer the new app started is
+   still open (not yet applied, rejected, ended or dropped), the app
+   refuses a scan of **that transfer's own code** (the same invitation,
+   §6.7.1 step 1: the same `transfer_id` and link). It tells the member
+   that a move is waiting, and changes nothing: its handshake, attested
+   key, epoch-1 secret and their records stay as they are, and it sends
+   nothing. *Why:* the vault does not answer a second `hs.init` on an
+   invitation already begun, while the old app still shows the first
+   comparison code and can approve it; had the new app dropped its keys
+   for the second scan, that approval would move the vault to a phone
+   that cannot open it. A scan of a **different** code is unchanged: it
+   is handled as today (before the vault's 10 minutes end, an abandon
+   chosen by the member; after them, refused until the transfer ends).
+   Once the transfer has ended, its own code may be scanned again; the
+   vault answers it only while the invitation is still unspent.
 
    **Wait for the outcome** (0.88.0, vettid.org #552; owner decision a
    of 2026-11-06). With a vault that lists `transfer_outcome` (§6.7.1
