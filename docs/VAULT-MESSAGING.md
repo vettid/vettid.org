@@ -7383,7 +7383,13 @@ follows this paragraph on either side as a member vault does.
   are never adopted at a later reconnect's confirmation, since the peer may
   have abandoned that epoch and revoked them); or one of them is answered
   `token_revoked` (below). A supersession leads to no reconnect: the later
-  handshake is the way on. Their revocation by the issuer harms nothing. In the write
+  handshake is the way on, and if it fails the recovery is §6.6's reconnect
+  ("When to use it"). A supersession can drop tokens that a later
+  confirmation of the earlier epoch would have adopted; that costs at most
+  one more reconnect on the held reconnect token, and only if the prompt to
+  adopt was lost too (accepted, review of the R29-T1 code). The current
+  epoch's record stays, discarded, so that "`hs.confirm` again" stays
+  stopped for it. Their revocation by the issuer harms nothing. In the write
   that discards them, if `R` holds no valid standing token for `I`, it is
   in §8.6's "no valid standing token" case and reconnects (§6.6), bounded
   by §3.4.1 "The reconnect bound".
