@@ -33,16 +33,21 @@ changelog:
     which is still open, and independent of it). Found by the blind
     reviews of vettid-ios #233. §11.14.10 rule 5 "A second scan of the
     same code": while a transfer the new app started is open (from its
-    `hs.init` until applied, rejected, ended, abandoned, given up or
-    dropped), the app refuses a scan of that transfer's own code (same
-    `r` and `c`, stored with the transfer, compared before any fetch or
-    drop), changes nothing and returns to the move's screen; a scan of a
-    different code is unchanged. Before this, such a re-scan dropped the
+    claim fetch until applied, rejected, ended, abandoned, given up or
+    dropped; a failed fetch or payload check ends it at once), the app
+    refuses a scan of that transfer's own code (the payload's same `r`
+    and `c`, stored with the transfer before the fetch, compared before
+    any fetch, drop or refusal of new codes), changes nothing and returns
+    to the move's screen as it stands; a scan of a different code is
+    unchanged. Before this, such a re-scan dropped the
     open transfer's keys while the old app could still approve it, which
     moved the vault to a phone that cannot open it. §6.7.1 step 2 points
     to it. §11.14.1 rule 2 and the iOS "Epoch 1" note: a transfer reuses
-    its phone key and record only for the resend of the same `hs.init`;
-    every new code makes new ones (the apps' fix, vettid-ios #233). Apps
+    its phone key and record only for the resend of the same `hs.init`
+    (a network retry, or a restart into the same open transfer); every
+    new code makes new ones and drops only the candidate `""` records of
+    transfers that ended without `device.paired`, never a current or
+    paired one (the apps' fix, vettid-ios #233). Apps
     only; no vault change.
   - 0.88.1: 2026-11-06, erratum to 0.87.1 (owner decision a, GC
     01M6S0QVS56CD790T5KD8J30QM, asked as "0.87.2"; numbered after
@@ -23109,7 +23114,12 @@ under the request's `id` (§8.2).
    from the moment it fetches the code's claim (the start of its
    `hs.init` and the 60-second wait for `hs.resp` included) until this
    rule ends it: applied, rejected, ended (`device.transfer.ended`, or
-   its session gone), abandoned, given up or dropped.
+   its session gone), abandoned, given up or dropped. A claim fetch that
+   fails (the relay not reached, a timeout, `404`), or a payload that
+   fails its checks (`h`, opening, `exp`), ends the transfer at once:
+   nothing was sent and nothing is kept, so the code can be scanned
+   again (a code whose claim the relay did serve is then a spent code,
+   below).
    - **The same code.** A scanned (or opened, or pasted) code is the
      same code when its parsed payload (§6.4) has the same relay `r` and
      claim id `c` (the payload's `r`, not an epoch-1 record's) as the
