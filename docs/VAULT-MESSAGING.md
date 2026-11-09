@@ -7366,10 +7366,9 @@ follows this paragraph on either side as a member vault does.
   the write that confirms its pending epoch (Initiator, above), before
   anything else is done with the confirming message. `R` adopts the
   tokens of `I`'s `hs.init` in the write in which its confirmed epoch
-  with `I` reaches that epoch, or a later one while that epoch is neither
-  destroyed (rule E) nor demoted (§3.4.1) and its carried tokens are not
-  discarded (Responder, above), before the handler of the message that
-  moves it, and not at `hs.fin`: until
+  with `I` reaches that epoch, or a later one reached from it by rekeys
+  only (Responder, above), before the handler of the message that moves
+  it, and not at `hs.fin`: until
   then `I` may still abandon the epoch after `hs.fin` (S5, H5, a
   crossing, its own key change) and revoke what its `hs.init` carried. A
   carried token replaces the held token of its kind only if its `exp` is
@@ -7378,8 +7377,13 @@ follows this paragraph on either side as a member vault does.
   discarded, and never adopted, when before their adoption its pending
   epoch is abandoned (at `I`); its answer is dropped, expires or is
   destroyed before `hs.fin` (at `R`); its epoch is destroyed by rule E or
-  demoted (§3.4.1) (at `R`); or one of them is answered `token_revoked`
-  (below). Their revocation by the issuer harms nothing. In the write
+  demoted (§3.4.1) (at `R`); when a later token-carrying handshake with
+  the peer supersedes them (the vault's own reconnect becoming pending, or
+  the peer's established at its `hs.fin`: an earlier epoch's carried tokens
+  are never adopted at a later reconnect's confirmation, since the peer may
+  have abandoned that epoch and revoked them); or one of them is answered
+  `token_revoked` (below). A supersession leads to no reconnect: the later
+  handshake is the way on. Their revocation by the issuer harms nothing. In the write
   that discards them, if `R` holds no valid standing token for `I`, it is
   in §8.6's "no valid standing token" case and reconnects (§6.6), bounded
   by §3.4.1 "The reconnect bound".
