@@ -21006,9 +21006,12 @@ replaced is **replaced**.
    `key_vault` makes new ones. (0.88.3) A transfer's `key_vault` is `""`
    for every vault, so it cannot tell attempts apart: for a transfer the
    reuse covers only the resend of the same `hs.init` within the open
-   transfer; every scan of a new code is a new attempt and makes a new
-   phone key, `r` and record, dropping those an earlier transfer left
-   (vettid-ios #233; Android the same).
+   transfer (a network retry, or the app restarting into the same open
+   transfer); every scan of a new code is a new attempt and makes a new
+   phone key, `r` and record, dropping the candidate `""` records (and
+   their keys) of transfers that ended without `device.paired`, never a
+   current record or a paired transfer's (vettid-ios #233; Android the
+   same).
 3. **A new change makes a new candidate and keeps the unconfirmed ones.**
    A `pin.change` or `vault.secret.renew` the member starts again makes a
    fresh candidate, so that one made while unwanted code ran is not
@@ -21271,9 +21274,11 @@ record does. So:
   earlier try may have reached the vault reuses `P` and the epoch-1
   record when they exist for the same `key_vault` and still work, as
   Android reuses its phone key; otherwise it makes new ones. (0.88.3)
-  For a transfer, only the resend of the same `hs.init` reuses them;
-  every scan of a new code drops the `""` records and keys an earlier
-  transfer left and makes new ones (§11.14.1 "Records and lost answers"
+  For a transfer, only the resend of the same `hs.init` (a network retry,
+  or the app restarting into the same open transfer) reuses them; every
+  scan of a new code drops the candidate `""` records and keys of
+  transfers that ended without `device.paired` (never a current record
+  or a paired transfer's) and makes new ones (§11.14.1 "Records and lost answers"
   rule 2).
 
 **Removal and deletion.** iOS keeps keychain items when an app is
@@ -23101,26 +23106,32 @@ under the request's `id` (§8.2).
 
    **A second scan of the same code** (0.88.3, owner decision a, GC
    01M70WNHJ7XWD53XD3FTNZKCPK). A transfer is **open** at the new app
-   from the moment it starts its `hs.init` (the 60-second wait for
-   `hs.resp` included) until this rule ends it: applied, rejected, ended
-   (`device.transfer.ended`, or its session gone), abandoned, given up
-   or dropped.
+   from the moment it fetches the code's claim (the start of its
+   `hs.init` and the 60-second wait for `hs.resp` included) until this
+   rule ends it: applied, rejected, ended (`device.transfer.ended`, or
+   its session gone), abandoned, given up or dropped.
    - **The same code.** A scanned (or opened, or pasted) code is the
      same code when its parsed payload (§6.4) has the same relay `r` and
-     claim id `c` as the code the open transfer started from. The app
-     stores that `r` and `c` with the transfer, durably, before it sends
-     the `hs.init`, as it stores the moment it started, so a restart
+     claim id `c` (the payload's `r`, not an epoch-1 record's) as the
+     code the open transfer started from. The app stores that `r` and
+     `c` with the transfer, durably, before it fetches the claim, as it stores the moment it started, so a restart
      keeps them. There is no second code for one transfer:
      `device.transfer.create` gives one link per transfer and answers
      `exists` while one is open (§6.7.1 step 1), so any new code from the
      old phone has a new `c`.
    - **Refused, before anything else.** The app compares the scanned
      payload alone, before it fetches the claim (a claim is served once,
-     §6.4) and before it drops anything. For the same code it changes
-     nothing (its handshake, attested key, epoch-1 secret and their
-     records stay as they are), sends nothing, and takes the member back
-     to that move's own screen (the comparison code or the wait), where
-     the old phone approves or rejects it. No new text.
+     §6.4), before it drops anything, and before the deadline's or the
+     settlement window's refusal of new codes. For the same code it
+     changes nothing (its handshake, attested key, epoch-1 secret and
+     their records stay as they are), sends nothing, and takes the member
+     back to that move's own screen as it stands, restored from the
+     stored transfer without reaching the vault: the wait for `hs.resp`,
+     the comparison code (while the vault's 10 minutes run, the old phone
+     approves or rejects there), the settlement window's checking screen,
+     or the outcome wait with its give-up. No message: the owner's
+     option named iOS's existing "a move is waiting", which Android does
+     not have, and the move's own screen already says what is waiting.
    - *Why:* the vault does not answer a second `hs.init` on an invitation
      already begun, while the old app still shows the first comparison
      code and can approve it; had the new app dropped its keys for the
@@ -23130,12 +23141,15 @@ under the request's `id` (§8.2).
      earlier" and the settlement window below: toward a vault without
      `transfer_outcome`, an abandon chosen by the member until the last
      minute before the deadline, refused from then until the window ends;
-     toward a vault with it, refused from the new phone's `hs.fin` until
-     the outcome or the member's give-up; before the `hs.fin`, as before.
+     toward a vault with it, refused from the new phone's `hs.fin` (from
+     the moment its deposit is attempted) until the outcome or the
+     member's give-up. Before that `hs.fin`, an abandon chosen by the
+     member, as before; harmless there, because the vault cannot approve
+     a transfer whose `hs.fin` it has not received.
    - **After the transfer ends,** a scan of its code is a scan of a spent
-     code: the relay no longer serves the claim (§6.4), and the app says
-     the code may already have been used and offers to scan a new one
-     (§6.7.1 step 2).
+     code: the relay no longer serves the claim (§6.4), and the app
+     handles it as it handles a spent link today and offers to scan a
+     new one.
 
    **Wait for the outcome** (0.88.0, vettid.org #552; owner decision a
    of 2026-11-06). With a vault that lists `transfer_outcome` (§6.7.1
