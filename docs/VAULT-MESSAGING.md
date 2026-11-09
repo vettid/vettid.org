@@ -4947,8 +4947,7 @@ each recipient Q).
   `I`'s that the relay redelivers after that (§8.4) is answered again: the
   answer awaits an `hs.fin` that never comes, and holds `R`'s rekeys back
   until it expires at `L` (16 days, §6.5). No message is lost and no epoch
-  is split; `I`'s own rekeys are not held, so a rekey of `I`'s ends it
-  sooner (a crossing, §6.5).
+  is split; `I`'s own rekeys are not held by it.
 - (0.88.2) **Rapid rotations exhaust the reconnect token** (accepted by
   the owner 2026-11-06, decision a, GC 01M6S92FATG7EWNX5KZGXG277W). A
   reconnect token allows 4 deposits (§6.6). When the two vaults change
