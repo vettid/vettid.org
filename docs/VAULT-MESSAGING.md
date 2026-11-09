@@ -7442,8 +7442,10 @@ revoke what its `hs.resp` carried only until it activates at `hs.fin` (its
 answer dropped, expired or destroyed by rule J, H5 or S5). The other
 revocations are unchanged: the events of §7.4; §7.2's refresh after
 `quota_exceeded`, which never revokes a token that a still-open handshake
-carried nor the standing token of the newest token-carrying handshake with
-the peer; §3.4.1's relay-key update (not built in release 29, A5); and
+carried, the standing token of the newest token-carrying handshake with
+the peer, nor the newest standing token re-minted at a confirmation ("The
+prompt to adopt"; a refresh handled in the batch that confirms would
+otherwise revoke the token the prompt delivers); §3.4.1's relay-key update (not built in release 29, A5); and
 §12.5. This holds for both peers and in both orders of a crossing.
 
 **The received flag** (owner decision S13 a, 2026-11-06, GC
@@ -9338,10 +9340,11 @@ denylisted when the request or pairing ends without one (§7.4).
   neither bound stops an ordinary refresh for long. The old token's
   `jti` is denylisted when the fresh one is issued (§7.4), so a refresh
   never doubles what a connection may deposit ((0.88.2) except for the
-  tokens a still-open handshake with the connection carried and the
-  standing token of the newest token-carrying handshake with it, which
-  the peer may not yet have adopted and which are left to expire, §6.3.1
-  "Revocation by the issuer"); the vault's own
+  tokens a still-open handshake with the connection carried, the
+  standing token of the newest token-carrying handshake with it and the
+  newest standing token re-minted at a confirmation, which the peer may
+  not yet have adopted and which are left to expire, §6.3.1 "Revocation
+  by the issuer"); the vault's own
   limits (§7.3) are what bound a connection's attachments. A token's
   quota still bounds what a connection can leave at the relay while
   the vault is locked.
@@ -9412,7 +9415,7 @@ The actions for each event are applied in one flush, in the order listed:
 | Device unlinked | End its access session and drop its held and pending requests (§6.8). Send `device.unlinked` (best effort). Denylist `sub`. Remove the device from the unlock keys. Delete its wake reference. |
 | Agent revoked | As for device unlinked, plus revoke all of the agent's LEASH grants |
 | Invite or pairing cancelled or expired | Denylist the open token's `jti`. DELETE the claim. |
-| (0.88.2) Standing token refreshed after `quota_exceeded` (§7.2) | Denylist the `jti` of the standing tokens the fresh one replaces, except a token a still-open handshake with the connection carried and the standing token of the newest token-carrying handshake with it (§6.3.1 "Revocation by the issuer"). A refresh near a token's end denylists nothing. |
+| (0.88.2) Standing token refreshed after `quota_exceeded` (§7.2) | Denylist the `jti` of the standing tokens the fresh one replaces, except a token a still-open handshake with the connection carried, the standing token of the newest token-carrying handshake with it, and the newest standing token re-minted at a confirmation (§6.3.1 "Revocation by the issuer", "The prompt to adopt"). A refresh near a token's end denylists nothing. |
 | Connection request or pairing ended without activation (declined, rejected, expired, aborted; 0.10.3) | If the vault's member declined (or blocked) a connection request whose handshake has given it the epoch and the peer's request token, send `connection.declined` first (0.10.5, §6.4), sealed under the epoch and queued on that token; the queued deposit keeps its own copy of the token, so deleting the held tokens below does not cancel it, and the tokens denylisted below are the vault's own, not the one it deposits with. Likewise, if the owner rejected a pairing or transfer after its `hs.fin`, send `device.pair.rejected` first, on the new device's token (0.10.5, §6.7); (0.88.0) for a transfer, after its `hs.resp`, send its outcome first (`device.pair.rejected` or `device.transfer.ended`, §6.7.1 "The transfer's outcome"), as a queued deposit kept until delivered. Denylist the `jti` of every token the vault issued to the peer in the request: the request token and, if its member approved, the standing and reconnect tokens of its `connection.approved` (0.10.4). Delete the tokens held for the peer and the handshake state. |
 
 The relay retains denylist entries for its maximum token lifetime
