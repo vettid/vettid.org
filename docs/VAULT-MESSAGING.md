@@ -23142,7 +23142,7 @@ under the request's `id` (§8.2).
      open): the handshake is gone with the process, so no `hs.fin` can
      follow and the vault cannot approve it (§6.7.1 step 2), whether or
      not the `hs.init` reached it. The app drops the stored `r` and `c`;
-     the code is then a spent code. At the vault the transfer ends
+     the code is then a spent code once its claim was fetched. At the vault the transfer ends
      `expired` within its 10 minutes, or sooner on the holder's
      `device.transfer.reject`, and `device.transfer.create` answers
      `exists` until then.
