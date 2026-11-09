@@ -4941,6 +4941,14 @@ each recipient Q).
   `stale` at `B`. It is visible (a new invitation). The pair recovers
   if `I` returns before `B`: at `token_expired`, `R` starts its own
   reconnect naming the epoch, which `I` accepts.
+- (0.88.2) **A stale rekey `hs.init` redelivered after a reconnect.** `R`
+  drops its open rekey answers when it establishes `I`'s reconnect
+  (§6.3.1 "A reconnect ends R's rekey answers"), but a rekey `hs.init` of
+  `I`'s that the relay redelivers after that (§8.4) is answered again: the
+  answer awaits an `hs.fin` that never comes, and holds `R`'s rekeys back
+  until it expires at `L` (16 days, §6.5). No message is lost and no epoch
+  is split; `I`'s own rekeys are not held, so a rekey of `I`'s ends it
+  sooner (a crossing, §6.5).
 - (0.88.2) **Rapid rotations exhaust the reconnect token** (accepted by
   the owner 2026-11-06, decision a, GC 01M6S92FATG7EWNX5KZGXG277W). A
   reconnect token allows 4 deposits (§6.6). When the two vaults change
@@ -7268,7 +7276,18 @@ epoch while `I` sends under it, a false fork (found by the release 29
 search after R29-T1, where a reconnect's `hs.fin` on its carried token
 overtakes a waiting one, §8.4). One the relay did accept can still reach
 `R` late (a redelivery, §8.4); `R` drops its open rekey answers at the
-reconnect for that reason (Responder, below). Except after a link, the abandoned epoch's receive keys are kept
+reconnect for that reason (Responder, below).
+
+(0.88.2) **I's rekeys end at its reconnect's `hs.resp`.** In the write
+that processes its reconnect's verified `hs.resp`, before the reconnect's
+epoch becomes pending, `I` abandons its own open rekeys with `R` (those
+awaiting `hs.resp`; not one marked replaced at a restore, §6.6): their
+tokens, if any, are revoked and an `hs.init` not yet deposited is not
+sent. `R` drops its answers to them when it establishes the reconnect
+(Responder, "A reconnect ends R's rekey answers"), so a rekey's `hs.resp`
+processed after the reconnect's would otherwise make a pending epoch that
+`R` never answers in, and the two sides would differ until `I`'s keys for
+the reconnect's epoch lapse. Except after a link, the abandoned epoch's receive keys are kept
 16 days as a previous epoch's, and authenticated messages under it are
 processed without confirming it; nothing under it confirms any more. An
 epoch abandoned by a link is demoted from the start: messages under it are
@@ -7331,10 +7350,12 @@ device toward its vault does the same.
 (0.88.2) **A reconnect ends R's rekey answers.** In the write that
 establishes `I`'s reconnect at its verified `hs.fin`, `R` also drops its
 open answers to `I`'s rekeys, except at a restore's reconnect (§6.6 "After
-a restore", where they stay, marked, as evidence against a second copy). A
-verified reconnect from `I` means that `I` abandoned its pending epoch and
-its rekeys, and `I` starts no rekey while a reconnect is open (as `I` drops
-its own rekey answers at its reconnect's `hs.resp`). Release 29's rekey
+a restore", where they stay, marked, as evidence against a second copy,
+and hold no rekey of `R`'s back). A verified reconnect `hs.fin` from `I`
+means that `I` processed the reconnect's `hs.resp`, and so abandoned its
+pending epoch and its open rekeys there (Initiator, "I's rekeys end at its
+reconnect's `hs.resp`"), and `I` starts no rekey while a reconnect is
+open. Release 29's rekey
 answers carry no tokens, so nothing is revoked. A later `hs.fin` for one
 (a redelivery, §8.4) is acked and dropped; without this, rule E below would
 destroy the reconnect's epoch after it was confirmed, a false fork. It also
@@ -9570,10 +9591,13 @@ same rule to their local storage.
 - Receivers MUST reject `ts` more than 5 minutes in the future. For durable
   types, they MUST also reject `ts` more than 16 days in the past.
 - (0.88.2) A vault deposits to one mailbox in its outbox's order, with
-  exceptions: an entry deposited with a token of its own (a reconnect
-  `hs.init` on the held reconnect token; an `hs.resp`, `hs.fin` or
-  `hs.confirm` on a carried token, §6.3.1) does not wait behind entries
-  that wait for a valid held standing token, and so can overtake them; and
+  exceptions, for example: an entry deposited with a token of its own (a
+  reconnect `hs.init` on the held reconnect token; an `hs.resp`, `hs.fin`
+  or `hs.confirm` on a carried token, §6.3.1) does not wait behind entries
+  that wait for a valid held standing token, and so can overtake them;
+  a handshake's messages pass entries held while a reconnect's epoch is
+  pending (§6.3.1 Initiator) and entries held unsealed while the current
+  epoch is demoted (§3.4.1); and
   a message the relay redelivers after a collect that was not acked (a
   crash or a lock before the ack) comes in no particular order. No rule of
   this specification may rely on the order between a handshake's messages
@@ -17024,7 +17048,7 @@ The app fetches the document when it opens a vote screen (and for a proposal old
 While the vault is held every owner request is `owner_check_required` (§3.6.3). When all pass, the vault:
 
 1. builds `ballot_msg = proposal_hash ‖ record_tag ‖ lp(choice_id)`; signs `ballot_sig = Sign(vk, "vettid/vote/1/ballot\x00", ballot_msg)`; builds `ballot_leaf = record_tag ‖ lp(vk) ‖ lp(choice_id) ‖ lp(ballot_sig)`; and signs `cast_sig = Sign(credential key, "vettid/vote/1/cast\x00", proposal_hash ‖ H(ballot_leaf))` with the credential key (the use extends the window, §3.5.3). `lp(x)` is a 16-bit big-endian length and `x`. §16 pins every byte. The credential key signs for votes only these bytes under this label; the label is not a prefix of any other (§10.4 "Labels").
-2. stores the ballot and the exact `vote.cast` body, and **flushes before it sends**; a `connection.authenticate.rotated` statement still unsent to this connection (§10.4: a credential rotation tells each connection that pinned a key) is queued **first in the same outbox**, so the service follows the chain before it meets `cast_sig` (deposits to one mailbox go in outbox order, RELAY-PROTOCOL §6.2, §8.4: both go on the held standing token, so neither is one of §8.4's exceptions); (0.83.11) the chain from the key last signed with to this connection is queued before **every** later send of the ballot too (the schedule below, the answer to a `bad_ballot`), and a service that already followed it ignores the repeat, which ends at its pin (§10.4); audits `vote.cast` (`connection_id`, `ref` = `proposal_id`; **never the choice**);
+2. stores the ballot and the exact `vote.cast` body, and **flushes before it sends**; a `connection.authenticate.rotated` statement still unsent to this connection (§10.4: a credential rotation tells each connection that pinned a key) is queued **first in the same outbox**, so the service follows the chain before it meets `cast_sig` (deposits to one mailbox normally go in outbox order, RELAY-PROTOCOL §6.2, §8.4, and both go on the held standing token, but the order is not guaranteed: a redelivery comes in no order, §8.4; a ballot that the service meets before the chain is answered `bad_ballot` and sent again after it, as below); (0.83.11) the chain from the key last signed with to this connection is queued before **every** later send of the ballot too (the schedule below, the answer to a `bad_ballot`), and a service that already followed it ignores the repeat, which ends at its pin (§10.4); audits `vote.cast` (`connection_id`, `ref` = `proposal_id`; **never the choice**);
 3. answers the app `{proposal_id, ballot: {state: "sending"}}` and sends `vote.cast` (§6.4).
 
 **Sizes that do not depend on the choice** (0.83.6). The relay sees the padded size of every message (§5.4), and a `choice_id` is 1 to 32 bytes, so without this a longer choice id could move a message into the next 512-byte bucket. Every JSON object that a vote message carries with a `choice_id` in it also carries `pad`: a string of ASCII `0` characters whose length is **32 minus the byte length of that `choice_id`** (its decoded UTF-8 bytes, not its escaped JSON form), and empty for a foreign `choice_id` longer than 32 bytes. This covers **every** `choice_id` outside a copied site document: `vote.cast` to the service (the body); the service's `vote.status` answer and `already_voted` refusal (their `ballot` object, BALLOT-PROTOCOL §4.2); the app's `vote.cast` request and the `row.ballot` of its `vote.results.submit` and of each `other_rows` entry; and the vault's answers to the app: `vote.get`'s `vote` object (beside its `choice_id`) and `service_ballot`, and `vote.evidence`'s `member.ballot`, `other_ballot`, `other_ballot_latest`, results `row.ballot` and the extra rows of a `row_duplicate`. Where `vote.evidence` returns the service's own bytes verbatim (its answers and refusals), they keep a fixed size only because the service pads them (BALLOT-PROTOCOL §4.2). A site document copied into a message (`results.json`, `rows.json`, a proposal) is sent as it is: it is public and the same for every member. No signature's message covers `pad` (the signatures cover the binary messages of step 1, not the JSON), except a service refusal to a body too malformed to form them, which signs `H(the request body)` (BALLOT-PROTOCOL §4.2). **Senders MUST write `pad` exactly as above. A receiver does not check its type, value or length and does not require it, an exception to §5.3; §5.3's strict rules (no duplicate names, depth, UTF-8) still apply to it.** A sender without it still works, with the old sizes. As a result the `vote.cast` body is always 418 bytes (§16 pins one) and its padded inner plaintext always **1,024 bytes**, for every `choice_id` and every `seq` up to 2^53 − 1. `vote.confirm`'s `mine: true` and `mine: false` differ by one byte; the request is far below 512 bytes, so its padded size does not change.
