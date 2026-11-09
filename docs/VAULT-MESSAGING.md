@@ -101,7 +101,9 @@ changelog:
     From the final release 29 review: §6.3.1 Initiator, new "I's open
     reconnects end at its rekey's confirmation" (a false fork otherwise);
     §6.5, a rekey `hs.init` is answered once, and a duplicate `hs.fin`
-    is acked and ignored; §6.3.2, R29-T1's tests and new R29-T2, R29-T3.
+    is acked and ignored; §6.3.2, R29-T1's tests and new R29-T2, R29-T3;
+    §3.4.1 Residuals, "A stale reconnect answer after a rekey's
+    confirmation".
   - 0.88.1: 2026-11-06, erratum to 0.87.1 (owner decision a, GC
     01M6S0QVS56CD790T5KD8J30QM, asked as "0.87.2"; numbered after
     0.88.0, which merged first). Found by the Opus review of vettid-vault
@@ -4959,6 +4961,17 @@ each recipient Q).
   `stale` at `B`. It is visible (a new invitation). The pair recovers
   if `I` returns before `B`: at `token_expired`, `R` starts its own
   reconnect naming the epoch, which `I` accepts.
+- (0.88.2) **A stale reconnect answer after a rekey's confirmation** (the
+  final release 29 review). `R` answers a reconnect `hs.init` of `I`'s that
+  reaches it late (§8.4), and its `hs.resp` deposit is accepted before `I`
+  confirms its rekey. `I` then abandons that reconnect (§6.3.1 Initiator,
+  "I's open reconnects end at its rekey's confirmation"), so the answer
+  gets no `hs.fin`, and since its deposit was accepted, no carried token's
+  refusal ends it either: it waits until `L` (16 days), holding `R`'s
+  rekeys back, and between two persons `R`'s reconnects too. Liveness only:
+  `I` can still rekey toward `R`, and nothing is lost or split. A fix (`R`
+  drops such an answer when a message from `I` opens under a newer epoch
+  with a later `ts`) is post-29 work.
 - (0.88.2) **A stale rekey `hs.init` redelivered after a reconnect.** `R`
   drops its open rekey answers when it establishes `I`'s reconnect
   (§6.3.1 "A reconnect ends R's rekey answers"), but a rekey `hs.init` of
@@ -7338,7 +7351,7 @@ processed after the reconnect's would otherwise make a pending epoch that
 (0.88.2) **I's open reconnects end at its rekey's confirmation** (the
 final release 29 review, F1). In the write that confirms a rekey's
 pending epoch, `I` abandons its open reconnects with `R` that name another
-epoch (not one marked replaced at a restore, §6.6): their tokens are
+epoch: their tokens are
 revoked and an `hs.init` not yet deposited is not sent. Such a reconnect
 named the epoch that was current when it started, which has just moved on.
 Its `hs.init` may still reach `R` late (a redelivery, §8.4); `R`, for which
@@ -7348,7 +7361,10 @@ then sent `hs.fin`, `R`'s rule E would destroy the epoch `I` sends under,
 and `I`'s next message under it would be fork evidence: an honest pair
 suspended. With this rule `I` finds nothing for that answer (§6.3.1, an
 `hs.resp` for no open handshake is acked and dropped) and sends no
-`hs.fin`. It mirrors "I's rekeys end at its reconnect's `hs.resp`".
+`hs.fin`. It mirrors "I's rekeys end at its reconnect's `hs.resp`". If
+`R`'s answer was deposited before `I` confirmed the rekey, it ends neither
+by a carried token's refusal nor by an `hs.fin`: it waits for `L` (§3.4.1
+Residuals, "A stale reconnect answer after a rekey's confirmation").
 
 After abandoning a rekey's pending epoch (at `B` or for want of a token),
 a connection's vault reconnects naming its current epoch (after a
@@ -7721,7 +7737,7 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-D4 | §6.3.1 An app from before release 29; §10.9 | r29_device_test.go:85, :116, :147 |
 | R29-T1 ((0.88.2) a handshake's tokens adopted at confirmation; no revocation of a superseded token) | §6.3.1 A handshake's tokens are adopted at confirmation; §6.6; §7.4 | r29_t1_test.go (the sub-rules, each failing without its rule; TestR29T1Seeds); the random-pair harness asserts that no vault adopts a carried token its issuer had already revoked (judgeAdoption) |
 | R29-T2 ((0.88.2) the handshakes a newer one ends) | §6.3.1 Initiator: an abandoned pending epoch's `hs.fin`; I's rekeys end at its reconnect's `hs.resp`; I's open reconnects end at its rekey's confirmation; Responder: a reconnect ends R's rekey answers | r29_t1_test.go: TestR29AbandonedPendingDropsItsWaitingFin, TestR29ReconnectRespAbandonsTheOwnRekeys, TestR29StaleReconnectEndsAtTheRekeysConfirmation, TestR29ReconnectDropsTheRekeyAnswers; r29_gapf_test.go: TestR29DeviceAbandonInTheDrainDropsItsFin |
-| R29-T3 ((0.88.2) a rekey `hs.init` answered once) | §6.5 | r29_t1_test.go: TestR29DuplicateRekeyInitAnsweredOnce |
+| R29-T3 ((0.88.2) a rekey `hs.init` answered once; a duplicate `hs.fin` ignored) | §6.5 | r29_t1_test.go: TestR29DuplicateRekeyInitAnsweredOnce, TestR29RedeliveredFinIsIgnored |
 
 ### 6.4 Connections and invitations
 
