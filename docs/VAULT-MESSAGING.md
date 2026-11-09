@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.3
+version: 0.88.4
 date: 2026-11-09
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,17 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.4: 2026-11-09, erratum to 0.88.3, found by the blind reviews of
+    vettid-android #334. §11.14.10 rule 5 "A second scan of the same
+    code": the comparison ignores the payload's `e` (the code's expiry) and
+    runs before any expiry check (a code expires about a minute or more
+    before its transfer's deadlines, so a same-code re-scan in that gap
+    was refused as expired, which told the member a live move was dead
+    and let an abandon drop it while the old phone could still approve);
+    a restart before the transfer's `hs.init` was recorded ends the
+    transfer, and the app drops its stored `r` and `c` (no `hs.fin` can
+    follow, so the vault cannot approve it, whether or not the `hs.init`
+    reached it). Apps only.
   - 0.88.3: 2026-11-09, erratum (owner decision a, GC
     01M70WNHJ7XWD53XD3FTNZKCPK; numbered after 0.88.2, vettid.org #555,
     which is still open, and independent of it). Found by the blind
@@ -23114,7 +23125,8 @@ under the request's `id` (§8.2).
    from the moment it fetches the code's claim (the start of its
    `hs.init` and the 60-second wait for `hs.resp` included) until this
    rule ends it: applied, rejected, ended (`device.transfer.ended`, or
-   its session gone), abandoned, given up or dropped. A claim fetch that
+   its session gone), abandoned, given up or dropped, or (0.88.4) a
+   restart before its `hs.init` was recorded. A claim fetch that
    fails (the relay not reached, a timeout, `404`), or a payload that
    fails its checks (`h`, opening, `exp`), ends the transfer at once:
    nothing was sent and nothing is kept, so the code can be scanned
@@ -23125,12 +23137,26 @@ under the request's `id` (§8.2).
      claim id `c` (the payload's `r`, not an epoch-1 record's) as the
      code the open transfer started from. The app stores that `r` and
      `c` with the transfer, durably, before it fetches the claim, as it stores the moment it started, so a restart
-     keeps them. There is no second code for one transfer:
+     after the transfer's `hs.init` was recorded keeps them. (0.88.4) A
+     restart before that record **ends the transfer** (it is then not
+     open): the handshake is gone with the process, so no `hs.fin` can
+     follow and the vault cannot approve it (§6.7.1 step 2), whether or
+     not the `hs.init` reached it. The app drops the stored `r` and `c`;
+     the code is then a spent code once its claim was fetched. At the vault the transfer ends
+     `expired` within its 10 minutes, or sooner on the holder's
+     `device.transfer.reject`, and `device.transfer.create` answers
+     `exists` until then.
+     (0.88.4) The comparison **ignores the payload's `e`** (the code's
+     expiry, the bundle's `exp`): the code expires 10 minutes after
+     `device.transfer.create`, before the deadlines of the transfer it
+     started (the new app's 11 minutes, then the settlement window or the
+     outcome wait), so the same code scanned in that gap is the same
+     code, never an "expired" one. There is no second code for one transfer:
      `device.transfer.create` gives one link per transfer and answers
      `exists` while one is open (§6.7.1 step 1), so any new code from the
      old phone has a new `c`.
    - **Refused, before anything else.** The app compares the scanned
-     payload alone, before it fetches the claim (a claim is served once,
+     payload alone, before any check of its `e`, before it fetches the claim (a claim is served once,
      §6.4), before it drops anything, and before the deadline's or the
      settlement window's refusal of new codes. For the same code it
      changes nothing (its handshake, attested key, epoch-1 secret and
