@@ -98,6 +98,10 @@ changelog:
     it came under (option A); the rapid-rotation residual re-accepted at
     3 in 10,002 burst runs of the random pair; "A ballot ahead of its
     chain" stays a residual for release 29.
+    From the final release 29 review: §6.3.1 Initiator, new "I's open
+    reconnects end at its rekey's confirmation" (a false fork otherwise);
+    §6.5, a rekey `hs.init` is answered once, and a duplicate `hs.fin`
+    is acked and ignored; §6.3.2, R29-T1's tests and new R29-T2, R29-T3.
   - 0.88.1: 2026-11-06, erratum to 0.87.1 (owner decision a, GC
     01M6S0QVS56CD790T5KD8J30QM, asked as "0.87.2"; numbered after
     0.88.0, which merged first). Found by the Opus review of vettid-vault
@@ -7331,6 +7335,21 @@ sent. `R` drops its answers to them when it establishes the reconnect
 processed after the reconnect's would otherwise make a pending epoch that
 `R` never answers in, and the two sides would differ until that epoch reaches `B`.
 
+(0.88.2) **I's open reconnects end at its rekey's confirmation** (the
+final release 29 review, F1). In the write that confirms a rekey's
+pending epoch, `I` abandons its open reconnects with `R` that name another
+epoch (not one marked replaced at a restore, §6.6): their tokens are
+revoked and an `hs.init` not yet deposited is not sent. Such a reconnect
+named the epoch that was current when it started, which has just moved on.
+Its `hs.init` may still reach `R` late (a redelivery, §8.4); `R`, for which
+that epoch is the confirmed one while the rekey's is current, answers it
+(Responder, a rekey or reconnect naming the confirmed epoch), and if `I`
+then sent `hs.fin`, `R`'s rule E would destroy the epoch `I` sends under,
+and `I`'s next message under it would be fork evidence: an honest pair
+suspended. With this rule `I` finds nothing for that answer (§6.3.1, an
+`hs.resp` for no open handshake is acked and dropped) and sends no
+`hs.fin`. It mirrors "I's rekeys end at its reconnect's `hs.resp`".
+
 After abandoning a rekey's pending epoch (at `B` or for want of a token),
 a connection's vault reconnects naming its current epoch (after a
 demotion, the one §3.4.1 names). After abandoning a reconnect's pending
@@ -7466,9 +7485,10 @@ follows this paragraph on either side as a member vault does.
   adopt was lost too (accepted, review of the R29-T1 code). The current
   epoch's record stays, discarded, so that "`hs.confirm` again" stays
   stopped for it. Their revocation by the issuer harms nothing. In the write
-  that discards them, if `R` holds no valid standing token for `I`, it is
-  in §8.6's "no valid standing token" case and reconnects (§6.6), bounded
-  by §3.4.1 "The reconnect bound".
+  that discards them (for a discard by rule E, a demotion or an end, at the
+  next housekeeping, where the bound is also judged), if `R` holds no
+  valid standing token for `I`, it is in §8.6's "no valid standing token"
+  case and reconnects (§6.6), bounded by §3.4.1 "The reconnect bound".
 - **What they are used for before.** Only the handshake's own messages,
   each deposited with the carried standing token: `R`'s `hs.resp` (after
   a long lock `R`'s held token has often expired, and the answer could not
@@ -7655,7 +7675,7 @@ IDs of the approved rule list (vettid.org #549: go at `bef67dc`, errata
 `201ee12`; owner go,
 GC 01M6RABDJ0FY3MZ8TPJ6C19QKR). Each has a test that fails without it;
 "gap" marks one still to write (cleanup plan step 5). Test locations are
-vettid-vault #206 at `8647aa6` ((0.88.2) every rule has a test except R29-T1, whose test comes with its code), in `vault/` unless prefixed (`V/` is the
+vettid-vault #206 at `8647aa6` ((0.88.2) every rule has a test; R29-T1 to R29-T3 at #206's head, `r29-t1`), in `vault/` unless prefixed (`V/` is the
 repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 `own_copy` exception) was withdrawn and its ID is not reused.
 
@@ -7699,7 +7719,9 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-D2 | §6.3.1 Devices and agents; §15 item 51 | V/client/rotate086_test.go:18, :71; V/client/persist_test.go:485 |
 | R29-D3 | §6.3.1 Devices and agents; §6.7; §10.9 | r29_device_test.go:18 |
 | R29-D4 | §6.3.1 An app from before release 29; §10.9 | r29_device_test.go:85, :116, :147 |
-| R29-T1 ((0.88.2) a handshake's tokens adopted at confirmation; no revocation of a superseded token) | §6.3.1 A handshake's tokens are adopted at confirmation; §6.6; §7.4 | gap (unit test from a failing seed's trace; the random-pair harness asserts that no vault holds as adopted a token its peer revoked, in both orders of a crossing) |
+| R29-T1 ((0.88.2) a handshake's tokens adopted at confirmation; no revocation of a superseded token) | §6.3.1 A handshake's tokens are adopted at confirmation; §6.6; §7.4 | r29_t1_test.go (the sub-rules, each failing without its rule; TestR29T1Seeds); the random-pair harness asserts that no vault adopts a carried token its issuer had already revoked (judgeAdoption) |
+| R29-T2 ((0.88.2) the handshakes a newer one ends) | §6.3.1 Initiator: an abandoned pending epoch's `hs.fin`; I's rekeys end at its reconnect's `hs.resp`; I's open reconnects end at its rekey's confirmation; Responder: a reconnect ends R's rekey answers | r29_t1_test.go: TestR29AbandonedPendingDropsItsWaitingFin, TestR29ReconnectRespAbandonsTheOwnRekeys, TestR29StaleReconnectEndsAtTheRekeysConfirmation, TestR29ReconnectDropsTheRekeyAnswers; r29_gapf_test.go: TestR29DeviceAbandonInTheDrainDropsItsFin |
+| R29-T3 ((0.88.2) a rekey `hs.init` answered once) | §6.5 | r29_t1_test.go: TestR29DuplicateRekeyInitAnsweredOnce |
 
 ### 6.4 Connections and invitations
 
@@ -8304,7 +8326,15 @@ connection and request bodies, which an older vault never sends.
 | Vault ↔ device or agent | 7 days, and on every unlock |
 
 Either side MAY rekey sooner. The side that hits the limit initiates
-(with a device or agent, the vault always initiates, §6.3.1). A
+(with a device or agent, the vault always initiates, §6.3.1). (0.88.2,
+R29-T3) The responder answers a rekey `hs.init` once: one it has already
+answered (the same `th1`, for example re-deposited by `I` after a crash
+under a new `msg_id`) is acked and dropped (audited
+`rekey_init_replayed`), as a reconnect's is (§6.6 "Replay"); a second
+answer would wait `L` for an `hs.fin` that never comes and hold `R`'s
+rekeys back. An `hs.fin` whose answer is gone (a duplicate after its
+epoch was established) is acked and ignored, as an `hs.confirm` that
+confirms nothing. A
 new connection's or device's first epoch counts from its activation
 (§6.3), not from `hs.fin`; a pending one is never rekeyed (0.10.3). If both
 sides initiate at once, the `hs.init` with the lower `th1` wins (compared as
