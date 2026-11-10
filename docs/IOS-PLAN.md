@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.65
-date: 2026-11-07
+version: 0.1.66
+date: 2026-11-10
 changelog:
+  - 0.1.66: erratum, 2026-11-10 (lead; the container-read audit after a public iOS sandbox escape, vettid-ios #241). §4 History export and §6.9: an export or a share that hands the system a file writes it to a directory of its own in tmp/ with complete protection, hands it over as a copy (`UIDocumentPickerViewController(forExporting:asCopy: true)`), and removes it on every answer, on a failure, when the screen leaves or is covered, and at launch (the vote proof's pattern). SwiftUI `.fileExporter` is not used: it leaves its file in tmp/ with default protection.
   - 0.1.65: erratum, 2026-11-07 (ANDROID-PLAN 0.1.122, RELEASE-UPDATES 0.3.4; owner decision a). The unlock screen's release offer follows ANDROID-PLAN §4 "What's new": PIN first, a compact notice with the security line and the fingerprint, What's new one tap away in a sheet, approval not gated on opening it.
   - 0.1.64: erratum, 2026-11-05 (ANDROID-PLAN 0.1.121, VAULT-MESSAGING 0.85.2; owner decisions a and a/a). The iPhone's transfer-in follows ANDROID-PLAN §4 "Transfer (new phone)": past the 11-minute deadline it collects for the settlement window (about 90 s) in the background, never cancels its own collect, retries failed collects, ends a rejection as rejected and hides the comparison code meanwhile.
   - 0.1.63: erratum, 2026-11-05 (ANDROID-PLAN 0.1.120, VAULT-MESSAGING
@@ -750,7 +751,7 @@ Only these differ on iOS:
 | Settings → Vault status | ID15; the credential-key fingerprint row, as on Android (ANDROID-PLAN §4 "Owner check and status", 0.1.119), computed in `VettIDCrypto` beside the `ik` fingerprint. |
 | Profile photo | **Camera only**, as on Android (ANDROID-PLAN §4 Settings → Privacy; row I2.5): the app's own AVFoundation camera screen, to memory; no photo picker and no other camera app. Camera access "not yet asked" asks; "denied" and "restricted" show `ios_settings_photo_capture_permission_blocked` (§14) with **Open settings**, which opens the app's page in Settings (Android's text names its phone's Permissions screen). |
 | Photo attachments | AVFoundation camera to memory; `PHPickerViewController` (no photo-library permission, like the Android Photo Picker); saving uses the add-only permission and only after the warning. |
-| History export | `fileExporter` ("Save to Files") in place of "Save to…". (0.1.63; from the app version with vettid-ios #209, in review) `bad_request` is the request's own fault and shows the vault's code; only `unsupported_type` says the vault release is too old. Android maps `bad_request` to "old vault" today and is to follow (ANDROID-PLAN 0.1.120). |
+| History export | "Save to Files" (`UIDocumentPickerViewController(forExporting:asCopy: true)`, 0.1.66: the file is kept only while the picker is up, §6.9) in place of "Save to…". (0.1.63; from the app version with vettid-ios #209, in review) `bad_request` is the request's own fault and shows the vault's code; only `unsupported_type` says the vault release is too old. Android maps `bad_request` to "old vault" today and is to follow (ANDROID-PLAN 0.1.120). |
 | Transfer to a new phone (this phone the old one) | (0.1.63; from the app version with vettid-ios #209, in review) When the wait for the new phone fails (not the code's own end), the app rejects the transfer (`device.transfer.reject`), so its code cannot be used, and returns to the start with the failure said. Android shows the "expired" screen. |
 | Unlock, a refused update | (0.1.63; from the app version with vettid-ios #209, in review) The reason is said in words, with the refused release's own number, for the codes the app has a sentence for (`ios_unlock_update_refused_why`, a draft for the owner); any other code gets Android's `unlock_update_refused` with the code filtered, never raw. Android shows the code. |
 | Calls (later) | CallKit, and PushKit to ring (needs APNs). |
@@ -2551,7 +2552,7 @@ are cleared at the vault lock, at a hold, at a wipe and when the process
 ends. There is no database, no content cache, no photo cache and no
 HTTP cache (every URLSession is `.ephemeral`: no disk cache and no persistent cookies; the release-notes fetch also sets `urlCache = nil`), and nothing of
 the content goes to a file, `UserDefaults`, scene state restoration, a
-log or a backup. Pending approval events and the names on recent
+log or a backup, except a file the member exports or shares, and only while the system's picker or share sheet holds it (0.1.66, the row below). Pending approval events and the names on recent
 connection requests are included: they are shown while the vault is open
 and read again from the vault after the next unlock (the app persisted
 them, encrypted, across a lock; that is being removed). (0.1.63; owner
@@ -2574,6 +2575,7 @@ Secure Enclave key only gates the prompt (0.1.46).
 | Owner-check state, lock record, canary manifest | Encrypted state file | The same | Wipe | Excluded |
 | Theme and Show in notifications (`settings.theme`, `settings.notification_previews`) | UserDefaults | — | Wipe; uninstall | Included in backups (these two only) |
 | App lock | Secure Enclave key (.biometryCurrentSet or .devicePasscode), its "made" record in the keychain WhenUnlockedThisDeviceOnly, encrypted settings file | Hardware; protects no data at rest | Turned off; wipe | None |
+| A file handed to the system: History export, vote proof (0.1.66) | A directory of its own in tmp/ (`vettid-history-export-…`, `vettid-proof-…`) | `NSFileProtectionComplete` on the directory and the file | When the member answers, on a failure, when the screen leaves or is covered, and at launch (and when the screen opens again). To be built (a vettid-ios follow-up): also when the app goes to the background, and the photo share sheet in the same way (today it hands the system the photo's bytes) | Excluded (tmp/) |
 | A copied secret item value | `UIPasteboard`, `.localOnly`, `.expirationDate` 60 s | Local to the phone, not shared with other devices | After 60 seconds, at the vault lock (only if still the app's item) | None |
 | Notifications | The system | Content rules | Before phase P only feed items' local notifications while the app is open (§6.7), removed when the vault stops being open, when the app lock covers the app and when the app goes to the background; from phase P, when the vault stops being open | None |
 
