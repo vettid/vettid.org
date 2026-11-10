@@ -9887,7 +9887,9 @@ The same applies when the connection ends while the entry waits:
    peer deposited can still arrive, so no rekey or reconnect of its can
    make the connection active again (a new invitation replaces the
    record, case 4). Each of its waiting durable messages, held or sealed,
-   is then audited `drop.undelivered_stale`.
+   is then audited `drop.undelivered_stale`. With no token recorded for
+   the peer at all, the bound cannot be judged and the messages are
+   kept.
 Each `drop.undelivered_*` entry has `ref` = the message's inner `id`
 (§10.9).
 Each such entry ends with its own audit entry (bounded as every
