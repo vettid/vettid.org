@@ -60,8 +60,14 @@ changelog:
     message ends with a `drop.undelivered_*` audit entry (§10.9),
     never silently. That is the hook vettid-vault card GC #6875 completes
     with the member's notice; its 16-day re-stamp at deposit, without a
-    key change, is that card's as well. Vaults toward their connections
-    only; a vault's entries to its devices, and the apps, are unchanged.
+    key change, is that card's as well. A deposit is one client attempt,
+    and any `5xx` or no answer counts as possibly stored; a vault keeps
+    inner ids 16 days and 5 minutes (§8.2). Proposed, for the lead's
+    confirmation: a `stale` connection's held messages end, audited,
+    once no token the vault issued to the peer is valid. Vaults toward
+    their connections only; a vault's entries to its devices are
+    unchanged; apps show a `stale` connection active again on its
+    `rekeyed` or `reconnected` event (a follow-up check).
   - 0.88.5: 2026-11-10, erratum (owner decision a, GC
     01M71ED8Y7CEF0PVNJ0BC31AQP). §10.11 "Initial grants at pairing" (new
     paragraph): which of an agent's approved initial grants a pairing
@@ -4725,13 +4731,19 @@ carried tokens wait" holds.
 (0.88.7, owner decision b, GC #7213) **Stale is not final.** `stale`
 ends Q's own handshakes with P and its pending epoch (as before), but
 not the connection's outbox: Q keeps every entry to P, held ones
-included. When a rekey or reconnect then brings the connection to a new
+included, until it can no longer come back (§8.3 "Not delivered", case
+6, proposed). When a rekey or reconnect then brings the connection to a new
 epoch (most often P's, which Q answers as usual, §6.5, §6.6), the
 connection is active again in the write that activates that epoch. Q
 seals the waiting entries under it (§8.3 "Re-sealed at a key change")
-and audits `connection.active_again` with its feed item (§10.9). Owner
-devices get that epoch's `connection.event` (`rekeyed` or
-`reconnected`) as usual. A removal, or a new connection that replaces the record (§7.4,
+and audits `connection.active_again` with its feed item (§10.9), which,
+after a restore reconnect (§6.6), is a feed item only: that reconnect's
+`connection.restored_reconnect` is the one History line, since it names
+the restored epoch. Owner devices get that epoch's `connection.event`
+(`rekeyed` or `reconnected`) as usual; an app that shows the connection
+as `stale` shows it active again on that event (apps: a follow-up check,
+vettid-android and vettid-ios). A removal, or a new connection that
+replaces the record (§7.4,
 "Connecting again after a removal"), still ends it. Its waiting
 messages then end as §8.3 "Not delivered" says.
 
@@ -9741,7 +9753,11 @@ lease and a 14-day TTL (the defaults).
 Both of the following layers are REQUIRED:
 
 1. **Relay `msg_id`.** Seen ids are kept for 16 days.
-2. **Inner `id`, per principal.** These are kept for 16 days in vault state.
+2. **Inner `id`, per principal.** These are kept for 16 days in vault state
+   ((0.88.7) a vault keeps them 16 days and 5 minutes: the durable `ts`
+   window of §8.4 with its future skew, so that a copy whose `ts` is kept,
+   §8.3 "Re-sealed at a key change", is refused for its `ts` before its
+   `id` is forgotten).
    This layer catches sender retransmissions, which the relay stores under
    different `msg_id`s. Responses are cached for 24 h, so a duplicate request
    gets the cached response again and is not re-executed.
@@ -9807,15 +9823,25 @@ again every durable entry to it that is still waiting (not yet answered
 - with the **same inner `id`**, so the peer's inner-`id` dedupe (§8.2)
   absorbs a copy it already holds;
 - with a **fresh `ts`**, except an entry an earlier deposit of which may
-  have reached the relay: one the relay accepted, or one that got no
-  answer from the relay (a transport error, or a `5xx` without a relay
-  error code). That entry **keeps its `ts`**. The peer forgets an inner
-  `id` 16 days after it processed it (dedupe retention), and §8.4
-  refuses a `ts` more than 16 days old, so the kept `ts` makes the peer
-  refuse the copy before it could run it twice. A fresh `ts` would not.
+  have reached the relay: one the relay accepted, or one whose answer
+  does not rule out that the relay stored it (no answer: a transport
+  error; or any `5xx`, with or without a relay error code: the relay may
+  have committed it before failing). A `4xx`, `429` included, is a
+  refusal. Each deposit is **one attempt** at the client, with no retry
+  inside it (the outbox's backoff, §8.6, is the retry), so the answer
+  the vault judges is that attempt's: a retry inside the client could
+  hide a stored first attempt behind a refused second one. That entry
+  **keeps its `ts`**. The peer keeps an inner `id` 16 days and 5
+  minutes after it processed it (§8.2: the `ts` window of §8.4 plus its
+  future skew), and §8.4 refuses a `ts` more than 16 days old, so the
+  kept `ts` makes the peer refuse the copy before it could run it twice,
+  whatever skew the first copy had. A fresh `ts` would not.
 Handshake messages (`hs.init`, `hs.resp`, `hs.fin`) belong to their
-handshake and are not sealed again; an `hs.confirm` is, like any other
-entry. One whose `exp` has passed is discarded (`drop.held_expired`).
+handshake and are not sealed again. A waiting `hs.confirm` for the epoch
+being replaced is superseded and dropped (the new epoch's own follows
+when one is needed, §6.3.1). An ephemeral entry (§8.5) stays as it is,
+under the old epoch, whose receive key the peer keeps 16 days (§6.5).
+One whose `exp` has passed is discarded (`drop.held_expired`).
 With no usable current epoch (after a demotion) the entries stay held
 until one is current (§3.4.1). Every key change does the same, so a
 waiting message is always sealed under the connection's current epoch.
@@ -9824,11 +9850,13 @@ after a long wait, it came under an epoch the peer had dropped
 (`drop.unknown_kid` there) or with a `ts` past 16 days
 (`drop.stale_or_future`). The relay accepted it, so the sender took it
 as delivered.) A vault's entries to its devices are as before.
-Residual: the mark that a deposit may have reached the relay is
-written by the state write after that deposit. A crash in between loses
-it. If a key change then comes before the entry is deposited again,
-it gets a fresh `ts`. The peer runs it twice only if that copy arrives
-more than 16 days after it processed the first.
+A state written before 0.88.7 does not record this mark: at its first
+load every waiting entry that was attempted is taken as one that may
+have reached the relay. Residual: the mark is written by the state write
+after that deposit. A crash in between loses it. If a key change then
+comes before the entry is deposited again, it gets a fresh `ts`. The
+peer runs it twice only if that copy arrives more than 16 days after it
+processed the first.
 
 (0.88.7) **Not delivered.** The vault does not deposit a waiting
 durable entry to a connection when re-sealing it is not safe:
@@ -9837,8 +9865,10 @@ durable entry to a connection when re-sealing it is not safe:
    release before 0.88.7 that already waited across a key change can be
    in this case. Audited `drop.undelivered_unreadable`;
 2. it keeps its `ts` (above), and that `ts` is already more than 16
-   days old: the peer would refuse it (§8.4). It may or may not have
-   been delivered. Audited `drop.undelivered_window`;
+   days old: the peer would refuse it (§8.4). It **may or may not have
+   been delivered** (an earlier copy may have reached the peer), so the
+   member's notice for this case says so, never "not delivered"
+   outright. Audited `drop.undelivered_window`;
 3. it cannot be sealed under the new epoch: `drop.held_unsealable`
    (0.88.2).
 The same applies when the connection ends while the entry waits:
@@ -9846,7 +9876,12 @@ The same applies when the connection ends while the entry waits:
    with the same peer (§7.4 "Connecting again after a removal"): audited
    `drop.undelivered_removed`;
 5. a deposit to it is answered `mailbox_unknown` and the connection
-   becomes `stale` (§8.6): audited `drop.undelivered_mailbox_unknown`.
+   becomes `stale` (§8.6): audited `drop.undelivered_mailbox_unknown`;
+6. (proposed, for the lead's confirmation) the connection is `stale`
+   and can no longer come back: no token the vault issued to the peer
+   (standing or reconnect) is still valid, so the peer can deposit no
+   rekey or reconnect (a new invitation replaces the record, case 4).
+   Its held messages are audited `drop.undelivered_stale`.
 Each such entry ends with its own audit entry (bounded as every
 `drop.*`, §10.9), never silently. A connection that is only `stale`
 keeps its entries. Handshake messages, `hs.confirm` and best-effort
@@ -9905,6 +9940,11 @@ deposit fails or the vault stops first).
 - full jitter, starting at 0.25 s × 2ⁿ and capped at 30 s;
 - every attempt is re-signed;
 - `retry_after` is honoured.
+
+(0.88.7) A vault's outbox deposit is one attempt per try: its outbox
+retries it with its own backoff (0.25 s × 2ⁿ, capped at 30 s), so
+that it judges each attempt's answer (§8.3 "Re-sealed at a key
+change").
 
 **Application retries** reuse the inner `id`, at most twice. (0.44.0)
 After a lost answer to `pin.change` or `credential.password.change`
@@ -13330,7 +13370,9 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `connection.stale`, `connection.reconnected`; (0.88.7)
   `connection.active_again` (`connection_id`, `ref` = `connection_id`: a
   `stale` connection the peer's rekey or reconnect made active again,
-  §3.4.1 "Stale is not final"); (0.72.0)
+  §3.4.1 "Stale is not final"; not after a restore reconnect, whose
+  `connection.restored_reconnect` is the History line, the feed item
+  being made all the same); (0.72.0)
   `connection.restored_reconnect` (`connection_id`, `ref` = the named
   epoch's activation time, §6.6) and `connection.fork_suspected`
   (`connection_id`, §6.6; (0.86.0) `ref` = `epoch`, `relay` or
@@ -13495,8 +13537,9 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   epoch the vault keeps for its peer, §3.4.1, with that peer's
   `connection_id` or `device_id`; also a sealed message to no KEM kid the
   vault knows, with no peer id), (0.88.7) `drop.undelivered_unreadable`,
-  `drop.undelivered_window`, `drop.undelivered_removed` and
-  `drop.undelivered_mailbox_unknown` (`connection_id`; one per waiting
+  `drop.undelivered_window` (may or may not have been delivered),
+  `drop.undelivered_removed`, `drop.undelivered_mailbox_unknown` and
+  (proposed) `drop.undelivered_stale` (`connection_id`; one per waiting
   message the vault did not deliver, §8.3 "Not delivered"; with
   `drop.held_expired` and `drop.held_unsealable`, §3.4.1) or (0.85.0) `drop.peer_key` (§3.4.1; `ref` = its reason;
   owner decision O7a, 2026-11-05: History shows a line, "A message from
