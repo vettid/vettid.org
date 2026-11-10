@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.4
-date: 2026-11-09
+version: 0.88.5
+date: 2026-11-10
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -28,6 +28,19 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.5: 2026-11-10, erratum (owner decision a, GC
+    01M71ED8Y7CEF0PVNJ0BC31AQP). §10.11 "Initial grants at pairing" (new
+    paragraph): which of an agent's approved initial grants a pairing
+    installs. None when the stored set no longer decodes; otherwise each
+    grant except one that is malformed, differs from the delegation the
+    member signed for it, has expired, has an id already in use, or is
+    over the cap. A grant is never widened and never replaces another.
+    Each one not installed is recorded in the audit log as the new
+    kind `leash.grant.dropped` (`device_id` = the agent, `ref` = the
+    reason), listed in §10.9. Before this the vault dropped them silently,
+    and a grant whose stored copy decoded with a field missing could take
+    effect wider than signed (no connection limit, no expiry). Vault only;
+    the pairing, its `grant_seq` and `leash.grant.updated` are unchanged.
   - 0.88.4: 2026-11-09, erratum to 0.88.3, found by the blind reviews of
     vettid-android #334. §11.14.10 rule 5 "A second scan of the same
     code": the comparison ignores the payload's `e` (the code's expiry) and
@@ -13294,7 +13307,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `ref` = `call_id`), `call.permission_off`, `call.permission_on`
   (`connection_id`) (§10.10); `leash.grant.issued`, `leash.grant.updated`,
   `leash.grant.revoked`, `leash.rate_limited` (`device_id` = the agent,
-  `ref` = `grant_id`), `leash.agent.suspended`, `leash.agent.resumed`,
+  `ref` = `grant_id`), (0.88.5) `leash.grant.dropped` (`device_id` = the
+  agent, `ref` = `damaged`, `mismatch`, `expired`, `id_taken` or `cap`:
+  an approved initial grant the pairing did not install, §10.11
+  "Initial grants at pairing"), `leash.agent.suspended`, `leash.agent.resumed`,
   `leash.referrals_limited`, and, summarised per agent and hour,
   `leash.allowed`, `leash.refused`, `leash.item.read`,
   `leash.item.used` and `leash.throttled` with their `<kind>.summary`
@@ -15104,6 +15120,36 @@ sig        = standard base64 of Ed25519(credential key, "leash/v1/delegation" ||
   delegation needs the owner, and a vault operator cannot issue one":
   the credential key is usable only inside the member's unlock window
   (§3.5).
+- **Initial grants at pairing** (0.88.5). The vault keeps the grants a
+  pairing approval signed, sealed with the pending pairing, and installs
+  them when the pairing completes (§6.7). If the stored set no longer
+  decodes (for example after a vault build change between the approval
+  and the completion), it installs none of them, not even those that
+  decoded before the error, and records one `leash.grant.dropped` with
+  `ref` = `damaged`. Otherwise it takes each grant in the order the
+  approval gave them and does not install it when the first of these
+  applies (`ref` = the reason in brackets):
+  1. it has no `grant_id`, or it lacks its signed delegation
+     (`damaged`);
+  2. the delegation the member signed for it is not in its canonical
+     form, its `sub` is not the pairing agent's `ik`, or the grant's
+     stored fields differ from it (`grant_id`, `version`, the scope with
+     its connections and tags, `approval`, the rate limits, `status_ttl`
+     and `expires_at`), so a stored copy that lost a limit, such as its
+     connections or its expiry, never takes effect wider than signed
+     (`mismatch`);
+  3. its `expires_at` has passed (`expired`);
+  4. its `grant_id` is already in use, by another agent's grant or an
+     earlier grant of the same set; an initial grant never replaces
+     another (`id_taken`);
+  5. the agent already has the most grants allowed (`cap`).
+
+  Each grant not installed is recorded as `leash.grant.dropped`
+  (`device_id` = the agent, `ref` = the reason; §10.9). The pairing
+  completes either way, with the grants that were installed (possibly
+  none): that set takes its `grant_seq`, and the agent is told in
+  `leash.grant.updated` as usual. The reasons are fixed values; a new
+  one is a spec change.
 - A replacement is signed again under its new `version` (and a new
   `nonce`). A `credential.rotate` does not re-sign grants: their `iss`
   is the old key, which verifiers that trust the new one follow through
