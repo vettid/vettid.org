@@ -9851,8 +9851,8 @@ after a long wait, it came under an epoch the peer had dropped
 (`drop.stale_or_future`). The relay accepted it, so the sender took it
 as delivered.) A vault's entries to its devices are as before.
 A state written before 0.88.7 does not record this mark: at its first
-load every waiting entry that was attempted is taken as one that may
-have reached the relay. Residual: the mark is written by the state write
+load every sealed waiting entry is taken as one that may have reached
+the relay (an attempt cut off by a lock or a crash was not counted). Residual: the mark is written by the state write
 after that deposit. A crash in between loses it. If a key change then
 comes before the entry is deposited again, it gets a fresh `ts`. The
 peer runs it twice only if that copy arrives more than 16 days after it
@@ -9878,10 +9878,18 @@ The same applies when the connection ends while the entry waits:
 5. a deposit to it is answered `mailbox_unknown` and the connection
    becomes `stale` (§8.6): audited `drop.undelivered_mailbox_unknown`;
 6. (proposed, for the lead's confirmation) the connection is `stale`
-   and can no longer come back: no token the vault issued to the peer
-   (standing or reconnect) is still valid, so the peer can deposit no
-   rekey or reconnect (a new invitation replaces the record, case 4).
-   Its held messages are audited `drop.undelivered_stale`.
+   and can no longer come back. The peer reaches the vault only with a
+   token the vault issued to it (standing for a rekey, reconnect for a
+   reconnect): one adopted, or one in a handshake still in flight (an
+   `hs.resp` or `hs.init` of the vault's not yet activated), revoked or
+   not. Once the latest `exp` among them is more than T (14 days, the
+   relay's hold) plus 5 minutes (§8.4's future skew) past, nothing the
+   peer deposited can still arrive, so no rekey or reconnect of its can
+   make the connection active again (a new invitation replaces the
+   record, case 4). Each of its waiting durable messages, held or sealed,
+   is then audited `drop.undelivered_stale`.
+Each `drop.undelivered_*` entry has `ref` = the message's inner `id`
+(§10.9).
 Each such entry ends with its own audit entry (bounded as every
 `drop.*`, §10.9), never silently. A connection that is only `stale`
 keeps its entries. Handshake messages, `hs.confirm` and best-effort
@@ -9941,10 +9949,11 @@ deposit fails or the vault stops first).
 - every attempt is re-signed;
 - `retry_after` is honoured.
 
-(0.88.7) A vault's outbox deposit is one attempt per try: its outbox
-retries it with its own backoff (0.25 s × 2ⁿ, capped at 30 s), so
-that it judges each attempt's answer (§8.3 "Re-sealed at a key
-change").
+(0.88.7) A vault's outbox deposit is one attempt per try (other
+deposits, such as a volatile response or `vault.locking`, keep these
+retries): its outbox retries it with its own backoff (0.25 s × 2ⁿ,
+capped at 30 s, and not before a `429`'s `retry_after`), so that it
+judges each attempt's answer (§8.3 "Re-sealed at a key change").
 
 **Application retries** reuse the inner `id`, at most twice. (0.44.0)
 After a lost answer to `pin.change` or `credential.password.change`
@@ -13539,9 +13548,11 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   vault knows, with no peer id), (0.88.7) `drop.undelivered_unreadable`,
   `drop.undelivered_window` (may or may not have been delivered),
   `drop.undelivered_removed`, `drop.undelivered_mailbox_unknown` and
-  (proposed) `drop.undelivered_stale` (`connection_id`; one per waiting
-  message the vault did not deliver, §8.3 "Not delivered"; with
-  `drop.held_expired` and `drop.held_unsealable`, §3.4.1) or (0.85.0) `drop.peer_key` (§3.4.1; `ref` = its reason;
+  (proposed) `drop.undelivered_stale` (`connection_id`, `ref` = the
+  message's inner `id`; one per waiting message the vault did not
+  deliver, §8.3 "Not delivered"; with `drop.held_expired` and
+  `drop.held_unsealable`, §3.4.1; (0.88.7) `drop.stale_or_future` also
+  has `ref` = the refused message's inner `id`) or (0.85.0) `drop.peer_key` (§3.4.1; `ref` = its reason;
   owner decision O7a, 2026-11-05: History shows a line, "A message from
   <name> used a key that is no longer valid and was dropped." (NEW, for
   wording approval with the app PRs), only for the reasons
