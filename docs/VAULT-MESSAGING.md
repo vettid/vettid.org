@@ -32,7 +32,7 @@ changelog:
     01M71ED8Y7CEF0PVNJ0BC31AQP). §10.11 "Initial grants at pairing" (new
     paragraph): which of an agent's approved initial grants a pairing
     installs. None when the stored set no longer decodes; otherwise each
-    grant except one that is malformed, differs from the delegation the
+    grant except one that is damaged, differs from the delegation the
     member signed for it, has expired, has an id already in use, or is
     over the cap. A grant is never widened and never replaces another.
     Each one not installed is recorded in the audit log as the new
@@ -41,6 +41,11 @@ changelog:
     and a grant whose stored copy decoded with a field missing could take
     effect wider than signed (no connection limit, no expiry). Vault only;
     the pairing, its `grant_seq` and `leash.grant.updated` are unchanged.
+    Also: the §10.11 members table says how `exp` is rounded; §6.7
+    points to the new paragraph, and its diagram's `device.paired` no
+    longer shows `grants` (it never carried them). Found by the blind
+    reviews of this erratum: the `expires_at` comparison in whole
+    seconds and the signature in rule 1.
   - 0.88.4: 2026-11-09, erratum to 0.88.3, found by the blind reviews of
     vettid-android #334. §11.14.10 rule 5 "A second scan of the same
     code": the comparison ignores the payload's `e` (the code's expiry) and
@@ -8830,7 +8835,7 @@ Paired app            Vault                Relay              New device/agent
   |<--device.pair.pending{name,role,sas}       |                     |
   |   user compares SAS         |              |                     |
   |--device.pair.approve{grants}-->|  epoch active, device record    |
-  |                             |--device.paired{role,grants,token}->|
+  |                             |--device.paired{role,token}------->|
 ```
 
 Rules:
@@ -8921,7 +8926,8 @@ Rules:
 - **Agents.** The approval MAY carry the agent's initial LEASH grants
   (`device.pair.approve{grants}`, §10.3, §10.11). The member's credential
   key signs them at the approval, so the app opens the unlock window
-  first; they take effect in the flush that completes the pairing, and
+  first; they take effect in the flush that completes the pairing
+  (those §10.11 "Initial grants at pairing" does not skip), and
   the agent learns them in `leash.grant.updated` when the approval also
   granted a first access session (`session_seconds`). (0.40.0) The vault
   sends `leash.grant.updated` only within a session (§10.11), so an agent
@@ -13309,8 +13315,9 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `leash.grant.revoked`, `leash.rate_limited` (`device_id` = the agent,
   `ref` = `grant_id`), (0.88.5) `leash.grant.dropped` (`device_id` = the
   agent, `ref` = `damaged`, `mismatch`, `expired`, `id_taken` or `cap`:
-  an approved initial grant the pairing did not install, §10.11
-  "Initial grants at pairing"), `leash.agent.suspended`, `leash.agent.resumed`,
+  an approved initial grant the pairing did not install, or with
+  `damaged` the whole stored set; §10.11 "Initial grants at pairing"),
+  `leash.agent.suspended`, `leash.agent.resumed`,
   `leash.referrals_limited`, and, summarised per agent and hour,
   `leash.allowed`, `leash.refused`, `leash.item.read`,
   `leash.item.used` and `leash.throttled` with their `<kind>.summary`
@@ -15077,7 +15084,7 @@ sig        = standard base64 of Ed25519(credential key, "leash/v1/delegation" ||
   | `status_ttl` | 60–3,600 s, default 900 (below) |
   | `nonce` | 16 bytes from the vault's random generator, in standard base64 (24 characters), new for each signature, a replacement's included (new in 0.12.0) |
   | `iat` | The signing time, in Unix seconds |
-  | `exp` | The grant's `expires_at` in whole seconds; absent when the grant has none (LEASH §3.2: expiry is optional) |
+  | `exp` | The grant's `expires_at` rounded down to whole seconds (an expiry not after `iat` is signed as `iat` + 1 s); absent when the grant has none (LEASH §3.2: expiry is optional) |
 
   No other member appears, at the top level or in `scope` or `limits`.
 - **Encoding.** The vault produces the bytes in the JSON Canonicalization
@@ -15129,23 +15136,31 @@ sig        = standard base64 of Ed25519(credential key, "leash/v1/delegation" ||
   `ref` = `damaged`. Otherwise it takes each grant in the order the
   approval gave them and does not install it when the first of these
   applies (`ref` = the reason in brackets):
-  1. it has no `grant_id`, or it lacks its signed delegation
-     (`damaged`);
+  1. it has no `grant_id`, or it lacks its delegation or the signature
+     over it (`damaged`);
   2. the delegation the member signed for it is not in its canonical
      form, its `sub` is not the pairing agent's `ik`, or the grant's
-     stored fields differ from it (`grant_id`, `version`, the scope with
-     its connections and tags, `approval`, the rate limits, `status_ttl`
-     and `expires_at`), so a stored copy that lost a limit, such as its
-     connections or its expiry, never takes effect wider than signed
-     (`mismatch`);
-  3. its `expires_at` has passed (`expired`);
+     stored fields differ from it: `grant_id`, `version`, the scope (an
+     initial grant is never `items.read`, so its `op` and
+     `connections`), `approval`, the rate limits (`per_hour` and
+     `per_day` equal `limits`, or are 0 when it is absent), `status_ttl`,
+     and `expires_at`, which is present exactly when `exp` is and,
+     rounded down to whole seconds, equals it. So a stored copy that
+     lost a limit, such as its connections or its expiry, never takes
+     effect wider than signed (`mismatch`). (An expiry within the second
+     it was signed was signed as one second later and mismatches; it
+     would have expired by the completion anyway);
+  3. its `expires_at` is not after the time of the completion
+     (`expired`);
   4. its `grant_id` is already in use, by another agent's grant or an
      earlier grant of the same set; an initial grant never replaces
      another (`id_taken`);
   5. the agent already has the most grants allowed (`cap`).
 
-  Each grant not installed is recorded as `leash.grant.dropped`
-  (`device_id` = the agent, `ref` = the reason; §10.9). The pairing
+  Each grant installed is recorded as `leash.grant.issued` (`ref` =
+  `grant_id`), and each one not installed as `leash.grant.dropped`
+  (`ref` = the reason), both with `device_id` = the agent (§10.9), in
+  the audit log only, not the feed. The pairing
   completes either way, with the grants that were installed (possibly
   none): that set takes its `grant_seq`, and the agent is told in
   `leash.grant.updated` as usual. The reasons are fixed values; a new
