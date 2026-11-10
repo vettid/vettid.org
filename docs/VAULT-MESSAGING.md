@@ -9890,6 +9890,9 @@ handshake and are not sealed again. A waiting `hs.confirm` for the epoch
 being replaced is superseded and dropped (the new epoch's own follows
 when one is needed, §6.3.1). An ephemeral entry (§8.5, recorded as such
 when it is queued) ends silently at the key change: it is never told.
+One queued before 0.88.7 has no such record: it ends silently too when
+it can be read back (by its type), and is told as unreadable (case 1)
+when it cannot.
 One whose `exp` has passed is discarded (`drop.held_expired`, `ref` =
 its inner `id`). An entry held again or sealed again is not deposited
 before the state write that stores it (§11.14.2 "order of writes"), as a
@@ -9959,12 +9962,17 @@ The same applies when the connection ends while the entry waits:
 7. the connection is suspended on fork evidence (§6.6): nothing is sent
    to it, and each waiting message is audited
    `drop.undelivered_suspended`;
-8. the relay refuses its deposit with a `4xx` other than `429`
-   (`bad_request`, `payload_too_large`, ...; §8.6): audited
-   `drop.undelivered_refused`. A deposit is one attempt, so a refusal
-   about the attempt rather than the message, `timestamp_stale` or
-   `replay_detected`, is retried with the backoff (freshly signed), never
-   ended.
+8. the relay refuses the deposit of a durable member message with a
+   `4xx` other than `429` (`bad_request`, `payload_too_large`, ...;
+   §8.6): audited `drop.undelivered_refused`. A deposit is one attempt,
+   so a refusal about the attempt rather than the message,
+   `timestamp_stale` or `replay_detected`, is retried with the backoff
+   (freshly signed), never ended. `replay_detected` means an earlier copy
+   of the request reached the relay, so the entry counts as possibly
+   stored (it keeps its `ts`, above). An entry the relay keeps refusing
+   `timestamp_stale` is noted once, at its third refusal
+   (`relay_clock_stale`, the vault's internal audit), so that a stuck
+   clock is visible.
 Each `drop.undelivered_*` entry has `ref` = the message's inner `id`
 (§10.9).
 Each such entry ends with its own audit entry (bounded as every
