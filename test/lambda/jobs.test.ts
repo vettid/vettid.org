@@ -1292,13 +1292,14 @@ describe('cleanup job: account deletions (MEMBER-API 2.14.0; ACCOUNT-ADMIN-PLAN 
     expect(JSON.stringify(err.mock.calls)).not.toContain('gone@x.org');
   });
 
+  // The vault rows are built inside the test, under the fake clock (RUN), so an expired lease is expired at RUN.
   test.each([
-    ['a sealed vault', [sealed], 'vault', [A]],
-    ['an enrollment under way (a lease, no release)', [{ vault_id: A, user_guid: 'g1', state: 'enrolling', lease: { instance_id: 'i1', lease_expires_at: nowS() + 60 } }], 'enrolling', [A]],
-    ['an enrollment whose lease has expired (no proof that no instance will report)', [{ vault_id: A, user_guid: 'g1', state: 'enrolling', lease: { instance_id: 'i1', lease_expires_at: nowS() - 3600 } }], 'enrolling', [A]],
-    ['a vault being deleted (asked, not yet reported)', [{ ...sealed, deletion_requested_at: nowS() - 60 }], 'vault', [A]],
+    ['a sealed vault', () => [sealed], 'vault', [A]],
+    ['an enrollment under way (a lease, no release)', () => [{ vault_id: A, user_guid: 'g1', state: 'enrolling', lease: { instance_id: 'i1', lease_expires_at: nowS() + 60 } }], 'enrolling', [A]],
+    ['an enrollment whose lease has expired (no proof that no instance will report)', () => [{ vault_id: A, user_guid: 'g1', state: 'enrolling', lease: { instance_id: 'i1', lease_expires_at: nowS() - 3600 } }], 'enrolling', [A]],
+    ['a vault being deleted (asked, not yet reported)', () => [{ ...sealed, deletion_requested_at: nowS() - 60 }], 'vault', [A]],
   ])('held for %s: nothing deleted, nothing written to the row, audited with the reason, counted, and the member emailed at this first run', async (_n, vaults, reason, ids) => {
-    setup(account(), [...vaults, neverSealed]);
+    setup(account(), [...vaults(), neverSealed]);
     const r = await cleanup.handler();
     expect(r).toMatchObject({ deleted: 0, failures: 0 });
     expect(order).toEqual(['read', 'disable', 'sign_out', 'read']);
@@ -1395,12 +1396,14 @@ describe('cleanup job: account deletions (MEMBER-API 2.14.0; ACCOUNT-ADMIN-PLAN 
     }
   });
 
+  // The rows are built inside the test, under the fake clock (RUN): built when the file loads, they took the real clock,
+  // and from an hour after RUN their delete_after was no longer due at RUN.
   test.each([
-    ['the confirmation was claimed and never recorded as sent', account({ account_deletion: deletion({ mailed_at: undefined }) })],
-    ['the confirmation was never claimed', account({ account_deletion: deletion({ mailed_at: undefined, mail_claimed_at: undefined, cancel_hash: undefined }) })],
-    ['a canceled row without a deletion record (before 0.3.0)', account({ account_deletion: undefined })],
+    ['the confirmation was claimed and never recorded as sent', () => account({ account_deletion: deletion({ mailed_at: undefined }) })],
+    ['the confirmation was never claimed', () => account({ account_deletion: deletion({ mailed_at: undefined, mail_claimed_at: undefined, cancel_hash: undefined }) })],
+    ['a canceled row without a deletion record (before 0.3.0)', () => account({ account_deletion: undefined })],
   ])('held (reason mail) when %s: nothing deleted, no email', async (_n, m) => {
-    setup(m, [neverSealed]);
+    setup(m(), [neverSealed]);
     await cleanup.handler();
     nothingDeleted();
     expect(audits()).toEqual([expect.objectContaining({ action: 'member.deletion_held', detail: { reason: 'mail' } })]);
