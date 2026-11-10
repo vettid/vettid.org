@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.5
+version: 0.88.6
 date: 2026-11-10
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,41 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.6: 2026-11-10, erratum (owner decision a, GC
+    01M72ND172BCN6HP0G9GH8XSGQ; vettid-vault card GC #6783). §8.6
+    `quota_exceeded` for the **token**: the refused deposit is never
+    sent again under that token (RELAY-PROTOCOL §7.1). It waits as one
+    waiting for a valid standing token (§8.4): later deposits to the
+    mailbox under the standing token wait behind it, and one with a
+    token of its own and the refresh it asked for pass. The refresh is
+    asked again at most once an hour, not while one is still queued and
+    not before a `too_soon`'s `allowed_after`; one asked under a token
+    since replaced is not sent; the earlier ones stay pending, so the
+    answer to the first (the one the issuer usually grants) is taken, also
+    after a restart and with no standing token held (one revoked
+    meanwhile). When the refresh itself is refused for
+    the token's quota (its messages spent), or a deposit is refused for
+    the token's quota after the token's `exp`, the vault reconnects at
+    once (§6.6 "When to use it" gains these triggers), also while its
+    own rekey's epoch is pending, as when an entry still waiting comes
+    due after the `exp`: the issuer's re-mint (§7.2) may come only after the waiting
+    messages are older than §8.4's 16 days (not before the `exp`
+    without a reconnect token). At most 24 refreshes are open, the
+    first always kept; the hour and `allowed_after` bounds are in
+    memory. §10.5.1: an
+    attachment's refresh during such a wait is this refresh. With no `quota`,
+    the mailbox reading after a fresh token holds for every later
+    deposit under that token. §8.2, §8.5: a volatile response or an
+    ephemeral message is not deposited past such a wait. Residual: with
+    both sides' standing quotas spent, the reconnect waits for a token's
+    `exp` (§6.6 "Between two persons"), and a waiting deposit sealed under
+    an epoch the peer has dropped is lost (`unknown_kid`); both are open
+    on vettid-vault card GC 01M73AGYWZXR81CAS4GCSF6038, with GC
+    01M72T4KN4N89DDXK3TMAATAVT. Before this, the vault retried the
+    refused deposit unchanged and held every later deposit to the
+    mailbox behind it, a reconnect's `hs.resp` and the refresh among
+    them, so the connection could stay stuck (found by the random-pair
+    harness). Vaults only.
   - 0.88.5: 2026-11-10, erratum (owner decision a, GC
     01M71ED8Y7CEF0PVNJ0BC31AQP). §10.11 "Initial grants at pairing" (new
     paragraph): which of an agent's approved initial grants a pairing
@@ -8489,7 +8524,14 @@ holds; or (0.88.2) when it discards a handshake's carried tokens and holds
 no valid standing token for the peer (§6.3.1 "Discarded, never adopted");
 or (0.88.2, owner decision a) at once when its pending reconnect's
 `hs.fin` is answered `token_revoked`, even while it holds a valid standing
-token (§6.3.1 "A carried token refused").
+token (§6.3.1 "A carried token refused");
+or (0.88.6, owner decision a) at once, also while its own rekey's epoch is
+pending, when a deposit was refused `quota_exceeded` for the token (§8.6)
+and then the refresh it asked for is itself refused for the token's quota,
+when a deposit is refused for the token's quota after the token's `exp`,
+or when an entry waiting for such a refresh comes due after the `exp`;
+before the `exp`, not without a valid reconnect token (§3.4.1), and not
+while §6.3.1 "No reconnect while carried tokens wait" holds.
 
 **Initiating.** The reconnect `hs.init` is sealed to the last known `ek` of
 the peer. (0.85.0) Its `from.relay` names the relay key it is deposited
@@ -9690,7 +9732,9 @@ Both of the following layers are REQUIRED:
 may mark its responses volatile: they are never cached and never written to
 vault state, so they are not in the outbox either. They are deposited from memory after the
 batch's flush, behind any queued deposits to the same mailbox, and are
-lost if that deposit fails or the vault stops first. A retransmission of
+lost if that deposit fails or the vault stops first, or (0.88.6) while an
+entry to the same mailbox waits for a fresh token after `quota_exceeded`
+(§8.6). A retransmission of
 such a request is therefore executed again. This is allowed only for types
 whose only side effects are audit and feed entries. (0.32.0)
 It is also used for reads whose answers are large and that change no
@@ -9754,7 +9798,10 @@ same rule to their local storage.
   that wait for a valid held standing token, and so can overtake them;
   a handshake's messages pass entries held while a reconnect's epoch is
   pending (§6.3.1 Initiator) and entries held unsealed while the current
-  epoch is demoted (§3.4.1); and
+  epoch is demoted (§3.4.1); (0.88.6) an entry refused `quota_exceeded`
+  for its token waits as one waiting for a valid held standing token
+  (an entry with a token of its own, and the `relay.token.refresh` it
+  asked for, pass it, §8.6); and
   a message the relay redelivers after a collect that was not acked (a
   crash or a lock before the ack) comes in no particular order. No rule of
   this specification may rely on the order between a handshake's messages
@@ -9770,7 +9817,9 @@ same rule to their local storage.
 A vault forwards ephemeral messages from memory: they are deposited after
 the batch's flush, behind any queued deposits to the same mailbox, once
 and best effort, and never written to vault state (they are lost if the
-deposit fails or the vault stops first).
+deposit fails or the vault stops first). (0.88.6) One is not deposited
+while an entry to the same mailbox waits for a fresh token after
+`quota_exceeded` (§8.6): it is lost.
 
 ### 8.6 Retries
 
@@ -9793,7 +9842,7 @@ How each error is handled:
 | `token_revoked` | Terminal. Stop sending to that mailbox (0.83.0: for a retried open-token `hs.init`, see `token_used`). (0.88.2, owner decision a, GC 01M6SRQ1B7NM0Q00G0CEGHFES8) **Between two vaults**, for a deposit to a connection with a held standing token (for a carried one, below and §6.3.1 "A carried token refused"): the answer ends **that token only**, not the connection. The vault drops the token and never uses it again; the entry waits in the outbox for a valid token. If the vault holds no other valid standing token for the peer, it is in the "no valid standing token" case: a pending rekey is abandoned (§6.3.1), and the vault reconnects (§6.6), bounded by §3.4.1 "The reconnect bound"; a reconnect's own `hs.init` answered `token_revoked` is a failed try there. Honest pairs reach this when a peer revokes a token in flight (S5 at its rotation, H5, an abandoned pending epoch), so it is not a sign of an end. It revives no revoked token, and a copy gains nothing by it: the reconnect needs the reconnect token and is authenticated as any other. (0.88.2) A **carried** token (one an `hs.init` or `hs.resp` carried and the vault has not adopted, §6.3.1 "A handshake's tokens are adopted at confirmation") answered `token_revoked` is handled by §6.3.1 "A carried token refused": the refused `hs.resp`, `hs.fin` or `hs.confirm` entry is dropped, the handshake's carried tokens are discarded, and that handshake ends; the refusal alone does not make the "no valid standing token" case. Toward a device's own vault, and S9's relay-key case, as before. |
 | `token_used` | The open token is already spent. Restart first contact; except that (0.83.0) when the client retried its own `hs.init` with that token after a lost or failed answer, `token_used` and `token_revoked` both mean the first attempt may have been delivered: it waits for `hs.resp` until the token's `exp` plus 60 s, and restarts first contact only then. For a pairing or transfer this is at most the link's 10 minutes; a vault's accepted connection request stays `waiting` (§6.4) until then, and its member can decline it. |
 | `mailbox_unknown` | Re-resolve the address, or mark the connection `stale`. |
-| `quota_exceeded` (0.32.0) | Not retried at once, and handled by what is used up (RELAY-PROTOCOL 0.9.2 §7.1 `quota`): **`token`**: a peer vault MAY ask for a fresh token (§7.2) and retries once with it; **`mailbox` or `mailbox_blobs` or `sender_blobs`**: a fresh token does not help; a deposit waits in the outbox and is retried with backoff, and a blob upload is not retried: the vault waits until the recipient asks for it (§10.5.1 "Delivery to the peer"). A relay that sends no `quota` is read as `token` the first time and as the mailbox after a fresh token. A device does not upload again on its own: it tells the member and retries later. |
+| `quota_exceeded` (0.32.0) | Not retried at once, and handled by what is used up (RELAY-PROTOCOL 0.9.2 §7.1 `quota`): **`token`**: (0.88.6) never sent again under that token (RELAY-PROTOCOL §7.1). A peer vault asks for a fresh token (§7.2) and tries the deposit once more with it; meanwhile the entry waits as for a valid held standing token (§8.4: later deposits to the mailbox under the standing token wait behind it, in order; one with a token of its own and the refresh pass). When it comes due under the same token it asks again: at most once an hour, not while a refresh is still queued, and not before a `too_soon`'s `allowed_after` (taken up to 24 hours and a minute; not in the token's last 3 days, when the issuer grants hourly, §7.2); the hour and `allowed_after` bounds are kept in memory, so a vault that restarts may ask again at once. At most 24 refreshes are open (persisted): at the 25th the first is kept and the next oldest is forgotten. A refresh asked under a token since replaced is not sent. The open refreshes stay pending (the issuer usually grants the first and answers the later ones `too_soon`; the order is not guaranteed): an answer to any of them is taken, also after a restart, until it is answered, its refresh ends unsent (refused, or dropped held), or another standing token is held (with none held, after a revocation, it is still taken); they do not hold the other refreshes (the near-end one, an attachment's), which while the wait lasts are this refresh. When the refresh itself is refused for the token's quota (its messages spent), when a deposit is refused for the token's quota after the token's `exp`, or when an entry still waiting comes due after the `exp`, the vault reconnects at once without sending it again (§6.6; unlike `token_expired`, also while an own rekey is pending: the reconnect abandons it; owner decision a, GC 01M72ND172BCN6HP0G9GH8XSGQ): the issuer's re-mint (§7.2) may come only after the waiting messages are older than §8.4's 16 days. Before the `exp` a vault that holds no valid reconnect token does not reconnect (that would make the connection `stale`, §3.4.1): it goes on asking as above until a fresh token or the `exp`. A refresh refused with no `quota` is not read as spent: it is asked again an hour later. **Residual** (0.88.6): when both sides' standing quotas are spent, the reconnect is held by §6.6 "Between two persons" (an answer of ours awaits the peer's `hs.fin`, which its own spent quota refuses) until a token's `exp`, up to about 30 days, so durable messages can pass §8.4's 16 days; a waiting deposit stays sealed under its epoch and is lost if the peer has dropped that epoch (`unknown_kid`). Both are open (vettid-vault card GC 01M73AGYWZXR81CAS4GCSF6038, with the resend-or-tell rule of GC 01M72T4KN4N89DDXK3TMAATAVT). **`mailbox` or `mailbox_blobs` or `sender_blobs`**: a fresh token does not help; a deposit waits in the outbox and is retried with backoff, and a blob upload is not retried: the vault waits until the recipient asks for it (§10.5.1 "Delivery to the peer"). A relay that sends no `quota` is read as `token` the first time and as the mailbox after a fresh token; (0.88.6) under that fresh token every later one is read as the mailbox's too, also after a restart. A device does not upload again on its own: it tells the member and retries later. |
 
 **`vault.lock` is never retried from a durable outbox** (0.29.0,
 release L; for devices, from the app versions that implement it). A
@@ -11616,7 +11665,9 @@ vault deletes nothing, and the blob expires after the blob TTL.
   after the first hour, until `attachment_window` ends;
 - `quota_exceeded` for the **token** (RELAY-PROTOCOL §7.1 `quota`:
   `token`; before a relay sends `quota`, the first `quota_exceeded`):
-  the vault asks for a fresh token (§7.2) and tries once more with it;
+  the vault asks for a fresh token (§7.2) and tries once more with it
+  ((0.88.6) while a deposit to that peer waits for a fresh token for
+  its quota, the refresh asked for it, §8.6);
 - `quota_exceeded` for the **mailbox's blob storage or this sender's
   share of it** (`quota`: `mailbox_blobs` or `sender_blobs`; before a
   relay sends `quota`, a second `quota_exceeded` after a fresh token,
