@@ -8835,7 +8835,7 @@ Paired app            Vault                Relay              New device/agent
   |<--device.pair.pending{name,role,sas}       |                     |
   |   user compares SAS         |              |                     |
   |--device.pair.approve{grants}-->|  epoch active, device record    |
-  |                             |--device.paired{role,token}------->|
+  |                             |--device.paired{role,token}-------->|
 ```
 
 Rules:
@@ -15084,7 +15084,7 @@ sig        = standard base64 of Ed25519(credential key, "leash/v1/delegation" ||
   | `status_ttl` | 60–3,600 s, default 900 (below) |
   | `nonce` | 16 bytes from the vault's random generator, in standard base64 (24 characters), new for each signature, a replacement's included (new in 0.12.0) |
   | `iat` | The signing time, in Unix seconds |
-  | `exp` | The grant's `expires_at` rounded down to whole seconds (an expiry not after `iat` is signed as `iat` + 1 s); absent when the grant has none (LEASH §3.2: expiry is optional) |
+  | `exp` | The grant's `expires_at` rounded down to whole seconds (an expiry within the signing second, one that rounds down to `iat`, is signed as `iat` + 1 s); absent when the grant has none (LEASH §3.2: expiry is optional) |
 
   No other member appears, at the top level or in `scope` or `limits`.
 - **Encoding.** The vault produces the bytes in the JSON Canonicalization
@@ -15148,8 +15148,8 @@ sig        = standard base64 of Ed25519(credential key, "leash/v1/delegation" ||
      rounded down to whole seconds, equals it. So a stored copy that
      lost a limit, such as its connections or its expiry, never takes
      effect wider than signed (`mismatch`). (An expiry within the second
-     it was signed was signed as one second later and mismatches; it
-     would have expired by the completion anyway);
+     it was signed was signed as one second later and mismatches, so
+     it is dropped; it would have been good for under a second);
   3. its `expires_at` is not after the time of the completion
      (`expired`);
   4. its `grant_id` is already in use, by another agent's grant or an
