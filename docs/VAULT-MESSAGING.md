@@ -36,12 +36,13 @@ changelog:
     (never replaced by an empty state), and the feature does not run until
     an unlock that reads it: its types are unknown types (§11.10.8,
     answered `unsupported_type`), and its timers and observers do not run.
-    (Owner decision 2026-11-11, GC #8529 a.) A feature other features
-    call directly (audit, connauth, credential, critical, grants, items,
+    (Owner decision 2026-11-11, GC #8520, answered a in #8529.) A
+    feature other features call directly (audit, connauth, credential, critical, grants, items,
     leash, vote, wallet) cannot be left out that way: when its part does
     not read, the unlock and a recovery's open are refused with the new
-    code `state_unreadable` (§11.4, §11.14.6), before the state is
-    written (a recovery's open has spent its attempt by then). Before,
+    code `state_unreadable` (§11.4, §11.14.6), after the release
+    decisions and before the state is written (a recovery's open has
+    spent its attempt by then). Before,
     the vault ignored the error and ran the feature empty, so a member's
     "calls off" for a connection could turn back on. §10.9 lists the
     audit kind.
@@ -4194,15 +4195,19 @@ than drop what it does not know), **fails closed**: a feature that held a rule
 (calls off for a connection, a limit) must never run as if it held none.
 
 Some features are called directly by others: the audit log, connection
-authorizations, the credential, critical secrets, grants, items, the
+authentication, the credential, critical secrets, grants, items, the
 leash, votes and the wallet. The vault cannot run without them, so when
 one of their parts does not read the vault does not open: the unlock is
 answered `state_unreadable` (§11.4) and a recovery's open likewise
-(§11.14.6), before the state is written or anything is sent or reported
-`unlocked`. Nothing of the vault is lost: an unlock by a release that
+(§11.14.6). The release decisions come first (§11.10.4: a header of a
+release the vault has left is still `wrong_release`), and §12.5's
+`deleting` check before them, as the one write; then the refusal comes
+before the state is written, before any message and before `unlocked`
+is reported. Nothing of the vault is lost: an unlock by a release that
 reads the part opens the vault with it whole. A recovery's open has
 already spent its attempt by then (the DEK exists only once the attempt
-is spent), so each such open uses one of the generation's attempts.
+is spent; the counter's records are made), so each such open uses one
+of the generation's attempts.
 
 For any other feature, until an unlock that reads its part:
 
@@ -18822,8 +18827,12 @@ one of:
   not read (§3.3 "Feature data that does not read"); nothing after the
   state opens is written, nothing is lost, and an unlock by a release that
   reads it opens the vault. It is not a PIN failure. The member must not
-  be told to set the vault up again: the app says "Your vault can't be opened right now. Nothing in it has been changed. Please try again later." (wording approved by the owner 2026-11-11, GC #8549); an app that
-  does not know the code shows its usual failure. `state_unsupported` (0.87.1):
+  be told to set the vault up again: the app says "Your vault can't be
+  opened right now. Nothing in it has been changed. Please try again
+  later." (wording approved by the owner 2026-11-11, GC #8549); an app
+  that does not know the code shows its usual failure. It comes after
+  the release decisions: a header of a release the vault has left is
+  still `wrong_release`. `state_unsupported` (0.87.1):
   the state opened but lacks `messaging_release` 29 or more (§6.3.1 "No
   upgrade: release 29 starts clean"); nothing after the state opens is
   written, and the member re-enrols; the app says "This vault was made
@@ -23649,7 +23658,10 @@ binding and replay rules of §11.3 and §11.6 and then, **in this order**:
    header.state_seq`, §13.2; (0.87.1) then §12.5's `deleting` check, and
    then §6.3.1 "No upgrade: release 29 starts clean": a state without
    `messaging_release` 29 or more is answered `state_unsupported` and
-   nothing further is written); opens the vault's backup copy of the
+   nothing further is written; (0.88.17) then §3.3 "Feature data that
+   does not read": a part of a feature others call directly that does
+   not read is answered `state_unreadable`, and nothing further is
+   written); opens the vault's backup copy of the
    credential with the same password (§3.5.6); and then, in the order of
    writes of §11.14.2: rotates the CEK and re-keys every critical item
    (§10.7); makes the phone the vault's app and the credential's holder;
