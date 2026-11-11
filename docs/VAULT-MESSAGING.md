@@ -40,11 +40,13 @@ changelog:
     feature other features call directly (audit, connauth, credential,
     critical, grants, items, leash, vote, wallet), and the feed (GC #8583
     a: every notice is written to it, some once only), cannot be left
-    out that way: when its part does
-    not read, the unlock and a recovery's open are refused with the new
-    code `state_unreadable` (§11.4, §11.14.6), after the release
-    decisions and before the state is written (a recovery's open has
-    spent its attempt by then). Before,
+    out that way: when its part does not read, the unlock and a
+    recovery's open are refused with the new code `state_unreadable`
+    (§11.4, §11.14.6), after the release decisions and before the state
+    is written (a recovery's open has spent its attempt by then). An
+    approved move, and a pending move's completion, still record and seal
+    for the next release with the part carried unchanged and the
+    header's credential bits as stored (GC #8621 a; §11.10.4). Before,
     the vault ignored the error and ran the feature empty, so a member's
     "calls off" for a connection could turn back on. §10.9 lists the
     audit kind.
@@ -4211,9 +4213,10 @@ is reported. Nothing of the vault is lost: an unlock by a release that
 reads the part opens the vault with it whole. An approved move to
 another release (§11.10.4), and the completion of a pending move, still
 record the move and seal the header for that release, with the part
-carried unchanged; they open nothing, run no feature and report no
-`unlocked` (owner decision 2026-11-11, GC #8621 a), so that a release
-that reads the part can be reached. A recovery's open has
+carried unchanged and the header's credential bits as stored; they
+open nothing, run no feature's handlers, timers or observers, send no
+message and report no `unlocked` (owner decision 2026-11-11, GC #8621
+a), so that a release that reads the part can be reached. A recovery's open has
 already spent its attempt by then (the DEK exists only once the attempt
 is spent; the counter's records are made), so each such open uses one
 of the generation's attempts.
@@ -20334,7 +20337,11 @@ approval is bound to the app's unlock key as well.
 #### 11.10.4 The move
 
 Every unlock request names the current signed manifest by its hash and
-serial, and the host supplies the document (§11.4, §11.5). An enclave of
+serial, and the host supplies the document (§11.4, §11.5). (0.88.17) A
+state with a part that a feature others call directly cannot read is
+still moved (steps 6 and 7), the part carried unchanged; only the
+resumption under this release is refused (§3.3 "Feature data that does
+not read"). An enclave of
 release N processes an unlock in this order:
 
 1. The normal checks of §11.4, in their order, up to and including the
