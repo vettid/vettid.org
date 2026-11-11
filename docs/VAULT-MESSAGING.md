@@ -39,7 +39,9 @@ changelog:
     call to another as its own is then refused on both sides ("Residual",
     new row), unless it removes form 2, which works until form 1 is
     retired ("Call forms", "Mixed releases"). What each device shows when
-    a check fails. §16: the confirmation vectors recomputed.
+    a check fails. From the release that retires form 1, a form 1 answer
+    to a form 2 offer is refused too. §16: the confirmation vectors
+    recomputed.
   - 0.88.15: 2026-11-11, erratum (owner decisions 2026-11-11 on calls C2
     permission and limits, GC #8321 a, a; vettid-vault #225; numbered
     after #573 and merged after it). §10.10 "Permission and limits":
@@ -14634,15 +14636,20 @@ other. `offered` in an answer is the caller's list **as the answering
 device read it** in the offer's `suites`.
 
 (0.88.16, owner decision 2026-11-11) **Form 2 names both members.**
-`caller_ik` and `callee_ik` travel in no message: every party that signs
-or checks `m2` puts in the two keys **from its own records**, never from
-the message it checks:
+`caller_ik` and `callee_ik` travel in no message: every party that signs,
+vouches for or checks `m2` puts in the two keys **from its own records**,
+never from the peer or from the signed content. A vault takes its own
+`ik` and the connection's pinned one; a device takes them from its own
+vault: the vault `ik` it was paired with and verifies ICE configurations
+under, and the connection's `ik` as `connection.get` gives it, or
+`peer_ik` once rule 6 of "Rules for a device" has checked it against
+that:
 
 | Who builds `m2` | `caller_ik` | `callee_ik` |
 |---|---|---|
 | The calling device (signs the offer; checks the answer) | its own vault's `ik` (the key that signs its ICE configurations) | the connection's `ik` as its vault gives it (`connection.get`; in an answer event, `peer_ik`, which MUST be the connection the call was placed to, rule 6) |
-| The calling vault (checks `ek_sig2`; checks the peer's answer) | its own `ik` | the connection's pinned `ik` |
-| The called vault (checks the peer's offer; checks its device's `enc_sig`) | the connection's pinned `ik` | its own `ik` |
+| The calling vault (checks `ek_sig2` and vouches; checks the peer's answer) | its own `ik` | the connection's pinned `ik` |
+| The called vault (checks the peer's offer; checks its device's `enc_sig` and vouches) | the connection's pinned `ik` | its own `ik` |
 | The called device (checks the offer; signs the answer) | `peer_ik` in the offer event | its own vault's `ik` |
 
 So a call is bound to the two vaults that each side believes take part.
@@ -14650,10 +14657,13 @@ A connection C that both A and B have, which passes A's call to C on to
 B as its own call (re-vouching A's device for its own) and B's answer
 back to A, fails every check: A's device signed "A calls C", B's side
 checks "C calls B". B's vault drops the offer (`drop.call_share`), and a
-forwarded answer fails at A's vault. Each vault's `ik` is the one current
-when it builds `m2`: an `identity.rotate` (§3.4) of either vault between
-an offer and its answer makes the answer fail its check, and the member
-calls again.
+forwarded answer fails at A's vault. Each party uses the keys current
+when it builds or checks `m2`, so an `identity.rotate` (§3.4) of either
+vault while a call rings **may** make the offer or the answer fail its
+check, depending on when each side learns of it; the call then fails and
+the member calls again. A device whose `call.start` is refused
+`bad_request` after a connection's `ik` changed reads `connection.get`
+once and places the call again, with a new `call_id`.
 
 What each party checks:
 
@@ -14709,7 +14719,8 @@ the calling device, which alone knows what it sent.
   call:
   1. in form 1 a device chooses **suite 1 only**, and does not ring for
      a form 1 offer that does not list it;
-  2. a device that offered any suite other than 1 MUST refuse a form 1
+  2. a device that offered any suite other than 1 (0.88.16: or, from the
+     release that retires form 1, any form 2 offer) MUST refuse a form 1
      answer (`call.end{failed}`);
   3. a device MUST NOT offer any suite other than 1 in a `call.start`
      that carries a form 1 signature.
@@ -14744,7 +14755,10 @@ the calling device checks it with its own. `k_call`, `k_confirm` and
 the media keys are not changed: the confirmation gates every key (the
 calling device sets none until `confirm` verifies, the answering device
 sends no microphone audio until a frame decrypts), so binding it binds
-the call, and the suites' key schedule and its vectors stand.
+the call, and the suites' key schedule and its vectors stand. That holds
+while calls carry audio only ("one audio section" today); video (C4)
+MUST hold back the camera track in the same way, as every outgoing
+media track, until a frame decrypts.
 
 - The **answering device** computes `confirm` when it has `k_call` and
   sends it in `call.answer`. It sets its keys and enables both
@@ -14780,12 +14794,12 @@ the call, and the suites' key schedule and its vectors stand.
   - **The calling device**, an answer whose signatures do not verify
     over its `m2`, or whose `confirm` does not: it uses nothing of
     the answer, sends `call.end{failed}`, and tells the member, as
-    for a wrong `confirm`, that the call could not be secured
+    for a wrong `confirm`, that the call could not be encrypted
     (ANDROID-PLAN and IOS-PLAN word it; a draft: "This call couldn't
-    be secured, so it was ended. Try calling again.").
-  - **The answering device** whose connection never decrypts a frame
-    (the caller refused its `confirm`) ends the call after 20 s
-    (`call.end{failed}`, above) and shows the same text.
+    be encrypted, so it was ended. Try calling again.").
+  - **The answering device**, on the caller's `call.end{failed}`, or 20 s
+    after its connection is established without a decrypted frame
+    (above), ends the call and shows the same text.
 
 **Residual.** The relay, the hosts and the peer vault cannot swap a
 share unnoticed. **Each member's own vault can.** It vouches for which
@@ -15201,7 +15215,10 @@ learns a peer vault's level and does not need to.
   without `suites` or without `keepalive: true` is `bad_request`, an
   offer without `suites` rings nobody (`drop.call_share`), and a
   `call.answer` from a device without `keepalive: true` is answered
-  `call.end{unavailable}`. From that release a device may offer a second suite,
+  `call.end{unavailable}`; (0.88.16) a peer's `call.answer` without
+  `suite` to an offer that had `suites` is dropped (`drop.call_share`;
+  the call keeps ringing), and the calling device refuses one too (rule
+  2). From that release a device may offer a second suite,
   and (0.88.16) a connection can no longer pass one member's call to
   another unnoticed ("Signed key-exchange shares").
   **Production never accepts form 1:** the first production release
