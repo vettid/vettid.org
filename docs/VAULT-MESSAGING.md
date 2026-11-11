@@ -40,7 +40,8 @@ changelog:
     call directly (audit, connauth, credential, critical, grants, items,
     leash, vote, wallet) cannot be left out that way: when its part does
     not read, the unlock and a recovery's open are refused with the new
-    code `state_unreadable` (§11.4, §11.14.6), before any write. Before,
+    code `state_unreadable` (§11.4, §11.14.6), before the state is
+    written (a recovery's open has spent its attempt by then). Before,
     the vault ignored the error and ran the feature empty, so a member's
     "calls off" for a connection could turn back on. §10.9 lists the
     audit kind.
@@ -4188,8 +4189,8 @@ Rules for all keys:
 (0.88.17, owner decision 2026-11-11) **Feature data that does not read.**
 At unlock each feature reads its own part of the feature data. A part
 that does not read, because it is damaged or because a later release
-wrote it (a feature refuses a state of a later version rather than drop
-what it does not know), **fails closed**: a feature that held a rule
+wrote it (calls, for one, refuses a state of a later version rather
+than drop what it does not know), **fails closed**: a feature that held a rule
 (calls off for a connection, a limit) must never run as if it held none.
 
 Some features are called directly by others: the audit log, connection
@@ -4197,9 +4198,11 @@ authorizations, the credential, critical secrets, grants, items, the
 leash, votes and the wallet. The vault cannot run without them, so when
 one of their parts does not read the vault does not open: the unlock is
 answered `state_unreadable` (§11.4) and a recovery's open likewise
-(§11.14.6), before anything is written, sent or reported `unlocked`.
-Nothing is lost: an unlock by a release that reads the part opens the
-vault with it whole.
+(§11.14.6), before the state is written or anything is sent or reported
+`unlocked`. Nothing of the vault is lost: an unlock by a release that
+reads the part opens the vault with it whole. A recovery's open has
+already spent its attempt by then (the DEK exists only once the attempt
+is spent), so each such open uses one of the generation's attempts.
 
 For any other feature, until an unlock that reads its part:
 
@@ -23742,7 +23745,7 @@ at register and padded to 4,096 bytes:
   | `quiet`, `wait`, `closed`, `exhausted` | `false` from step 3, or from a `Spend` that took nothing; `true` when step 4b refused to test a spent attempt |
   | `stored_mismatch`, `vault_missing` | `false` before the spend (step 2; a stored state that cannot be read); `true` after it (step 6: the state, the keys or the backup copy cannot be opened) |
   | `state_unsupported` (0.87.1) | `true` at step 6, after the spend (the state opens only then); (0.88.1) `false` on a repeat through the `next` wrap, which spends none; it lacks `messaging_release` 29 or more (§6.3.1 "No upgrade: release 29 starts clean"). The app says "This vault was made by an earlier version of VettID and must be set up again." (wording approved by the owner 2026-11-06, GC 01M6RV1QRM1403G0Z8G2W2C6ZS) |
-  | `state_unreadable` (0.88.17) | as `state_unsupported`: `true` at step 6, `false` on a repeat through the `next` wrap; the part of a feature others call directly does not read (§3.3 "Feature data that does not read"). Nothing is written, nothing is lost; the vault is not to be set up again. The app says "Your vault can't be opened right now. Nothing in it has been changed. Please try again later." (wording approved by the owner 2026-11-11, GC #8549) |
+  | `state_unreadable` (0.88.17) | as `state_unsupported`: `true` at step 6, `false` on a repeat through the `next` wrap; the part of a feature others call directly does not read (§3.3 "Feature data that does not read"). The state is not written and nothing of the vault is lost, but the attempt is spent; the vault is not to be set up again. The app says "Your vault can't be opened right now. Nothing in it has been changed. Wait for a VettID update before you try again: each try uses one of your recovery attempts." (wording approved by the owner 2026-11-11, GC #8568; the unlock's text, which invites a retry, is not used here) |
   | `retry` | `false` from step 3b; `true` whenever the spend happened: the run ended at any point after it, before or after step 1 of the order of writes was stored, including a failure to register at the relay or to store steps 2 and 3 (the entry may have been right) |
   | every other code (`wrong_again`, `busy`, `counter_unavailable`, `not_armed`, `no_recovery`, `expired`, `attestation`, `manifest`, `wrong_release`, `bad_request`, `device_secret`) | `false` |
 
