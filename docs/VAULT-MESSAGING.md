@@ -46,7 +46,8 @@ changelog:
     2 from both shares, while both members' vaults still accept form 1
     ("Call forms", "Mixed releases"). What each device shows when
     a check fails; the answering device also ends a call whose
-    connection is not established 30 s after it answered. From the release that retires form 1, a form 1 answer
+    connection is not established 60 s after it answered, as "couldn't
+    connect" (owner decision 2026-11-11). From the release that retires form 1, a form 1 answer
     to a form 2 offer is refused too. §16: form 2's `k_call`,
     `k_confirm`, `confirm`, direction and frame keys, and a relayed
     call's.
@@ -14681,7 +14682,12 @@ to B as its own call, and B's answer back to A:
   ("Key confirmation"). No key is set on A's side, no media flows, and C
   never holds `k_call`; and A's and B's `k_call` differ, so even a
   device that skipped the confirmation would decrypt nothing. B sees the
-  call end as unencrypted, within about 50 s: 30 s after it answered if no connection comes up, or 20 s after its connection is established (the SDP is not signed, so a re-signing C can let B's connection come up), without a decrypted frame; at once if the caller's `call.end{failed}` reaches it ("What each device shows" below).
+  call end within about 80 s: as "couldn't connect" 60 s after it
+  answered if no connection comes up, or as unencrypted 20 s after its
+  connection is established without a decrypted frame (the SDP is not
+  signed, so a re-signing C can let B's connection come up); at once if
+  the caller's `call.end{failed}` reaches it ("What each device shows"
+  below).
 
 So the signatures stop the cheap relay at the vaults, and the
 confirmation stops every relay that stays in form 2 at the calling
@@ -14701,10 +14707,10 @@ devices never disagree about whom they name). So an `identity.rotate`
 (§3.4) of either vault while a call rings **may** make the offer or the
 answer fail its check, depending on when each side learns of it. A
 failed offer rings nobody (the caller's call times out). A failed
-answer is dropped by the calling vault; the callee, which had answered,
-ends the call by its own rule first (30 s after it answered without a
-connection, "Key confirmation") and shows "couldn't be encrypted", and
-the caller's call times out (45 s). The member calls again. A calling
+answer is dropped by the calling vault, whose call then times out (45 s
+after the offer at most) and tells the callee's vault
+`call.end{timeout}`, which ends the call the callee had answered (its
+own 60 s rule, "Key confirmation", is the backstop if that is lost). The member calls again. A calling
 device whose form 2 `call.start` is answered `bad_request` refreshes its
 copies of both keys once (its own vault's `ik`, which an
 `identity.rotate` changes, and the connection's from `connection.get`)
@@ -14828,10 +14834,14 @@ confirmation by mistake. Form 1's `k_call` is unchanged.
   only for a frame under the keys it derived, so it proves that the
   caller holds the same `k_call` and the same view of what was
   negotiated. If no frame has decrypted 20 s after its connection is
-  established, or (0.88.16) its connection is not established 30 s after
-  it sent `call.answer`, it ends the call (`call.end{failed}`): a caller
-  that refused the answer never connects, and its own `call.end` may not
-  arrive.
+  established, it ends the call (`call.end{failed}`). (0.88.16, owner
+  decision 2026-11-11) If its connection is not established **60 s**
+  after it sent `call.answer`, it also ends the call (`call.end{failed}`)
+  and tells the member that the call could not be connected, not that
+  it could not be encrypted: a slow path (TURN, a network allowing only
+  TCP 443) may take a while, and nothing is known about the keys then.
+  This is the backstop for a caller that refused the answer, which
+  never connects and whose own `call.end` may not arrive.
 - The **calling device** verifies `confirm` (in constant time) over its
   own `caller_ik` and `callee_ik`, and (0.88.16, normative) **MUST NOT
   set any key, apply the answer's SDP or send any frame before `confirm`
@@ -14863,12 +14873,15 @@ confirmation by mistake. Form 1's `k_call` is unchanged.
     for a wrong `confirm`, that the call could not be encrypted
     (ANDROID-PLAN and IOS-PLAN word it; a draft: "This call couldn't
     be encrypted, so it was ended. Try calling again.").
-  - **The answering device**, on the caller's `call.end{failed}`, 20 s
-    after its connection is established without a decrypted frame, or
-    30 s after it answered without a connection (above), ends the call
-    and shows the same text. This is what the callee sees when a
-    connection re-signed a relayed call: its phone rang, it answered,
-    and the call ends as unencrypted within about 50 s (30 s after it answered if no connection comes up, or 20 s after its connection is established (the SDP is not signed, so a re-signing C can let B's connection come up), without a decrypted frame; at once if the caller's `call.end{failed}` reaches it).
+  - **The answering device**, on the caller's `call.end{failed}` or 20 s
+    after its connection is established without a decrypted frame,
+    ends the call and shows the same text; 60 s after it answered
+    without a connection (above), it ends the call and says it could not
+    be connected (a draft: "Couldn't connect the call. Try calling
+    again."). This is what the callee sees when a connection re-signed a
+    relayed call: its phone rang, it answered, and the call ends within
+    about 80 s, as unencrypted or as not connected (at once if the
+    caller's `call.end{failed}` reaches it).
 
 **Residual.** The relay, the hosts and the peer vault cannot swap a
 share unnoticed. **Each member's own vault can.** It vouches for which
@@ -14884,7 +14897,7 @@ calls, as it is for everything else of the member (§2.1).
 | The member's own vault swaps a share and learns `k_call` | Possible; trusted (§2.1) | **Unchanged** |
 | A vault changes the list of suites or the choice | Undetected at signalling time; the keys then differ and nothing is heard; audio may be sent under the weaker suite's keys until the failure shows | Rejected by the signature check before the callee rings or the caller uses the answer. A member's own vault could still do it together with a swapped share (the row above) |
 | Audio sent before the other side is known to hold the keys | Yes | No (key confirmation) |
-| (0.88.16) A connection C passes one member's call to another as its own (A calls C; C re-vouches A's device to B as its own call, and B's answer back to A): A and B talk, each believing the other is C; C learns no key | Possible: `m` names neither member | Never connects: `m2` and `confirm` name the caller's and the callee's vault, each side from its own records. Re-vouched, the signatures fail and nothing rings; re-signed with C's own device, B's phone rings and the calling device refuses the answer on `confirm`, so no key is set and B's call ends as unencrypted (within about 50 s, "What each device shows"); and the two sides' `k_call` differ (the second lock), so nothing would decrypt even without the confirmation. While both members' vaults still accept form 1, C can still remove form 2 from both shares and get the S10 outcome; removing it from one only fails on the key ("Call forms", "Mixed releases") |
+| (0.88.16) A connection C passes one member's call to another as its own (A calls C; C re-vouches A's device to B as its own call, and B's answer back to A): A and B talk, each believing the other is C; C learns no key | Possible: `m` names neither member | Never connects: `m2` and `confirm` name the caller's and the callee's vault, each side from its own records. Re-vouched, the signatures fail and nothing rings; re-signed with C's own device, B's phone rings and the calling device refuses the answer on `confirm`, so no key is set and B's call ends within about 80 s ("What each device shows"); and the two sides' `k_call` differ (the second lock), so nothing would decrypt even without the confirmation. While both members' vaults still accept form 1, C can still remove form 2 from both shares and get the S10 outcome; removing it from one only fails on the key ("Call forms", "Mixed releases") |
 | A vault changes the SDP (fingerprint, candidates, sections) | Possible: the SDP is not signed. Media that is not encrypted under the call's keys is never played ("Rules for a device") | **Unchanged** |
 | A vault leaves out or changes the ICE servers of its own devices | Its own devices' vault signs them; nobody else can | **Unchanged**; from C2 the list is no longer empty |
 | Both vaults see both members' addresses in the signalling | Yes (accepted, CALLS-PLAN D1) | **Unchanged** |
