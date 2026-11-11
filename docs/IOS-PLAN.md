@@ -4,7 +4,7 @@ status: approved (owner, 2026-10-17)
 version: 0.1.68
 date: 2026-11-11
 changelog:
-  - 0.1.68: 2026-11-11 (ANDROID-PLAN 0.1.124; owner decisions a, GC #8451, #8476 and #8511). The iPhone follows ANDROID-PLAN §4 "Advanced security, attestation in detail and the check's progress": Advanced security in Settings, the attestation in detail with "Copy all", and the owner check's "Checking with your vault…" and "Check passed". §4.17: what the iPhone shows for itself (the App Attest state only), the haptic, the clipboard and the back gesture; Allow screenshots moves to Advanced security.
+  - 0.1.68: 2026-11-11 (ANDROID-PLAN 0.1.124; owner decisions a, GC #8451, #8476 and #8511). The iPhone follows ANDROID-PLAN §4 "Advanced security, attestation in detail and the check's progress": Advanced security in Settings, the attestation in detail with "Copy all", and the owner check's "Checking with your vault…" and "Check passed". §4.17: what the iPhone shows for itself (the App Attest state only), the haptic, the clipboard and the back gesture; Allow screenshots moves to Advanced security; §6.9: the verification record.
   - 0.1.67: erratum, 2026-11-11 (ANDROID-PLAN 0.1.123, VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). §4 Calls: after a glare, the iPhone answers the winning call with its own call's media, as Android does: no camera by itself.
   - 0.1.66: erratum, 2026-11-10, as built (vettid-ios #241, in review; the container-read audit, GC #7243). §4 History export, §4.16 and §6.9: the History export, as the vote proof already does, writes its file to a directory of its own in tmp/ with complete protection, hands it over as a copy (`UIDocumentPickerViewController(forExporting:asCopy: true)`), and removes it on every answer, on a failure, when the screen leaves, when the §4.4 (1) cover closes the picker, at launch and when the screen opens again. SwiftUI `.fileExporter` is not used: it leaves its file in tmp/ with default protection. Complete protection helps only while the iPhone is locked; on an unlocked phone the defense is that the file is short-lived. Not yet: removal when the app goes to the background (a vettid-ios follow-up). The photo share sheet is unchanged: it hands the system bytes, no file.
   - 0.1.65: erratum, 2026-11-07 (ANDROID-PLAN 0.1.122, RELEASE-UPDATES 0.3.4; owner decision a). The unlock screen's release offer follows ANDROID-PLAN §4 "What's new": PIN first, a compact notice with the security line and the fingerprint, What's new one tap away in a sheet, approval not gated on opening it.
@@ -1908,11 +1908,13 @@ iPhone:
   `UINotificationFeedbackGenerator` `.success`; VoiceOver hears
   "Checking with your vault" and "Check passed" as announcements; the
   tick is held 1 second, or 3 seconds while VoiceOver is on.
-- **"Check now" in flight**: the edge swipe and the iOS 26 content
-  swipe are off (``blocksBackGesture``), as for any request that cannot
-  be taken back.
+- **A non-gated check in flight** (Check now, the hold-off, the
+  interval change): the edge swipe and the iOS 26 content swipe are off
+  (`blocksBackGesture`), as for any request that cannot be taken back.
 - **Advanced security** is a pushed screen of the Settings stack, with
   the back arrow and the system back gesture (ID14).
+- **Test:** "Copy all" on the iPhone holds no This iPhone section, no
+  App Attest state or key id, no attestation object and no check time.
 
 ## 5. Architecture
 
@@ -2603,6 +2605,7 @@ Secure Enclave key only gates the prompt (0.1.46).
 | Transport state: session keys, relay token, sealed credential blob, one-time keys, outbox | Encrypted state file (AES-GCM) in Application Support | The state files' key | Wipe; each part when used up or replaced | Excluded |
 | Account ids and flags; with location (not built yet), the "Not now" entries | Encrypted state file | The same | Wipe; an entry at its `exp` | Excluded |
 | Owner-check state, lock record, canary manifest | Encrypted state file | The same | Wipe | Excluded |
+| (0.1.68) The last enclave verification's record: each check's result, the values the attestation screen shows, when it was made | Encrypted state file | The same | Wipe; replaced at the next verification of that instance | Excluded |
 | Theme and Show in notifications (`settings.theme`, `settings.notification_previews`) | UserDefaults | — | Wipe; uninstall | Included in backups (these two only) |
 | App lock | Secure Enclave key (.biometryCurrentSet or .devicePasscode), its "made" record in the keychain WhenUnlockedThisDeviceOnly, encrypted settings file | Hardware; protects no data at rest | Turned off; wipe | None |
 | A file handed to the system: History export (vettid-ios #241, in review), vote proof (0.1.66) | A directory of its own in tmp/ (`vettid-history-export-…`, `vettid-proof-…`) | `NSFileProtectionComplete` on the directory and the file | When the member answers (a save, a cancel, a swipe down), on a failure, when the screen leaves, when the §4.4 (1) cover closes the picker, at launch and when the screen opens again. Not at the app lock and not when the app goes to the background: the picker stays up and the file with it, unreadable while the iPhone is locked. To be built (a vettid-ios follow-up): removal when the app goes to the background | Excluded (tmp/ is never backed up by the system) |
