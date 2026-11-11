@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.124
+version: 0.1.125
 date: 2026-11-11
 changelog:
+  - 0.1.125: 2026-11-11, **for the owner's approval** (owner decisions a, GC #8494, #8537, #8538 and #8559; VAULT-MESSAGING 0.89.0 §11.10.1 "The release log check", VAULT-RELEASES 0.1.36 §7.1). The app trusts a release manifest only with a valid entry in the release transparency log: a DSSE envelope over the manifest and its Rekor v1 or v2 entry (Ed25519 checkpoints for v2, through the app's existing Ed25519), checked offline against a trusted root built into the app, from the channel's cutover serial (production 1, from the first build). The RFC 3161 timestamp is not checked. The attestation screen gains check line 2, "Logged publicly". New §4 "The release log check" covers the pinned values and their CI checks, the messages and the tests. No production build ships without it.
   - 0.1.124: 2026-11-11 (owner decisions a, GC #8451, #8476 and #8511). Settings → Security keeps the rows used often (Recovery included) and moves the rest behind **Advanced security**; the attestation screen shows each link of the chain, one line per check the app performs (passed, failed or not checked), the release's source and this phone, with "Copy all"; the owner check shows "Checking with your vault…" while the vault verifies (Lock vault still enabled), then "Check passed". §4 "Advanced security, attestation in detail and the check's progress"; the Settings and Owner check rows; §4 "Locking the vault" and "Recovery and unlock from release R" point to Advanced security; §5 "What the phone keeps": the verification record.
   - 0.1.123: erratum, 2026-11-11 (VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). "Video in calls (C4)": after a glare, the phone that answers the winning call without asking (`superseded_by`) answers with its own call's media, so an audio call never turns on the camera by itself.
   - 0.1.122: erratum, 2026-11-07 (RELEASE-UPDATES 0.3.4; owner decision a, Ground Control thread 01M6SQ6VMNMB0C2CRPNZYNWKBB). §4 "Vault update" and "What's new": on the unlock screen the PIN keypad and Unlock come first; the release offer below them is a compact notice ("Update available: release N", the security line, the fingerprint and "Approve the update with this unlock"), with "What's new in release N" as a link that opens a sheet holding the full What's new, "Also in earlier releases" and Full release notes. Approving does not require opening the sheet. The security line comes from the release log like the rest of What's new: while it loads, the notice shows the progress line, and if it can't be had, "Release notes unavailable"; approval stays enabled either way. `security_text` stays in the sheet. The update screen is unchanged. Existing texts only (Android's `unlock_offer_title` and `unlock_offer_approve` already hold "Update available: release N" and "Approve the update with this unlock").
@@ -7025,7 +7026,7 @@ all" is hidden. When the last verification failed: a notice
 "Verification failed" (`settings_attestation_failed_title`), "This
 phone couldn't verify your vault's enclave, so it sent it nothing. The
 check that failed is marked below." (`settings_attestation_failed_body`).
-A verification refused after line 9, with every line "Passed" (a
+A verification refused after the last line, with every line "Passed" (a
 release removed, not active for an enrollment, or older than one this
 phone has used), has the same title with "Every check passed, but this
 phone refused the release: <reason>" (`settings_attestation_refused_body`),
@@ -7061,25 +7062,29 @@ in the order the apps make them, each "Passed"
 | # | Line | What the app verified |
 |---|---|---|
 | 1 | "Release list signed by VettID" | the release manifest's format, its signature under a key the app pins and its serial not going back (§11.10.1); under it, once this line passed, the key id and the manifest's serial |
-| 2 | "Certificate chain to the AWS Nitro root" | the document's format (a COSE_Sign1, ES384 and nothing else) and its certificate chain to the root the app pins; under it "Root fingerprint (SHA-256)" (`settings_attestation_root_fingerprint`): the SHA-256 of the root certificate's DER, as AWS publishes it |
-| 3 | "Signed by AWS Nitro hardware" | the document's COSE_Sign1 ES384 signature by the chain's leaf |
-| 4 | "Covers the key this phone encrypts to" | the descriptor's format, and `user_data` = SHA-256("vettid/vms/2/etk" ‖ descriptor) |
-| 5 | "Recent" | the document is less than 26 hours old, and at most 5 minutes ahead of the phone's clock |
-| 6 | "Not a debug enclave" | no debug PCRs |
-| 7 | "Names its own release" | the descriptor's `release` equals PCR0 |
-| 8 | "Within its validity" | `not_after` in the future and at most 24 h + 5 min after the document |
-| 9 | "Measurements match a signed release" | PCR0–2 equal to an entry of the manifest (an `active` one to enroll) |
+| 2 | "Logged publicly" (0.1.125) | the manifest's entry in the release transparency log (§4 "The release log check"); under it "Log index" and, for a Rekor v1 entry, "Logged at" (the entry's integrated time), both of the manifest this verification used |
+| 3 | "Certificate chain to the AWS Nitro root" | the document's format (a COSE_Sign1, ES384 and nothing else) and its certificate chain to the root the app pins; under it "Root fingerprint (SHA-256)" (`settings_attestation_root_fingerprint`): the SHA-256 of the root certificate's DER, as AWS publishes it |
+| 4 | "Signed by AWS Nitro hardware" | the document's COSE_Sign1 ES384 signature by the chain's leaf |
+| 5 | "Covers the key this phone encrypts to" | the descriptor's format, and `user_data` = SHA-256("vettid/vms/2/etk" ‖ descriptor) |
+| 6 | "Recent" | the document is less than 26 hours old, and at most 5 minutes ahead of the phone's clock |
+| 7 | "Not a debug enclave" | no debug PCRs |
+| 8 | "Names its own release" | the descriptor's `release` equals PCR0 |
+| 9 | "Within its validity" | `not_after` in the future and at most 24 h + 5 min after the document |
+| 10 | "Measurements match a signed release" | PCR0–2 equal to an entry of the manifest (an `active` one to enroll) |
 
 **"Passed" only with a recorded pass; anything not run is "Not
 checked".** A check that failed is "Failed" and every later one "Not
 checked". A manifest whose signature fails is refused before any
 enclave is checked: line 1 "Failed", the rest "Not checked", and the
-Enclave section shows only "Environment". Each line is read by the
+Enclave section shows only "Environment". (0.1.125) A manifest whose
+signature passes but whose log entry fails is refused the same way:
+line 1 "Passed", line 2 "Failed", the rest "Not checked", only
+"Environment". A record made by a build from before the release log
+check shows line 2 "Not checked", never "Passed". Each line is read by the
 screen reader as "<line>: <state>", and the state is shown in text and
-glyph, never by color alone. The root fingerprint and the manifest
-keys come from the values built into the app, never from the network.
-The apps do not check a transparency log for enclave releases (none is
-specified yet; GC #8494 adds it), so there is no such line.
+glyph, never by color alone. The root fingerprint, the manifest
+keys and the log's trusted root come from the values built into the
+app, never from the network.
 
 **Release** (`settings_attestation_section_release`, "Release"):
 "Source" (`settings_attestation_source`), the signed tag VAULT-RELEASES names for it
@@ -7178,7 +7183,10 @@ text, not its color.
 | `settings_attestation_not_verified` | Not verified |
 | `settings_attestation_copy` / `_copied` / `_copy_all` | Copy / Copied / Copy all |
 | `settings_attestation_rebuild` | How to rebuild it |
-| the nine check lines, the other row labels | as in the tables above |
+| the check lines (ten from 0.1.125), the other row labels | as in the tables above |
+| `settings_attestation_log_index` / `_logged_at` (0.1.125) | Log index / Logged at |
+| `release_log_update_app` (0.1.125) | Update the app to continue. This version can't check VettID's latest release list. |
+| `release_log_failed` (0.1.125) | VettID's release list could not be checked against the public log. Try again. |
 
 The new keys replace today's `settings_attestation_release` ("Last
 verified release", now the "Release" row) and `settings_attestation_version`
@@ -7192,9 +7200,9 @@ verified release", now the "Release" row) and `settings_attestation_version`
   opening as before; a notification for a moved row opens Advanced
   security at it.
 - Attestation: a verification that passed shows every check "Passed";
-  one failed at each check (including the format errors of lines 1, 2
-  and 4, a non-ES384 document and a manifest serial going back) shows
-  it "Failed" and the later ones "Not checked"; a refusal after line 9
+  one failed at each check (including the format errors of lines 1, 3
+  and 5, a non-ES384 document and a manifest serial going back) shows
+  it "Failed" and the later ones "Not checked"; a refusal after the last line
   shows every line "Passed" and its reason; a failed manifest signature
   shows only line 1 "Failed", without the key id and serial;
   no "Passed" without a recorded pass; the values resting on a failed
@@ -7209,6 +7217,106 @@ verified release", now the "Release" row) and `settings_attestation_version`
   announcement and the return on each pass path; the presence-needed
   pass unchanged; each failure back to the form; "probably locked" to
   its screen; the back gesture ignored during each non-gated check.
+
+### The release log check (0.1.125)
+
+The app trusts a release manifest only if it is in VettID's release
+transparency log (VAULT-RELEASES §7.1). The check is normative in
+VAULT-MESSAGING §11.10.1 "The release log check". On Android:
+
+- **Pinned values**, per build flavour, beside the manifest keys in
+  `core/attestation` (`manifest/ManifestKeys.kt`):
+  - `RELEASE_LOG_TRUSTED_ROOT`, a Sigstore TrustedRoot JSON as a raw
+    resource (production: Sigstore's public instance; staging: its
+    staging instance);
+  - `RELEASE_LOG_FROM_SERIAL`, the channel's cutover serial (**1 for
+    production**, from the first production build; staging's once it is
+    known).
+
+  Never fetched, never overridable in a release build, and changed only
+  by an app release.
+- **No production build ships without the check.** The release build
+  task fails without both values.
+- **CI** checks that the bundled root is, byte for byte, a file in
+  vettid.org `vault/release-log/<channel>/` on `master`. Like the
+  `check*Apk` tasks for hosts today, it also checks that a release or
+  staging build carries its own environment's root and manifest keys,
+  never the other's.
+- **Where the check runs:** in `ReleaseManifestManager`, after the
+  signature, the format and the serial (line 1), before the serial is
+  stored, before any attestation is checked against the manifest or
+  anything is sealed to an enclave key, and before any request that
+  carries `manifest_sha256`. It also covers `CanaryManifest`
+  (installation and every selection).
+- **What it verifies.** The app gains its first Sigstore bundle
+  verifier (the votes bundles are checked by the vault, not the app):
+  - the bundle, with the envelope's payload restored from the manifest;
+  - the DSSE envelope's signature over PAE;
+  - the Rekor v1 `dsse` 0.0.1 and v2 0.0.2 bodies;
+  - Merkle inclusion;
+  - the checkpoint's signed note, ECDSA P-256 for v1 and Ed25519 for v2.
+    Ed25519 reuses the app's existing verifier (the one that checks call
+    shares), so there is no new crypto;
+  - v1's signed entry timestamp.
+
+  It uses the platform's P-256, SHA-256 and Ed25519 against the pinned
+  root, with no network. **The RFC 3161 timestamp is not checked**
+  (owner decision a, GC #8537), so there is no CMS parser.
+- **Messages** (VAULT-MESSAGING §11.10.1; texts in the table above):
+  - `release_log_update_app`, with a link to where this build was
+    installed from (§7 "Signing and the two distributions");
+  - `release_log_failed`, with Retry.
+
+  Both appear where a manifest error appears today (the unlock, enroll
+  and recovery screens). Neither says the vault is unsafe, locked or
+  gone, and no PIN is sent.
+- **Stored:** the verified entry's log, index and, for v1, its
+  integrated time. They go in the verification record (§5 "What the
+  phone keeps"), with the manifest that verification used, so the
+  screen shows that manifest's entry and not a later one's.
+- **The attestation screen:** "Logged publicly" is check line 2
+  (above). "Logged at" is shown for v1 entries only; v2 entries have no
+  integrated time.
+
+#### Tests
+
+- The vectors (`core/attestation/src/test/…`) are a staging served
+  document with a v1 `tlog`, and one with a v2 `tlog` (Ed25519
+  checkpoint). Both pass. Each of these fails:
+  - `tlog` missing, too large or malformed, or an envelope whose payload
+    isn't empty as served;
+  - another `payloadType`, two signatures, or an envelope signature that
+    doesn't verify over PAE;
+  - a high-s envelope signature or `sig`, or the envelope signature as
+    (r, n − s);
+  - a body whose `payloadHash` is of other bytes, or whose signature
+    isn't the envelope's;
+  - another key, or the right key inside a certificate;
+  - a `hashedrekord` entry;
+  - a broken inclusion proof, or a proof whose size or root isn't the
+    checkpoint's;
+  - a checkpoint signed by an unpinned key, under a wrong note key ID,
+    or with another origin;
+  - a bad signed entry timestamp (v1), or one whose index or time
+    differs from the bundle's;
+  - a v2 log with a `validFor.end`, a log the root doesn't list, or a
+    v1 entry from another host;
+  - a serial below the cutover.
+
+  A log, or a key, that the pinned root lacks gives the "Update the
+  app" message. A bundle whose RFC 3161 timestamp is broken still
+  passes.
+- A canary manifest without a valid `tlog` is not installed, and an
+  installed one that loses it is removed.
+- The phone's clock set a year ahead or behind doesn't change any
+  result.
+- The attestation screen:
+  - the line passes with the log index shown, and "Logged at" for v1
+    only;
+  - a log failure shows line 1 "Passed", line 2 "Failed" and the rest
+    "Not checked";
+  - a record from a build before the check shows line 2 "Not checked";
+  - the log index shown is that of the manifest the verification used.
 
 ## 5. Architecture
 

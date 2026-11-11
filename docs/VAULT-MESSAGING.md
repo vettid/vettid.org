@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.16
+version: 0.89.0
 date: 2026-11-11
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -21,13 +21,39 @@ related:
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - BALLOT-PROTOCOL.md (0.13.11; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at 8940571, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.11.1, unchanged since)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
-  - VAULT-RELEASES.md (0.1.34; 0.1.6 approved 2026-10-04)
+  - VAULT-RELEASES.md (0.1.36 §7.1, the release transparency log; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.6; D3, D4, D5; §4 the automation CA)
   - VAULT-HOST-PROTOCOL.md (0.1.16; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.89.0: 2026-11-11, **for the owner's approval** (owner decisions a,
+    GC #8494, #8537, #8538 and #8559; VAULT-RELEASES 0.1.36 §7.1).
+    §11.10.1:
+    - the served document gains `tlog`, the Sigstore bundle of the
+      manifest's Rekor `dsse` entry. Its DSSE envelope over the
+      manifest is signed by the same manifest key (payload type
+      `application/vnd.vettid.pcr-manifest+json`), and it is carried
+      with its payload left empty. The 90,112-byte limit is unchanged:
+      from the cutover, a publisher's manifest is at most 49,152 bytes.
+    - New "The release log check": the apps verify `tlog` offline
+      against a pinned trusted root, after the signature, format and
+      serial and before anything uses the manifest (any request that
+      carries `manifest_sha256`, an attestation check, a canary
+      installation).
+      - They check the envelope's signature over PAE, the entry's body
+        against the envelope and the pinned key, and inclusion under a
+        signed-note checkpoint: ECDSA for Rekor v1, with its signed
+        entry timestamp, and Ed25519 for v2.
+      - Exactly one rule says which logs are accepted. The RFC 3161
+        timestamp is not checked.
+      - They refuse a manifest without a valid entry. Builds pin a
+        cutover serial per channel (production 1) and refuse manifests
+        below it. `sig` is low s.
+    - The vault, the parent and the manifest sync ignore `tlog`.
+      Additive for every parser that ignores unknown members.
+    - §13.5's manifest key row and §13.9 note what the log changes.
   - 0.88.16: 2026-11-11, erratum (owner decisions 2026-11-11, GC #8361 a and
     #8374 a: bind both parties into form 2 before release C2, in which form
     2 first ships; vettid-vault #226; numbered after #574 and merged after
@@ -20091,8 +20117,19 @@ they carry its hash (§11.5, "Manifest by hash").
 **The served document** wraps the exact manifest bytes:
 
 ```json
-{ "manifest": "<b64 exact manifest bytes>", "sig": "<b64 64 bytes>", "key_id": "<16 hex>" }
+{ "manifest": "<b64 exact manifest bytes>", "sig": "<b64 64 bytes>", "key_id": "<16 hex>",
+  "tlog": "<b64 Sigstore bundle bytes, envelope payload empty>" }
 ```
+
+`tlog` (0.89.0) is the Sigstore bundle of the manifest's entry in the
+release transparency log: a DSSE envelope over the manifest bytes,
+signed by the same manifest key, and its Rekor `dsse` entry ("The
+release log check", below; VAULT-RELEASES §7.1). It is base64 of the
+bundle's bytes with the envelope's `payload` left empty, since the
+payload is `manifest`. `sig` doesn't cover it, and neither signature
+covers the other's message: `sig` is over `"vettid/pcr-manifest/1"` ||
+0x00 || bytes, the envelope over PAE, which begins `"DSSEv1 "`.
+Documents signed before a channel's cutover serial have no `tlog`.
 
 ```
 sig    = ECDSA-P256-SHA256(manifest_key, "vettid/pcr-manifest/1" || 0x00 || manifest_bytes)
@@ -20102,10 +20139,15 @@ key_id = hex(SHA-256(SubjectPublicKeyInfo DER of the public key)[0:8])
 
 - Signatures are verified over the exact bytes, so no JSON
   canonicalization is needed.
-- The served document is at most **90,112 bytes**.
+- The served document is at most **90,112 bytes**, unchanged by 0.89.0.
+  From a channel's cutover serial, a publisher's manifest bytes are at
+  most 49,152 and a decoded `tlog` at most 16,384, so the document fits
+  (VAULT-RELEASES §7.1 "Size"). The vault, the parent and the manifest
+  sync ignore `tlog`.
 - **How apps learn the manifest** (unchanged by 0.10.0): before each
   enroll and unlock they fetch the served document from the URL above,
-  verify it (signature, strict format, the serial rule), store the
+  verify it (signature, strict format, the serial rule and, from 0.89.0,
+  the release log check below), store the
   highest `serial` seen and send `manifest_sha256` = hex(SHA-256(manifest
   bytes)) and `manifest_serial` in the request. On a `manifest` result
   they refetch and retry once. The one exception is a canary manifest
@@ -20156,6 +20198,122 @@ key_id = hex(SHA-256(SubjectPublicKeyInfo DER of the public key)[0:8])
   s+1, §13.2). If the canary fails, the vault unlocks again once VettID
   publishes s+2 (VAULT-RELEASES §10.1, "If the canary fails"). §13.9
   describes the risk this path leaves.
+- **The release log check** (0.89.0; VAULT-RELEASES §7.1; owner
+  decisions a, GC #8494, #8537, #8538 and #8559).
+
+  **What is pinned.** Each app build pins, per channel:
+  - `release_log_trusted_root`, a Sigstore TrustedRoot JSON document.
+    The app uses its `tlogs[]` only, and ignores the timestamp
+    authorities and the certificate authorities.
+  - `release_log_from_serial`, the channel's cutover serial `C`
+    (production: 1).
+
+  Both are built in, never fetched, and change only with an app release.
+
+  **Which logs** (VAULT-RELEASES §7.1, the one rule):
+  - **v1** is every `tlogs[]` entry whose `baseUrl` is exactly the
+    channel's host (`https://rekor.sigstore.dev`; staging
+    `https://rekor.sigstage.dev`), any shard, under that entry's key;
+  - **v2** is every other `tlogs[]` entry, accepted only for a `dsse`
+    0.0.2 entry whose checkpoint origin equals the `baseUrl`'s host, and
+    only if the pinned root gives its key no `validFor.end`.
+
+  The app has no trusted time, so it does not judge a v2 key's validity
+  by date.
+
+  **When.** A build that pins these values checks every manifest it
+  would use, served or canary, in this order:
+  1. the signature, the strict format and the serial rule (the
+     attestation screen's line 1);
+  2. then this check (line 2).
+
+  It all happens before the serial is stored, before any attestation is
+  checked against the manifest or anything is sealed to an enclave key,
+  before **any request that carries `manifest_sha256`** (enroll, unlock,
+  a recovery register or open, anything later that names the manifest),
+  and before a canary installation.
+
+  **The check:**
+  1. **The serial.** A manifest with a serial below `C` is refused, and
+     so is a `sig` whose s is above n/2 (low s, VAULT-RELEASES §7.1).
+  2. **The bundle.** `tlog` is present. Decoded, it is at most 16,384
+     bytes and parses strictly as a Sigstore bundle v0.3 with a
+     `dsseEnvelope` whose `payload` is empty. The app sets the payload to
+     the manifest bytes before anything below. The bundle holds exactly
+     one transparency-log entry and no certificates. Its RFC 3161
+     timestamp is not checked by the apps (owner decision a, GC #8537).
+  3. **The envelope.**
+     - `payloadType` is exactly `application/vnd.vettid.pcr-manifest+json`.
+     - It has exactly one signature, low s, which verifies as ECDSA
+       P-256 SHA-256 over PAE(payloadType, payload) under the pinned
+       manifest key that `key_id` selects.
+     - PAE is `"DSSEv1"` SP LEN(type) SP type SP LEN(body) SP body,
+       where LEN is the length in bytes as ASCII decimal and SP a single
+       space.
+  4. **The entry is this envelope.** These fields are read from the
+     entry's canonicalized body, the bytes the log's leaf hashes:
+     - **v1** (`kind` `dsse`, `apiVersion` `0.0.1`): `payloadHash` is
+       `sha256` with the value SHA-256(manifest bytes); exactly one
+       signature; its `verifier` decodes to a `PUBLIC KEY` block whose
+       SubjectPublicKeyInfo DER is, byte for byte, the pinned manifest
+       key; its `signature` is byte for byte the envelope's signature.
+       `envelopeHash` is not used.
+     - **v2** (`dsse` 0.0.2): `payloadHash` has algorithm `SHA2_256` and
+       the digest SHA-256(manifest bytes); exactly one signature, whose
+       `verifier` holds `publicKey.rawBytes` equal, byte for byte, to
+       the pinned key's SubjectPublicKeyInfo DER, with `keyDetails`
+       `PKIX_ECDSA_P256_SHA_256` and no certificate; its `content` is
+       byte for byte the envelope's signature.
+  5. **The log.**
+     - The leaf hash is SHA-256(0x00 || the canonicalized body). The
+       inclusion proof (RFC 9162) verifies from that leaf, at the
+       proof's index, to a root hash at the proof's tree size.
+     - That root hash and tree size are the checkpoint's. The
+       checkpoint is a signed note: its first lines are the origin, the
+       tree size in decimal and the root hash in base64. Then comes a
+       blank line, then signature lines of the form `— <name>
+       <base64(4-byte key ID || signature)>`.
+     - The app verifies the one signature line whose name and key ID
+       match the log's key. The algorithm is chosen by the root's
+       `keyDetails` for that log:
+       - **v1, ECDSA P-256:** the origin is `<host> - <tree ID>`. The key
+         ID is the first 4 bytes of SHA-256(the key's SPKI DER). The
+         signature is DER ECDSA over the note text, the lines above the
+         blank line, each ending in a newline.
+       - **v2, Ed25519** (every v2 log in the live roots): the origin is
+         the log's host. The key ID is the first 4 bytes of SHA-256(name
+         || 0x0A || 0x01 || the 32-byte Ed25519 key), as C2SP signed
+         notes define it. The signature is Ed25519 over the note text.
+       - Other signature lines (witnesses, say) are ignored.
+     - **v1 only:** the signed entry timestamp verifies under the same
+       log key. It covers the canonical JSON of `body`,
+       `integratedTime`, `logIndex` (the global index) and `logID`, and
+       the bundle's values for all four must be those. The log key must
+       be valid, per the root, at `integratedTime`.
+
+     The phone's clock is not used, so a wrong phone clock cannot fail
+     the check.
+
+  **A failure** means the manifest is **not trusted**. It is handled as
+  a manifest whose signature fails: the app refetches once and does not
+  proceed. The request does not start (no PIN is sent), and a canary
+  manifest is not installed, or is removed, as above. The app never
+  falls back to a manifest without a valid entry, and a canary manifest
+  never masks a failed served one. The member is told plainly, and the
+  app keeps trying:
+  - a log that the pinned root does not accept, or a key it lacks
+    (Sigstore rotated a key, or the log moved): **"Update the app to
+    continue"**. This build cannot check the release list, and a newer
+    build can;
+  - any other failure: **"VettID's release list could not be checked
+    against the public log"**, with a retry.
+
+  Neither is shown as the vault being unsafe or locked.
+
+  **What is kept.** The app keeps the verified entry's log, index and,
+  for v1, integrated time, **with the manifest that verification used**,
+  for the attestation screen. Builds that do not pin these values
+  ignore `tlog`.
 - The **manifest key** is an ECDSA P-256 key held by VettID in a hardware
   key store and used for nothing else. Its public key is **pinned in every
   app and in every release image**. Apps and images MAY pin two keys to
@@ -26263,7 +26421,7 @@ it can read and write only its own objects and use only its own relay key
 | Decrypted vault state (DEK) | Everything in it (`data` and `secret` items included), plus offline guessing of the credential password against the current CEK and the latest blob (§3.5.8); critical items' values stay encrypted under item keys that only the credential, sealed under the password, holds (§10.7). (0.33.0, release R) Getting the DEK without the enclave needs a broken sealing and then either the phone's secret and the PIN, or the PIN and the password together through the recovery wrap at the heavy parameters (§11.14.12's table) | Rotate the relay key and the credential; change the password |
 | A critical item key (from an old blob with its CEK and the password, or from a compromised release during an operation) | That item's ciphertext of that generation only; nothing after the item's next use, which re-keys it (§10.7) | Use the item, or `credential.rotate` (re-keys every item) |
 | An old release, after members moved away | Vaults still sealed to it. A moved vault only if the host serves it a stale header and state **and** an app sends it the PIN; apps never send a PIN to an older release than they last unlocked into (§11.10.6). Residual: an owner device that never learned of the move. | Members move forward; the app warns about `deprecated` and `retired` releases; the release ends at its `ends_at` (§11.10.5) |
-| Manifest key | Listing a release as `active`, or marking one `removed` (routing only: the API stops routing it). A vault still moves only with the member's approval, and only to a sealing key in the pinned namespace. A manifest the host supplies must match the hash in the sealed request (§11.5). | Rotate the key in a release; apps pin two keys |
+| Manifest key | Listing a release as `active`, or marking one `removed` (routing only: the API stops routing it). A vault still moves only with the member's approval, and only to a sealing key in the pinned namespace. A manifest the host supplies must match the hash in the sealed request (§11.5). (0.89.0) From the cutover, apps that require the release log accept a manifest only with a DSSE entry in a log the monitor watches. A thief's manifest is therefore public and reaches the owner as an alarm within about an hour: detection, not prevention (VAULT-RELEASES §7.1). | Rotate the key in a release; apps pin two keys |
 | Sealing-key policy (VettID's AWS account) | A key whose policy let anything other than its release decrypt, or could be changed later, would expose the pepper and allow offline PIN guessing against stored state (0.33.0, release R: guessing as in §11.14.12's table, which without the member's phone means the PIN and the password together at the heavy parameters). The enclave refuses to seal to such a key: before sealing it reads the policy, metadata and grants from KMS over TLS it terminates and checks them (§11.10.7). | Nothing to recover: the check runs before any seal, and a passing policy can never change, unless AWS restores the account owner's control of the key (0.33.0: AWS documents a support path for keys nobody can manage, §11.14.12); only the pinned retirement principal can delete the key, after notice (below) |
 | Retirement principal (0.10.0) | Scheduling the deletion of a release key, always with the pinned window: 30 days later every vault still sealed to that release is permanently unopenable. Availability only, never confidentiality: it cannot read, open, move or re-key anything, change the policy or add grants. | Cancel the deletion within the 30 days (`CancelKeyDeletion`, `EnableKey`); a CloudTrail alarm on every `ScheduleKeyDeletion` (VAULT-RELEASES §8.7) |
 
@@ -26496,6 +26654,19 @@ phone"). A canary-only app build would close this risk: a build signed
 with its own key, and the only build that accepts canary manifests. That
 is a possible later hardening, tied to the signing of the canary
 phone's build (W10-READINESS B8), and is not done now.
+
+**The release log** (0.89.0, VAULT-RELEASES §7.1) changes what a canary
+can hide, not the accepted risk above:
+- the owner approves a canary's row before it is signed;
+- it is logged when it is signed, like any serial, so its hash is
+  public at once and the owner gets a notice for its entry;
+- its bytes become public within 7 days, and in any case once a later
+  serial is published;
+- an app that requires the log refuses a canary without a valid entry.
+
+So a manifest signed under a manifest key for a few chosen phones
+becomes public. If the owner didn't approve it, it is an alarm. It
+cannot stay a private variant.
 
 ## 14. Push (0.24.0)
 
