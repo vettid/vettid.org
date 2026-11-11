@@ -33,9 +33,7 @@ changelog:
     the §7.4 row "Standing token refreshed after `quota_exceeded`":
     "newer" than the token a quota refresh came under is a later `exp`,
     and for the same `exp` a later place in the issuer's registry (issue
-    order, but a handshake's tokens are placed at its activation or
-    confirmation). `exp`
-    orders standing tokens by issue only while the relay's
+    order). `exp` orders standing tokens by issue only while the relay's
     `max_token_lifetime_seconds` is unchanged; for the same `exp`, a
     handshake's token (placed at its activation or confirmation) counts
     as the newer.
