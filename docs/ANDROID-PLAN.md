@@ -5122,9 +5122,12 @@ On top of voice calls, C4 adds:
   2026-11-11) **A glare never turns the camera on.** The phone that
   answers the winning call *Y* without asking (on `call.end` with
   `superseded_by`) answers with never more than its own lost call *X*'s
-  media: audio only unless both are video calls. After an audio call *X*
-  it answers a video *Y* with audio only, sending no camera track, and the
-  camera stays off until the member turns it on.
+  media (VAULT-MESSAGING §10.10's table): video only when both are video
+  calls. After an audio call *X* it answers a video *Y* with the video
+  section rejected (`port 0`, inactive), so no video is sent or received,
+  and shows the call as audio. As the caller of a video *Y*, it accepts an
+  answer without video and shows the call as audio. Turning video on
+  later is `call.update` (V7, below).
 - **The camera**: `call.start{media: "video"}`, the front camera first,
   VP8 always and H.264 through the phone's hardware codec only, VP9 and
   AV1 off (CALLS-PLAN §4); frame encryption covers the video track as

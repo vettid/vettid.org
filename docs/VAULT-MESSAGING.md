@@ -29,13 +29,15 @@ related:
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.88.14: 2026-11-11, erratum (owner decisions 2026-11-11 on calls C2
-    glare, GC #8303 a, a; vettid-vault #224; numbered after #571 and
-    #572). §10.10 "Glare": when its own call loses, the vault also sends
+    glare, GC #8303 a, a; vettid-vault #224; numbered after #570, #571 and
+    #572, and merged after them). §10.10 "Glare": when its own call loses, the vault also sends
     the peer vault `call.end{busy}` for it, which a peer that dropped it
     ignores and one whose own call had ended or expired, and so rang for
     it, uses to stop ringing; the device that answers *Y* without asking
-    answers with never more than *X*'s media, so an audio call never turns
-    on the camera by itself. ANDROID-PLAN
+    answers with never more than *X*'s media (the four combinations; after
+    an audio *X* the video section is rejected, `port 0`), so an audio call
+    never turns on the camera by itself; turning video on later needs
+    `call.update` (V7). ANDROID-PLAN
     0.1.123 and IOS-PLAN 0.1.67 note the second.
   - 0.88.10: 2026-11-11, erratum (lead; vettid-vault #218, GC #6875; owner
     decisions #6866 a, #7711 a, #7806 a, #7861 a, #7862 a, #8099 a;
@@ -14490,11 +14492,18 @@ other at once, one call connects.
   followed or preceded by the offer *Y* from the same connection, while
   its screen still shows the outgoing call, **answers *Y* without
   asking** (the member asked for this call seconds ago), (0.88.14, owner
-  decision 2026-11-11) **with never more than *X*'s media**: audio only
-  unless both *X* and *Y* are video calls. After an audio *X* it answers a
-  video *Y* with audio only, sending no camera track (the video section
-  answered without sending), and the camera stays off until the member
-  turns it on. Any other
+  decision 2026-11-11) **with never more than *X*'s media**:
+
+  | *X* (the lost call) | *Y* (the winning offer) | The answer |
+  |---|---|---|
+  | audio | audio | audio |
+  | audio | video | **audio only**: the video section is rejected (`port 0`, inactive), so no video is sent or received |
+  | video | audio | audio (an answer cannot add video to an audio offer) |
+  | video | video | video |
+
+  The device that placed *Y* accepts an answer without video and shows
+  the call as audio. Turning video on later needs `call.update`
+  (CALLS-PLAN V7, not yet in this section). Any other
   device rings as usual and is told `answered_elsewhere`. A device
   that does not know `superseded_by` shows "busy" and then rings for
   *Y*; the member answers by hand.
