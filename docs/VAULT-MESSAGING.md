@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.14
+version: 0.88.15
 date: 2026-11-11
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,21 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.15: 2026-11-11, erratum (owner decisions 2026-11-11 on calls C2
+    permission and limits, GC #8321 a, a; vettid-vault #225; numbered
+    after #573 and merged after it). §10.10 "Permission and limits":
+    calls missed because of the vault hold (offers that arrive while
+    held, incoming calls the hold's start ended) are still missed calls
+    but don't count toward the unanswered limits; turning calls off for a
+    connection also ends a call with it that is still ringing, in either
+    direction, with reason `unavailable` (incoming: the devices stop
+    ringing, a missed call not counted, nothing sent to the peer, whose
+    caller times out; outgoing: `call.end{unavailable}` to the peer vault,
+    whose devices stop ringing and record a missed call, counted there as
+    usual), and an active call carries on. §3.6.3 notes the first.
+    Also (vettid-vault #226) §10.10 "Call forms": an answer with part of
+    form 2, or a malformed form 2 member, is a share that does not
+    verify.
   - 0.88.14: 2026-11-11, erratum (owner decisions 2026-11-11 on calls C2
     glare, GC #8303 a, a; vettid-vault #224; numbered after #570, #571 and
     #572, and merged after them). §10.10 "Glare": when its own call loses, the vault also sends
@@ -6601,7 +6616,9 @@ the hold off, `"held"` with it on.
   `owner_check_required`, and drops pending access-session requests;
 - stops a ringing incoming call on its devices (`call.end{unavailable}`
   to them; the caller is not told and times out, as with a locked
-  callee). A call answered before the deadline continues (below);
+  callee), and records it as a missed call, not counted toward the
+  connection's unanswered-call limits (§10.10 "Permission and limits",
+  0.88.15). A call answered before the deadline continues (below);
 - audits `owner_check.held` and sends `vault.held` (below) to the
   owner's app and desktops.
 
@@ -6640,7 +6657,9 @@ the hold off, `"held"` with it on.
 - **Incoming calls do not ring.** An offer that arrives while held rings
   no device. The vault does not answer it (no `busy`, no `call.end`), so
   the caller times out exactly as with a locked callee; the vault records
-  a missed call (feed `call.missed`), counted in `vault.held`. Ringing a
+  a missed call (feed `call.missed`), counted in `vault.held` but not
+  toward the connection's unanswered-call limits (§10.10 "Permission and
+  limits", 0.88.15). Ringing a
   device that may not act before a check would either force the check in
   the middle of answering or ring for nothing, and an answer from a phone
   in someone else's hands would let them speak as the member. A call
@@ -14545,7 +14564,9 @@ itself.
   (by the rule under "Ringing") and the vault's `call.end{timeout}`
   follows.
 - A missed call is recorded once per call, by whichever comes first:
-  the vault's timer, the peer's `call.end`, `busy`, or the hold.
+  the vault's timer, the peer's `call.end`, `busy`, the hold, the
+  unanswered-call limit, or (0.88.15) calls turned off for the
+  connection.
 - An offer that expired while the vault was locked is dropped before
   this feature sees it (§8.4), as today: no missed call. Not changed in
   C2.
@@ -14655,9 +14676,27 @@ other at once, one call connects.
   missed call and no wake, and is audited `drop.call_off`. The caller
   times out as with a locked callee and cannot tell the two apart. The
   member's own `call.start` to that connection is answered `calls_off`.
+- (0.88.15, owner decision 2026-11-11) **Turning calls off ends a call
+  with that connection that is still ringing**, in either direction; an
+  **active** call carries on (the member can hang up). Each ends with
+  reason `unavailable`. A ringing record already past its `exp` when
+  calls are turned off is not ended here: the ring timer ends it as
+  usual (`timeout`), and counts it as an ordinary missed call.
+
+  | The ringing call | This vault | What the peer sees |
+  |---|---|---|
+  | Incoming (the connection is calling) | `call.end{unavailable}` to the owner devices, which stop ringing; a missed call, not counted (below) | Nothing: off is silent, so its caller times out as with a locked callee |
+  | Outgoing (the member is calling) | `call.end{unavailable}` to the peer vault; the owner devices told (the call's device directly) | `call.end{unavailable}`: its devices stop ringing, and it records a missed call |
+
 - **Unanswered calls are limited.** The vault counts, per connection,
   the incoming calls that ended without being answered (missed,
-  declined, `busy`, suppressed by this rule). When a connection has
+  declined, `busy`, suppressed by this rule). (0.88.15, owner decision
+  2026-11-11) Calls the member couldn't answer because of the vault hold
+  (§3.6.3: offers that arrive while held, and incoming calls the hold's
+  start ended) are missed calls but are **not** counted, and neither is
+  a ringing call ended because this vault's member turned calls off for
+  the connection (the peer, which cannot tell why the call ended, counts
+  its missed call as usual). When a connection has
   **3 in the last 10 minutes or 10 in the last 24 hours**, a further
   offer from it rings no device and is not answered; it is recorded as
   an ended call with reason `unavailable` and as a missed call, and
@@ -14742,7 +14781,13 @@ the calling device, which alone knows what it sent.
   signed `suites` (the SDP attribute is ignored and removed), and its
   `call.answer` carries `suite`, `offered`, `confirm` and `enc_sig`
   over `m2`; its SDP carries no VettID attribute. In form 1 it answers
-  as at S10. An answer is in exactly one form.
+  as at S10. An answer is in exactly one form. (0.88.15) A vault treats a
+  `call.answer` with only some of `suite`, `offered` and `confirm`, or
+  with one of them malformed, as a share that does not verify: from its
+  own device, `drop.call_share` and `call.end{unavailable}` to that
+  device (the call still rings on the others); from the peer vault,
+  `drop.call_share`, and the call keeps ringing until it ends or times
+  out.
 - **The calling device**, for an answer with `suite`: verifies the
   signatures over `m2`; requires `offered` to equal the list it sent
   and `suite` to be in it and in its registry; verifies `confirm`. For
@@ -27158,7 +27203,9 @@ Follow-ups:
        session, and the check must work on a vault that stays unlocked).
        Recommended: as specified.
     2. **Calls while held:** no ringing; the caller times out as with a
-       locked callee; a missed call is recorded and counted. A call
+       locked callee; a missed call is recorded and counted (in
+       `vault.held`; not toward the unanswered-call limits since
+       0.88.15). A call
        answered before the deadline continues. Recommended: as
        specified (an answer would let a phone in other hands speak as
        the member, and a check in the middle of answering is
