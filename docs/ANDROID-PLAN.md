@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.123
+version: 0.1.124
 date: 2026-11-11
 changelog:
+  - 0.1.124: 2026-11-11 (owner decisions a, GC #8451, #8476 and #8511). Settings → Security keeps the rows used often (Recovery included) and moves the rest behind **Advanced security**; the attestation screen shows each link of the chain, one line per check the app performs (passed, failed or not checked), the release's source and this phone, with "Copy all"; the owner check shows "Checking with your vault…" while the vault verifies (Lock vault still enabled), then "Check passed". §4 "Advanced security, attestation in detail and the check's progress"; the Settings and Owner check rows; §4 "Locking the vault" and "Recovery and unlock from release R" point to Advanced security; §5 "What the phone keeps": the verification record.
   - 0.1.123: erratum, 2026-11-11 (VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). "Video in calls (C4)": after a glare, the phone that answers the winning call without asking (`superseded_by`) answers with its own call's media, so an audio call never turns on the camera by itself.
   - 0.1.122: erratum, 2026-11-07 (RELEASE-UPDATES 0.3.4; owner decision a, Ground Control thread 01M6SQ6VMNMB0C2CRPNZYNWKBB). §4 "Vault update" and "What's new": on the unlock screen the PIN keypad and Unlock come first; the release offer below them is a compact notice ("Update available: release N", the security line, the fingerprint and "Approve the update with this unlock"), with "What's new in release N" as a link that opens a sheet holding the full What's new, "Also in earlier releases" and Full release notes. Approving does not require opening the sheet. The security line comes from the release log like the rest of What's new: while it loads, the notice shows the progress line, and if it can't be had, "Release notes unavailable"; approval stays enabled either way. `security_text` stays in the sheet. The update screen is unchanged. Existing texts only (Android's `unlock_offer_title` and `unlock_offer_approve` already hold "Update available: release N" and "Approve the update with this unlock").
   - 0.1.121: erratum, 2026-11-05 (VAULT-MESSAGING 0.85.2; owner decisions a and a/a). §4 "Transfer (new phone)": past the 11-minute deadline the new phone collects for a settlement window (about 90 s) instead of once, in the background; rules and tests.
@@ -1619,8 +1620,8 @@ rows below say "Vault" for the screens and "item" for the data.
 | History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail, each entry's icon in its category's colour (0.1.22); a ⋯ menu with **Export…** (0.1.17: CSV or JSON of what the filters show, with the vault PIN, saved through "Save to…"). Details below |
 | Notifications | — (Proton has none; a bell as in most apps) | 0.1.23 (owner answers of 2026-10-09): the vault's feed (VAULT-MESSAGING §10.9), opened from the bell in the top bar with the unread count; grouped by day, urgent items first, unread and read, swipe to archive or to mark read, an Archived view; each item opens the screen it is about; system notifications through the member's notification mode (D7). Details below |
 | Credential | — | Reached from Settings → Security → Credential (0.1.11; not in the drawer). Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on. (0.1.51) **New credential** (`credential.reset`) is hidden until §4 "A lost answer to New credential" is implemented. (0.1.88) **Replace your vault's keys** (approved title, was "Rotate the credential key"; `credential.rotate`, now the whole set) stays here; the one-time prompt after a PIN or password change (§4 "Replacing the vault's keys, once") opens it |
-| Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state, memory only, wiped at lock (0.1.61, §4 "The member's own profile"); tapping it opens the avatar sheet. Vault (status, with the "Installed from" line of §7 "Signing and the two distributions" (0.1.36), release, lock, PIN; "Update available" while a newer release can be approved, 0.1.19); Security (credential, recovery, attestation info, the app lock (0.1.19: Biometrics or Phone screen lock) and timeout, the owner-check interval 1–24 h and the hold switch); Privacy (the **Shared profile**, glyph `Badge`, 0.1.12: display name, `@profile` items and the profile photo, **camera only** — "Take a photo" / "Retake photo" opens the app's own camera screen, front camera first with a switch to the rear one, then "Retake" or "Use photo"; no selection of an existing picture and no other camera app; the shot stays in memory, is never saved to the gallery, and is cropped, scaled and re-encoded to a JPEG ≤ 65,536 bytes without EXIF before `profile.set{photo}`; "Remove photo" confirmed; a refused camera permission is explained, with the system settings once Android no longer asks; a phone without a camera is told); App (theme; **Notifications** (0.1.23): the mode, its status, previews and the channels, §4 Notification modes; the local "Vault updates" channel, 0.1.19) |
-| Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
+| Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state, memory only, wiped at lock (0.1.61, §4 "The member's own profile"); tapping it opens the avatar sheet. Vault (status, with the "Installed from" line of §7 "Signing and the two distributions" (0.1.36), release, lock, PIN; "Update available" while a newer release can be approved, 0.1.19); Security (credential, recovery, the app lock (0.1.19: Biometrics or Phone screen lock) on/off and method, Check now, Move to a new phone, and **Advanced security** (0.1.124): the owner-check interval 1–24 h, the hold switch, the idle lock, the app lock timeout, the attestation in detail, the new phone secret when it applies and Allow screenshots; §4 "Advanced security, attestation in detail and the check's progress"); Privacy (the **Shared profile**, glyph `Badge`, 0.1.12: display name, `@profile` items and the profile photo, **camera only** — "Take a photo" / "Retake photo" opens the app's own camera screen, front camera first with a switch to the rear one, then "Retake" or "Use photo"; no selection of an existing picture and no other camera app; the shot stays in memory, is never saved to the gallery, and is cropped, scaled and re-encoded to a JPEG ≤ 65,536 bytes without EXIF before `profile.set{photo}`; "Remove photo" confirmed; a refused camera permission is explained, with the system settings once Android no longer asks; a phone without a camera is told); App (theme; **Notifications** (0.1.23): the mode, its status, previews and the channels, §4 Notification modes; the local "Vault updates" channel, 0.1.19) |
+| Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action. While the vault verifies, "Checking with your vault…", then "Check passed" (0.1.124, §4 "Advanced security, attestation in detail and the check's progress") |
 | Avatar sheet | Account sheet | The member's first and last name and **full email address** (0.1.11, from `account.get`'s snapshot `first_name`, `last_name` and `email`, VAULT-MESSAGING 0.20.0 §11.13; never the masked hint; memory only, wiped at lock, 0.1.61, §4 "The member's own profile"), the email labelled "Only you see this address" and the names "Your connections see this name"; **Lock vault first** (0.1.12), right under the name and email, before Change name, Shared profile and the email; the sheet scrolls; vault status; **Change name** (0.1.10): the two names (the registration rule: letters, spaces, `'’.-`, ≤ 40), then the owner-check screen's PIN and password, sent as `account.name.set`; then "Name change requested" until `account.get`'s `name_request` is `applied` or `refused`; `too_soon` (from the vault or the member API): "You can change your name once every 30 days. You can change it again on <date>" (VAULT-MESSAGING §10.8), membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
 | Recovery (new phone) | — (VettID-specific) | (0.1.40, release R: after the register, one screen for the PIN and the password, a check-before-sending step and `vault.recovery.open`; §4 "Recovery and unlock from release R".) Only with the backup on: scan the portal's recovery QR, or type its code (0.1.33, below) → claim (`email_hint`) → register → PIN → credential password → the app replaces the old one. No other path: 0.1.6's backup-off choice (new credential or delete) is removed. `no_backup` at register or unlock (a vault whose backup is off): "This vault cannot be recovered: its credential backup was off. Delete it on the account site and start over with a new setup code", with a link to the portal's start-over page (MEMBER-API 2.1.0) and then to onboarding |
 | Recovery: type the code (new phone) | — (VettID-specific) | 0.1.33 (owner decision of 2026-10-11; VAULT-MESSAGING 0.25.0 §11.11.10). **Where:** **Type the code instead**, a text button on the recover intro (under **Scan the code**) and on the scan screen, and the primary action when the camera permission is refused or the phone has no working camera; **Scan instead** leads back. **The screen:** title "Type your recovery code"; body "On the account site, under the QR code, there are 12 groups of four characters. Type them all, in order."; one text field, monospace, drawn in groups of four in three rows as it fills, with "*n* of 12 groups" under it; **Continue**, enabled at 48 characters. **Input:** paste accepted; spaces, hyphens and line breaks dropped; lower case accepted and shown upper case; `I` and `L` become `1` and `O` becomes `0` as typed (the code never contains them); `U` is refused with "The code has no letter U. Check whether it is a V." and any other character with "The code uses only digits and letters."; a forty-ninth character is ignored. The keyboard is text, capital letters, with no autocorrect, no suggestions and no personalized learning. **Before anything is sent:** the app recomputes the 4 check characters with its own built-in member API origin. On a mismatch: "That code doesn't match. Compare it with the account site group by group, and check that the site is <account host>." Nothing is sent and nothing is counted; the entry stays for correction. A paste of exactly 32 valid characters (the bare code an account page showed before MEMBER-API 2.4.0) says "That is the short code of an older page. Reload the recovery page on the account site: it shows 12 groups." **Then:** `POST /api/vault/recovery/claim {locator, app_key}` signed with an empty `vault` → `vault_id`, `recovery_id`, `user_guid`, `email_hint` → the same `RecoveryCode` a scan produces → register → PIN → credential password, the row above. **Answers:** every answer shows the text the scan shows for it, and returns to the typed entry: the claim's `404` ("This recovery is no longer active…"; with the check passed, a mistyped locator is not a likely cause), `409 recovery_not_available`, `429` and the register's `bad_code` ("That code is not right. After 5 wrong codes the recovery is cancelled. Wrong codes from this phone: *n* of 5."), voided, `expired`, `too_early`, `used`, `attestation`, `retry` and `no_backup`. The characters are kept for correction, and cleared when the recovery has ended (the fifth wrong code, `expired`, `used`, `no_backup`). **Never:** an account session, the member's email typed or shown beyond `email_hint`, the code or the locator written to disk, logs, the clipboard or saved state that outlives the process; the screen is excluded from screenshots and the recent-apps preview (`FLAG_SECURE`; the first screen of the app to set it, an open point for the owner). **Accessibility:** TalkBack reads the field group by group, character by character; the count and every refusal are announced (a live region), a refused character naming its group ("group 4"); the layout holds at the largest font scale (the groups wrap to more rows); the entry survives rotation; nothing times out but the code's own 24 hours. **Tests:** `RecoveryCodes.normalize` extended to 48 characters and its `U` refusal; the check against VAULT-MESSAGING §16's vector for production and staging, and a staging string refused by a production build; a failed check makes no request; typed and scanned entry of the same recovery produce equal register requests; `bad_code` text and count equal either way; screen-catalog entries for empty, partial, refused character, failed check, `404` and `bad_code`; an end-to-end typed recovery on staging. **As built (0.1.37; vettid-android #113):** the keyboard is the **password-class** text keyboard with capital letters (Android has no flag that turns off suggestions and personalized learning on a plain text keyboard; the password class does, and the characters stay visible). A refused character's message **names its group on screen**, not only to TalkBack: "The code has no letter U. Check whether it is a V. Look at group 4." (likewise for any other character). **Continue** stays disabled below 48 characters; the keyboard's Done key with fewer says "The code has 12 groups of four characters. Type them all." The "short code of an older page" text appears when a paste leaves exactly 32 characters, and on Done with a bare code. On a phone with no camera at all (no camera feature) the scan screen shows **"No camera"**, "This phone has no camera that VettID can use. Type the code instead.", and typing is the primary action. A `429` that carries `Retry-After` (in seconds) shows "Too many attempts. Try again in *wait*." and counts down, on the intro, scan and type screens alike; it does not disable the retry, and without the header the general "Too many attempts" text is shown. The typed characters live in the screen's view model only: kept when switching to the scan and back and through refusals that can be corrected, and cleared **when the register succeeds** (before the PIN step), on `no_backup` and when the recovery has ended (voided, `expired`, `used`). A scanned claim reads the answer's `vault_id` and `recovery_id` as optional (a member API before 2.4.0 did not send them; the QR has both); the claim by locator requires them |
@@ -2846,7 +2847,8 @@ vault without it, part 1 applies unchanged.
   vault was opened again", owner decision 2026-10-24; its label is a draft).
 - A `vault.locking` is taken only if its `unlock_id` is the current
   one (VAULT-MESSAGING §10.2 "Locks").
-- **The idle lock** (VAULT-MESSAGING §3.6.8). Settings → Security,
+- **The idle lock** (VAULT-MESSAGING §3.6.8). Settings → Security →
+  Advanced security (0.1.124),
   beside the check's interval: "Lock my vault by itself after" with
   1 hour, 1 day, 7 days (default), 14 days, 30 days; a longer choice
   says "This takes effect after your next check." The held screen says
@@ -2887,7 +2889,8 @@ vettid-android #145, #146, #153 and #154.*
   their real units and show both ("24 hours (staging: 1 hour)").
   Staging builds add a small "Staging: 1 day = 1 hour" where a scaled
   wait is shown: the owner check, the idle lock, recovery, the old
-  phone's screen and Settings → Security.
+  phone's screen and Settings → Security → Advanced security (0.1.124:
+  the interval, the hold and the idle lock rows).
 
 ### Photo attachments (0.1.39)
 
@@ -4012,7 +4015,7 @@ both sections above (`pin.change`, `credential.password.change`,
   `connection.rotation.resolve`, after a confirmation; **Neither matches**
   offers to remove the connection and invite again with a safety code.
 
-- Settings → Security → **New phone secret** (`vault.secret.renew`): the
+- Settings → Security → Advanced security (0.1.124) → **New phone secret** (`vault.secret.renew`): the
   PIN and the password; "Your phone now uses a new secret for this
   vault." It replaces the vault's DEK, so a secret that leaked by
   another route opens no later stored state. (0.1.43) The screen says,
@@ -6972,6 +6975,241 @@ already sent are cleared at lock and in the hold or the due state, an
 `account.name.set` answered after the lock does not store them again,
 and the request comes back from `account.get` after the unlock.
 
+### Advanced security, attestation in detail and the check's progress (0.1.124)
+
+Owner decisions a, GC #8451, #8476 and #8511 (2026-11-11). Both apps, the
+same texts; the string names are Android's (the iPhone's keys follow
+IOS-PLAN §4.17).
+
+#### Advanced security
+
+Settings → **Security** keeps what a member uses often or needs in a
+hurry, in this order:
+
+1. Credential (unchanged);
+2. Recovery (unchanged: its screen and its "cancel it now" notice;
+   GC #8511);
+3. the app lock: on/off and its method (unchanged);
+4. **Check now** (unchanged);
+5. **Move to a new phone** (unchanged; rare, but looked for here);
+6. **Advanced security** (`settings_security_advanced`), glyph
+   `Shield`, with `settings_security_advanced_body` under it. It opens
+   a screen of that title.
+
+**Advanced security** holds, in this order, each row as it is today
+(texts, behavior, confirmations unchanged): the owner-check interval,
+the hold switch, the idle lock, the app lock timeout (shown while the
+app lock is on), **Attestation**, **New phone secret** (when it
+applies) and **Allow screenshots** (moved from App; turning it on
+still asks first). A notification or link whose target is one of
+these rows ("Settings → Security (the check)" opens the interval row,
+"(the hold)" the hold row; the idle lock; New phone secret) opens
+Advanced security at that row.
+
+#### Attestation in detail
+
+**Which verification.** The screen shows this phone's last
+verification (VAULT-MESSAGING §11.2) of the enclave instance its vault
+runs on, the one the app seals to; never an abandoned move's candidate
+(release N+1) or anything else it only looked at. The record (each
+check's result, the values below and when it was made) is kept as §5
+"What the phone keeps" says, and replaced by the next verification of
+that instance; a verification that could not be made (the descriptor
+or the document not fetched) makes no record.
+
+**At the top**, today's introduction (`settings_attestation_body`)
+stays. When there is no record yet: "This phone hasn't verified your
+vault's enclave yet. It does at the next unlock."
+(`settings_attestation_none`), only **This phone** follows, and "Copy
+all" is hidden. When the last verification failed: a notice
+"Verification failed" (`settings_attestation_failed_title`), "This
+phone couldn't verify your vault's enclave, so it sent it nothing. The
+check that failed is marked below." (`settings_attestation_failed_body`).
+A verification refused after line 9, with every line "Passed" (a
+release removed, not active for an enrollment, or older than one this
+phone has used), has the same title with "Every check passed, but this
+phone refused the release: <reason>" (`settings_attestation_refused_body`),
+the reason being the text the unlock shows for that refusal.
+
+**Enclave** (`settings_attestation_enclave`, today's "Vault enclave"):
+
+| Row | Value |
+|---|---|
+| "Environment" | as today |
+| "Release" | "Release N · <status>" (`settings_attestation_release_value`), the manifest status (VAULT-MESSAGING §11.10.1) capitalized: "Active", "Deprecated", "Retired" or "Removed", with ", ends <date>" (`settings_attestation_ends`) when the entry has `ends_at` |
+| "PCR0", "PCR1", "PCR2" | the full hex, monospaced, wrapped, each with "Copy" (`settings_attestation_copy`; then "Copied", `settings_attestation_copied`), through the clipboard rule of "Copy all" below |
+| "Attested at" | the attestation document's timestamp |
+| "Valid until" | the descriptor's `not_after` |
+
+On screen, dates and times are in the phone's locale and time zone.
+
+A value is shown plainly only when every check it rests on passed:
+the PCRs and "Attested at" on the chain and the hardware signature,
+"Valid until" also on "Covers the key this phone encrypts to". If one
+of those did not pass, the value is followed by "Not verified"
+(`settings_attestation_not_verified`). "Release" (and **Release**
+below) is shown only when "Measurements match a signed release"
+passed.
+
+**Checks** (`settings_attestation_section_checks`, "Checks", followed
+by "as of <time>", `settings_attestation_as_of`): one line per check,
+in the order the apps make them, each "Passed"
+(`settings_attestation_check_passed`), "Failed"
+(`settings_attestation_check_failed`) or "Not checked"
+(`settings_attestation_check_not_run`):
+
+| # | Line | What the app verified |
+|---|---|---|
+| 1 | "Release list signed by VettID" | the release manifest's format, its signature under a key the app pins and its serial not going back (§11.10.1); under it, once this line passed, the key id and the manifest's serial |
+| 2 | "Certificate chain to the AWS Nitro root" | the document's format (a COSE_Sign1, ES384 and nothing else) and its certificate chain to the root the app pins; under it "Root fingerprint (SHA-256)" (`settings_attestation_root_fingerprint`): the SHA-256 of the root certificate's DER, as AWS publishes it |
+| 3 | "Signed by AWS Nitro hardware" | the document's COSE_Sign1 ES384 signature by the chain's leaf |
+| 4 | "Covers the key this phone encrypts to" | the descriptor's format, and `user_data` = SHA-256("vettid/vms/2/etk" ‖ descriptor) |
+| 5 | "Recent" | the document is less than 26 hours old, and at most 5 minutes ahead of the phone's clock |
+| 6 | "Not a debug enclave" | no debug PCRs |
+| 7 | "Names its own release" | the descriptor's `release` equals PCR0 |
+| 8 | "Within its validity" | `not_after` in the future and at most 24 h + 5 min after the document |
+| 9 | "Measurements match a signed release" | PCR0–2 equal to an entry of the manifest (an `active` one to enroll) |
+
+**"Passed" only with a recorded pass; anything not run is "Not
+checked".** A check that failed is "Failed" and every later one "Not
+checked". A manifest whose signature fails is refused before any
+enclave is checked: line 1 "Failed", the rest "Not checked", and the
+Enclave section shows only "Environment". Each line is read by the
+screen reader as "<line>: <state>", and the state is shown in text and
+glyph, never by color alone. The root fingerprint and the manifest
+keys come from the values built into the app, never from the network.
+The apps do not check a transparency log for enclave releases (none is
+specified yet; GC #8494 adds it), so there is no such line.
+
+**Release** (`settings_attestation_section_release`, "Release"):
+"Source" (`settings_attestation_source`), the signed tag VAULT-RELEASES names for it
+(`release/prod/N`, on staging `release/staging/N`), as a link to that
+tag's page in the vettid-vault repository; "Reproducible build"
+(`settings_attestation_reproducible`): "Anyone can rebuild this release
+from its tag and compare the measurements."
+(`settings_attestation_rebuild_body`) with the link "How to rebuild it"
+(`settings_attestation_rebuild`) to vettid-vault `docs/RELEASING.md`
+at that tag (VAULT-RELEASES §5.2). Both URL patterns are built into
+the app.
+
+**This phone** (`settings_attestation_device`, today's "This phone";
+the iPhone's "This iPhone", IOS-PLAN §4.17): the rows of today's screen
+for the phone's own key (Android: the key attestation level, StrongBox,
+verified boot), then "App version" (`settings_attestation_app_version`;
+version and build).
+
+**Copy all** (`settings_attestation_copy_all`, "Copy all"; then
+"Copied"), at the end: the Enclave, Checks and Release sections as
+plain text, as shown, in English, values in full, times in ISO 8601
+UTC. **This phone** and the check's time are left out: they identify
+the phone. So the copy holds nothing secret and nothing that
+identifies the account or the phone. Android: the system clipboard,
+marked sensitive (`EXTRA_IS_SENSITIVE`) and cleared after 60 seconds
+if the clip is still the app's (§5); iPhone: IOS-PLAN §4.17.
+
+The canary manifest section stays as it is (VettID's test phones only).
+
+#### The owner check's progress
+
+While the vault verifies a submitted owner check (VAULT-MESSAGING
+§3.6.5):
+
+- the PIN and the password give way to a centered progress indicator
+  and "Checking with your vault…" (`ownercheck_checking`);
+- the screen's buttons are hidden, except **Lock vault** where §3.6.5
+  offers it (a gated check), which stays enabled throughout: tapping it
+  sends `vault.lock` as today, and a check answer that arrives after it
+  is dropped;
+- the system back gesture (and swipe) is ignored while a check that is
+  not gated is in flight (Check now, the hold-off, the interval
+  change): the request cannot be taken back. A `vault.lock` that fails
+  shows today's notice and retry.
+
+**On a pass:** a green tick and "Check passed" (`ownercheck_passed`),
+a light success haptic, held for 1 second (3 seconds while a screen
+reader is on; both apps, with no wait on the announcement), then
+back to where the check came from:
+
+- **Check now** (Settings): Settings;
+- the gated check over the app, and the password-only retry after an
+  unlock: the app as it was;
+- the hold-off: Advanced security, at the hold row;
+- the interval change: Advanced security, at the interval row.
+
+The unlock with the check due (a vault locked and overdue) is the
+unlock screen's own and shows no tick; its password-only retry after a
+failed check is the owner check, and does.
+
+A pass that still needs presence recorded keeps today's screen. Flows
+that are not an owner check (Change name, the credential operations
+that ask for the password) show no tick.
+
+**On any other answer:** a wrong PIN or password, a backoff or a
+failure goes back to the form with today's messages, the entries
+handled as today; "probably locked" goes to today's screen for that
+answer.
+
+The screen reader says "Checking with your vault" when the state
+starts and "Check passed" on a pass; the tick's meaning is in its
+text, not its color.
+
+#### Texts (for the owner's approval)
+
+| Name | Text |
+|---|---|
+| `settings_security_advanced` | Advanced security |
+| `settings_security_advanced_body` | Check interval, idle lock, attestation and more |
+| `settings_attestation_none` | This phone hasn't verified your vault's enclave yet. It does at the next unlock. |
+| `settings_attestation_failed_title` | Verification failed |
+| `settings_attestation_failed_body` | This phone couldn't verify your vault's enclave, so it sent it nothing. The check that failed is marked below. |
+| `settings_attestation_enclave` (today's) | Vault enclave |
+| `settings_attestation_section_checks` / `_release` | Checks / Release |
+| `settings_attestation_device` (today's; iPhone `ios_settings_attestation_device`) | This phone (This iPhone) |
+| `settings_attestation_refused_body` | Every check passed, but this phone refused the release: %s |
+| `settings_attestation_release_value` (today's) | Release %1$d · %2$s |
+| `settings_attestation_ends` | , ends %s |
+| `settings_attestation_root_fingerprint` | Root fingerprint (SHA-256) |
+| `settings_attestation_source` | Source |
+| `settings_attestation_reproducible` | Reproducible build |
+| `settings_attestation_rebuild_body` | Anyone can rebuild this release from its tag and compare the measurements. |
+| `settings_attestation_app_version` | App version |
+| `settings_attestation_as_of` | as of %s |
+| `settings_attestation_check_passed` / `_failed` / `_not_run` | Passed / Failed / Not checked |
+| `settings_attestation_not_verified` | Not verified |
+| `settings_attestation_copy` / `_copied` / `_copy_all` | Copy / Copied / Copy all |
+| `settings_attestation_rebuild` | How to rebuild it |
+| the nine check lines, the other row labels | as in the tables above |
+
+The new keys replace today's `settings_attestation_release` ("Last
+verified release", now the "Release" row) and `settings_attestation_version`
+("Attestation version", now "App version"); the others stay.
+| `ownercheck_checking` | Checking with your vault… |
+| `ownercheck_passed` | Check passed |
+
+#### Tests
+
+- Security shows its six rows and Advanced security its rows, each
+  opening as before; a notification for a moved row opens Advanced
+  security at it.
+- Attestation: a verification that passed shows every check "Passed";
+  one failed at each check (including the format errors of lines 1, 2
+  and 4, a non-ES384 document and a manifest serial going back) shows
+  it "Failed" and the later ones "Not checked"; a refusal after line 9
+  shows every line "Passed" and its reason; a failed manifest signature
+  shows only line 1 "Failed", without the key id and serial;
+  no "Passed" without a recorded pass; the values resting on a failed
+  check say "Not verified"; no record shows the empty state; the
+  fingerprint and key ids equal the pinned values; "Copy all" holds
+  exactly the three sections shown, with no phone row, no check time,
+  no email, name or device name, and no App Attest or device key id
+  (the manifest key id, shown on line 1, is copied).
+- Owner check: the checking state while waiting; **Lock vault**
+  enabled and working during it, with a late answer dropped; the back
+  gesture ignored during "Check now"; the tick, the hold, the
+  announcement and the return on each pass path; the presence-needed
+  pass unchanged; each failure back to the form; "probably locked" to
+  its screen; the back gesture ignored during each non-gated check.
+
 ## 5. Architecture
 
 Multi-module Gradle, Kotlin, Jetpack Compose + Material3, Hilt, coroutines
@@ -7082,6 +7320,7 @@ What the phone does keep, and why:
 | Transport state: session keys, relay token, the sealed credential blob, one-time keys, the outbox | Encrypted state file (AES-GCM) in no-backup storage | The Keystore key above | Wipe; each part when it is used up or replaced | None |
 | Account ids and flags (user_guid, vault_id, the masked email hint, markers); with location (not built yet), its "Not now" entries {request_id, exp} | Encrypted state file in no-backup storage | The same | Wipe; an entry at its `exp` | None |
 | Owner-check state, the lock record, the canary manifest | Encrypted state file in no-backup storage | The same (0.1.91: the lock record is encrypted as the others are; being fixed) | Wipe (the lock record is rewritten, never deleted otherwise) | None |
+| (0.1.124) The last enclave verification's record: each check's result, the values the attestation screen shows, when it was made | Encrypted state file in no-backup storage | The same | Wipe; replaced at the next verification | None |
 | Settings and non-secret state: theme, app lock (on/off, method, timeout), notification mode, previews, push-registration flags, release-notice state (DataStore); the identity slot in use, the attestation-key list, the last served (public) release manifest, the pending-lock notice (SharedPreferences) | DataStore / SharedPreferences | None needed: no secrets, no vault content | Wipe; uninstall | None |
 | (0.1.110) With the wallet: the chain server per network, the testnet4 label, the backed-up flag per `wallet_id` | Encrypted state file in no-backup storage | The Keystore key above (a member's own server can point at their home node) | Wipe; uninstall | None |
 | App lock key | Android Keystore, bound to user authentication (class 3 biometric or the device credential) | Hardware | Turned off; a new biometric (Biometrics method); wipe | None |
