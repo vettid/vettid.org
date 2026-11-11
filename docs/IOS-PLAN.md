@@ -5,7 +5,7 @@ version: 0.1.69
 date: 2026-11-11
 changelog:
   - 0.1.69: 2026-11-11, **for the owner's approval** (ANDROID-PLAN 0.1.125, VAULT-MESSAGING 0.89.0 §11.10.1, VAULT-RELEASES 0.1.36 §7.1; owner decision a, GC #8494). The iPhone requires the release transparency log as Android does: a manifest is trusted only with a valid entry, checked offline against a trusted root built into the app, from the channel's cutover serial; "Logged publicly" on the attestation screen. §4.18: where the check and the pinned values live on the iPhone.
-  - 0.1.68: 2026-11-11 (ANDROID-PLAN 0.1.124; owner decisions a, GC #8451 and #8476). The iPhone follows ANDROID-PLAN §4 "Advanced security, attestation in detail and the check's progress": Advanced security in Settings, the attestation in detail with "Copy all", and the owner check's "Checking with your vault…" and "Check passed". §4.17: what the iPhone shows for itself, the haptic and the clipboard.
+  - 0.1.68: 2026-11-11 (ANDROID-PLAN 0.1.124; owner decisions a, GC #8451, #8476 and #8511). The iPhone follows ANDROID-PLAN §4 "Advanced security, attestation in detail and the check's progress": Advanced security in Settings, the attestation in detail with "Copy all", and the owner check's "Checking with your vault…" and "Check passed". §4.17: what the iPhone shows for itself (the App Attest state only), the haptic, the clipboard and the back gesture; Allow screenshots moves to Advanced security.
   - 0.1.67: erratum, 2026-11-11 (ANDROID-PLAN 0.1.123, VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). §4 Calls: after a glare, the iPhone answers the winning call with its own call's media, as Android does: no camera by itself.
   - 0.1.66: erratum, 2026-11-10, as built (vettid-ios #241, in review; the container-read audit, GC #7243). §4 History export, §4.16 and §6.9: the History export, as the vote proof already does, writes its file to a directory of its own in tmp/ with complete protection, hands it over as a copy (`UIDocumentPickerViewController(forExporting:asCopy: true)`), and removes it on every answer, on a failure, when the screen leaves, when the §4.4 (1) cover closes the picker, at launch and when the screen opens again. SwiftUI `.fileExporter` is not used: it leaves its file in tmp/ with default protection. Complete protection helps only while the iPhone is locked; on an unlocked phone the defense is that the file is short-lived. Not yet: removal when the app goes to the background (a vettid-ios follow-up). The photo share sheet is unchanged: it hands the system bytes, no file.
   - 0.1.65: erratum, 2026-11-07 (ANDROID-PLAN 0.1.122, RELEASE-UPDATES 0.3.4; owner decision a). The unlock screen's release offer follows ANDROID-PLAN §4 "What's new": PIN first, a compact notice with the security line and the fingerprint, What's new one tap away in a sheet, approval not gated on opening it.
@@ -748,7 +748,7 @@ Only these differ on iOS:
 | Every PIN entry | The in-app keypad (ID11). |
 | Every secret or code field | §6.5. |
 | Typed recovery code | "Password-class keyboard" on Android: on iOS an ASCII-capable keyboard with autocorrection, spell checking, smart punctuation and inline predictions off, `textContentType` cleared; the screen holds the secure layer (ID10). |
-| Settings → App → Allow screenshots | Turns off the secure layer of ID10 only; the app-switcher cover and capture hiding stay (they protect against what the member does not see). Same lifetime rules as Android (`core/data/…/lock/ScreenshotAllowance.kt`). |
+| Settings → Security → Advanced security → Allow screenshots (0.1.68; was Settings → App) | Turns off the secure layer of ID10 only; the app-switcher cover and capture hiding stay (they protect against what the member does not see). Same lifetime rules as Android (`core/data/…/lock/ScreenshotAllowance.kt`). |
 | Settings → App → Show in notifications | Android's choice, texts and default (ANDROID-PLAN §4 Notification modes 8), in Settings → App until phase P. |
 | Settings → Notifications | Two modes, **Apple push** and **Off** (PUSH-GATEWAY §11.2); until phase P, Apple push shows "Not available yet" (§14). No on-phone service exists on iOS. |
 | Settings → Vault status | ID15; the credential-key fingerprint row, as on Android (ANDROID-PLAN §4 "Owner check and status", 0.1.119), computed in `VettIDCrypto` beside the `ik` fingerprint. |
@@ -1897,18 +1897,21 @@ check's progress" (0.1.124), the same texts and order; the string keys
 take Android's names (`ios_` only for what the iPhone adds). On the
 iPhone:
 
-- **This phone** on the attestation screen: today's App Attest rows
-  (§6.2: the key, and whether the vault accepted it), then "iOS
-  version" and "App version" (version and build). No device name and
-  no model name.
-- **Copy all** goes through the app's local, expiring pasteboard
-  (`SecurePasteboard`, §6.5), never the general one without expiry.
-- **The PCR rows' "Copy"**: the same pasteboard.
+- **This phone** on the attestation screen: the App Attest key's
+  **state only** (§6.2: whether the vault accepted it), never the key
+  id or the attestation object; then "iOS version" and "App version"
+  (version and build). No device or model name.
+- **Copy all** and the PCR rows' "Copy" go through the app's local,
+  expiring pasteboard (`SecurePasteboard`, §6.5), never the general
+  one without expiry. As on Android, the copy leaves out This phone and
+  the check's time.
 - **"Check passed"**: the success haptic is
   `UINotificationFeedbackGenerator` `.success`; VoiceOver hears
-  "Checking with your vault" and "Check passed" (announcements, as the
-  unlock's results), and the tick stays until the announcement is
-  spoken or 1 second, whichever is later.
+  "Checking with your vault" and "Check passed" as announcements; the
+  tick is held 1 second, or 3 seconds while VoiceOver is on.
+- **"Check now" in flight**: the edge swipe and the iOS 26 content
+  swipe are off (``blocksBackGesture``), as for any request that cannot
+  be taken back.
 - **Advanced security** is a pushed screen of the Settings stack, with
   the back arrow and the system back gesture (ID14).
 
