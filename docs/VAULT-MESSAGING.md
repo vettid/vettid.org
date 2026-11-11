@@ -29,8 +29,8 @@ related:
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.88.10: 2026-11-11, erratum (lead; vettid-vault #218, GC #6875; owner
-    decisions #6866 a, #7711 a, #7806 a, #7861 a, #7862 a; both blind
-    reviews). Completes
+    decisions #6866 a, #7711 a, #7806 a, #7861 a, #7862 a, #8099 a;
+    both blind reviews). Completes
     0.88.7's §8.3 "Not delivered". **Re-stamp at deposit**: a waiting
     durable deposit to a connection, no attempt of which may
     have reached the relay (not tried), with a `ts` older than 2 days
@@ -10100,7 +10100,9 @@ end of it (removal, mailbox gone, refusal, `stale`, suspension,
 "couldn't be delivered" would overstate it. Priority
 `normal`; `ref` = the first message's inner `id`; `connection_name` (the connection's display name when the batch's
 first message was dropped, or else the first and last name shared with
-it, §10.8; owner decision #7862 a), so that the
+it, §10.8; owner decision #7862 a; absent when neither is on record,
+for example before the peer's first profile reached the vault, or when
+the names are blank), so that the
 app can name a connection that is gone (vault-local: the feed, sent to
 the owner's devices only, never to the relay or the peer). Items are
 batched, one per kind and connection per hour (§10.4.1 "Batching"; two
@@ -10126,6 +10128,10 @@ mailbox, `stale`, a fork suspension and a refusal. The apps' texts
   VettID couldn't confirm they arrived." (`count` = N; the words after
   the colon complete the owner-approved text's "…"; owner-approved
   2026-11-11, GC #7861 a).
+
+When `connection_name` is absent, `<name>` is "a connection", for
+example "1 message to a connection couldn't be delivered." (owner
+decision #8099 a).
 
 **Residuals** (0.88.10):
 - A tried entry, or one that could not be sealed again and was
@@ -14095,7 +14101,7 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
 - `connection_name` (0.88.10) is present only on those two kinds (the
   connection's display name when the batch's first message was dropped,
   or else the first and last name shared with it; owner decision #7862
-  a), so that the
+  a; absent when neither is on record), so that the
   app can name a connection that is gone. It is vault-local: it is in the feed
   and the `feed.event` to the owner's devices, and is never sent to the
   relay or the peer.
