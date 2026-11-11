@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.8
+version: 0.88.10
 date: 2026-11-11
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,24 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.10: 2026-11-11, erratum (lead; vettid-vault #218, GC #6875; owner
+    decisions #6866 a, #7711 a, #7806 a; both blind reviews). Completes
+    0.88.7's §8.3 "Not delivered". **Re-stamp at deposit**: a waiting
+    durable member deposit to a connection that no attempt of which may
+    have reached the relay (not tried), with a `ts` older than 2 days
+    (16 days less the relay's 14-day hold), is sealed again in place with
+    a fresh `ts`; one that may have reached the relay and is past 16 days
+    is not delivered (`drop.undelivered_window`), never stamped again.
+    **Clean end**: a state loaded without a clean end (a crash, a kill, a
+    deploy that stops the enclave without locking, a state from before)
+    marks every waiting session-mode deposit as tried; after a clean load
+    nothing is deposited before the first successful write. **The
+    member's notice**: feed kinds `message.not_delivered` and
+    `message.delivery_unconfirmed`, one item per kind and connection per
+    hour with `count` and `connection_name`; none for the vault's own
+    upkeep, none after the member's own removal of the connection
+    (still audited). §10.9, §10.4.1 and §8.6 updated; the residuals of
+    0.88.6 and 0.88.7 that named #6875 are closed or restated.
   - 0.88.8: 2026-11-11, erratum (lead; vettid-android #345, GC #6847, both
     blind reviews; vettid-ios to follow, card GC #7777). §8.6
     `quota_exceeded`, for a device (§6.3.1 "Devices and agents"): a
@@ -9933,9 +9951,10 @@ counted). Residuals:
 - **Late window:** an entry that keeps its `ts` and is sealed again
   while that `ts` is still within 16 days, but deposited only after
   them, is accepted by the relay and refused by the peer
-  (`drop.stale_or_future` there): the sender is not told. Card GC #6875's
-  check at deposit (an entry already tried and past 16 days is not
-  delivered, case 2, never stamped again) ends it.
+  (`drop.stale_or_future` there): the sender is not told. (0.88.10) The
+  check at deposit below ends it where the deposit itself would be past
+  16 days; it remains where a tried entry is deposited within them and
+  the peer collects it after them (see "At deposit", Residuals).
 - **Relay hold:** a message the relay drops at T (14 days) unread,
   because the receiver stays locked longer, was accepted, so the sender
   was told it was delivered (§8.3 step 5); as before 0.88.7.
@@ -9994,11 +10013,98 @@ Each such entry ends with its own audit entry (bounded as every
 `drop.*`, §10.9), never silently. A connection that is only `stale`
 keeps its entries. Handshake messages, `hs.confirm` and best-effort
 notices (`connection.removed`, `connection.declined`) are not covered.
-This is the hook that vettid-vault card GC #6875 completes with the
-member's notice (whether it is a feed item, per message or per batch,
-and its text), along with the re-stamp at deposit of an entry that
-waited past 16 days without a key change. Until then the member sees
-only the audit entries.
+(0.88.10; vettid-vault #218, GC #6875; owner decisions #6866 a, #7711 a,
+#7806 a) The hook is complete: the re-stamp and the check at deposit
+below, the clean end, and the member's notice.
+
+**At deposit.** Before each deposit of a waiting durable member message
+to a connection (not a handshake message, `hs.confirm`, a best-effort
+notice or an ephemeral one) that is sealed under the connection's
+current epoch, with the connection's standing token held (without one
+the deposit waits for it and is judged then; an entry under another
+epoch is the key change's, above), the vault judges its `ts` against
+now:
+- **Not tried** (no attempt of it may have reached the relay) and `ts`
+  older than **2 days** (`RestampAfter`: §8.4's 16 days less the
+  relay's 14-day hold, so that a copy the relay holds for all 14 days
+  still reaches the peer within its window): it is sealed again in
+  place, with the same inner `id`, a fresh `ts` and a new `seq`
+  (§8.4), and deposited only once a write stores it. The mailbox's
+  later deposits wait behind it, in order. Under a demoted epoch it
+  waits (its old bytes are not sent), and the demotion's rehold takes
+  it. If it cannot be sealed again, it is deposited as it is while its
+  `ts` is within 16 days, and ends otherwise as case 3
+  (`drop.held_unsealable`).
+- **Tried** (an attempt may have reached the relay) and `ts` older than
+  16 days: not delivered, case 2 (`drop.undelivered_window`), checked
+  at deposit as well as at a key change. It is never stamped again: a
+  fresh `ts` could make the peer run a message it already ran.
+- Otherwise it is deposited as it is.
+
+**A clean end.** The state records `clean_end`, set only by a lock's
+last write, after its last drain. A state loaded without it (a crash, a
+kill, a deploy that stops the enclave without locking first, a state
+written by a release before 0.88.10) may have lost the write that stored
+a `Tried` mark after a deposit the relay accepted, so the vault marks
+every waiting session-mode deposit tried at the load, and none of them
+is stamped again. The flag is cleared at every load and set again only
+by the next lock's last write. After a **clean** load the stored marks
+are trusted, so nothing is deposited before the first successful write
+since the load (the store still says clean until then); the unlock's own
+write comes before its first drain, so normally nothing waits for it. A
+lock right after a clean load writes not-clean first, drains, and writes
+clean after its last drain. **Trade-off** (accepted by the lead, GC
+#7805): after an unclean end a waiting message that was in fact untried
+is not stamped again, and if it then waits past 16 days the member is
+told it "may not have been delivered" (below): a crash costs a notice,
+never a duplicate. Every deploy that stops the enclave without locking
+counts as such an end.
+
+**The member's notice.** Each `drop.undelivered_*` of the member's own
+message to a connection (every case above; the audit entry is made as
+before) also makes a feed item (§10.9):
+`message.delivery_unconfirmed` for `undelivered_window` (it may have
+been delivered), `message.not_delivered` for every other reason. Priority
+`normal`; `ref` = the first message's inner `id`; `connection_name` = the
+connection's display name when the message was dropped, so that the
+app can name a connection that is gone (vault-local: the feed, sent to
+the owner's devices only, never to the relay or the peer). Items are
+batched, one per kind and connection per hour (§10.4.1 "Batching"), with
+`count`. The member's own messages are all but the vault's upkeep:
+types `profile.update`, `identity.rotate` and `vault.held`, types
+beginning `relay.` (token refreshes and issues, and the answers to the
+peer's) or `att.`, and quota refreshes. An entry whose type cannot be
+read (an entry queued before 0.88.10 records none; the vault reads it
+back from the held bytes or the payload) is told. The member is not told
+when they removed the connection themselves (`undelivered_removed`
+during their own removal, owner decision #7806 a): the drop is still
+audited. They are told for the peer's removal, a replacement, a gone
+mailbox, `stale`, a fork suspension and a refusal. The apps' texts
+(owner-approved 2026-11-11, GC #7711), with `<name>` =
+`connection_name`:
+- `message.not_delivered`: "1 message to <name> couldn't be delivered."
+  or "N messages to <name> couldn't be delivered." (`count` = N), then
+  "Send it again if it still matters.";
+- `message.delivery_unconfirmed`: "A message to <name> may not have been
+  delivered: it was sent, but VettID couldn't confirm it arrived." or
+  "N messages to <name> may not have been delivered: …" (`count` = N;
+  the words after the colon are the singular's, put in the plural by the
+  app).
+
+**Residuals** (0.88.10):
+- A tried entry deposited within 16 days of its `ts` but collected by
+  the peer after them is refused `stale_or_future` by the peer, and the
+  sender is not told: the late window is ended only where the deposit
+  itself would be past 16 days.
+- `RestampAfter` assumes the relay's 14-day hold; a longer
+  `message_ttl_seconds` reopens it.
+- A re-stamped message has a new `seq`: a receiver can show it after
+  later messages and leave a gap at the old `seq` (§8.4 display).
+- After an unclean end, told rather than re-sent (the trade-off above).
+- A deposit answered `5xx` or not at all counts as possibly stored
+  (tried, above): if the entry then waits past 16 days it is not
+  stamped again but told, as `message.delivery_unconfirmed` (0.88.7's
+  told-after-`5xx` residual, now told).
 
 Flushes SHOULD be coalesced over a window of about 100 ms. Devices apply the
 same rule to their local storage.
@@ -10073,7 +10179,7 @@ How each error is handled:
 | `token_revoked` | Terminal. Stop sending to that mailbox (0.83.0: for a retried open-token `hs.init`, see `token_used`). (0.88.2, owner decision a, GC 01M6SRQ1B7NM0Q00G0CEGHFES8) **Between two vaults**, for a deposit to a connection with a held standing token (for a carried one, below and §6.3.1 "A carried token refused"): the answer ends **that token only**, not the connection. The vault drops the token and never uses it again; the entry waits in the outbox for a valid token. If the vault holds no other valid standing token for the peer, it is in the "no valid standing token" case: a pending rekey is abandoned (§6.3.1), and the vault reconnects (§6.6), bounded by §3.4.1 "The reconnect bound"; a reconnect's own `hs.init` answered `token_revoked` is a failed try there. Honest pairs reach this when a peer revokes a token in flight (S5 at its rotation, H5, an abandoned pending epoch), so it is not a sign of an end. It revives no revoked token, and a copy gains nothing by it: the reconnect needs the reconnect token and is authenticated as any other. (0.88.2) A **carried** token (one an `hs.init` or `hs.resp` carried and the vault has not adopted, §6.3.1 "A handshake's tokens are adopted at confirmation") answered `token_revoked` is handled by §6.3.1 "A carried token refused": the refused `hs.resp`, `hs.fin` or `hs.confirm` entry is dropped, the handshake's carried tokens are discarded, and that handshake ends; the refusal alone does not make the "no valid standing token" case. Toward a device's own vault, and S9's relay-key case, as before. |
 | `token_used` | The open token is already spent. Restart first contact; except that (0.83.0) when the client retried its own `hs.init` with that token after a lost or failed answer, `token_used` and `token_revoked` both mean the first attempt may have been delivered: it waits for `hs.resp` until the token's `exp` plus 60 s, and restarts first contact only then. For a pairing or transfer this is at most the link's 10 minutes; a vault's accepted connection request stays `waiting` (§6.4) until then, and its member can decline it. |
 | `mailbox_unknown` | Re-resolve the address, or mark the connection `stale`. (0.88.7) The connection's waiting durable messages end as §8.3 "Not delivered" says (`drop.undelivered_mailbox_unknown`). |
-| `quota_exceeded` (0.32.0) | Not retried at once, and handled by what is used up (RELAY-PROTOCOL 0.9.2 §7.1 `quota`): **`token`**: (0.88.6) never sent again under that token (RELAY-PROTOCOL §7.1). A peer vault asks for a fresh token (§7.2) and tries the deposit once more with it; meanwhile the entry waits as for a valid held standing token (§8.4: later deposits to the mailbox under the standing token wait behind it, in order; one with a token of its own and the refresh pass). When it comes due under the same token it asks again: at most once an hour, not while a refresh is still queued, and not before a `too_soon`'s `allowed_after` (taken up to 24 hours and a minute; not in the token's last 3 days, when the issuer grants hourly, §7.2); the hour and `allowed_after` bounds are kept in memory, so a vault that restarts may ask again at once. At most 24 refreshes are open (persisted): at the 25th the first is kept and the next oldest is forgotten. A refresh asked under a token since replaced is not sent. The open refreshes stay pending (the issuer usually grants the first and answers the later ones `too_soon`; the order is not guaranteed): an answer to any of them is taken, also after a restart, until it is answered, its refresh ends unsent (refused, or dropped held), or another standing token is held (with none held, after a revocation, it is still taken); they do not hold the other refreshes (the near-end one, an attachment's), which while the wait lasts are this refresh. When the refresh itself is refused for the token's quota (its messages spent), when a deposit is refused for the token's quota after the token's `exp`, or when an entry still waiting comes due after the `exp`, the vault reconnects at once without sending it again (§6.6; unlike `token_expired`, also while an own rekey is pending: the reconnect abandons it; owner decision a, GC 01M72ND172BCN6HP0G9GH8XSGQ): the issuer's re-mint (§7.2) may come only after the waiting messages are older than §8.4's 16 days. Before the `exp` a vault that holds no valid reconnect token does not reconnect (that would make the connection `stale`, §3.4.1): it goes on asking as above until a fresh token or the `exp`. A refresh refused with no `quota` is not read as spent: it is asked again an hour later. **Residual** (0.88.6): when both sides' standing quotas are spent, the reconnect is held by §6.6 "Between two persons" (an answer of ours awaits the peer's `hs.fin`, which its own spent quota refuses) until a token's `exp`, up to about 30 days, so durable messages can pass §8.4's 16 days; a waiting deposit stays sealed under its epoch and is lost if the peer has dropped that epoch (`unknown_kid`). Both are open (vettid-vault card GC 01M73AGYWZXR81CAS4GCSF6038, with the resend-or-tell rule of GC 01M72T4KN4N89DDXK3TMAATAVT). (0.88.7) The second is closed at a key change, which seals the waiting deposit again under the new epoch (§8.3 "Re-sealed at a key change"); a wait past 16 days with no key change remains (vettid-vault card GC #6875). **`mailbox` or `mailbox_blobs` or `sender_blobs`**: a fresh token does not help; a deposit waits in the outbox and is retried with backoff, and a blob upload is not retried: the vault waits until the recipient asks for it (§10.5.1 "Delivery to the peer"). A relay that sends no `quota` is read as `token` the first time and as the mailbox after a fresh token; (0.88.6) under that fresh token every later one is read as the mailbox's too, also after a restart. A device does not upload again on its own: it tells the member and retries later. **A device** (0.88.8; §6.3.1 "Devices and agents"; built in vettid-android #345, vettid-ios to follow, card GC #7777): its standing token has no quota (§7.1), §7.2's refresh after `quota_exceeded` is a peer vault's, and §6.6 is between vaults, so it asks for no fresh token and reconnects to nothing; a device token is never spent by its quota, so its `token` case below is for a relay that errs. It reads a `quota_exceeded` with no `quota` as the mailbox's. These rules hold its outbox entries: a request (§8.1), a message sent once and a handshake's `hs.resp` or `hs.fin` are deposited once, outside the outbox, under the held token; they are not held, and a refusal is the caller's to handle (a request's is shown to the member). A `token` one holds that outbox entry and every other outbox entry under that token, the near-end refresh too, until the device holds another standing token (an unlock result, §7.2 "Unlock exchange"; the vault's re-mint, `relay.token.issued`; or a new pairing's `hs.resp` and `device.paired`), so on the app the wait usually ends at the next unlock; no outbox entry is sent under a token known to be spent, and one is re-addressed only to a held token not known to be spent. A `mailbox` one holds the outbox entries to that mailbox, backing off from 1 minute and doubling to 1 hour (kept in memory); any deposit the relay accepts to that mailbox ends the backoff. While the mailbox waits, an outbox entry to it other than `relay.token.refresh` goes only after every earlier one has gone (in order); the refresh passes them (as §8.4), and the backoff holds it as any other. A held entry is not stamped again: one older than §8.4's 16 days when it arrives is dropped by the vault (`stale_or_future`, §8.4). |
+| `quota_exceeded` (0.32.0) | Not retried at once, and handled by what is used up (RELAY-PROTOCOL 0.9.2 §7.1 `quota`): **`token`**: (0.88.6) never sent again under that token (RELAY-PROTOCOL §7.1). A peer vault asks for a fresh token (§7.2) and tries the deposit once more with it; meanwhile the entry waits as for a valid held standing token (§8.4: later deposits to the mailbox under the standing token wait behind it, in order; one with a token of its own and the refresh pass). When it comes due under the same token it asks again: at most once an hour, not while a refresh is still queued, and not before a `too_soon`'s `allowed_after` (taken up to 24 hours and a minute; not in the token's last 3 days, when the issuer grants hourly, §7.2); the hour and `allowed_after` bounds are kept in memory, so a vault that restarts may ask again at once. At most 24 refreshes are open (persisted): at the 25th the first is kept and the next oldest is forgotten. A refresh asked under a token since replaced is not sent. The open refreshes stay pending (the issuer usually grants the first and answers the later ones `too_soon`; the order is not guaranteed): an answer to any of them is taken, also after a restart, until it is answered, its refresh ends unsent (refused, or dropped held), or another standing token is held (with none held, after a revocation, it is still taken); they do not hold the other refreshes (the near-end one, an attachment's), which while the wait lasts are this refresh. When the refresh itself is refused for the token's quota (its messages spent), when a deposit is refused for the token's quota after the token's `exp`, or when an entry still waiting comes due after the `exp`, the vault reconnects at once without sending it again (§6.6; unlike `token_expired`, also while an own rekey is pending: the reconnect abandons it; owner decision a, GC 01M72ND172BCN6HP0G9GH8XSGQ): the issuer's re-mint (§7.2) may come only after the waiting messages are older than §8.4's 16 days. Before the `exp` a vault that holds no valid reconnect token does not reconnect (that would make the connection `stale`, §3.4.1): it goes on asking as above until a fresh token or the `exp`. A refresh refused with no `quota` is not read as spent: it is asked again an hour later. **Residual** (0.88.6): when both sides' standing quotas are spent, the reconnect is held by §6.6 "Between two persons" (an answer of ours awaits the peer's `hs.fin`, which its own spent quota refuses) until a token's `exp`, up to about 30 days, so durable messages can pass §8.4's 16 days; a waiting deposit stays sealed under its epoch and is lost if the peer has dropped that epoch (`unknown_kid`). Both are open (vettid-vault card GC 01M73AGYWZXR81CAS4GCSF6038, with the resend-or-tell rule of GC 01M72T4KN4N89DDXK3TMAATAVT). (0.88.7) The second is closed at a key change, which seals the waiting deposit again under the new epoch (§8.3 "Re-sealed at a key change"); a wait past 16 days with no key change (0.88.7) by the re-stamp at deposit (0.88.10; §8.3 "Not delivered", "At deposit"), as a wait past 16 days under the quota or a lock was; what remains is told (§8.3 "Not delivered", Residuals). **`mailbox` or `mailbox_blobs` or `sender_blobs`**: a fresh token does not help; a deposit waits in the outbox and is retried with backoff, and a blob upload is not retried: the vault waits until the recipient asks for it (§10.5.1 "Delivery to the peer"). A relay that sends no `quota` is read as `token` the first time and as the mailbox after a fresh token; (0.88.6) under that fresh token every later one is read as the mailbox's too, also after a restart. A device does not upload again on its own: it tells the member and retries later. **A device** (0.88.8; §6.3.1 "Devices and agents"; built in vettid-android #345, vettid-ios to follow, card GC #7777): its standing token has no quota (§7.1), §7.2's refresh after `quota_exceeded` is a peer vault's, and §6.6 is between vaults, so it asks for no fresh token and reconnects to nothing; a device token is never spent by its quota, so its `token` case below is for a relay that errs. It reads a `quota_exceeded` with no `quota` as the mailbox's. These rules hold its outbox entries: a request (§8.1), a message sent once and a handshake's `hs.resp` or `hs.fin` are deposited once, outside the outbox, under the held token; they are not held, and a refusal is the caller's to handle (a request's is shown to the member). A `token` one holds that outbox entry and every other outbox entry under that token, the near-end refresh too, until the device holds another standing token (an unlock result, §7.2 "Unlock exchange"; the vault's re-mint, `relay.token.issued`; or a new pairing's `hs.resp` and `device.paired`), so on the app the wait usually ends at the next unlock; no outbox entry is sent under a token known to be spent, and one is re-addressed only to a held token not known to be spent. A `mailbox` one holds the outbox entries to that mailbox, backing off from 1 minute and doubling to 1 hour (kept in memory); any deposit the relay accepts to that mailbox ends the backoff. While the mailbox waits, an outbox entry to it other than `relay.token.refresh` goes only after every earlier one has gone (in order); the refresh passes them (as §8.4), and the backoff holds it as any other. A held entry is not stamped again: one older than §8.4's 16 days when it arrives is dropped by the vault (`stale_or_future`, §8.4). |
 
 **`vault.lock` is never retried from a durable outbox** (0.29.0,
 release L; for devices, from the app versions that implement it). A
@@ -11487,6 +11593,17 @@ events are still sent. Apps MUST present
 a batch as one approval entry and one notification ("Dr Lee asks for 3
 things"), listing its asks from the per-type lists, and MUST NOT raise a
 notification for each ask of a batch in progress.
+
+(0.88.10) The feed batches one more thing the same way: the member's
+notice that messages to a connection were not delivered (§8.3 "Not
+delivered", §10.9: `message.not_delivered` and
+`message.delivery_unconfirmed`). The window is **one hour** from the
+first, kept per kind and per connection (the asks' batch stays per
+connection and 10 minutes): the first creates the item, each later one
+within the hour only updates its `count` and `seq`, with the same status
+rules as above. The window is persisted, so a restart does not end it.
+It has no `.pending` event and no notification of its own beyond the
+feed item's.
 
 **What the connection learns: nothing it could tell apart.** A
 suppressed ask is answered exactly as the member's decline of that kind
@@ -13912,7 +14029,7 @@ stay without an export.
 ```json
 item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts>",
         "status": "active|read|archived|deleted", "priority": "low|normal|high|urgent",
-        "connection_id": "<id>?", "device_id": "<id>?", "ref": "<id>?", "count": 3,
+        "connection_id": "<id>?", "connection_name": "First Last?", "device_id": "<id>?", "ref": "<id>?", "count": 3,
         "title": "...?", "body": "...?" }
 ```
 
@@ -13927,7 +14044,14 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   of a connection's asks: the number of asks it stands for (§10.4.1);
   and (0.28.0, release C2) on a `call.missed` item that stands for
   several missed calls of one connection (§10.10 "Permission and
-  limits").
+  limits"); (0.88.10) on a `message.not_delivered` or
+  `message.delivery_unconfirmed` item that stands for several messages
+  of one connection within an hour (§10.4.1 "Batching").
+- `connection_name` (0.88.10) is present only on those two kinds: the
+  connection's display name when the item was made, so that the app can
+  name a connection that is gone. It is vault-local: it is in the feed
+  and the `feed.event` to the owner's devices, and is never sent to the
+  relay or the peer.
 - `feed.update` sets `status` (`active`, `read` or `archived`) and/or
   `priority`; changes send `sync.event` `feed.updated` or `feed.deleted`.
 - Kinds the vault creates: `connection.request` (`ref` = `pending_id`),
@@ -13946,7 +14070,15 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   `device.paired`, `device.unlinked`, (0.87.0) `device.update_needed`
   (`device_id`, priority `high`: a device whose `features` lack
   `hs_confirm`, §6.3.1 "An app from before release 29"),
-  `message.received` (`ref` = `message_id`), (0.32.0, release
+  `message.received` (`ref` = `message_id`), (0.88.10)
+  `message.not_delivered` and `message.delivery_unconfirmed` (`ref` =
+  the first message's inner `id`, `connection_id`, `connection_name`,
+  `count`, priority `normal`; for each `drop.undelivered_*` of the
+  member's own message to a connection, `delivery_unconfirmed` for
+  `undelivered_window` and `not_delivered` for the rest; not for the
+  vault's upkeep or the member's own removal of the connection; one item
+  per kind and connection per hour; §8.3 "Not delivered", where the
+  apps' texts are), (0.32.0, release
   A) `message.attachment_failed` (an outgoing attachment failed:
   `unsupported`, `refused`, `missing` or `unconfirmed`) and
   `message.attachment_refused` (an incoming one was refused because
