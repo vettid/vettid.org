@@ -33,16 +33,22 @@ changelog:
     and a desktop, §6.8 and §10.10 "Ringing": a call answered before the
     deadline also has its `call.keepalive` pass the hold; one answered at
     or after the deadline is ended `unavailable` when the hold begins,
-    the peer vault and the owner devices told, as is an outgoing call the
-    peer answers while held. §6.8 and §10.10 "Devices": a desktop's
-    active call outlives an expired access session, only that call's
-    `call.keepalive`, `call.ice` and `call.end` passing, and the vault's
-    `call.ice` and `call.end` for it reaching the desktop; an access ended
-    on purpose (`device.session.end`) or an unlink ends the call, as does
-    an answer that can't reach the calling desktop. §10.10
+    the peer vault and the owner devices told, as are an outgoing call the
+    peer answers while held and (owner decision) one still ringing when
+    the hold begins; a continuing call's `call.ice` and `call.end` are
+    among what still reaches the devices. §6.8 and §10.10 "Devices": a
+    desktop's active call outlives an expired access session, only that
+    call's `call.keepalive`, `call.ice` and `call.end` passing (and,
+    owner decision, its `call.end` for its own outgoing call while it
+    rings), and the vault's `call.ice` and `call.end` for it reaching the
+    desktop; an access ended on purpose (`device.session.end`) ends the
+    call, as does an answer its device can't receive. §6.8 and the §7.4
+    "Device unlinked" row (owner decision): an unlink, or an app replaced
+    by a transfer or a recovery, ends that device's call. §10.10
     "Liveness": the 90 s silence is judged at the end of each batch,
     after its messages, and a gap of over 30 s in collecting starts the
-    count again.
+    count again. §10.19.6: a non-normative pointer to BALLOT-PROTOCOL
+    0.13.12 for the results' timestamp and the count's wait.
   - 0.88.9: 2026-11-11, erratum (vettid-vault card GC #6647, the final
     release 29 review's residual). §6.3.1 Responder, new "A stale
     reconnect answer ends at a later message": `R` abandons its open
@@ -6576,7 +6582,10 @@ the hold off, `"held"` with it on.
   `call.end{unavailable}` goes to the peer vault and the owner devices,
   rather than leaving 90 s of silence to end it. An outgoing call that
   the peer answers while the vault is held was answered after the
-  deadline too: it is ended the same way, never made `active`.
+  deadline too: it is ended the same way, never made `active`. (0.88.13,
+  owner decision 2026-11-11) An outgoing call still ringing when the hold
+  begins is ended `unavailable` as well, `call.end{unavailable}` to the
+  peer vault and the owner devices told once.
 - **Presence.** A held vault does not answer `presence.ping` (§10.17):
   it looks locked or offline, as any refusal does (§9.2).
 - **Owner fan-out.** No `sync.event`, `feed.event`, `message.new` or
@@ -6618,8 +6627,9 @@ deletion or a PIN change waits for the check, which takes seconds.
 **What the vault still sends its owner's devices:** responses to the
 allowed requests; `vault.held`; `vault.locking`; `credential.alarm`
 with its feed item and `sync.event`; `device.transfer.pending` for an
-open transfer; `device.unlinked`; `push.token-needed` (0.24.0); and the
-token, address, rotation and handshake messages. Of these, `vault.held`,
+open transfer; `device.unlinked`; `push.token-needed` (0.24.0);
+(0.88.13) a continuing call's `call.ice` and every `call.end` (§10.10);
+and the token, address, rotation and handshake messages. Of these, `vault.held`,
 `vault.locking` and the alarm wake the app (§14.2).
 
 **`vault.held`** (V→D, durable) is the content-free notice that lets
@@ -9517,14 +9527,18 @@ While the vault is held, a session is suspended but still returned.
   expired session.** While a desktop is the call device of a live
   `active` call (§10.10), its own `call.keepalive`, `call.ice` and
   `call.end` naming that call (`call_id`) pass a session that has
-  expired; and the vault's `call.ice` and `call.end` for a live call of
-  the desktop's, ringing or `active` (the peer's candidates and hang-up,
-  an end the vault decides), reach it. The call continues until it ends,
-  as a call does through the hold (§3.6.3). Nothing else passes either
-  way, and the call still ends at 12 h at most. An outgoing call whose
-  answer can't reach its desktop (its session ended while it rang) is
-  `ended` with reason `unavailable`, the peer vault and the owner devices
-  told. **Access ended on purpose ends the call:** a
+  expired, and (owner decision 2026-11-11) so does its `call.end` for its
+  own outgoing call while it still rings (only `call.end`, only that
+  `call_id`); and the vault's `call.ice` and `call.end` for a live call
+  of the desktop's, ringing or `active` (the peer's candidates and
+  hang-up, an end the vault decides), reach it. The call continues until
+  it ends, as a call does through the hold (§3.6.3). Nothing else passes
+  either way: a keep-alive the session check refuses gets no reply (no
+  `call.end{unavailable}`), and after 12 h the call stops counting as
+  live, with no `call.end` sent. An outgoing call whose device can't
+  receive the answer (a desktop whose session ended, an app gated past
+  the deadline, a suspended device) is `ended` with reason `unavailable`,
+  the peer vault and the owner devices told. **Access ended on purpose ends the call:** a
   `device.session.end` that ends the desktop's access (the member's End
   access, "Deny and end access now", or the desktop's own end; also on a
   session that had already expired, while its call went on; not one
@@ -9847,7 +9861,7 @@ The actions for each event are applied in one flush, in the order listed:
 |---|---|
 | Connection removed | Send `connection.removed` (best effort). Denylist the `jti` of every token the vault issued to the peer (standing and reconnect, including those minted in handshakes still in flight, (0.85.0) those issued to an earlier relay key of the peer, and those issued by an earlier mailbox of the vault still in its grace, at that mailbox, §3.4.1 S7), so that none of them is accepted again. Delete the tokens held for the peer, its session keys and its outbox entries ((0.88.7) each waiting durable message audited `drop.undelivered_removed`, §8.3 "Not delivered"). |
 | Peer blocked | As for connection removed, plus a block entry on the peer's `ik` and relay key (§10.4) ((0.85.0) and on each earlier relay key and ancestor `ik` the vault still keeps for it, §3.4.1) |
-| Device unlinked | End its access session and drop its held and pending requests (§6.8). Send `device.unlinked` (best effort). Denylist `sub`. Remove the device from the unlock keys. Delete its wake reference. |
+| Device unlinked | End its access session and drop its held and pending requests (§6.8). (0.88.13, owner decision 2026-11-11) End its call in progress, `unavailable`, the peer vault and the owner devices told (§10.10); so for an app a transfer or a recovery replaces. Send `device.unlinked` (best effort). Denylist `sub`. Remove the device from the unlock keys. Delete its wake reference. |
 | Agent revoked | As for device unlinked, plus revoke all of the agent's LEASH grants |
 | Invite or pairing cancelled or expired | Denylist the open token's `jti`. DELETE the claim. |
 | (0.88.2) Standing token refreshed after `quota_exceeded` (§7.2) | Denylist the `jti` of the standing tokens the fresh one replaces (no newer than the one the refresh came under, by its collect `jti`; owner decision a, option A), except a token a still-open handshake with the connection carried, the standing token of the newest token-carrying handshake with it, and the newest standing token re-minted at a confirmation (§6.3.1 "Revocation by the issuer", "The prompt to adopt"). A refresh near a token's end denylists nothing. |
@@ -17684,6 +17698,11 @@ A code the vault does not know is no answer.
 **Removal.** If the service removes the connection, or the member does, proposals and ballots stay as records. A ballot still `sending` or `waiting` can no longer be sent: it becomes `refused` with `code` `connection_ended`. The app warns before the member removes a service with an open vote or an unrecorded ballot. A member removed from the roster who is **still connected** gets `not_active` (unless the proposal's `removed_may_vote`).
 
 #### 10.19.6 After the close: checking the results
+
+(0.88.13, non-normative) Why the results' timestamp can be held to the
+`closes_at` itself, and how a service whose clock runs fast never counts
+early: BALLOT-PROTOCOL 0.13.12 §7 (the count waits for the timestamp
+authority's time) and §8.3 step 2.
 
 At `vote.closed`, and in any case at **`closes_at` (as extended) + 2 hours**, the vault marks the check `pending` and tells the app (`vote.event{event: "check_due"}`; `check.due_at` in `vote.list`). The app runs pending checks whenever it opens and retries with backoff; the vault gives up (`gave_up`) **7 days** after the check was due (BALLOT-PROTOCOL §8.3). The app knows why it could not finish (the site could not be reached, or `results.json` was not there) and says so (ANDROID-PLAN); the vault records only `gave_up` (with reason `rows_unavailable` when the app said it could not get the row, step 3). **A `gave_up` check is not final** (0.83.6, owner decision a, thread 01M6HK8A1VMV41M8TTASXV4BSK): the app keeps running it whenever it opens, as a `pending` one but at most once a day per record, and a later submission is judged as usual, so it can still become `verified`, `unconfirmed` or `failed`. (0.84.1) Such a re-check **does not download an unchanged `rows.json` again** (it can be up to 51 MB per record): `results.json` names `rows_root`, so with the same `results.json` (compared by its hash) as at the last attempt the rows are unchanged, and the app fetches `rows.json` again only when `results.json` was absent, unreachable or changed, when `rows.json` could not be fetched on the last attempt, or when the last attempt failed on the vault's side (`trust_root`, `service_list`, `clock`). A re-check that skips the download either submits again the row and proof it kept from the last attempt, or sends nothing: the vault judges only what is submitted (steps 2 and 3), and the same results, row and proof get the same answer, still no answer (`input`) or `rows_unavailable`, so sending nothing loses nothing. Until then the record is in the problem set (§10.19.2). The results are public and write-once, so with a service that publishes them the record clears by itself the next time the app opens; only results that are never published or never verify keep it there. A released record (§10.19.8 `vote.release`) is not checked again. While the app stays closed past the give-up, a busy service can bring its `gave_up` records to the problem cap of 16; until the app opens and the checks clear, its new proposals are answered `limit`, and one still on the site comes back through `vote.site.sync`. This is accepted: the cap is what keeps a withholding service from evicting the records.
 
