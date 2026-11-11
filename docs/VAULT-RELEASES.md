@@ -282,10 +282,20 @@ changelog:
     served document carries the entry's bundle (`tlog`); the apps verify
     it offline against a pinned trusted root before trusting a manifest
     and refuse a manifest without a valid one, from a cutover serial per
-    channel; the release list keeps a record of every signed serial; a
-    monitor alarms to the owner on any entry under a manifest key that
-    is not in that record. §10.1 steps 9 and 10, §13 W12 and §14 risk 13
-    follow
+    channel (production 1); the release list keeps a record of every
+    signed serial; a monitor alarms to the owner on any entry under a
+    manifest key that is not in that record. The owner's choices of
+    2026-11-11:
+    - #8536 a: the owner gets a notice for every entry, approves the
+      record, and old lists are published;
+    - #8537 a: the apps don't check the RFC 3161 timestamp;
+    - #8538 a: v1 now, and the apps accept v2 from their first build,
+      with the monitor scanning the v2 logs.
+
+    The sign step's order, retries and low-s signatures, the replay
+    classes, the trusted roots' procedure and invariant, and the size
+    rule are also defined. §10.1 steps 9 and 10, §13 W12 and §14 risk
+    13 follow
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.37.0) §11.10 release updates, §11.10.8 release constants, §12.5 deletion, §13.5, §13.9
@@ -1314,48 +1324,137 @@ its timestamp authority); staging logs in its staging instance
 (`rekor.sigstage.dev`), as votes does (VOTES-SITE §7), so the whole path
 is tested on staging first.
 
+**Rekor v2 from the first app build** (owner decision a, GC #8538).
+VettID publishes in v1 now, but every app build that pins the check
+also accepts an entry of a **Rekor v2** log that its pinned root lists:
+- a `hashedrekord` 0.0.2 entry, with the same digest, key and
+  signature, under the same rules (VAULT-MESSAGING §11.10.1);
+- its inclusion proof and signed-note checkpoint;
+- no signed entry timestamp, since v2 has none.
+
+A move to v2 is then a change on the publisher's side only, as long as
+the v2 log is in the roots of every supported build, which step 5 of
+the sign step checks. v2 logs are sharded by period, so a build whose
+root predates a new shard needs an update before the publisher uses
+that shard. Before production's go, Sigstore's v1 timeline is checked
+again (§14 risk 13).
+
 **Signing, logging, then the served document.** `vault:manifest sign`
-(§6.1, §7 "As built") gains these steps after it signs:
+(§6.1, §7 "As built") works in this order. Each step's output is
+written under `local/vault/<channel>/` before the next step starts, so
+a retry resumes and never repeats an earlier step:
 
-1. Get an RFC 3161 timestamp over the signature from the instance's
-   timestamp authority, then submit the entry (it stamps first, then
-   logs, as the votes anchorer does). Rekor answers `409` when the same
-   entry exists (a retry after a lost answer); the existing entry is
+1. **Intent.** Before it signs, it raises `signed_serial` (as today)
+   and adds the serial's row to `signed` (below) in the `pending` state,
+   keyed by `log_digest`. That digest is known before signing, since it
+   is the hash of the message.
+2. **Sign** with the manifest key, as today, and **normalize the
+   signature to low s** (s ≤ n/2, replacing a high s with n − s). The
+   signature is the same signature, and `sig` carries the low form.
+   Write the unlogged served document (`sig`, `key_id`, no `tlog`).
+3. **Timestamp.** Get one RFC 3161 timestamp from the instance's
+   timestamp authority. Its message imprint is SHA-256 of the
+   signature's DER bytes, as in the votes profile. Write it. A retry
+   reuses this timestamp; it never asks again.
+4. **Submit** the entry. Rekor answers `409` when the same entry
+   already exists (a retry after a lost answer); the existing entry is
    fetched and used.
-2. Verify the bundle offline, exactly as an app does (VAULT-MESSAGING
-   §11.10.1 "The release log check"), against **each** trusted root that
-   an app build still supported in that channel pins
-   (`vault/release-log/<channel>/*.json`, one Sigstore TrustedRoot JSON
-   file per root, added and removed by PR). One that any of them would
-   refuse stops the sign step: a member's app must never be the first
-   to find out that a log key changed (§14 risk 13).
-3. Write the served document with the bundle as `tlog` (base64 of the
-   exact bundle bytes, VAULT-MESSAGING §11.10.1) under `local/`, as
-   today, and add the serial's row to the record (below).
+5. **Check the bundle offline**, as an app does (VAULT-MESSAGING
+   §11.10.1 "The release log check"), against **each** trusted root
+   that a supported app build in that channel pins
+   (`vault/release-log/<channel>/`, below). If any of them would refuse
+   the bundle, the sign step stops: a member's app must never be the
+   first to find out that a log key changed (§14 risk 13).
+6. **Complete** the row (`logged`, with the entry's ID, log index and
+   integrated time), and write the served document with the bundle as
+   `tlog` (base64 of the exact bundle bytes, VAULT-MESSAGING §11.10.1).
 
-If logging fails, the sign step fails and writes no served document.
-The serial is spent (`signed_serial` was raised first) and the next
-attempt signs the next one, as for any serial never published (§7).
+The release list file, with the row, goes to `master` by the same PR
+as today's `signed_serial`. That PR needs the owner's approval (**The
+record's approval**, below). The row should be on `master` within the
+monitor's pending grace (below). A canary's row is committed before the
+canary starts (§10.1 step 9).
+
+If logging cannot be completed, the row is marked `abandoned` and the
+serial is spent. No served document is written, and the next attempt
+signs the next serial (a gap in `signed`, as for any serial never
+published, §7). An abandoned signature never left `local/`. If an entry
+for it appears later, it is reported (below).
+
 `upload` (the bucket copy, a canary) and `publish` take the served
-document with its `tlog`; the canary tester's file therefore carries
-it too (§10.1 "The canary manifest on the test phone").
+document with its `tlog`, so the canary tester's file carries it too
+(§10.1 "The canary manifest on the test phone").
+
+**Size.** The served document stays within **90,112 bytes** for every
+parser. From the cutover, the publisher's manifest bytes are at most
+**49,152** (65,536 as base64), and a decoded bundle is at most 16,384
+(21,848 as base64), so the whole document, with its JSON, stays under
+the limit. `check:manifest` and the sign step refuse anything larger.
+A manifest is about 530 bytes per release entry, so 49,152 holds about
+90 entries, well above the 15–30 that VAULT-MESSAGING §11.10.1 plans
+for. Older parsers need no change.
+
+**The trusted roots.** The files in `vault/release-log/<channel>/` are
+Sigstore TrustedRoot JSON documents. Each is one an app build supported
+in that channel pins: the production one is Sigstore's public instance,
+the staging one its staging instance.
+- They are obtained and checked as the release's `vote_trust_roots` are
+  (VAULT-MESSAGING §11.10.8): through the instance's TUF repository,
+  with a second person checking the PR that adds a file.
+- They are added and removed only by PR, with the owner's approval
+  (`.github/CODEOWNERS`).
+- Each app's CI checks that the root it bundles is byte for byte one of
+  these files, and that a release or staging build carries its own
+  environment's root, never the other's (ANDROID-PLAN, IOS-PLAN).
+- An app uses, from its root, only the `tlogs[]` entry of the Rekor v1
+  log at the channel's host (`https://rekor.sigstore.dev`, or
+  `https://rekor.sigstage.dev` on staging), and ignores every other
+  log.
+- **The invariant:** every log that any supported app build accepts is
+  a log the monitor watches.
 
 **The record of signed manifests.** Each channel's release list gains
-`signed`, an array with one row per serial ever signed after the
-cutover, in serial order, written only by the sign step:
+`signed`, an array with one row per serial signed from the cutover on,
+in serial order, written only by the sign step:
 
 ```json
-{"serial": 41, "key_id": "<16 hex>", "manifest_sha256": "<64 hex>",
- "log_digest": "<64 hex>", "uuid": "<80 hex>", "log_index": 123456789,
- "integrated_time": "<RFC 3339, whole seconds>"}
+{"serial": 41, "state": "logged", "key_id": "<16 hex>",
+ "manifest_sha256": "<64 hex>", "log_digest": "<64 hex>",
+ "log": "<the log's base URL>", "entry_id": "<the entry's ID in that log>",
+ "log_index": 123456789}
 ```
 
-`check:manifest` checks that the rows only grow across the file's git
-history (none removed or changed), that their serials strictly increase
-and the last one equals `signed_serial`, and that every committed
-version of the served file has a `tlog` whose entry is its serial's
-row, from the cutover on. This record, public in this repository, is
-what the monitor compares the log with.
+- `state` is `pending`, `logged` or `abandoned`, and moves only in
+  that order.
+- `log` and `entry_id` are present once `logged`. `log_index` is the
+  entry's global index in a v1 log, or its index in a v2 log.
+- `check:manifest` checks that rows are only added or moved forward
+  across the file's git history (never removed, and a filled member
+  never changed) and that serials strictly increase, with gaps allowed
+  for abandoned or unrecorded serials. The last serial is at most
+  `signed_serial`. From the cutover on, every committed version of the
+  served file must have a `tlog` whose entry is its serial's `logged`
+  row.
+
+This record is public in this repository, and it is what the monitor
+compares the log with. The monitor reads it from `master` only.
+
+**The record's approval** (owner decision a, GC #8536). The monitor
+alarms on what is not in the record, so the record itself must not be
+something a key holder can write alone:
+- `.github/CODEOWNERS` names the owner for `vault/releases/` and
+  `vault/release-log/`, and branch protection on `master` requires the
+  owner's approval for them;
+- the monitor sends the owner a **notice for every new entry** under a
+  manifest key, known or not, so each signing reaches the owner even
+  when the record already holds it;
+- **old lists become public:** once a later serial of a channel is
+  published, every served document signed before it (canaries
+  included) is committed under `vault/manifests/<channel>/<serial>.json`,
+  with its `tlog`. Anyone can then see what a phone could have
+  trusted. `check:manifest` requires a file for each `logged` row
+  below the published serial, whose `log_digest` and entry match the
+  row.
 
 **Cutover, per channel.** Releases already published keep working. They
 are listed in every later manifest, and each later manifest is logged.
@@ -1366,52 +1465,93 @@ What changes is which **manifests** an app accepts:
    `C`. The served document gains `tlog` at that channel's next
    publication. App builds without the check ignore the new member, so
    nothing breaks.
-2. Production has published nothing yet (§7 "As built"), so its `C` is
-   its first serial signed after step 1. Production release 1's canary
-   is logged like any other serial. Staging's `C` is its first serial
-   signed after step 1.
-3. App builds that require the log pin `C` per channel
-   (`release_log_from_serial`) and ship only after `C` is served in
-   that channel. They refuse a manifest with a serial below `C`: it was
-   never logged, and accepting one would let an old signature skip the
-   log. Every manifest at or above `C` needs a valid `tlog`.
+2. **Production: `C` = 1.** Production has signed nothing (its
+   `signed_serial` is 0), so every production manifest is logged,
+   production release 1's canary included. Production app builds pin
+   `C` = 1 now. **No production app build ships without the check.**
+3. **Staging:** `C` is its first serial signed after step 1. Staging app
+   builds pin it once it is known, and ship with the check only after
+   a serial ≥ `C` is served in that channel.
+4. App builds that require the log pin `C` per channel
+   (`release_log_from_serial`) and refuse a manifest with a serial
+   below `C`. It was never logged, and accepting one would let an old
+   signature skip the log. Every manifest with a serial ≥ `C` needs a
+   valid `tlog`.
 
-App builds from before the check still accept any manifest that verifies
-as today. The log protects members once they run a build that requires it.
+Staging app builds from before the check still accept any manifest
+that verifies as today. So do `dev` builds, which never pin the check
+(§3.1). The log protects members from the first production build.
 
-**The monitor.** VettID watches, per channel, the Rekor instance that
-channel logs in. It looks for entries whose public key is that channel's
-manifest key (production: keys A and B; staging: the staging key),
-compared as SubjectPublicKeyInfo, never as PEM bytes. It alarms to the
-owner (the owner's alerts email) on:
+**The monitor.** **What it watches:**
+- **Keys.** Every manifest key that a supported app build of the
+  channel pins (production: keys A and B; staging: the staging key).
+  They are read from one source, `lib/config.ts` `manifestKeys`, the
+  same values the apps' CI compares with, and compared as
+  SubjectPublicKeyInfo DER, never as PEM bytes.
+- **Logs.** Every log that a supported app build of the channel
+  accepts (**the invariant**, above): the Rekor v1 log at the channel's
+  host, and from the start every Rekor v2 log in the pinned roots
+  (owner decision a, GC #8538, below), even before VettID logs
+  anything there.
 
-- **`unknown manifest`:** a verified entry under a manifest key whose
-  entry ID is not a row of `signed`. That covers both cases below.
-  - A digest VettID never signed: the key was used without the record.
-  - A known digest with another entry ID. ECDSA signatures differ every
-    time, and Rekor refuses a second identical entry, so only the key
-    can produce a second entry for the same digest.
+It sends the owner (the alerts email) a **notice for every new entry**
+under a manifest key (GC #8536). The notice names the channel, the
+log, the entry, its digest, and the serial of its row when one exists.
+It **alarms** on:
+
+- **`unknown manifest`:** a verified entry whose signature verifies
+  under a manifest key, over a digest that is no row's `log_digest`.
+  The key was used outside the record.
+- **`replayed`** (a report, not the key-use alarm): an entry whose
+  digest is a row's `log_digest` and whose signature is that row's
+  (r, s) or (r, n − s), but which is not the row's entry. ECDSA
+  signatures are malleable: anyone holding a published `sig` can
+  submit (r, n − s) as a new `hashedrekord` entry, or a `rekord` entry
+  with the public message, and Rekor accepts it. So such an entry
+  proves nothing about the key. The apps refuse it in any case,
+  because they require the exact `sig` (low s, step 2). It is reported
+  and kept in the acknowledged list.
+- **`second signature`:** an entry over a row's `log_digest` whose
+  signature verifies under a manifest key but is neither (r, s) nor
+  (r, n − s) of that row. Only the key can make one, so this is the
+  key-use alarm, like `unknown manifest`.
 - **`wrong kind`:** an entry under a manifest key that is not a
-  `hashedrekord` 0.0.1 entry over a `sha256` digest whose signature
-  verifies under that key.
-- **`missing entry`:** a row of `signed` whose entry the log no longer
+  `hashedrekord` (0.0.1 in v1, 0.0.2 in v2) over a `sha256` digest and
+  is not `replayed`. Rekor verifies an entry's signature when it is
+  submitted, so such an entry means the key signed something other
+  than a manifest message: the key-use alarm.
+- **`missing entry`:** a `logged` row whose entry the log no longer
   returns, or that no longer verifies.
+- **`pending` past its grace:** an entry matching a `pending` or
+  `abandoned` row is reported at once. If no `logged` row names it
+  **6 hours** after its integration, it is `unknown manifest`. An entry
+  with no row at all is `unknown manifest` at once.
 
-It also raises the votes monitor's search, freshness, shard,
-unavailability and state alarms. Its method is the votes monitor's Rekor
-check (VOTES-SITE §7 "The Rekor check"), with the manifest keys as its
-keys and the `signed` rows as its known entries:
+**Its method** is the votes monitor's Rekor check (VOTES-SITE §7 "The
+Rekor check"), with the manifest keys as its keys and the `signed` rows
+as its known entries. It also raises that check's search, freshness,
+shard, unavailability and state alarms. Per log:
 
-- production: a search of Rekor's index by key, best effort, with its
-  canary (each row's entry must be among the results);
-- staging: a full scan of the staging log;
-- for both: the verified store, the checkpoint pin, pacing, the
+- **Production v1:** a search of Rekor's index by key, best effort,
+  with its canary (each row's entry must be among the results).
+- **Staging v1:** a full scan of the staging log.
+- **Every v2 log in the pinned roots:** a full scan of its tiles, since
+  v2 has no search. v2 checkpoints are signed notes, verified under
+  the root's key for that log.
+- **For all:** the verified store, the checkpoint pin, pacing, the
   heartbeat alarm, an acknowledged list the owner approves, and
   clearing by owner-run jobs.
 
-It runs at least hourly. W12 builds it, either beside the votes
-monitor's Rekor check or as its own job. Either way, it reads only
-public data and never assumes a role in the account that holds key A.
+**When:** it runs at least hourly. An entry reaches the owner within
+about an hour. While Rekor is degraded it can take up to about 3 hours,
+when the unavailability alarm fires instead. A second channel carries
+every alarm: the monitor workflow's own failure notice, besides the SNS
+alerts email. The runbook section is RUNBOOK "Release log monitor",
+written as built.
+
+**Who builds it:** W12, either beside the votes monitor's Rekor check
+or as its own job. Either way, it reads only public data and never
+assumes a role in the account that holds key A.
 
 What the monitor can and cannot see follows from what the apps accept:
 
@@ -1429,8 +1569,12 @@ What the monitor can and cannot see follows from what the apps accept:
   - an entry in another log is not seen, but the apps don't trust any
     other log.
 - **Detection, not prevention.** A phone that has been served a manifest
-  logged by a key thief accepts it; the theft becomes public and the
-  owner hears of it within about an hour.
+  logged by a key thief accepts it. The theft becomes public, and the
+  owner hears of it within about an hour (about 3 while Rekor is
+  degraded).
+- **A Rekor outage delays signing**, an urgent manifest included (one
+  that marks a bad release `removed`). It never delays an unlock,
+  because the apps check offline.
 
 **What the enclave does.** Nothing new. The vault takes the manifest by
 hash from the app's request (VAULT-MESSAGING §11.5), and the app has
@@ -2528,11 +2672,18 @@ W4 can go any time; W2 and W3 can run beside W1; W5–W8 follow W3.
       cover it, so that build refuses every new manifest. The sign step
       catches this before anything is served: it checks each new bundle
       against every root a supported build pins.
-    - **Rekor v1 freezing.** The profile names v1 `hashedrekord` 0.0.1,
-      which Rekor v2 doesn't hold, and v2 has no search for the monitor.
-      Moving to v2 is a change of this profile, the votes profile and
-      the monitor together. It ships in app builds before the first
-      manifest that needs it.
+    - **Rekor v1 freezing.** The apps accept v2 entries from their
+      first build (owner decision a, GC #8538), so a move to v2 is a
+      change on the publisher's side, provided the v2 log is in every
+      supported build's root. v2 logs are sharded by period, so a long
+      unupdated build can still be stranded: the sign step's check
+      against every supported root (§7.1) finds this before anything
+      is served. The monitor already scans the v2 logs in the roots.
+    - **A Rekor outage** delays signing, an urgent manifest included,
+      never an unlock.
+    - **Builds without the check:** `dev` builds never pin it, and
+      staging builds from before it don't require it. Production has
+      none (§7.1).
 
     Until then, a build that can't verify a new manifest's log key tells
     the member to update the app (VAULT-MESSAGING §11.10.1). It never
