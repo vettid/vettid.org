@@ -7622,7 +7622,7 @@ frees `R`'s rekeys, which an open answer would hold for 16 days (§6.5).
 
 (0.88.9) **A stale reconnect answer ends at a later message.** When a
 message from `I`, other than `hs.fin`, that `acceptFrom` does not refuse at
-steps 1-4 opens under an epoch with `I` newer than the epoch an open answer
+steps 1–4 opens under an epoch with `I` newer than the epoch an open answer
 of `R`'s to `I`'s reconnect named (both among `R`'s epochs with `I`; newer:
 later in establishing order, and established: not pending, abandoned while
 pending or destroyed), and its inner `ts` is later than that `hs.init`'s,
