@@ -7034,7 +7034,7 @@ error text: not active for an enrollment
 (`settings_attestation_refused_not_active`), older than a release this
 phone has used (`settings_attestation_refused_older`), a descriptor
 naming another instance than the one the request goes to
-(`settings_attestation_refused_instance`), or a time scale this build
+(`settings_attestation_refused_other_instance`), or a time scale this build
 does not accept (`settings_attestation_refused_time_scale`). A removed
 release is not a refusal of the phone's: the host answers 410 and
 nothing is verified, so nothing is recorded. While the route waits for
@@ -7180,7 +7180,7 @@ text, not its color.
 | `settings_attestation_refused_body` | Every check passed, but this phone refused the release: %s |
 | `settings_attestation_refused_not_active` | it isn't offered to new phones. |
 | `settings_attestation_refused_older` | it's older than a release this phone has already used. |
-| `settings_attestation_refused_instance` | your vault's address named a different enclave. |
+| `settings_attestation_refused_other_instance` | your vault's address named a different enclave. |
 | `settings_attestation_refused_time_scale` | its time setting is for test builds, not this app. |
 | `settings_attestation_release_value` (today's) | Release %1$d · %2$s |
 | `settings_attestation_ends` | , ends %s |
