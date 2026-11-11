@@ -14680,23 +14680,35 @@ to B as its own call, and B's answer back to A:
   "A calls C", so A's device refuses the answer before it sets any key
   ("Key confirmation"). No key is set on A's side, no media flows, and C
   never holds `k_call`; and A's and B's `k_call` differ, so even a
-  device that skipped the confirmation would decrypt nothing. B sees the call end as unencrypted, within 30 s ("What each
-  device shows" below).
+  device that skipped the confirmation would decrypt nothing. B sees the
+  call end as unencrypted, within about 50 s: 30 s after it answered if no connection comes up, or 20 s after its connection is established (the SDP is not signed, so a re-signing C can let B's connection come up), without a decrypted frame; at once if the caller's `call.end{failed}` reaches it ("What each device shows" below).
 
 So the signatures stop the cheap relay at the vaults, and the
-confirmation stops every relay at the calling device; the confirmation
-rules below are therefore normative for every device.
+confirmation stops every relay that stays in form 2 at the calling
+device; the confirmation rules below are therefore normative for every
+device. (A relay that removes form 2 from one share fails on the key;
+one that removes it from both is the residual of "Call forms".) A C that
+takes part in two real calls of its own, one with A and one with B, and
+bridges the media between them is a participant in both, not a relay of
+one call: that is inherent to any call and out of scope here.
 
-Each party uses the keys current when it builds or checks `m2`, so an
-`identity.rotate` (§3.4) of either vault while a call rings **may** make
-the offer or the answer fail its check, depending on when each side
-learns of it. A failed offer rings nobody (the caller's call times out);
-a failed answer is dropped by the calling vault, and the callee, which
-had answered, sees the call end when the caller's call times out (45 s
-at most; `call.end{timeout}`). The member calls again. A calling device
-whose form 2 `call.start` is answered `bad_request` reads
-`connection.get` once and places the call again, with a new `call_id`
-(its copy of the connection's `ik` may be stale).
+Each vault uses the keys current when it builds or checks `m2`. The
+**calling device** fixes the two keys when it places the call: it signs
+the offer, and later checks the answer and derives `k_call`, `k_confirm`
+and `confirm`'s check, with the parties **as of its offer**; an answer
+naming another `callee_ik` fails the call (fail closed, so the two
+devices never disagree about whom they name). So an `identity.rotate`
+(§3.4) of either vault while a call rings **may** make the offer or the
+answer fail its check, depending on when each side learns of it. A
+failed offer rings nobody (the caller's call times out). A failed
+answer is dropped by the calling vault; the callee, which had answered,
+ends the call by its own rule first (30 s after it answered without a
+connection, "Key confirmation") and shows "couldn't be encrypted", and
+the caller's call times out (45 s). The member calls again. A calling
+device whose form 2 `call.start` is answered `bad_request` refreshes its
+copies of both keys once (its own vault's `ik`, which an
+`identity.rotate` changes, and the connection's from `connection.get`)
+and places the call again, with a new `call_id`.
 
 What each party checks:
 
@@ -14764,7 +14776,8 @@ the calling device, which alone knows what it sent.
   §12.3): key confirmation before microphone audio is required before
   a second suite is ever offered, and form 1 has none.
 - Who can remove form 2 from a message: the two vaults, nobody else
-  (the members travel inside the E2E sessions). What they gain is a
+  (the members travel inside the E2E sessions), and a member's own
+  modified app, which can always send form 1 for its own calls. What they gain is a
   call under form 1's rules, which is suite 1 with the keys still bound
   to the negotiation, exactly what S10 gives. (0.88.16) Form 1 names
   neither member, so a connection that passes a call on (above) and
@@ -14776,7 +14789,7 @@ the calling device, which alone knows what it sent.
   vault then drops a form 1 offer, the caller's a form 1 answer to its
   form 2 offer).
 
-**Key confirmation (C2).** In form 2 no microphone audio is sent under
+**Key confirmation (C2).** In form 2 no outgoing media is sent under
 keys the other device has not confirmed.
 
 ```
@@ -14796,6 +14809,8 @@ key itself names both members as well (§10 "Calls"):
 ```
 k_call (form 2) = HKDF-SHA-256(ikm = K, salt = "vettid-call-v1", info = call_id || caller_ik (32) || callee_ik (32), L = 32)
 ```
+
+(`call_id` is a ULID, 26 ASCII characters, so the info splits one way.)
 
 and `k_confirm`, the direction keys and the frame keys follow from it
 unchanged ("Media suites and keys"). The confirmation is the first lock:
@@ -14853,8 +14868,7 @@ confirmation by mistake. Form 1's `k_call` is unchanged.
     30 s after it answered without a connection (above), ends the call
     and shows the same text. This is what the callee sees when a
     connection re-signed a relayed call: its phone rang, it answered,
-    and the call ends as unencrypted within 30 s (at once if the
-    caller's `call.end{failed}` reaches it).
+    and the call ends as unencrypted within about 50 s (30 s after it answered if no connection comes up, or 20 s after its connection is established (the SDP is not signed, so a re-signing C can let B's connection come up), without a decrypted frame; at once if the caller's `call.end{failed}` reaches it).
 
 **Residual.** The relay, the hosts and the peer vault cannot swap a
 share unnoticed. **Each member's own vault can.** It vouches for which
@@ -14870,7 +14884,7 @@ calls, as it is for everything else of the member (§2.1).
 | The member's own vault swaps a share and learns `k_call` | Possible; trusted (§2.1) | **Unchanged** |
 | A vault changes the list of suites or the choice | Undetected at signalling time; the keys then differ and nothing is heard; audio may be sent under the weaker suite's keys until the failure shows | Rejected by the signature check before the callee rings or the caller uses the answer. A member's own vault could still do it together with a swapped share (the row above) |
 | Audio sent before the other side is known to hold the keys | Yes | No (key confirmation) |
-| (0.88.16) A connection C passes one member's call to another as its own (A calls C; C re-vouches A's device to B as its own call, and B's answer back to A): A and B talk, each believing the other is C; C learns no key | Possible: `m` names neither member | Never connects: `m2` and `confirm` name the caller's and the callee's vault, each side from its own records. Re-vouched, the signatures fail and nothing rings; re-signed with C's own device, B's phone rings and the calling device refuses the answer on `confirm`, so no key is set and B's call ends as unencrypted; and the two sides' `k_call` differ (the second lock), so nothing would decrypt even without the confirmation. While both members' vaults still accept form 1, C can still remove form 2 from both shares and get the S10 outcome; removing it from one only fails on the key ("Call forms", "Mixed releases") |
+| (0.88.16) A connection C passes one member's call to another as its own (A calls C; C re-vouches A's device to B as its own call, and B's answer back to A): A and B talk, each believing the other is C; C learns no key | Possible: `m` names neither member | Never connects: `m2` and `confirm` name the caller's and the callee's vault, each side from its own records. Re-vouched, the signatures fail and nothing rings; re-signed with C's own device, B's phone rings and the calling device refuses the answer on `confirm`, so no key is set and B's call ends as unencrypted (within about 50 s, "What each device shows"); and the two sides' `k_call` differ (the second lock), so nothing would decrypt even without the confirmation. While both members' vaults still accept form 1, C can still remove form 2 from both shares and get the S10 outcome; removing it from one only fails on the key ("Call forms", "Mixed releases") |
 | A vault changes the SDP (fingerprint, candidates, sections) | Possible: the SDP is not signed. Media that is not encrypted under the call's keys is never played ("Rules for a device") | **Unchanged** |
 | A vault leaves out or changes the ICE servers of its own devices | Its own devices' vault signs them; nobody else can | **Unchanged**; from C2 the list is no longer empty |
 | Both vaults see both members' addresses in the signalling | Yes (accepted, CALLS-PLAN D1) | **Unchanged** |
@@ -29798,9 +29812,9 @@ sealed 780a14a5d44d9ba28ccf9ad78a82e7855c69d9584297c8aef4c5bf19d8a503b6d6aae36a1
 
 Key confirmation (release C2). Computed for this version with Python's
 `hmac` only (the same script reproduces the first `k_dir` and frame key
-above); **to be confirmed by the vault's and the app's
-implementations**, which add them, and vectors for `m2` and its
-signatures, to `calls.json`:
+above); (0.88.16) confirmed by the vault's implementation, whose
+`calls.json` carries them with the vectors for `m2` and its signatures;
+the apps reproduce them:
 
 (0.88.16) Form 2 names both vaults in `k_call` and in `confirm`. With
 `calls.json`'s exporter secret `K`, `call_id` and the vault identity
