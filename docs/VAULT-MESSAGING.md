@@ -38,8 +38,8 @@ changelog:
     direction, with reason `unavailable` (incoming: the devices stop
     ringing, a missed call not counted, nothing sent to the peer, whose
     caller times out; outgoing: `call.end{unavailable}` to the peer vault,
-    whose devices stop ringing and record a missed call), and an active
-    call carries on. §3.6.3 notes the first.
+    whose devices stop ringing and record a missed call, counted there as
+    usual), and an active call carries on. §3.6.3 notes the first.
   - 0.88.14: 2026-11-11, erratum (owner decisions 2026-11-11 on calls C2
     glare, GC #8303 a, a; vettid-vault #224; numbered after #570, #571 and
     #572, and merged after them). §10.10 "Glare": when its own call loses, the vault also sends
@@ -6554,7 +6554,9 @@ the hold off, `"held"` with it on.
   `owner_check_required`, and drops pending access-session requests;
 - stops a ringing incoming call on its devices (`call.end{unavailable}`
   to them; the caller is not told and times out, as with a locked
-  callee). A call answered before the deadline continues (below);
+  callee), and records it as a missed call, not counted toward the
+  connection's unanswered-call limits (§10.10 "Permission and limits",
+  0.88.15). A call answered before the deadline continues (below);
 - audits `owner_check.held` and sends `vault.held` (below) to the
   owner's app and desktops.
 
@@ -14439,7 +14441,9 @@ itself.
   (by the rule under "Ringing") and the vault's `call.end{timeout}`
   follows.
 - A missed call is recorded once per call, by whichever comes first:
-  the vault's timer, the peer's `call.end`, `busy`, or the hold.
+  the vault's timer, the peer's `call.end`, `busy`, the hold, the
+  unanswered-call limit, or (0.88.15) calls turned off for the
+  connection.
 - An offer that expired while the vault was locked is dropped before
   this feature sees it (§8.4), as today: no missed call. Not changed in
   C2.
@@ -14561,7 +14565,9 @@ other at once, one call connects.
   2026-11-11) Calls the member couldn't answer because of the vault hold
   (§3.6.3: offers that arrive while held, and incoming calls the hold's
   start ended) are missed calls but are **not** counted, and neither is
-  a ringing call ended because calls were turned off. When a connection has
+  a ringing call ended because this vault's member turned calls off for
+  the connection (the peer, which cannot tell why the call ended, counts
+  its missed call as usual). When a connection has
   **3 in the last 10 minutes or 10 in the last 24 hours**, a further
   offer from it rings no device and is not answered; it is recorded as
   an ended call with reason `unavailable` and as a missed call, and
@@ -27048,7 +27054,9 @@ Follow-ups:
        session, and the check must work on a vault that stays unlocked).
        Recommended: as specified.
     2. **Calls while held:** no ringing; the caller times out as with a
-       locked callee; a missed call is recorded and counted. A call
+       locked callee; a missed call is recorded and counted (in
+       `vault.held`; not toward the unanswered-call limits since
+       0.88.15). A call
        answered before the deadline continues. Recommended: as
        specified (an answer would let a phone in other hands speak as
        the member, and a check in the middle of answering is
