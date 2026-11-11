@@ -7026,7 +7026,7 @@ all" is hidden. When the last verification failed: a notice
 "Verification failed" (`settings_attestation_failed_title`), "This
 phone couldn't verify your vault's enclave, so it sent it nothing. The
 check that failed is marked below." (`settings_attestation_failed_body`).
-A verification refused after line 9, with every line "Passed" (a
+A verification refused after the last line, with every line "Passed" (a
 release removed, not active for an enrollment, or older than one this
 phone has used), has the same title with "Every check passed, but this
 phone refused the release: <reason>" (`settings_attestation_refused_body`),
@@ -7202,7 +7202,7 @@ verified release", now the "Release" row) and `settings_attestation_version`
 - Attestation: a verification that passed shows every check "Passed";
   one failed at each check (including the format errors of lines 1, 2
   and 4, a non-ES384 document and a manifest serial going back) shows
-  it "Failed" and the later ones "Not checked"; a refusal after line 9
+  it "Failed" and the later ones "Not checked"; a refusal after the last line
   shows every line "Passed" and its reason; a failed manifest signature
   shows only line 1 "Failed", without the key id and serial;
   no "Passed" without a recorded pass; the values resting on a failed
