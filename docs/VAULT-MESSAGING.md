@@ -4208,7 +4208,12 @@ release the vault has left is still `wrong_release`), and §12.5's
 `deleting` check before them, as the one write; then the refusal comes
 before the state is written, before any message and before `unlocked`
 is reported. Nothing of the vault is lost: an unlock by a release that
-reads the part opens the vault with it whole. A recovery's open has
+reads the part opens the vault with it whole. An approved move to
+another release (§11.10.4), and the completion of a pending move, still
+record the move and seal the header for that release, with the part
+carried unchanged; they open nothing, run no feature and report no
+`unlocked` (owner decision 2026-11-11, GC #8621 a), so that a release
+that reads the part can be reached. A recovery's open has
 already spent its attempt by then (the DEK exists only once the attempt
 is spent; the counter's records are made), so each such open uses one
 of the generation's attempts.
