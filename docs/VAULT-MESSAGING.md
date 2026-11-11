@@ -33,8 +33,9 @@ changelog:
     reconnect answer ends at a later message": `R` abandons its open
     answer to a reconnect of `I`'s when a message from `I` other than
     `hs.fin` opens under an epoch newer than the one that `hs.init`
-    named, with a later inner `ts` (not a restore's answer, nor one to a
-    reconnect naming a replaced line's epoch). §3.4.1
+    named, with a later inner `ts` (not a restore's answer, nor a fork
+    sign's: a reconnect naming a replaced line's epoch or one older than
+    the confirmed epoch). §6.3.2 R29-T2 gains its tests. §3.4.1
     Residuals, "A stale reconnect answer after a rekey's confirmation",
     is closed by it, and §6.3.1 Initiator's "I's open reconnects end at
     its rekey's confirmation" points to it.
@@ -7620,21 +7621,28 @@ destroy the reconnect's epoch after it was confirmed, a false fork. It also
 frees `R`'s rekeys, which an open answer would hold for 16 days (§6.5).
 
 (0.88.9) **A stale reconnect answer ends at a later message.** When a
-message from `I`, other than `hs.fin`, opens under an epoch with `I` newer
-(later in establishing order, §3.4.1) than the epoch an open answer of
-`R`'s to `I`'s reconnect named, and its inner `ts` is later than that
-`hs.init`'s, `R` abandons that answer in the write that accepts the
-message: the tokens its `hs.resp` carried are revoked, and an `hs.resp`
-not yet deposited is not sent. `I` made that message after the reconnect's
-`hs.init` and under another epoch, so it had ended that reconnect (Initiator,
-"I's open reconnects end at its rekey's confirmation", or "A verified
-`hs.fin` comes first", §6.6) and sends no `hs.fin` for it. Without this the
-answer waits for `L` (16 days), holding `R`'s rekeys back (§6.5) and, between
-two persons, its reconnects (§6.6 "Between two persons"). An answer to a
-restore's reconnect (one that named an older epoch, §6.6 "After a restore")
-and one to a reconnect that named an epoch of a replaced line (fork
-evidence, judged at its `hs.fin`, §6.6 "Fork detection") are kept: they
-name such an epoch by design. It is a connection's rule.
+message from `I`, other than `hs.fin`, that `acceptFrom` does not refuse at
+steps 1-4 opens under an epoch with `I` newer than the epoch an open answer
+of `R`'s to `I`'s reconnect named (both among `R`'s epochs with `I`; newer:
+later in establishing order, and established: not pending, abandoned while
+pending or destroyed), and its inner `ts` is later than that `hs.init`'s,
+`R` abandons that answer before anything else is done with the message
+(dedupe, the `ts` window, its handler), after the confirmation of `R`'s own
+pending epoch that the message makes (Initiator): the tokens the `hs.resp` carried are
+revoked, and an `hs.resp` not yet deposited is not sent. `I` made that
+message after the reconnect's `hs.init` and under another epoch, so it had
+ended that reconnect (Initiator, "I's open reconnects end at its rekey's
+confirmation", or "A verified `hs.fin` comes first", §6.5, §6.6, whatever
+the two purposes) and sends no `hs.fin` for it. `hs.fin` is not such a
+message: a pending rekey's `hs.fin` is made under the newer epoch while
+`I`'s reconnect is still open, and the two are settled by "A verified
+`hs.fin` comes first". Without this the answer waits for `L` (16 days),
+holding `R`'s rekeys back (§6.5) and, between two persons, its reconnects
+(§6.6 "Between two persons"). An answer to a restore's reconnect (one that
+named an older epoch, §6.6 "After a restore") is kept, and so is a fork
+sign's, judged at its `hs.fin`: one to a reconnect that named an epoch of a
+replaced line (§6.6 "Fork detection") or an epoch older than the confirmed
+one (§3.4.1 "Fork by ctx"). It is a connection's rule.
 
 **Rule E.** In the write that establishes a rekey's or reconnect's epoch
 at its verified `hs.fin`, `R` destroys every other epoch with `I` later
@@ -7942,7 +7950,7 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-D3 | §6.3.1 Devices and agents; §6.7; §10.9 | r29_device_test.go:18 |
 | R29-D4 | §6.3.1 An app from before release 29; §10.9 | r29_device_test.go:85, :116, :147 |
 | R29-T1 ((0.88.2) a handshake's tokens adopted at confirmation; no revocation of a superseded token) | §6.3.1 A handshake's tokens are adopted at confirmation; §6.6; §7.4 | r29_t1_test.go (the sub-rules, each failing without its rule; TestR29T1Seeds); the random-pair harness asserts that no vault adopts a carried token its issuer had already revoked (judgeAdoption) |
-| R29-T2 ((0.88.2) the handshakes a newer one ends) | §6.3.1 Initiator: an abandoned pending epoch's `hs.fin`; I's rekeys end at its reconnect's `hs.resp`; I's open reconnects end at its rekey's confirmation; Responder: a reconnect ends R's rekey answers | r29_t1_test.go: TestR29AbandonedPendingDropsItsWaitingFin, TestR29ReconnectRespAbandonsTheOwnRekeys, TestR29StaleReconnectEndsAtTheRekeysConfirmation, TestR29ReconnectDropsTheRekeyAnswers; r29_gapf_test.go: TestR29DeviceAbandonInTheDrainDropsItsFin |
+| R29-T2 ((0.88.2) the handshakes a newer one ends) | §6.3.1 Initiator: an abandoned pending epoch's `hs.fin`; I's rekeys end at its reconnect's `hs.resp`; I's open reconnects end at its rekey's confirmation; Responder: a reconnect ends R's rekey answers; (0.88.9) a stale reconnect answer ends at a later message | r29_t1_test.go: TestR29AbandonedPendingDropsItsWaitingFin, TestR29ReconnectRespAbandonsTheOwnRekeys, TestR29StaleReconnectEndsAtTheRekeysConfirmation, TestR29ReconnectDropsTheRekeyAnswers; r29_gapf_test.go: TestR29DeviceAbandonInTheDrainDropsItsFin; r30_staleans_test.go: TestR30StaleReconnectAnswerDroppedByALaterMessage, TestR30StaleAnswerKeptForAMessageUnderTheNamedEpoch, TestR30StaleAnswerKeepsAForkByCtxAnswer, TestR30StaleAnswerNotEndedByAnHsFin, TestR30StaleAnswerEndedByAConfirmOfTheOwnPendingEpoch |
 | R29-T3 ((0.88.2) a rekey `hs.init` answered once; a duplicate `hs.fin` ignored) | §6.5 | r29_t1_test.go: TestR29DuplicateRekeyInitAnsweredOnce, TestR29RedeliveredFinIsIgnored |
 
 ### 6.4 Connections and invitations
