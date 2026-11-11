@@ -14552,7 +14552,9 @@ other at once, one call connects.
 - (0.88.15, owner decision 2026-11-11) **Turning calls off ends a call
   with that connection that is still ringing**, in either direction; an
   **active** call carries on (the member can hang up). Each ends with
-  reason `unavailable`:
+  reason `unavailable`. A ringing record already past its `exp` when
+  calls are turned off is not ended here: the ring timer ends it as
+  usual (`timeout`), and counts it as an ordinary missed call.
 
   | The ringing call | This vault | What the peer sees |
   |---|---|---|
