@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.67
+version: 0.1.68
 date: 2026-11-11
 changelog:
+  - 0.1.68: 2026-11-11 (ANDROID-PLAN 0.1.124; owner decisions a, GC #8451 and #8476). The iPhone follows ANDROID-PLAN §4 "Advanced security, attestation in detail and the check's progress": Advanced security in Settings, the attestation in detail with "Copy all", and the owner check's "Checking with your vault…" and "Check passed". §4.17: what the iPhone shows for itself, the haptic and the clipboard.
   - 0.1.67: erratum, 2026-11-11 (ANDROID-PLAN 0.1.123, VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). §4 Calls: after a glare, the iPhone answers the winning call with its own call's media, as Android does: no camera by itself.
   - 0.1.66: erratum, 2026-11-10, as built (vettid-ios #241, in review; the container-read audit, GC #7243). §4 History export, §4.16 and §6.9: the History export, as the vote proof already does, writes its file to a directory of its own in tmp/ with complete protection, hands it over as a copy (`UIDocumentPickerViewController(forExporting:asCopy: true)`), and removes it on every answer, on a failure, when the screen leaves, when the §4.4 (1) cover closes the picker, at launch and when the screen opens again. SwiftUI `.fileExporter` is not used: it leaves its file in tmp/ with default protection. Complete protection helps only while the iPhone is locked; on an unlocked phone the defense is that the file is short-lived. Not yet: removal when the app goes to the background (a vettid-ios follow-up). The photo share sheet is unchanged: it hands the system bytes, no file.
   - 0.1.65: erratum, 2026-11-07 (ANDROID-PLAN 0.1.122, RELEASE-UPDATES 0.3.4; owner decision a). The unlock screen's release offer follows ANDROID-PLAN §4 "What's new": PIN first, a compact notice with the security line and the fingerprint, What's new one tap away in a sheet, approval not gated on opening it.
@@ -1887,6 +1888,28 @@ reconnect, and a vote is not in Messages, in the approvals indicator
   of the proof stays on the phone after a save or a cancel; one left by
   a killed app is removed at launch and when the screen opens again
   (§6.9's row).
+
+### 4.17 Advanced security, attestation in detail and the check's progress (0.1.68)
+
+As ANDROID-PLAN §4 "Advanced security, attestation in detail and the
+check's progress" (0.1.124), the same texts and order; the string keys
+take Android's names (`ios_` only for what the iPhone adds). On the
+iPhone:
+
+- **This phone** on the attestation screen: today's App Attest rows
+  (§6.2: the key, and whether the vault accepted it), then "iOS
+  version" and "App version" (version and build). No device name and
+  no model name.
+- **Copy all** goes through the app's local, expiring pasteboard
+  (`SecurePasteboard`, §6.5), never the general one without expiry.
+- **The PCR rows' "Copy"**: the same pasteboard.
+- **"Check passed"**: the success haptic is
+  `UINotificationFeedbackGenerator` `.success`; VoiceOver hears
+  "Checking with your vault" and "Check passed" (announcements, as the
+  unlock's results), and the tick stays until the announcement is
+  spoken or 1 second, whichever is later.
+- **Advanced security** is a pushed screen of the Settings stack, with
+  the back arrow and the system back gesture (ID14).
 
 ## 5. Architecture
 
