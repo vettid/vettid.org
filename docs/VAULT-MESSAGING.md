@@ -38,7 +38,8 @@ changelog:
     active call outlives an expired access session, only that call's
     `call.keepalive`, `call.ice` and `call.end` passing, and the vault's
     `call.ice` and `call.end` for it reaching the desktop; an access ended
-    on purpose (`device.session.end`) ends the call. §10.10
+    on purpose (`device.session.end`) or an unlink ends the call, as does
+    an answer that can't reach the calling desktop. §10.10
     "Liveness": the 90 s silence is judged at the end of each batch,
     after its messages, and a gap of over 30 s in collecting starts the
     count again.
@@ -6569,7 +6570,8 @@ the hold off, `"held"` with it on.
   (§10.10 "Liveness"), until it ends (the check is never forced
   mid-action, §3.6.5). (0.88.13, owner decision 2026-11-11) A call
   answered at or after the deadline (a desktop may answer while the
-  check is due, or after `hold_off_until` lapses) does not continue: when
+  check is due, or while `hold_off_until` still holds the hold off, the
+  hold beginning when it lapses) does not continue: when
   the hold begins it is `ended` with reason `unavailable`, and
   `call.end{unavailable}` goes to the peer vault and the owner devices,
   rather than leaving 90 s of silence to end it. An outgoing call that
@@ -9514,17 +9516,24 @@ While the vault is held, a session is suspended but still returned.
 - (0.88.13, owner decisions 2026-11-11) **A desktop's call outlives an
   expired session.** While a desktop is the call device of a live
   `active` call (§10.10), its own `call.keepalive`, `call.ice` and
-  `call.end` for that call pass a session that has expired, and the
-  vault's `call.ice` and `call.end` for that call (the peer's candidates
-  and hang-up, an end the vault decides, the answer to a keep-alive for
-  a call that is gone) reach it: the call continues until it ends, as a
-  call does through the hold (§3.6.3). Nothing else passes either way,
-  the vault checks that the call is that device's, and the call still
-  ends at 12 h at most. **Access ended on purpose ends the call:** a
-  `device.session.end` (the member's End access, "Deny and end access
-  now", or the desktop's own end) also ends that desktop's call in
-  progress, `ended` with reason `unavailable`, `call.end{unavailable}` to
-  the peer vault and to the owner devices, that desktop included.
+  `call.end` naming that call (`call_id`) pass a session that has
+  expired; and the vault's `call.ice` and `call.end` for a live call of
+  the desktop's, ringing or `active` (the peer's candidates and hang-up,
+  an end the vault decides), reach it. The call continues until it ends,
+  as a call does through the hold (§3.6.3). Nothing else passes either
+  way, and the call still ends at 12 h at most. An outgoing call whose
+  answer can't reach its desktop (its session ended while it rang) is
+  `ended` with reason `unavailable`, the peer vault and the owner devices
+  told. **Access ended on purpose ends the call:** a
+  `device.session.end` that ends the desktop's access (the member's End
+  access, "Deny and end access now", or the desktop's own end; also on a
+  session that had already expired, while its call went on; not one
+  naming another or an expired `session_id`, which changes nothing), and
+  unlinking the device (§7.4), end that desktop's call in progress:
+  `ended` with reason `unavailable`, `call.end{unavailable}` to the peer
+  vault and to the owner devices, that desktop included while it is
+  still paired. An app removed by a transfer or a recovery loses its
+  call the same way.
 - Within it, a **desktop** may send the types listed for it in §10. Some
   of them are **step-up types**: the vault holds each such request until
   an app approves it (below). They are the types that reveal a secret
@@ -14120,7 +14129,7 @@ the authorization: call types are not step-up types, and placing or
 answering a call needs no per-call approval. A desktop without a session
 is not rung (§9.1) and its `call.start` is answered `session_required`;
 (0.88.13) a call it is already in outlives an expired session, and ends
-with an access ended on purpose (§6.8).
+with an access ended on purpose or an unlink (§6.8).
 Agents never place or take calls. (0.69.0) Nor does a service
 connection (`peer_kind` `"service"`, §6.4 "Service connections"):
 `call.start` and `call.permission.set` naming one are `forbidden`, and a
