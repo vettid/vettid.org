@@ -18819,8 +18819,8 @@ one of:
   not read (§3.3 "Feature data that does not read"); nothing after the
   state opens is written, nothing is lost, and an unlock by a release that
   reads it opens the vault. It is not a PIN failure. The member must not
-  be told to set the vault up again; an app that does not know the code
-  shows its usual failure. `state_unsupported` (0.87.1):
+  be told to set the vault up again: the app says "Your vault can't be opened right now. Nothing in it has been changed. Please try again later." (wording approved by the owner 2026-11-11, GC #8549); an app that
+  does not know the code shows its usual failure. `state_unsupported` (0.87.1):
   the state opened but lacks `messaging_release` 29 or more (§6.3.1 "No
   upgrade: release 29 starts clean"); nothing after the state opens is
   written, and the member re-enrols; the app says "This vault was made
@@ -23742,7 +23742,7 @@ at register and padded to 4,096 bytes:
   | `quiet`, `wait`, `closed`, `exhausted` | `false` from step 3, or from a `Spend` that took nothing; `true` when step 4b refused to test a spent attempt |
   | `stored_mismatch`, `vault_missing` | `false` before the spend (step 2; a stored state that cannot be read); `true` after it (step 6: the state, the keys or the backup copy cannot be opened) |
   | `state_unsupported` (0.87.1) | `true` at step 6, after the spend (the state opens only then); (0.88.1) `false` on a repeat through the `next` wrap, which spends none; it lacks `messaging_release` 29 or more (§6.3.1 "No upgrade: release 29 starts clean"). The app says "This vault was made by an earlier version of VettID and must be set up again." (wording approved by the owner 2026-11-06, GC 01M6RV1QRM1403G0Z8G2W2C6ZS) |
-  | `state_unreadable` (0.88.17) | as `state_unsupported`: `true` at step 6, `false` on a repeat through the `next` wrap; the part of a feature others call directly does not read (§3.3 "Feature data that does not read"). Nothing is written, nothing is lost; the vault is not to be set up again |
+  | `state_unreadable` (0.88.17) | as `state_unsupported`: `true` at step 6, `false` on a repeat through the `next` wrap; the part of a feature others call directly does not read (§3.3 "Feature data that does not read"). Nothing is written, nothing is lost; the vault is not to be set up again. The app says "Your vault can't be opened right now. Nothing in it has been changed. Please try again later." (wording approved by the owner 2026-11-11, GC #8549) |
   | `retry` | `false` from step 3b; `true` whenever the spend happened: the run ended at any point after it, before or after step 1 of the order of writes was stored, including a failure to register at the relay or to store steps 2 and 3 (the entry may have been right) |
   | every other code (`wrong_again`, `busy`, `counter_unavailable`, `not_armed`, `no_recovery`, `expired`, `attestation`, `manifest`, `wrong_release`, `bad_request`, `device_secret`) | `false` |
 
