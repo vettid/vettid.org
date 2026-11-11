@@ -45,7 +45,8 @@ changelog:
     track before a frame decrypts). It still works only if C removes form
     2 from both shares, while both members' vaults still accept form 1
     ("Call forms", "Mixed releases"). What each device shows when
-    a check fails. From the release that retires form 1, a form 1 answer
+    a check fails; the answering device also ends a call whose
+    connection is not established 30 s after it answered. From the release that retires form 1, a form 1 answer
     to a form 2 offer is refused too. §16: form 2's `k_call`,
     `k_confirm`, `confirm`, direction and frame keys, and a relayed
     call's.
