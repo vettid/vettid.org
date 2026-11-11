@@ -4,7 +4,7 @@ status: draft
 version: 0.1.125
 date: 2026-11-11
 changelog:
-  - 0.1.125: erratum, 2026-11-11 (owner decision a, GC #8641; as built in vettid-android #353). §4 "Attestation in detail": the reason after "Every check passed, but this phone refused the release:" is one of four texts of its own (not active for an enrollment, older, another instance, a time scale this build does not accept), never the unlock's error text, which contradicted "every check passed"; another instance and the time scale are refusals after line 9 as built; a removed release is the host's 410, not a refusal of the phone's; line 9's cell no longer reads as if a release not active for an enrollment failed it; while the route waits for a move, the screen keeps the last record. Four new texts.
+  - 0.1.125: erratum, 2026-11-11 (owner decision a, GC #8641; the refusal list as built in vettid-android #353, the four texts to be built there). §4 "Attestation in detail": the reason after "Every check passed, but this phone refused the release:" is one of four texts of its own (not active for an enrollment, older, another instance, a time scale this build does not accept), never the unlock's error text, which contradicted "every check passed"; another instance and the time scale are refusals after line 9 as built; a removed release is the host's 410, not a refusal of the phone's; line 9's cell no longer reads as if a release not active for an enrollment failed it; while the route waits for a move, a pass still naming the release moved from is not recorded, so the screen keeps the last record, and a failure meanwhile is recorded. Four new texts.
   - 0.1.124: 2026-11-11 (owner decisions a, GC #8451, #8476 and #8511). Settings → Security keeps the rows used often (Recovery included) and moves the rest behind **Advanced security**; the attestation screen shows each link of the chain, one line per check the app performs (passed, failed or not checked), the release's source and this phone, with "Copy all"; the owner check shows "Checking with your vault…" while the vault verifies (Lock vault still enabled), then "Check passed". §4 "Advanced security, attestation in detail and the check's progress"; the Settings and Owner check rows; §4 "Locking the vault" and "Recovery and unlock from release R" point to Advanced security; §5 "What the phone keeps": the verification record.
   - 0.1.123: erratum, 2026-11-11 (VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). "Video in calls (C4)": after a glare, the phone that answers the winning call without asking (`superseded_by`) answers with its own call's media, so an audio call never turns on the camera by itself.
   - 0.1.122: erratum, 2026-11-07 (RELEASE-UPDATES 0.3.4; owner decision a, Ground Control thread 01M6SQ6VMNMB0C2CRPNZYNWKBB). §4 "Vault update" and "What's new": on the unlock screen the PIN keypad and Unlock come first; the release offer below them is a compact notice ("Update available: release N", the security line, the fingerprint and "Approve the update with this unlock"), with "What's new in release N" as a link that opens a sheet holding the full What's new, "Also in earlier releases" and Full release notes. Approving does not require opening the sheet. The security line comes from the release log like the rest of What's new: while it loads, the notice shows the progress line, and if it can't be had, "Release notes unavailable"; approval stays enabled either way. `security_text` stays in the sheet. The update screen is unchanged. Existing texts only (Android's `unlock_offer_title` and `unlock_offer_approve` already hold "Update available: release N" and "Approve the update with this unlock").
@@ -7038,8 +7038,10 @@ naming another instance than the one the request goes to
 does not accept (`settings_attestation_refused_time_scale`). A removed
 release is not a refusal of the phone's: the host answers 410 and
 nothing is verified, so nothing is recorded. While the route waits for
-a move (ROUTE_PENDING), nothing is verified or recorded, so the screen
-keeps the last record with its "as of" time.
+a move (ROUTE_PENDING), each route fetched is verified, but a pass that
+still names the release moved from is not recorded (nothing is sealed
+to it), so the screen keeps the last record with its "as of" time; a
+check that fails, or a refusal, meanwhile is recorded at once.
 
 **Enclave** (`settings_attestation_enclave`, today's "Vault enclave"):
 
@@ -7208,8 +7210,10 @@ verified release", now the "Release" row) and `settings_attestation_version`
 - Attestation: a verification that passed shows every check "Passed";
   one failed at each check (including the format errors of lines 1, 2
   and 4, a non-ES384 document and a manifest serial going back) shows
-  it "Failed" and the later ones "Not checked"; a refusal after line 9
-  shows every line "Passed" and its reason; a failed manifest signature
+  it "Failed" and the later ones "Not checked"; each of the four
+  refusals after line 9 shows every line "Passed" and its own reason
+  text, never the unlock's; a 410 (a removed release) and a
+  ROUTE_PENDING leave the last record as it was; a failed manifest signature
   shows only line 1 "Failed", without the key id and serial;
   no "Passed" without a recorded pass; the values resting on a failed
   check say "Not verified"; no record shows the empty state; the
