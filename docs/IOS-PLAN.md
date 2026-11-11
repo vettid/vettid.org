@@ -4,7 +4,7 @@ status: approved (owner, 2026-10-17)
 version: 0.1.69
 date: 2026-11-11
 changelog:
-  - 0.1.69: 2026-11-11, **for the owner's approval** (ANDROID-PLAN 0.1.125, VAULT-MESSAGING 0.89.0 §11.10.1, VAULT-RELEASES 0.1.36 §7.1; owner decisions a, GC #8494, #8537 and #8538). The iPhone requires the release transparency log as Android does. A manifest is trusted only with a valid Rekor v1 or v2 entry, checked offline against a trusted root built into the app, from the channel's cutover serial (production 1); the timestamp token is not checked. "Logged publicly" appears on the attestation screen. §4.18 says where the check and the pinned values live on the iPhone, and that no production build ships without it.
+  - 0.1.69: 2026-11-11, **for the owner's approval** (ANDROID-PLAN 0.1.125, VAULT-MESSAGING 0.89.0 §11.10.1, VAULT-RELEASES 0.1.36 §7.1; owner decisions a, GC #8494, #8537, #8538 and #8559). The iPhone requires the release transparency log as Android does. A manifest is trusted only with a valid DSSE envelope and its Rekor v1 or v2 entry, checked offline against a trusted root built into the app, from the channel's cutover serial (production 1); the timestamp token is not checked. "Logged publicly" appears on the attestation screen. §4.18 says where the check and the pinned values live on the iPhone, and that no production build ships without it.
   - 0.1.68: 2026-11-11 (ANDROID-PLAN 0.1.124; owner decisions a, GC #8451, #8476 and #8511). The iPhone follows ANDROID-PLAN §4 "Advanced security, attestation in detail and the check's progress": Advanced security in Settings, the attestation in detail with "Copy all", and the owner check's "Checking with your vault…" and "Check passed". §4.17: what the iPhone shows for itself (the App Attest state only), the haptic, the clipboard and the back gesture; Allow screenshots moves to Advanced security; §6.9: the verification record.
   - 0.1.67: erratum, 2026-11-11 (ANDROID-PLAN 0.1.123, VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). §4 Calls: after a glare, the iPhone answers the winning call with its own call's media, as Android does: no camera by itself.
   - 0.1.66: erratum, 2026-11-10, as built (vettid-ios #241, in review; the container-read audit, GC #7243). §4 History export, §4.16 and §6.9: the History export, as the vote proof already does, writes its file to a directory of its own in tmp/ with complete protection, hands it over as a copy (`UIDocumentPickerViewController(forExporting:asCopy: true)`), and removes it on every answer, on a failure, when the screen leaves, when the §4.4 (1) cover closes the picker, at launch and when the screen opens again. SwiftUI `.fileExporter` is not used: it leaves its file in tmp/ with default protection. Complete protection helps only while the iPhone is locked; on an unlocked phone the defense is that the file is short-lived. Not yet: removal when the app goes to the background (a vettid-ios follow-up). The photo share sheet is unchanged: it hands the system bytes, no file.
@@ -1933,16 +1933,18 @@ and vectors. On the iPhone:
   They are not in an xcconfig a build setting could override. The
   release check of I0.1 fails an archive whose trusted root is the
   other environment's.
-- **The verifier** is Swift, with CryptoKit (P-256, SHA-256). It handles
-  the Rekor v1 and v2 `hashedrekord` bodies, inclusion, both
-  checkpoint forms and v1's signed entry timestamp. The RFC 3161
+- **The verifier** is Swift, with CryptoKit (P-256, SHA-256, and
+  Ed25519 as the call shares already use it). It handles the DSSE
+  envelope over PAE, the Rekor v1 `dsse` 0.0.1 and v2 0.0.2 bodies,
+  inclusion, both checkpoint forms (ECDSA for v1, Ed25519 for v2) and
+  v1's signed entry timestamp. The RFC 3161
   timestamp is not checked (owner decision a, GC #8537), so there is no
   CMS or timestamp parser. There is no network and no third-party
   Sigstore library: what it parses is fixed by the profile.
 - **Production** pins the cutover serial 1 from its first build. No
   production build ships without the check. CI checks that the
   bundled root is byte for byte a file in vettid.org
-  `vault/release-log/<channel>/`.
+  `vault/release-log/<channel>/` on `master`.
 - **The check** runs in the manifest manager and the canary manifest
   path, at the same point as on Android: after the signature and the
   format, and before the serial is stored or the manifest is used.
