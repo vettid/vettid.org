@@ -9531,7 +9531,9 @@ While the vault is held, a session is suspended but still returned.
   own outgoing call while it still rings (only `call.end`, only that
   `call_id`); and the vault's `call.ice` and `call.end` for a live call
   of the desktop's, ringing or `active` (the peer's candidates and
-  hang-up, an end the vault decides), reach it. The call continues until
+  hang-up, an end the vault decides), reach it, and so does the ring
+  timer's `call.end{timeout}` for its outgoing call, though sent at or
+  after the call's `exp`. The call continues until
   it ends, as a call does through the hold (§3.6.3). Nothing else passes
   either way: a keep-alive the session check refuses gets no reply (no
   `call.end{unavailable}`), and after 12 h the call stops counting as
