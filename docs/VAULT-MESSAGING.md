@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.16
+version: 0.88.17
 date: 2026-11-11
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,17 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.17: 2026-11-11, erratum (owner decision 2026-11-11, GC #8440 a;
+    vettid-vault #227). §3.3: **feature data that does not read** at
+    unlock (damaged, or written by a later release, which a feature
+    refuses rather than drop what it does not know) fails closed: audited
+    `feature.load_failed`, kept and written back unchanged at every flush
+    (never replaced by an empty state), and the feature does not run until
+    an unlock that reads it: its device types are answered
+    `unsupported_type`, its peer types are dropped, and its timers and
+    observers do not run. Before, the vault ignored the error and ran the
+    feature empty, so a member's "calls off" for a connection could turn
+    back on. §10.9 lists the audit kind.
   - 0.88.16: 2026-11-11, erratum (owner decisions 2026-11-11, GC #8361 a and
     #8374 a: bind both parties into form 2 before release C2, in which form
     2 first ships; vettid-vault #226; numbered after #574 and merged after
@@ -4168,6 +4179,29 @@ Rules for all keys:
   rules the state was written under, `29`; a state without it is refused
   (§6.3.1 "No upgrade: release 29 starts clean");
 - feature data.
+
+(0.88.17, owner decision 2026-11-11) **Feature data that does not read.**
+At unlock each feature reads its own part of the feature data. A part
+that does not read, because it is damaged or because a later release
+wrote it (a feature refuses a state of a later version rather than drop
+what it does not know), **fails closed**: a feature that held a rule
+(calls off for a connection, a limit) must never run as if it held none.
+Until an unlock that reads it:
+
+- the vault audits `feature.load_failed` (`ref` = the feature's name;
+  nothing of the data), once per unlock;
+- it keeps the part exactly as stored and writes it back unchanged at
+  every flush: never an empty state in its place, so a later release that
+  can read it finds it whole;
+- the feature does not run. A message of its device types is answered
+  `unsupported_type`, as from a release without the feature (an app then
+  hides it until the next unlock, as it does for such a release); a
+  message of its peer types is dropped as from a feature this vault does
+  not have (for calls: no offer rings, and the caller times out); its
+  timers, housekeeping and observers do not run;
+- the rest of the vault runs as usual.
+
+The member learns of it from History (`feature.load_failed`).
 
 The **sealed header** is a small record sealed to the enclave's attestation,
 not to the DEK, so that an unlock can be checked before the DEK exists. It
@@ -13983,7 +14017,8 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   SDP or keys), `drop.call_share` (§10.10); (0.28.0, release C2)
   `drop.call_glare`, `drop.call_off`, `drop.call_rate` (`connection_id`,
   `ref` = `call_id`), `call.permission_off`, `call.permission_on`
-  (`connection_id`) (§10.10); `leash.grant.issued`, `leash.grant.updated`,
+  (`connection_id`) (§10.10); (0.88.17) `feature.load_failed` (`ref` =
+  the feature's name; §3.3); `leash.grant.issued`, `leash.grant.updated`,
   `leash.grant.revoked`, `leash.rate_limited` (`device_id` = the agent,
   `ref` = `grant_id`), (0.88.5) `leash.grant.dropped` (`device_id` = the
   agent, `ref` = `damaged`, `mismatch`, `expired`, `id_taken` or `cap`:
