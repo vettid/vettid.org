@@ -33,9 +33,12 @@ changelog:
     the §7.4 row "Standing token refreshed after `quota_exceeded`":
     "newer" than the token a quota refresh came under is a later `exp`,
     and for the same `exp` a later place in the issuer's registry (issue
-    order; a handshake's tokens are placed at its activation). `exp`
-    orders standing tokens by issue only while the relay's token limit
-    is unchanged.
+    order, but a handshake's tokens are placed at its activation or
+    confirmation). `exp`
+    orders standing tokens by issue only while the relay's
+    `max_token_lifetime_seconds` is unchanged; for the same `exp`, a
+    handshake's token (placed at its activation or confirmation) counts
+    as the newer.
   - 0.88.8: 2026-11-11, erratum (lead; vettid-android #345, GC #6847, both
     blind reviews; vettid-ios to follow, card GC #7777). §8.6
     `quota_exceeded`, for a device (§6.3.1 "Devices and agents"): a
@@ -9684,15 +9687,17 @@ denylisted when the request or pairing ends without one (§7.4).
   collect `jti` (RELAY-PROTOCOL 0.4.0 §6.3); a newer one (a near-end
   re-mint, a prompt, a handshake's) may still be on its way and is left to
   expire. (0.88.11) Newer: a later `exp`, and for the same `exp` a later
-  place in the issuer's registry of issued tokens (issue order; a
-  handshake's tokens are placed there at its activation, after any token
-  issued while it was open, so `exp` decides for them). A standing token's
-  `exp` is its issue second plus its kind's lifetime, so `exp` orders by
-  issue only while the relay's token limit (and the vault's lifetime
-  setting) is unchanged. The token the refresh came under marks that place
-  whether or not it is denylisted already. The token the refresh came under is always denylisted, a
-  prompt's or a handshake's too: a deposit under it shows the peer adopted
-  it. A refresh with no `jti` (a relay before 0.4), or with one the vault
+  place in the issuer's registry of issued tokens. That place is issue
+  order, except that a handshake's tokens are placed when the vault
+  activates its epoch as responder (at `hs.fin`) or confirms it as
+  initiator, after any token issued while it was open, so for the same
+  `exp` they count as newer even when issued earlier in that second. A
+  standing token's `exp` is its issue second plus its lifetime, so `exp`
+  orders by issue only while the relay's `max_token_lifetime_seconds` is
+  unchanged. The token the refresh came under marks that place whether or
+  not it is denylisted already, and it is always denylisted, a prompt's or
+  a handshake's too: a deposit under it shows the peer adopted it. A
+  refresh with no `jti` (a relay before 0.4), or with one the vault
   does not know as a standing token it issued to this connection,
   denylists as before. With or without a `jti`, every refresh spares,
   other than the one it came under, ((0.88.2) the
