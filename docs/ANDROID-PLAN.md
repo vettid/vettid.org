@@ -2890,7 +2890,8 @@ vettid-android #145, #146, #153 and #154.*
   their real units and show both ("24 hours (staging: 1 hour)").
   Staging builds add a small "Staging: 1 day = 1 hour" where a scaled
   wait is shown: the owner check, the idle lock, recovery, the old
-  phone's screen and Settings → Security.
+  phone's screen and Settings → Security → Advanced security (0.1.124:
+  the interval, the hold and the idle lock rows).
 
 ### Photo attachments (0.1.39)
 
@@ -7002,8 +7003,9 @@ the hold switch, the idle lock, the app lock timeout (shown while the
 app lock is on), **Attestation**, **New phone secret** (when it
 applies) and **Allow screenshots** (moved from App; turning it on
 still asks first). A notification or link whose target is one of
-these rows ("Settings → Security (the check)", "(the hold)", the idle
-lock, New phone secret) opens Advanced security at that row.
+these rows ("Settings → Security (the check)" opens the interval row,
+"(the hold)" the hold row; the idle lock; New phone secret) opens
+Advanced security at that row.
 
 #### Attestation in detail
 
@@ -7012,26 +7014,35 @@ verification (VAULT-MESSAGING §11.2) of the enclave instance its vault
 runs on, the one the app seals to; never an abandoned move's candidate
 (release N+1) or anything else it only looked at. The record (each
 check's result, the values below and when it was made) is kept as §5
-"What the phone keeps" says, and replaced by the next verification.
+"What the phone keeps" says, and replaced by the next verification of
+that instance; a verification that could not be made (the descriptor
+or the document not fetched) makes no record.
 
 **At the top**, today's introduction (`settings_attestation_body`)
 stays. When there is no record yet: "This phone hasn't verified your
 vault's enclave yet. It does at the next unlock."
-(`settings_attestation_none`), and only **This phone** follows. When
-the last verification failed: a notice "Verification failed"
-(`settings_attestation_failed_title`), "This phone couldn't verify
-your vault's enclave, so it sent it nothing. The check that failed is
-marked below." (`settings_attestation_failed_body`).
+(`settings_attestation_none`), only **This phone** follows, and "Copy
+all" is hidden. When the last verification failed: a notice
+"Verification failed" (`settings_attestation_failed_title`), "This
+phone couldn't verify your vault's enclave, so it sent it nothing. The
+check that failed is marked below." (`settings_attestation_failed_body`).
+A verification refused after line 9, with every line "Passed" (a
+release removed, not active for an enrollment, or older than one this
+phone has used), has the same title with "Every check passed, but this
+phone refused the release: <reason>" (`settings_attestation_refused_body`),
+the reason being the text the unlock shows for that refusal.
 
-**Enclave** (`settings_attestation_section_enclave`, "Enclave"):
+**Enclave** (`settings_attestation_enclave`, today's "Vault enclave"):
 
 | Row | Value |
 |---|---|
 | "Environment" | as today |
-| "Release" | "Release N" and its manifest status (VAULT-MESSAGING §11.10.1) capitalized: "Active", "Deprecated", "Retired" or "Removed", with ", ends <date>" when the entry has `ends_at` |
-| "PCR0", "PCR1", "PCR2" | the full hex, monospaced, wrapped, each with "Copy" (`settings_attestation_copy`; then "Copied", `settings_attestation_copied`) |
+| "Release" | "Release N · <status>" (`settings_attestation_release_value`), the manifest status (VAULT-MESSAGING §11.10.1) capitalized: "Active", "Deprecated", "Retired" or "Removed", with ", ends <date>" (`settings_attestation_ends`) when the entry has `ends_at` |
+| "PCR0", "PCR1", "PCR2" | the full hex, monospaced, wrapped, each with "Copy" (`settings_attestation_copy`; then "Copied", `settings_attestation_copied`), through the clipboard rule of "Copy all" below |
 | "Attested at" | the attestation document's timestamp |
 | "Valid until" | the descriptor's `not_after` |
+
+On screen, dates and times are in the phone's locale and time zone.
 
 A value is shown plainly only when every check it rests on passed:
 the PCRs and "Attested at" on the chain and the hardware signature,
@@ -7050,12 +7061,12 @@ in the order the apps make them, each "Passed"
 
 | # | Line | What the app verified |
 |---|---|---|
-| 1 | "Release list signed by VettID" | the release manifest's signature under a key the app pins (§11.10.1); under it the key id and the manifest's serial |
+| 1 | "Release list signed by VettID" | the release manifest's format, its signature under a key the app pins and its serial not going back (§11.10.1); under it, once this line passed, the key id and the manifest's serial |
 | 2 | "Logged publicly" (0.1.125) | the manifest's entry in the release transparency log (§4 "The release log check"); under it "Log index" and "Logged at" (the entry's integrated time), both of the manifest this verification used |
-| 3 | "Certificate chain to the AWS Nitro root" | the document's certificate chain to the root the app pins; under it "Root fingerprint (SHA-256)": the SHA-256 of the root certificate's DER, as AWS publishes it |
+| 3 | "Certificate chain to the AWS Nitro root" | the document's format (a COSE_Sign1, ES384 and nothing else) and its certificate chain to the root the app pins; under it "Root fingerprint (SHA-256)" (`settings_attestation_root_fingerprint`): the SHA-256 of the root certificate's DER, as AWS publishes it |
 | 4 | "Signed by AWS Nitro hardware" | the document's COSE_Sign1 ES384 signature by the chain's leaf |
-| 5 | "Covers the key this phone encrypts to" | `user_data` = SHA-256("vettid/vms/2/etk" ‖ descriptor) |
-| 6 | "Recent" | the document is less than 26 hours old, and not ahead of the phone's clock beyond the allowance |
+| 5 | "Covers the key this phone encrypts to" | the descriptor's format, and `user_data` = SHA-256("vettid/vms/2/etk" ‖ descriptor) |
+| 6 | "Recent" | the document is less than 26 hours old, and at most 5 minutes ahead of the phone's clock |
 | 7 | "Not a debug enclave" | no debug PCRs |
 | 8 | "Names its own release" | the descriptor's `release` equals PCR0 |
 | 9 | "Within its validity" | `not_after` in the future and at most 24 h + 5 min after the document |
@@ -7076,19 +7087,21 @@ keys and the log's trusted root come from the values built into the
 app, never from the network.
 
 **Release** (`settings_attestation_section_release`, "Release"):
-"Source", the signed tag VAULT-RELEASES names for it
+"Source" (`settings_attestation_source`), the signed tag VAULT-RELEASES names for it
 (`release/prod/N`, on staging `release/staging/N`), as a link to that
-tag's page in the vettid-vault repository; "Reproducible build":
-"Anyone can rebuild this release from its tag and compare the
-measurements." with the link "How to rebuild it"
+tag's page in the vettid-vault repository; "Reproducible build"
+(`settings_attestation_reproducible`): "Anyone can rebuild this release
+from its tag and compare the measurements."
+(`settings_attestation_rebuild_body`) with the link "How to rebuild it"
 (`settings_attestation_rebuild`) to vettid-vault `docs/RELEASING.md`
 at that tag (VAULT-RELEASES §5.2). Both URL patterns are built into
 the app.
 
-**This phone** (`settings_attestation_section_phone`, "This phone"):
-the rows of today's screen for the phone's own key (Android: the key
-attestation level, StrongBox, verified boot; iPhone: IOS-PLAN §4.17),
-then "App version" (version and build).
+**This phone** (`settings_attestation_device`, today's "This phone";
+the iPhone's "This iPhone", IOS-PLAN §4.17): the rows of today's screen
+for the phone's own key (Android: the key attestation level, StrongBox,
+verified boot), then "App version" (`settings_attestation_app_version`;
+version and build).
 
 **Copy all** (`settings_attestation_copy_all`, "Copy all"; then
 "Copied"), at the end: the Enclave, Checks and Release sections as
@@ -7112,8 +7125,10 @@ While the vault verifies a submitted owner check (VAULT-MESSAGING
   offers it (a gated check), which stays enabled throughout: tapping it
   sends `vault.lock` as today, and a check answer that arrives after it
   is dropped;
-- the system back gesture (and swipe) is ignored while a "Check now"
-  is in flight: the request cannot be taken back.
+- the system back gesture (and swipe) is ignored while a check that is
+  not gated is in flight (Check now, the hold-off, the interval
+  change): the request cannot be taken back. A `vault.lock` that fails
+  shows today's notice and retry.
 
 **On a pass:** a green tick and "Check passed" (`ownercheck_passed`),
 a light success haptic, held for 1 second (3 seconds while a screen
@@ -7123,7 +7138,12 @@ back to where the check came from:
 - **Check now** (Settings): Settings;
 - the gated check over the app, and the password-only retry after an
   unlock: the app as it was;
-- the hold-off: Settings, at the hold row.
+- the hold-off: Advanced security, at the hold row;
+- the interval change: Advanced security, at the interval row.
+
+The unlock with the check due (a vault locked and overdue) is the
+unlock screen's own and shows no tick; its password-only retry after a
+failed check is the owner check, and does.
 
 A pass that still needs presence recorded keeps today's screen. Flows
 that are not an owner check (Change name, the credential operations
@@ -7147,16 +7167,30 @@ text, not its color.
 | `settings_attestation_none` | This phone hasn't verified your vault's enclave yet. It does at the next unlock. |
 | `settings_attestation_failed_title` | Verification failed |
 | `settings_attestation_failed_body` | This phone couldn't verify your vault's enclave, so it sent it nothing. The check that failed is marked below. |
-| `settings_attestation_section_enclave` / `_checks` / `_release` / `_phone` | Enclave / Checks / Release / This phone |
+| `settings_attestation_enclave` (today's) | Vault enclave |
+| `settings_attestation_section_checks` / `_release` | Checks / Release |
+| `settings_attestation_device` (today's; iPhone `ios_settings_attestation_device`) | This phone (This iPhone) |
+| `settings_attestation_refused_body` | Every check passed, but this phone refused the release: %s |
+| `settings_attestation_release_value` (today's) | Release %1$d · %2$s |
+| `settings_attestation_ends` | , ends %s |
+| `settings_attestation_root_fingerprint` | Root fingerprint (SHA-256) |
+| `settings_attestation_source` | Source |
+| `settings_attestation_reproducible` | Reproducible build |
+| `settings_attestation_rebuild_body` | Anyone can rebuild this release from its tag and compare the measurements. |
+| `settings_attestation_app_version` | App version |
 | `settings_attestation_as_of` | as of %s |
 | `settings_attestation_check_passed` / `_failed` / `_not_run` | Passed / Failed / Not checked |
 | `settings_attestation_not_verified` | Not verified |
 | `settings_attestation_copy` / `_copied` / `_copy_all` | Copy / Copied / Copy all |
 | `settings_attestation_rebuild` | How to rebuild it |
-| the check lines (ten from 0.1.125), the row labels | as in the tables above |
+| the check lines (ten from 0.1.125), the other row labels | as in the tables above |
 | `settings_attestation_log_index` / `_logged_at` (0.1.125) | Log index / Logged at |
 | `release_log_update_app` (0.1.125) | Update the app to continue. This version can't check VettID's latest release list. |
 | `release_log_failed` (0.1.125) | VettID's release list could not be checked against the public log. Try again. |
+
+The new keys replace today's `settings_attestation_release` ("Last
+verified release", now the "Release" row) and `settings_attestation_version`
+("Attestation version", now "App version"); the others stay.
 | `ownercheck_checking` | Checking with your vault… |
 | `ownercheck_passed` | Check passed |
 
@@ -7166,19 +7200,23 @@ text, not its color.
   opening as before; a notification for a moved row opens Advanced
   security at it.
 - Attestation: a verification that passed shows every check "Passed";
-  one failed at each check shows it "Failed" and the later ones "Not
-  checked"; a failed manifest signature shows only line 1 "Failed";
+  one failed at each check (including the format errors of lines 1, 2
+  and 4, a non-ES384 document and a manifest serial going back) shows
+  it "Failed" and the later ones "Not checked"; a refusal after line 9
+  shows every line "Passed" and its reason; a failed manifest signature
+  shows only line 1 "Failed", without the key id and serial;
   no "Passed" without a recorded pass; the values resting on a failed
   check say "Not verified"; no record shows the empty state; the
   fingerprint and key ids equal the pinned values; "Copy all" holds
   exactly the three sections shown, with no phone row, no check time,
-  no email, name, device name or key id.
+  no email, name or device name, and no App Attest or device key id
+  (the manifest key id, shown on line 1, is copied).
 - Owner check: the checking state while waiting; **Lock vault**
   enabled and working during it, with a late answer dropped; the back
   gesture ignored during "Check now"; the tick, the hold, the
   announcement and the return on each pass path; the presence-needed
   pass unchanged; each failure back to the form; "probably locked" to
-  its screen.
+  its screen; the back gesture ignored during each non-gated check.
 
 ### The release log check (0.1.125)
 
