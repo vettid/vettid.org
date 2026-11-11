@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.68
+version: 0.1.69
 date: 2026-11-11
 changelog:
+  - 0.1.69: 2026-11-11, **for the owner's approval** (ANDROID-PLAN 0.1.125, VAULT-MESSAGING 0.89.0 §11.10.1, VAULT-RELEASES 0.1.36 §7.1; owner decision a, GC #8494). The iPhone requires the release transparency log as Android does: a manifest is trusted only with a valid entry, checked offline against a trusted root built into the app, from the channel's cutover serial; "Logged publicly" on the attestation screen. §4.18: where the check and the pinned values live on the iPhone.
   - 0.1.68: 2026-11-11 (ANDROID-PLAN 0.1.124; owner decisions a, GC #8451 and #8476). The iPhone follows ANDROID-PLAN §4 "Advanced security, attestation in detail and the check's progress": Advanced security in Settings, the attestation in detail with "Copy all", and the owner check's "Checking with your vault…" and "Check passed". §4.17: what the iPhone shows for itself, the haptic and the clipboard.
   - 0.1.67: erratum, 2026-11-11 (ANDROID-PLAN 0.1.123, VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). §4 Calls: after a glare, the iPhone answers the winning call with its own call's media, as Android does: no camera by itself.
   - 0.1.66: erratum, 2026-11-10, as built (vettid-ios #241, in review; the container-read audit, GC #7243). §4 History export, §4.16 and §6.9: the History export, as the vote proof already does, writes its file to a directory of its own in tmp/ with complete protection, hands it over as a copy (`UIDocumentPickerViewController(forExporting:asCopy: true)`), and removes it on every answer, on a failure, when the screen leaves, when the §4.4 (1) cover closes the picker, at launch and when the screen opens again. SwiftUI `.fileExporter` is not used: it leaves its file in tmp/ with default protection. Complete protection helps only while the iPhone is locked; on an unlocked phone the defense is that the file is short-lived. Not yet: removal when the app goes to the background (a vettid-ios follow-up). The photo share sheet is unchanged: it hands the system bytes, no file.
@@ -1910,6 +1911,29 @@ iPhone:
   spoken or 1 second, whichever is later.
 - **Advanced security** is a pushed screen of the Settings stack, with
   the back arrow and the system back gesture (ID14).
+
+### 4.18 The release log check (0.1.69)
+
+As ANDROID-PLAN §4 "The release log check" (0.1.125): the same rule
+(VAULT-MESSAGING §11.10.1 "The release log check"), the same messages
+and string keys, the same "Logged publicly" line, and the same tests
+and vectors. On the iPhone:
+
+- **Pinned values** live in `VettIDAttestation` beside the manifest keys,
+  per configuration:
+  - the trusted root, a bundled resource: Sigstore's public instance for
+    Release, its staging instance for Staging;
+  - the cutover serial.
+
+  They are not in an xcconfig a build setting could override. The
+  release check of I0.1 fails an archive whose trusted root is the
+  other environment's.
+- **The verifier** is Swift, with CryptoKit (P-256, SHA-256) and a small
+  ASN.1 DER reader for the RFC 3161 token. No network and no third-party
+  Sigstore library: what it parses is fixed by the profile.
+- **The check** runs in the manifest manager and the canary manifest
+  path, at the same point as on Android: after the signature and the
+  format, and before the serial is stored or the manifest is used.
 
 ## 5. Architecture
 

@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.16
+version: 0.89.0
 date: 2026-11-11
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -21,13 +21,24 @@ related:
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - BALLOT-PROTOCOL.md (0.13.11; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at 8940571, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.11.1, unchanged since)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
-  - VAULT-RELEASES.md (0.1.34; 0.1.6 approved 2026-10-04)
+  - VAULT-RELEASES.md (0.1.36 §7.1, the release transparency log; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.6; D3, D4, D5; §4 the automation CA)
   - VAULT-HOST-PROTOCOL.md (0.1.16; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.89.0: 2026-11-11, **for the owner's approval** (owner decision a, GC
+    #8494; VAULT-RELEASES 0.1.36 §7.1). §11.10.1: the served document
+    gains `tlog`, the Sigstore bundle of the manifest signature's Rekor
+    entry (the profile of §10.19.4), and its limit becomes 106,496 bytes
+    for parsers (publishers stay within 90,112 until no supported parser
+    has the old limit). New "The release log check": apps verify `tlog`
+    offline against a pinned trusted root before trusting a manifest
+    (served or canary) and refuse a manifest without a valid one; builds
+    pin a cutover serial per channel and refuse manifests below it. The
+    vault, the parent and the manifest sync ignore `tlog`. Additive for
+    every parser that ignores unknown members
   - 0.88.16: 2026-11-11, erratum (owner decisions 2026-11-11, GC #8361 a and
     #8374 a: bind both parties into form 2 before release C2, in which form
     2 first ships; vettid-vault #226; numbered after #574 and merged after
@@ -20091,8 +20102,15 @@ they carry its hash (§11.5, "Manifest by hash").
 **The served document** wraps the exact manifest bytes:
 
 ```json
-{ "manifest": "<b64 exact manifest bytes>", "sig": "<b64 64 bytes>", "key_id": "<16 hex>" }
+{ "manifest": "<b64 exact manifest bytes>", "sig": "<b64 64 bytes>", "key_id": "<16 hex>",
+  "tlog": "<b64 exact Sigstore bundle bytes>" }
 ```
+
+`tlog` (0.89.0) is the bundle of the signature's entry in the release
+transparency log ("The release log check", below; VAULT-RELEASES §7.1).
+The signature does not cover it, and cannot: the entry is made from the
+signature. Documents signed before a channel's cutover serial have no
+`tlog`.
 
 ```
 sig    = ECDSA-P256-SHA256(manifest_key, "vettid/pcr-manifest/1" || 0x00 || manifest_bytes)
@@ -20102,10 +20120,16 @@ key_id = hex(SHA-256(SubjectPublicKeyInfo DER of the public key)[0:8])
 
 - Signatures are verified over the exact bytes, so no JSON
   canonicalization is needed.
-- The served document is at most **90,112 bytes**.
+- The served document is at most **90,112 bytes**. (0.89.0) Parsers
+  that read `tlog` accept up to **106,496 bytes**, of which the decoded
+  bundle is at most 16,384. Publishers keep the served document within
+  90,112 bytes while any supported parser (an app build, the vault, the
+  parent, the manifest sync) still has the old limit (VAULT-RELEASES
+  §7.1). The vault, the parent and the manifest sync ignore `tlog`.
 - **How apps learn the manifest** (unchanged by 0.10.0): before each
   enroll and unlock they fetch the served document from the URL above,
-  verify it (signature, strict format, the serial rule), store the
+  verify it (signature, strict format, the serial rule and, from 0.89.0,
+  the release log check below), store the
   highest `serial` seen and send `manifest_sha256` = hex(SHA-256(manifest
   bytes)) and `manifest_serial` in the request. On a `manifest` result
   they refetch and retry once. The one exception is a canary manifest
@@ -20156,6 +20180,61 @@ key_id = hex(SHA-256(SubjectPublicKeyInfo DER of the public key)[0:8])
   s+1, §13.2). If the canary fails, the vault unlocks again once VettID
   publishes s+2 (VAULT-RELEASES §10.1, "If the canary fails"). §13.9
   describes the risk this path leaves.
+- **The release log check** (0.89.0; VAULT-RELEASES §7.1). Each app build
+  pins, per channel:
+  - `release_log_trusted_root`: a Sigstore TrustedRoot JSON document, of
+    which it uses `tlogs[]` and `timestampAuthorities[]`. Production's
+    is Sigstore's public instance and staging's its staging instance.
+  - `release_log_from_serial`: the channel's cutover serial `C`.
+
+  Both are built in, never fetched, and change only with an app release.
+  A build that pins them checks every manifest it would use, served or
+  canary. It checks after the signature and the strict format, and
+  before the serial rule stores anything or the manifest is used for an
+  enroll, an unlock, a recovery register or a canary installation:
+  1. **The serial.** A manifest whose `serial` is below `C` is refused.
+  2. **The bundle.** `tlog` is present. Decoded, it is at most 16,384
+     bytes and parses strictly as the Sigstore profile of §10.19.4: a
+     v0.3 bundle with exactly one Rekor v1 `hashedrekord` 0.0.1 entry
+     (its inclusion proof and checkpoint, and its signed entry
+     timestamp) and exactly one RFC 3161 timestamp, with no
+     certificates.
+  3. **The entry is this signature.** The entry's digest is `sha256`
+     and equals SHA-256(`"vettid/pcr-manifest/1"` || 0x00 || manifest
+     bytes). Its public key is a `PUBLIC KEY` block whose
+     SubjectPublicKeyInfo equals the pinned manifest key that `key_id`
+     selects. Its signature, decoded from DER, is the same r and s as
+     `sig`.
+  4. **The log.** The inclusion proof verifies from the entry's leaf
+     hash to the checkpoint's root. The checkpoint is signed by a log
+     key of the pinned root, and its origin names that log. The signed
+     entry timestamp verifies under the same key. Each key must be
+     valid at the entry's integrated time `t_int`.
+  5. **The timestamp.** The RFC 3161 token is over the signature and
+     verifies under a timestamp authority of the pinned root, valid at
+     its `genTime` `t_tsa`. `−60 s ≤ t_int − t_tsa ≤ 600 s`, both
+     truncated to whole seconds, and `t_tsa` is not before the
+     manifest's `issued_at` − 300 s. The phone's clock is not used, so
+     a wrong phone clock cannot fail the check.
+
+  Any failure means the manifest is **not trusted**. It is handled as a
+  manifest whose signature fails: the app refetches once, and does not
+  proceed. The enroll, unlock or register does not start (no PIN is
+  sent), and a canary manifest is not installed, or is removed, as
+  above. The app never falls back to a manifest without a valid entry,
+  and a canary manifest never masks a failed served one. The member is
+  told plainly, and the app keeps trying:
+  - a log key or timestamp authority that the pinned root lacks
+    (Sigstore rotated a key, or the log moved): **"Update the app to
+    continue"**. This build cannot check the release list, and a newer
+    build can;
+  - any other failure: **"VettID's release list could not be checked
+    against the public log"**, with a retry.
+
+  Neither is shown as the vault being unsafe or locked. The app keeps
+  the verified entry's log index and integrated time with the manifest,
+  for the attestation screen. Builds that do not pin these values
+  ignore `tlog`.
 - The **manifest key** is an ECDSA P-256 key held by VettID in a hardware
   key store and used for nothing else. Its public key is **pinned in every
   app and in every release image**. Apps and images MAY pin two keys to

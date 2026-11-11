@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.124
+version: 0.1.125
 date: 2026-11-11
 changelog:
+  - 0.1.125: 2026-11-11, **for the owner's approval** (owner decision a, GC #8494; VAULT-MESSAGING 0.89.0 §11.10.1 "The release log check", VAULT-RELEASES 0.1.36 §7.1). The app trusts a release manifest only with a valid entry in the release transparency log, checked offline against a trusted root built into the app, from the channel's cutover serial. The attestation screen gains "Logged publicly" after "Release list signed by VettID". New §4 "The release log check": pinned values, messages, the order of checks and tests. Ships only after the channel's cutover serial is served.
   - 0.1.124: 2026-11-11 (owner decisions a, GC #8451 and #8476). Settings → Security keeps the rows used often and moves the rest behind **Advanced security**; the attestation screen shows each link of the chain, one line per check the app performs (passed, failed or not checked), the release's source and this phone, with "Copy all"; the owner check shows "Checking with your vault…" while the vault verifies, then "Check passed". §4 "Advanced security, attestation in detail and the check's progress"; the Settings and Owner check rows.
   - 0.1.123: erratum, 2026-11-11 (VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). "Video in calls (C4)": after a glare, the phone that answers the winning call without asking (`superseded_by`) answers with its own call's media, so an audio call never turns on the camera by itself.
   - 0.1.122: erratum, 2026-11-07 (RELEASE-UPDATES 0.3.4; owner decision a, Ground Control thread 01M6SQ6VMNMB0C2CRPNZYNWKBB). §4 "Vault update" and "What's new": on the unlock screen the PIN keypad and Unlock come first; the release offer below them is a compact notice ("Update available: release N", the security line, the fingerprint and "Approve the update with this unlock"), with "What's new in release N" as a link that opens a sheet holding the full What's new, "Also in earlier releases" and Full release notes. Approving does not require opening the sheet. The security line comes from the release log like the rest of What's new: while it loads, the notice shows the progress line, and if it can't be had, "Release notes unavailable"; approval stays enabled either way. `security_text` stays in the sheet. The update screen is unchanged. Existing texts only (Android's `unlock_offer_title` and `unlock_offer_approve` already hold "Update available: release N" and "Approve the update with this unlock").
@@ -7036,14 +7037,15 @@ order the app makes them (VAULT-MESSAGING §11.2 steps), each with
 | "Within its validity" | `not_after` in the future and at most 24 h + 5 min after the document |
 | "Measurements match a signed release" | release = PCR0, and PCR0–2 equal to an entry of the release manifest |
 | "Release list signed by VettID" | the manifest's signature under a key the app pins; under it the key id and the manifest's serial |
+| "Logged publicly" (0.1.125) | the manifest's entry in the release transparency log, checked as §4 "The release log check" says; under it "Log index" and "Logged at" (the entry's integrated time) |
 
 A line says "Passed" only for a check this phone made and passed in
 that verification; the app never shows "Passed" for a check it skipped
 or inferred. A verification that failed shows its failed check
-"Failed" and every later check "Not checked". The root fingerprint and
-the manifest keys come from the values built into the app, never from
-the network. The apps do not check a transparency log for enclave
-releases (none is specified), so there is no such line.
+"Failed" and every later check "Not checked". The root fingerprint,
+the manifest keys and the log's trusted root come from the values
+built into the app, never from the network. (0.1.125: until the build
+that requires the release log, there is no "Logged publicly" line.)
 
 **Release** (`attestation_section_release`): "Source", the signed tag
 VAULT-RELEASES names for it (`release/prod/N`, on staging
@@ -7097,6 +7099,68 @@ starts and "Check passed" on a pass.
 - Owner check: the checking state while waiting; the tick, the
   announcement and the return on a pass; the presence-needed pass
   unchanged; each failure back to the form.
+
+### The release log check (0.1.125)
+
+The app trusts a release manifest only if it is in VettID's release
+transparency log (VAULT-RELEASES §7.1). The check is normative in
+VAULT-MESSAGING §11.10.1 "The release log check". On Android:
+
+- **Pinned values**, per build flavour, beside the manifest keys in
+  `core/attestation` (`manifest/ManifestKeys.kt`):
+  - `RELEASE_LOG_TRUSTED_ROOT`, a Sigstore TrustedRoot JSON as a raw
+    resource: production's is Sigstore's public instance, staging's its
+    staging instance;
+  - `RELEASE_LOG_FROM_SERIAL`, the channel's cutover serial.
+
+  Both are set in the PR that turns the check on, once the channel's
+  cutover serial is served, and changed only by an app release. Never
+  fetched, never overridable in a release build.
+- **Where:** in `ReleaseManifestManager`, after the signature and the
+  strict format and before the serial is stored. It also covers
+  `CanaryManifest` (installation and every selection). The app gains
+  its first Sigstore bundle verifier (the votes bundles are checked by
+  the vault, not the app): bundle parsing, Merkle inclusion, the
+  checkpoint and signed entry timestamp, and RFC 3161, verified
+  against the pinned root alone, with no network.
+- **Messages** (VAULT-MESSAGING §11.10.1):
+  - `release_log_update_app`: "Update the app to continue. This version
+    can't check VettID's latest release list." with a link to where
+    this build was installed from (§7 "Signing and the two
+    distributions");
+  - `release_log_failed`: "VettID's release list could not be checked
+    against the public log. Try again." with Retry.
+
+  Both appear where a manifest error appears today (the unlock, enroll
+  and recovery screens). Neither says the vault is unsafe, locked or
+  gone, and no PIN is sent.
+- **Stored:** the verified entry's log index and integrated time, with
+  the last served manifest (public values, §5 "What the phone keeps").
+- **The attestation screen:** "Logged publicly", after "Release list
+  signed by VettID" (above).
+
+#### Tests
+
+- The vectors (`core/attestation/src/test/…`): a staging served
+  document with its `tlog`, which passes. Each of these fails:
+  - `tlog` missing, too large or malformed;
+  - a digest of other bytes, or one without the `vettid/pcr-manifest/1`
+    prefix;
+  - another key, or the right key inside a certificate;
+  - a signature that isn't `sig`;
+  - a broken inclusion proof, or a checkpoint signed by an unpinned key;
+  - a bad signed entry timestamp;
+  - a timestamp from an unpinned authority, or a `t_int − t_tsa` out of
+    range;
+  - a serial below the cutover.
+
+  An unpinned log key gives the "Update the app" message.
+- A canary manifest without a valid `tlog` is not installed, and an
+  installed one that loses it is removed.
+- The phone's clock set a year ahead or behind doesn't change any
+  result.
+- The attestation screen: the line passes with the log index shown,
+  fails at its place, and is "Not checked" after an earlier failure.
 
 ## 5. Architecture
 

@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.35
-date: 2026-11-05
+version: 0.1.36
+date: 2026-11-11
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -274,6 +274,18 @@ changelog:
     their release is removed, weeks after it is cut, not right after use; §11.1's
     shared relay stays (D11), not "at first" (STAGING-DEVELOPMENT-PLAN
     §7); no rule changes
+  - 0.1.36: **for the owner's approval** (owner decision a, GC #8494,
+    2026-11-11; with VAULT-MESSAGING 0.89.0, ANDROID-PLAN 0.1.125 and
+    IOS-PLAN 0.1.69). New §7.1, **the release transparency log**: every
+    manifest serial signed, in every channel, is logged in Rekor as the
+    manifest's own signature (the Sigstore profile pinned for votes); the
+    served document carries the entry's bundle (`tlog`); the apps verify
+    it offline against a pinned trusted root before trusting a manifest
+    and refuse a manifest without a valid one, from a cutover serial per
+    channel; the release list keeps a record of every signed serial; a
+    monitor alarms to the owner on any entry under a manifest key that
+    is not in that record. §10.1 steps 9 and 10, §13 W12 and §14 risk 13
+    follow
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.37.0) §11.10 release updates, §11.10.8 release constants, §12.5 deletion, §13.5, §13.9
@@ -284,6 +296,7 @@ related:
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
   - VAULT-HOST-PROTOCOL.md (0.1.6) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
+  - votes docs/VOTES-SITE.md §7 "The Rekor check" — the monitor §7.1 reuses
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -1253,6 +1266,179 @@ production carries `log`):
   rewritten. Production has nothing to backfill: release 1 is not
   published and its entry already needs `log` (W10-READINESS step 5).
 
+### 7.1 The release transparency log (0.1.36)
+
+**Why** (owner decision a, GC #8494, 2026-11-11). A phone trusts an
+enclave when its attestation matches an entry of a manifest signed under
+a key the app pins (VAULT-MESSAGING §11.2, §11.10.1). Whoever holds a
+manifest key could therefore list a release, serve that manifest to some
+phones, and have them trust it without the release ever being public.
+From the cutover (below), a manifest is trusted only if it is also in a
+public transparency log, and VettID watches that log for manifests it
+did not sign. The log does not stop a key holder; it makes every use of
+the key public, and the monitor makes VettID see it.
+
+**What is logged: the manifest's own signature.** Every served document
+that `vault:manifest sign` produces, for every serial and in every
+channel (a canary that is never published included), gets one Rekor
+entry. The entry is a **Rekor v1 `hashedrekord` 0.0.1** entry whose:
+
+- digest is `log_digest` = SHA-256(`"vettid/pcr-manifest/1"` || 0x00 ||
+  manifest bytes), the exact message the manifest signature covers
+  (VAULT-MESSAGING §11.10.1);
+- signature is the served document's `sig`, the same r and s encoded as
+  ASN.1 DER (Rekor's encoding; `sig` stays IEEE P1363);
+- public key is the manifest key that `key_id` names, as a PEM `PUBLIC
+  KEY` block (the bare SubjectPublicKeyInfo, never in a certificate).
+
+So the entry is the existing signature made public: no new signature,
+no new message under a manifest key, and the key's one domain
+(`vettid/pcr-manifest/1`) is unchanged. The manifest bytes hold each
+listed release's number, PCR0–2, sealing key, status and dates, so the
+entry commits to all of them. A release's tag and commit are not in the
+manifest. They are in the release list and the release log (§7), and
+the reproducible build binds them to PCR0 (§5). Why not one entry per
+release: it would need the manifest key to sign a second kind of
+message (or a further key for the apps to pin), and what an app trusts
+is the manifest, not a release on its own.
+
+**Profile and instances.** The profile is exactly the Sigstore profile
+pinned for votes (VAULT-MESSAGING §10.19.4 "The Sigstore profile",
+BALLOT-PROTOCOL §8.5): a Sigstore bundle v0.3 with one `hashedrekord`
+0.0.1 entry of a Rekor v1 log (with its inclusion proof and signed
+checkpoint), its signed entry timestamp, and one RFC 3161 timestamp over
+the signature. The bundle holds no certificates; the log keys and the
+timestamp authority's chain come from a pinned Sigstore TrustedRoot.
+Production logs in Sigstore's public instance (`rekor.sigstore.dev` and
+its timestamp authority); staging logs in its staging instance
+(`rekor.sigstage.dev`), as votes does (VOTES-SITE §7), so the whole path
+is tested on staging first.
+
+**Signing, logging, then the served document.** `vault:manifest sign`
+(§6.1, §7 "As built") gains these steps after it signs:
+
+1. Get an RFC 3161 timestamp over the signature from the instance's
+   timestamp authority, then submit the entry (it stamps first, then
+   logs, as the votes anchorer does). Rekor answers `409` when the same
+   entry exists (a retry after a lost answer); the existing entry is
+   fetched and used.
+2. Verify the bundle offline, exactly as an app does (VAULT-MESSAGING
+   §11.10.1 "The release log check"), against **each** trusted root that
+   an app build still supported in that channel pins
+   (`vault/release-log/<channel>/*.json`, one Sigstore TrustedRoot JSON
+   file per root, added and removed by PR). One that any of them would
+   refuse stops the sign step: a member's app must never be the first
+   to find out that a log key changed (§14 risk 13).
+3. Write the served document with the bundle as `tlog` (base64 of the
+   exact bundle bytes, VAULT-MESSAGING §11.10.1) under `local/`, as
+   today, and add the serial's row to the record (below).
+
+If logging fails, the sign step fails and writes no served document.
+The serial is spent (`signed_serial` was raised first) and the next
+attempt signs the next one, as for any serial never published (§7).
+`upload` (the bucket copy, a canary) and `publish` take the served
+document with its `tlog`; the canary tester's file therefore carries
+it too (§10.1 "The canary manifest on the test phone").
+
+**The record of signed manifests.** Each channel's release list gains
+`signed`, an array with one row per serial ever signed after the
+cutover, in serial order, written only by the sign step:
+
+```json
+{"serial": 41, "key_id": "<16 hex>", "manifest_sha256": "<64 hex>",
+ "log_digest": "<64 hex>", "uuid": "<80 hex>", "log_index": 123456789,
+ "integrated_time": "<RFC 3339, whole seconds>"}
+```
+
+`check:manifest` checks that the rows only grow across the file's git
+history (none removed or changed), that their serials strictly increase
+and the last one equals `signed_serial`, and that every committed
+version of the served file has a `tlog` whose entry is its serial's
+row, from the cutover on. This record, public in this repository, is
+what the monitor compares the log with.
+
+**Cutover, per channel.** Releases already published keep working. They
+are listed in every later manifest, and each later manifest is logged.
+What changes is which **manifests** an app accepts:
+
+1. The sign step built by W12 logs every serial signed from then on. The
+   first such serial of a channel is that channel's **cutover serial**
+   `C`. The served document gains `tlog` at that channel's next
+   publication. App builds without the check ignore the new member, so
+   nothing breaks.
+2. Production has published nothing yet (§7 "As built"), so its `C` is
+   its first serial signed after step 1. Production release 1's canary
+   is logged like any other serial. Staging's `C` is its first serial
+   signed after step 1.
+3. App builds that require the log pin `C` per channel
+   (`release_log_from_serial`) and ship only after `C` is served in
+   that channel. They refuse a manifest with a serial below `C`: it was
+   never logged, and accepting one would let an old signature skip the
+   log. Every manifest at or above `C` needs a valid `tlog`.
+
+App builds from before the check still accept any manifest that verifies
+as today. The log protects members once they run a build that requires it.
+
+**The monitor.** VettID watches, per channel, the Rekor instance that
+channel logs in. It looks for entries whose public key is that channel's
+manifest key (production: keys A and B; staging: the staging key),
+compared as SubjectPublicKeyInfo, never as PEM bytes. It alarms to the
+owner (the owner's alerts email) on:
+
+- **`unknown manifest`:** a verified entry under a manifest key whose
+  entry ID is not a row of `signed`. That covers both cases below.
+  - A digest VettID never signed: the key was used without the record.
+  - A known digest with another entry ID. ECDSA signatures differ every
+    time, and Rekor refuses a second identical entry, so only the key
+    can produce a second entry for the same digest.
+- **`wrong kind`:** an entry under a manifest key that is not a
+  `hashedrekord` 0.0.1 entry over a `sha256` digest whose signature
+  verifies under that key.
+- **`missing entry`:** a row of `signed` whose entry the log no longer
+  returns, or that no longer verifies.
+
+It also raises the votes monitor's search, freshness, shard,
+unavailability and state alarms. Its method is the votes monitor's Rekor
+check (VOTES-SITE §7 "The Rekor check"), with the manifest keys as its
+keys and the `signed` rows as its known entries:
+
+- production: a search of Rekor's index by key, best effort, with its
+  canary (each row's entry must be among the results);
+- staging: a full scan of the staging log;
+- for both: the verified store, the checkpoint pin, pacing, the
+  heartbeat alarm, an acknowledged list the owner approves, and
+  clearing by owner-run jobs.
+
+It runs at least hourly. W12 builds it, either beside the votes
+monitor's Rekor check or as its own job. Either way, it reads only
+public data and never assumes a role in the account that holds key A.
+
+What the monitor can and cannot see follows from what the apps accept:
+
+- **What an app accepts is findable.** An app accepts only an entry
+  whose key is a bare `PUBLIC KEY` block equal to a pinned manifest
+  key. Rekor's index holds such an entry under that key, so production's
+  search can find it. An entry whose key is wrapped in a certificate is
+  indexed under the certificate and could escape the search, but the
+  apps refuse it.
+- **Not guaranteed (VOTES-SITE §7 "Not guaranteed"):**
+  - the index is best effort, so production's search could miss a
+    single entry;
+  - Rekor v1 has no witnesses, so a split view (a log that shows phones
+    one tree and the monitor another) is not detected;
+  - an entry in another log is not seen, but the apps don't trust any
+    other log.
+- **Detection, not prevention.** A phone that has been served a manifest
+  logged by a key thief accepts it; the theft becomes public and the
+  owner hears of it within about an hour.
+
+**What the enclave does.** Nothing new. The vault takes the manifest by
+hash from the app's request (VAULT-MESSAGING §11.5), and the app has
+already required the log entry before sending its PIN. Checking the log
+in the enclave would need trusted roots in every release image, kept
+current for the life of each release, and would add no protection
+beyond the app's check.
+
 ## 8. Infrastructure
 
 ### 8.1 Accounts
@@ -1991,8 +2177,8 @@ job's vault deletion. Order (W4):
 | 6 | Deploy `VettidOrgVaultStack` (creates the key); `vaultctl keycheck` against the draft manifest | owner | key ARN in `vault/releases/prod.json` |
 | 7 | Deploy `VettidOrgVaultRelease<N>Stack` (AMI with EIF verified against measurements; group min 0, canary 1) | owner | instance |
 | 8 | Hardware self-test on the canary host (`vault-parent -selftest` against the host stack's deletable smoke key), then normal start | SSM | PASS report |
-| 9 | Canary: sign manifest `serial` s+1 with N `active` but **do not publish**; the registry row is `canary`, routed only for flagged test members (W8 adds this to the member API); canary member enrolls into N, unlocks, locks; the oldest live release's canary vault moves into N (§11.3); soak 24 h | owner, test device | canary report |
-| 10 | Publish: commit the signed manifest (N `active`, N−1 `deprecated`, any `retired`/`ends_at` changes), the release log entry, `deploy:site`; manifest sync updates routing | owner | live |
+| 9 | Canary: sign manifest `serial` s+1 with N `active` (the sign step logs it in Rekor and records it in `signed`, §7.1) but **do not publish**; the registry row is `canary`, routed only for flagged test members (W8 adds this to the member API); canary member enrolls into N, unlocks, locks; the oldest live release's canary vault moves into N (§11.3); soak 24 h | owner, test device | canary report |
+| 10 | Publish: commit the signed manifest with its `tlog` (§7.1; N `active`, N−1 `deprecated`, any `retired`/`ends_at` changes), the release log entry, `deploy:site`; manifest sync updates routing | owner | live |
 | 11 | Previous release group to minimum 0; the always-on minimum moves to N (O7) | owner | |
 | 12 | In-app prompts follow from the manifest, with What's new from the log (ANDROID-PLAN §4); no email for a routine release | — | |
 
@@ -2286,6 +2472,7 @@ release's method until its sealing key is deleted.
 | W9 | Staging stand-up, release S1/S2, hardware tests, capacity measurement, retirement drill (7 days wall time) | both | 3 d |
 | W10 | Production release 1 with the canary (blocked on the signed Android build), RUNBOOK "Vault" section | both | 2 d |
 | W11 | Release notes on every channel (§7, owner request 2026-10-10): `log` and log `notes` required in every channel; the staging log; check:manifest for both logs; notice email links (§3.5) and per-stage log URLs; the S1–S9 backfill; MEMBER-API "Vault release notices" and RUNBOOK ("Staging", "Adding a release") updated as built. The app's side is ANDROID-PLAN 0.1.31 | vettid.org, vettid-android | 1.5 d |
+| W12 | The release transparency log (§7.1, 0.1.36): the sign step's timestamp, entry and offline check against `vault/release-log/<channel>/`; `tlog` in the served document; `signed` and its `check:manifest` rules; the monitor and its alarm; staging first, then production (production on the owner's go); RUNBOOK "Publishing a manifest" and the monitor's alarms. The apps' side is ANDROID-PLAN 0.1.125 and IOS-PLAN 0.1.69, shipped only after the channel's cutover serial is served | vettid.org, votes, vettid-android, vettid-ios | 4–6 d |
 
 About 25–30 engineering days, plus the Android dependency for W10.
 W4 can go any time; W2 and W3 can run beside W1; W5–W8 follow W3.
@@ -2334,6 +2521,22 @@ W4 can go any time; W2 and W3 can run beside W1; W5–W8 follow W3.
     VettID builds its own from kernel.org source (§5.1, once the lock
     adopts it); that kernel is tested on Nitro only by VettID's
     hardware runs, so every kernel change needs one.
+13. **The release log is a dependency the apps fail closed on** (0.1.36,
+    §7.1). The apps check the log offline, so a Rekor outage only delays
+    signing, never an unlock. The risk is the trusted roots changing.
+    - **A new log key or shard.** The roots pinned in a build don't
+      cover it, so that build refuses every new manifest. The sign step
+      catches this before anything is served: it checks each new bundle
+      against every root a supported build pins.
+    - **Rekor v1 freezing.** The profile names v1 `hashedrekord` 0.0.1,
+      which Rekor v2 doesn't hold, and v2 has no search for the monitor.
+      Moving to v2 is a change of this profile, the votes profile and
+      the monitor together. It ships in app builds before the first
+      manifest that needs it.
+
+    Until then, a build that can't verify a new manifest's log key tells
+    the member to update the app (VAULT-MESSAGING §11.10.1). It never
+    falls back to an unlogged manifest.
 
 ## 15. Owner decisions
 
