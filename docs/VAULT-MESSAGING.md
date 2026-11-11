@@ -35,7 +35,10 @@ changelog:
     `hs.fin` opens under an epoch newer than the one that `hs.init`
     named, with a later inner `ts` (not a restore's answer, nor a fork
     sign's: a reconnect naming a replaced line's epoch or one older than
-    the confirmed epoch). §6.3.2 R29-T2 gains its tests. §3.4.1
+    the confirmed epoch). §6.3.2 R29-T2 gains its tests; the §3.4.1
+    liveness table's "`hs.fin` awaited (responder's answer)" and
+    "Crossing" rows name it. A service vault follows it on either side.
+    Built in vettid-vault #219. §3.4.1
     Residuals, "A stale reconnect answer after a rekey's confirmation",
     is closed by it, and §6.3.1 Initiator's "I's open reconnects end at
     its rekey's confirmation" points to it.
@@ -5154,7 +5157,8 @@ each recipient Q).
   `I` can still rekey toward `R`, and nothing is lost or split. (0.88.9)
   Closed: `R` abandons such an answer at `I`'s next message under the newer
   epoch (§6.3.1 Responder, "A stale reconnect answer ends at a later
-  message"); it still waits for `L` if `I` sends nothing more.
+  message"); it still waits for `L` if `I` sends nothing more, and so does
+  an answer the rule keeps (a restore's or a fork sign's).
 - (0.88.2) **A stale rekey `hs.init` redelivered after a reconnect.** `R`
   drops its open rekey answers when it establishes `I`'s reconnect
   (§6.3.1 "A reconnect ends R's rekey answers"), but a rekey `hs.init` of
@@ -5380,12 +5384,12 @@ that refuses, within `U`.
 | Wait | Ended by | Bound under A3 / hard bound | Why it cannot form a cycle |
 |---|---|---|---|
 | `hs.resp` awaited (initiator) | `hs.resp`; "Own `th1` higher" (§6.6, §6.5); a verified `hs.fin` for this side's answer ("A verified `hs.fin` comes first"); H5, S5 | 2`U` / 16 days | A responder answers without waiting for anything of its own. §6.6 requires it ("answers the peer's reconnect `hs.init` as usual, even while its own is open"), and §6.5 does the same for rekeys. Once λ = 0, an honest side refuses an `hs.init` only if it has itself sent `hs.fin`: its own reconnect is pending ("Accepting `ctx`"), or it is a pending initiator that drops an earlier crossing rekey (§6.3.1 "Crossing"). That `hs.fin` reaches the waiting side within `U` (next row). |
-| `hs.fin` awaited (responder's answer) | a verified `hs.fin` (§6.3.1 Responder); `L`; rule J; H5, S5; (0.88.2) its `hs.resp` answered `token_revoked` (§6.3.1 "A carried token refused"); "Own `th1` lower" at the peer's `hs.resp`; a newer reconnect `hs.init` (H5) | 2`U` / `L` = 16 days | The initiator sends `hs.fin` as soon as `hs.resp` arrives. Neither a demotion nor a pending reconnect holds `hs.fin` (§3.4.1, §6.3.1). An open answer stops only its own side from starting a rekey or reconnect (§6.5, §6.6), never the peer. |
+| `hs.fin` awaited (responder's answer) | a verified `hs.fin` (§6.3.1 Responder); `L`; rule J; H5, S5; (0.88.2) its `hs.resp` answered `token_revoked` (§6.3.1 "A carried token refused"); "Own `th1` lower" at the peer's `hs.resp`; a newer reconnect `hs.init` (H5); (0.88.9) a later message from `I` under a newer epoch (§6.3.1 "A stale reconnect answer ends at a later message") | 2`U` / `L` = 16 days | The initiator sends `hs.fin` as soon as `hs.resp` arrives. Neither a demotion nor a pending reconnect holds `hs.fin` (§3.4.1, §6.3.1). An open answer stops only its own side from starting a rekey or reconnect (§6.5, §6.6), never the peer. |
 | Pending epoch (initiator) | any message from R under it except `hs.fin`; the abandonments in §6.3.1, (0.88.2) its `hs.fin` answered `token_revoked` among them ("A carried token refused") | 2`U` / `B` = 32 days | R queues `hs.confirm` in the write that activates the epoch. Nothing holds it there: R has a current epoch again, and activating abandons R's own pending epoch. For R to lack the answer, an honest R must have rotated (S5). R's link then ends this pending epoch ("Pending epochs at a link", step 1). |
 | Held outbox (§3.4.1 "After a demotion"; §6.3.1 Initiator) | the next epoch that becomes current; `exp`; (0.88.7) the connection's removal or replacement (§8.3 "Not delivered"), not `stale`, which keeps it ("Stale is not final") | ends with the handshake that holds it | No handshake needs a held message. `hs.init`, `hs.resp` and `hs.fin` pass the hold. The `hs.confirm` comes from the peer, which as responder has a current epoch again when it activates. |
 | Demotion | the reconnect after the demotion, which names E or the newest epoch that is neither demoted nor destroyed. P accepts that name as its current, confirmed, pending or abandoned-while-pending epoch (§6.6 "Accepting `ctx`") | waits at most one round for the side's own reconnect, then runs one round / "The reconnect bound" | Demotions happen only when a link is followed, so there are at most λ of them and none after step 1. |
 | Refused reconnect | the refuser's own `hs.fin` (rows 1–2); or, if the refuser's answer is gone, the links it carries under 0.88.2, with H5 then restarting the refuser's own reconnect under the new `ik` | one round / the try's 16 days | The refusal is silent, but the refuser has sent `hs.fin`, or else it has had its pending epoch ended by a link. The try that was refused is abandoned when the peer's `hs.fin` is established, so it does not expire and is not counted. |
-| Crossing (any two handshakes, §6.5) | the lower `th1` wins; "A verified `hs.fin` comes first"; a service yields to a member (§6.6 "Crossing reconnects") | one round | Both sides compare the same two `th1` values, so at most one side keeps its own handshake. At most one side sends `hs.fin`. A side drops its answer only at the peer's `hs.resp` to its own handshake, and only a side that has sent `hs.fin` drops the peer's (§6.6). |
+| Crossing (any two handshakes, §6.5) | the lower `th1` wins; "A verified `hs.fin` comes first"; a service yields to a member (§6.6 "Crossing reconnects") | one round | Both sides compare the same two `th1` values, so at most one side keeps its own handshake. At most one side sends `hs.fin`. A side drops its answer only at the peer's `hs.resp` to its own handshake, (0.88.9) at the peer's later message under a newer epoch (§6.3.1 Responder), or, having itself sent `hs.fin`, at that `hs.fin` (§6.6). |
 | Token refresh (§7.2) | `relay.token.issued`. If a token lapses, the holder reconnects (§6.6 "When to use it") | — / 30 days | A lapse turns into rows 1 and 6. It costs one of the reconnect token's deposits, and the next successful reconnect mints a fresh token on each side, adopted at confirmation (next row). |
 | (0.88.2) Carried tokens awaiting adoption (§6.3.1 "A handshake's tokens are adopted at confirmation") | `I`: its confirmation (row 3). `R`: `I`'s `relay.token.issued` under the epoch, queued in the write that confirms; discard at `I`'s abandonment, at `R`'s rule E or demotion, or at a carried token's `token_revoked` | `I`: 2`U` after `hs.fin`; `R`: `U` after `I`'s confirmation, so 3`U` after `hs.fin` / at `I`, `B`; at `R`, on its own clock, the carried standing token's `exp` or 32 days after activation | `I`'s confirmation needs only `R`'s `hs.confirm`, which goes on the carried standing token, so nothing held at `R` stands in its way. `R`'s entries that wait for a valid token need nothing from a handshake, and `R` starts no reconnect meanwhile ("No reconnect while carried tokens wait"), so no second round begins. |
 | "`hs.confirm` again" | not a wait: it re-sends every 12 days until R's confirmed epoch catches up | — | Its worst-case residual needs `I` to be away more than about 26 days after `hs.fin`, which A3 excludes. |
@@ -7552,7 +7556,7 @@ suspended. With this rule `I` finds nothing for that answer (§6.3.1, an
 `hs.fin`. It mirrors "I's rekeys end at its reconnect's `hs.resp`". If
 `R`'s answer was deposited before `I` confirmed the rekey, it ends neither
 by a carried token's refusal nor by an `hs.fin`: (0.88.9) it ends at `I`'s
-next message under the rekey's epoch (Responder, "A stale reconnect answer
+next message under the rekey's (or any newer) epoch (Responder, "A stale reconnect answer
 ends at a later message"), and waits for `L` only if none comes (§3.4.1
 Residuals, "A stale reconnect answer after a rekey's confirmation").
 
@@ -7624,25 +7628,29 @@ frees `R`'s rekeys, which an open answer would hold for 16 days (§6.5).
 message from `I`, other than `hs.fin`, that `acceptFrom` does not refuse at
 steps 1–4 opens under an epoch with `I` newer than the epoch an open answer
 of `R`'s to `I`'s reconnect named (both among `R`'s epochs with `I`; newer:
-later in establishing order, and established: not pending, abandoned while
-pending or destroyed), and its inner `ts` is later than that `hs.init`'s,
-`R` abandons that answer before anything else is done with the message
-(dedupe, the `ts` window, its handler), after the confirmation of `R`'s own
-pending epoch that the message makes (Initiator): the tokens the `hs.resp` carried are
-revoked, and an `hs.resp` not yet deposited is not sent. `I` made that
-message after the reconnect's `hs.init` and under another epoch, so it had
-ended that reconnect (Initiator, "I's open reconnects end at its rekey's
-confirmation", or "A verified `hs.fin` comes first", §6.5, §6.6, whatever
-the two purposes) and sends no `hs.fin` for it. `hs.fin` is not such a
-message: a pending rekey's `hs.fin` is made under the newer epoch while
-`I`'s reconnect is still open, and the two are settled by "A verified
-`hs.fin` comes first". Without this the answer waits for `L` (16 days),
-holding `R`'s rekeys back (§6.5) and, between two persons, its reconnects
-(§6.6 "Between two persons"). An answer to a restore's reconnect (one that
-named an older epoch, §6.6 "After a restore") is kept, and so is a fork
-sign's, judged at its `hs.fin`: one to a reconnect that named an epoch of a
-replaced line (§6.6 "Fork detection") or an epoch older than the confirmed
-one (§3.4.1 "Fork by ctx"). It is a connection's rule.
+later in establishing order, the newer one established: not pending,
+abandoned while pending or destroyed), and its inner `ts` is later than
+that `hs.init`'s, `R` abandons that answer before anything else is done
+with the message (dedupe, the `ts` window, its handler), after the
+confirmation of `R`'s own pending epoch that the message makes
+(Initiator): the tokens the `hs.resp` carried are revoked, and an
+`hs.resp` not yet deposited is not sent. `I` made that message after the
+reconnect's `hs.init` and under another epoch, so it had ended that
+reconnect (Initiator, "I's open reconnects end at its rekey's
+confirmation"; "A verified `hs.fin` comes first", §6.5, §6.6, whatever the
+two purposes; or it abandoned it and a later reconnect of its own was
+established and confirmed) and sends no `hs.fin` for it. `hs.fin` is not
+such a message: a pending rekey's `hs.fin` is made under the newer epoch
+while `I`'s reconnect is still open, and the two are settled by "A
+verified `hs.fin` comes first". Without this the answer waits for `L` (16
+days), holding `R`'s rekeys back (§6.5) and, between two persons, its
+reconnects (§6.6 "Between two persons"). An answer to a restore's
+reconnect (one that named an older epoch, §6.6 "After a restore") is
+kept, and so is a fork sign's, judged at its `hs.fin`: one to a reconnect
+that named an epoch of a replaced line (§6.6 "Fork detection") or an
+epoch older than the confirmed one (§3.4.1 "Fork by ctx"). It is a
+connection's rule. A service vault follows this rule, and the two
+Initiator rules it rests on, on either side as a member vault does.
 
 **Rule E.** In the write that establishes a rekey's or reconnect's epoch
 at its verified `hs.fin`, `R` destroys every other epoch with `I` later
