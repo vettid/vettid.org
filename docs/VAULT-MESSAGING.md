@@ -29,7 +29,8 @@ related:
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.88.10: 2026-11-11, erratum (lead; vettid-vault #218, GC #6875; owner
-    decisions #6866 a, #7711 a, #7806 a; both blind reviews). Completes
+    decisions #6866 a, #7711 a, #7806 a, #7861 a, #7862 a; both blind
+    reviews). Completes
     0.88.7's §8.3 "Not delivered". **Re-stamp at deposit**: a waiting
     durable deposit to a connection, no attempt of which may
     have reached the relay (not tried), with a `ts` older than 2 days
@@ -10097,9 +10098,9 @@ been delivered) and for the late window at deposit (above),
 end of it (removal, mailbox gone, refusal, `stale`, suspension,
 `held_unsealable`, the 16-day window): that end is only audited, since
 "couldn't be delivered" would overstate it. Priority
-`normal`; `ref` = the first message's inner `id`; `connection_name`, when the connection has a display name (the
-connection's display name when the batch's first message was dropped;
-absent otherwise), so that the
+`normal`; `ref` = the first message's inner `id`; `connection_name` (the connection's display name when the batch's
+first message was dropped, or else the first and last name shared with
+it, §10.8; owner decision #7862 a), so that the
 app can name a connection that is gone (vault-local: the feed, sent to
 the owner's devices only, never to the relay or the peer). Items are
 batched, one per kind and connection per hour (§10.4.1 "Batching"; two
@@ -10123,8 +10124,8 @@ mailbox, `stale`, a fork suspension and a refusal. The apps' texts
   delivered: it was sent, but VettID couldn't confirm it arrived." or
   "N messages to <name> may not have been delivered: they were sent, but
   VettID couldn't confirm they arrived." (`count` = N; the words after
-  the colon complete the owner-approved text's "…": NEW, for the owner's
-  approval, GC #7861).
+  the colon complete the owner-approved text's "…"; owner-approved
+  2026-11-11, GC #7861 a).
 
 **Residuals** (0.88.10):
 - A tried entry, or one that could not be sealed again and was
@@ -14091,9 +14092,10 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   limits"); (0.88.10) on a `message.not_delivered` or
   `message.delivery_unconfirmed` item that stands for several messages
   of one connection within an hour (§10.4.1 "Batching").
-- `connection_name` (0.88.10) is present only on those two kinds, when
-  the connection has a display name (the connection's display name when
-  the batch's first message was dropped; absent otherwise), so that the
+- `connection_name` (0.88.10) is present only on those two kinds (the
+  connection's display name when the batch's first message was dropped,
+  or else the first and last name shared with it; owner decision #7862
+  a), so that the
   app can name a connection that is gone. It is vault-local: it is in the feed
   and the `feed.event` to the owner's devices, and is never sent to the
   relay or the peer.
