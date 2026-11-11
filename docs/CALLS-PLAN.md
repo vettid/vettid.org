@@ -1,8 +1,8 @@
 ---
 title: CALLS-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1) and 2026-10-12 (§13, D12–D26 as recommended; D23 as (c))
-version: 0.1.8
-date: 2026-10-26
+version: 0.1.9
+date: 2026-11-11
 owner: Al Liebl (Mesmer)
 related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) §2 rules, §2.4 promotion, §5 phase 2
@@ -82,6 +82,14 @@ changelog:
     of calls has merged since 2026-10-23 (vettid-android #128 is still
     open and conflicting; vettid-calls has no pull request since
     2026-10-20, and the vault has none for calls since #67)
+  - 0.1.9 (2026-11-11): erratum (owner decisions 2026-11-11, GC #8361 a and
+    #8374 a; VAULT-MESSAGING 0.88.16). §13.2: form 2 of the shares and
+    the key confirmation name both members' vault identity keys, each
+    side from its own records, and so does form 2's call key (a second
+    lock, GC #8387 a), so a shared connection cannot pass one member's
+    call to another as its own; added before C2, in which form 2 first
+    ships. The vault and app rows say so; the apps' form 2 media vectors
+    are VAULT-MESSAGING §16's.
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -803,10 +811,10 @@ code or key is involved anywhere in this.
 
 | Repository | Work | Spec |
 |---|---|---|
-| **vettid-vault** (a staging release, "release C2") | **V1, V8:** an issuer client: a request with a fresh key and an attestation, the pool of 4, one credential per call, the limits and backoff; the release constant `calls_url` and its checks; the enclave's allowlist entry; the parent's `DefaultAllow`; remove the `Coturn` issuer that holds a secret. **V2:** the ring timer in housekeeping. **V3:** `call.keepalive`, watched calls, the 90 s rule. **V5:** `call.permission.set` and `.list`, the unanswered-call counts, merged missed calls. **V6:** glare. **Signed suites:** form 2 of the shares, both forms vouched, the form checks. `call.list`'s new members. Vectors for `m2` and the confirmation in `calls.json`. **V4** (the push wake for a ringing call; D24), once its §14.2 text is approved (*0.1.4:* approved 2026-10-17, VAULT-MESSAGING 0.38.0). MUST-COVERAGE for all of it | VAULT-MESSAGING 0.28.0 §10.10, §11.10.8; VAULT-RELEASES 0.1.19 §5.2 |
+| **vettid-vault** (a staging release, "release C2") | **V1, V8:** an issuer client: a request with a fresh key and an attestation, the pool of 4, one credential per call, the limits and backoff; the release constant `calls_url` and its checks; the enclave's allowlist entry; the parent's `DefaultAllow`; remove the `Coturn` issuer that holds a secret. **V2:** the ring timer in housekeeping. **V3:** `call.keepalive`, watched calls, the 90 s rule. **V5:** `call.permission.set` and `.list`, the unanswered-call counts, merged missed calls. **V6:** glare. **Signed suites:** form 2 of the shares, both forms vouched, the form checks; (0.1.9) `m2` names both members' vault keys, and the `calls.json` vectors for form 2's `k_call` (VAULT-MESSAGING 0.88.16). `call.list`'s new members. Vectors for `m2` and the confirmation in `calls.json`. **V4** (the push wake for a ringing call; D24), once its §14.2 text is approved (*0.1.4:* approved 2026-10-17, VAULT-MESSAGING 0.38.0). MUST-COVERAGE for all of it | VAULT-MESSAGING 0.28.0 §10.10, §11.10.8; VAULT-RELEASES 0.1.19 §5.2 |
 | **vettid-calls** (new, AGPL-3.0) | The issuer (Go; the attestation and manifest code shared with vettid-push); the coturn image with its configuration and `turn-agent`; `callsctl`; reproducible builds in CI; a README | CALLING-SERVICE 0.2.0 §4, §5, §7, §10 |
 | **vettid.org** | `VettidOrgCallsDataStack` and `VettidOrgCallsStack` in the staging app; `callsHost` in `lib/config.ts` and `lib/vault/egress.ts` (snapshot test); the host stack deploy; RUNBOOK "Calling service"; the release list entry and log text for release C2; the open source page lists `vettid-calls` | CALLING-SERVICE §8, §10, §11; VAULT-RELEASES §8.4 |
-| **vettid-android** | Learn the vault's level from `call.list` (`v`); form 2 (`suites`, `ek_sig2`, `suite`, `offered`), key confirmation with the microphone held back on the callee; `keepalive` and `call.keepalive`; the stale sweep by `device_id`, `exp` and `now`; glare (`superseded_by`); "Calls: allowed / off" on a connection and the limited state; relay or direct recorded per call; a debug-only forced-relay switch to test the fallback (§3.1); all of it while still working against S10. No pin of a connection's identity key (D23): `docs/calls/CALL-MEDIA.md` §7 rule 6 stops calling that an open question | VAULT-MESSAGING §10.10 "Call forms", "Key confirmation", "Liveness", "Glare", "Mixed releases" |
+| **vettid-android** | Learn the vault's level from `call.list` (`v`); form 2 (`suites`, `ek_sig2`, `suite`, `offered`), key confirmation with the microphone held back on the callee; (0.1.9) both members' vault keys in `m2`, `confirm` and form 2's `k_call` (new media vectors for form 2), and the "couldn't be encrypted" text when a check fails (VAULT-MESSAGING 0.88.16); `keepalive` and `call.keepalive`; the stale sweep by `device_id`, `exp` and `now`; glare (`superseded_by`); "Calls: allowed / off" on a connection and the limited state; relay or direct recorded per call; a debug-only forced-relay switch to test the fallback (§3.1); all of it while still working against S10. No pin of a connection's identity key (D23): `docs/calls/CALL-MEDIA.md` §7 rule 6 stops calling that an open question | VAULT-MESSAGING §10.10 "Call forms", "Key confirmation", "Liveness", "Glare", "Mixed releases" |
 
 No relay change, no member API change, no push gateway change.
 
@@ -856,7 +864,7 @@ are written into this plan.
 | 5 | **App killed mid-call**, on the caller's side, then on the callee's side | The surviving phone's vault shows the call `ended` **within 2 minutes** of the kill, and that phone can place a new call then. The killed phone's vault shows, when its app is next opened, reason `failed` and an `ended_at` within 2 minutes of the kill and before the restart (so the vault ended it, not the app's sweep) |
 | 6 | **Glare:** both members tap Call within a second, 5 times | Each time exactly one call connects, with audio both ways, and no missed call remains on either phone |
 | 7 | **Forced relay** (the debug switch) on one phone | The call connects through `turn.staging.vettid.org`; audio both ways; the server's `allocations` counter moves; no address or username appears in any log group |
-| 8 | **Signed suites and confirmation:** a test build that sends a wrong `confirm`; one that changes `suites` after signing | The caller ends the first call as not encrypted before any audio; the second never rings (`drop.call_share` in the callee's History) |
+| 8 | **Signed suites and confirmation:** a test build that sends a wrong `confirm`; one that changes `suites` after signing; (0.1.9) a test build acting as a shared connection C that passes A's call to B as its own, once re-vouching the shares and once re-signing them with its own device | The caller ends the first call as not encrypted before any audio; the second never rings (`drop.call_share` in the callee's History); (0.1.9) the re-vouched relay never rings B (`drop.call_share`), the re-signed one rings B, A refuses the answer before any key or audio, and B's call ends within about 80 s (as not encrypted, or as not connected after 60 s); separately, a genuine call through TURN on a slow network still connects (the 60 s rule does not cut it); no frame decrypts on either side |
 | 9 | **Calls off** for the connection; then **4 unanswered calls in 10 minutes** | Off: no ring, nothing in the feed, the caller sees "no answer". Limit: the fourth does not ring; one missed-call item with a count |
 | 10 | **Mixed:** the C2 app against a vault still on S10; the last C1 app build against a vault on release C2 | Calls connect on one network in the first case and across networks in the second, with S10's known gaps and nothing worse |
 | 11 | The issuer made unreachable (the DNS Firewall entry removed on a test host) | Calls on one network still connect; a call that needs the relay fails with "could not connect"; nothing else of the vault is affected |
