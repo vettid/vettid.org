@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.14
+version: 0.88.15
 date: 2026-11-11
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,18 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.15: 2026-11-11, erratum (owner decisions 2026-11-11 on calls C2
+    permission and limits, GC #8321 a, a; vettid-vault #225; numbered
+    after #573 and merged after it). §10.10 "Permission and limits":
+    calls missed because of the vault hold (offers that arrive while
+    held, incoming calls the hold's start ended) are still missed calls
+    but don't count toward the unanswered limits; turning calls off for a
+    connection also ends a call with it that is still ringing, in either
+    direction, with reason `unavailable` (incoming: the devices stop
+    ringing, a missed call not counted, nothing sent to the peer, whose
+    caller times out; outgoing: `call.end{unavailable}` to the peer vault,
+    whose devices stop ringing and record a missed call), and an active
+    call carries on. §3.6.3 notes the first.
   - 0.88.14: 2026-11-11, erratum (owner decisions 2026-11-11 on calls C2
     glare, GC #8303 a, a; vettid-vault #224; numbered after #570, #571 and
     #572, and merged after them). §10.10 "Glare": when its own call loses, the vault also sends
@@ -6581,7 +6593,9 @@ the hold off, `"held"` with it on.
 - **Incoming calls do not ring.** An offer that arrives while held rings
   no device. The vault does not answer it (no `busy`, no `call.end`), so
   the caller times out exactly as with a locked callee; the vault records
-  a missed call (feed `call.missed`), counted in `vault.held`. Ringing a
+  a missed call (feed `call.missed`), counted in `vault.held` but not
+  toward the connection's unanswered-call limits (§10.10 "Permission and
+  limits", 0.88.15). Ringing a
   device that may not act before a check would either force the check in
   the middle of answering or ring for nothing, and an answer from a phone
   in someone else's hands would let them speak as the member. A call
@@ -14531,9 +14545,23 @@ other at once, one call connects.
   missed call and no wake, and is audited `drop.call_off`. The caller
   times out as with a locked callee and cannot tell the two apart. The
   member's own `call.start` to that connection is answered `calls_off`.
+- (0.88.15, owner decision 2026-11-11) **Turning calls off ends a call
+  with that connection that is still ringing**, in either direction; an
+  **active** call carries on (the member can hang up). Each ends with
+  reason `unavailable`:
+
+  | The ringing call | This vault | What the peer sees |
+  |---|---|---|
+  | Incoming (the connection is calling) | `call.end{unavailable}` to the owner devices, which stop ringing; a missed call, not counted (below) | Nothing: off is silent, so its caller times out as with a locked callee |
+  | Outgoing (the member is calling) | `call.end{unavailable}` to the peer vault; the owner devices told (the call's device directly) | `call.end{unavailable}`: its devices stop ringing, and it records a missed call |
+
 - **Unanswered calls are limited.** The vault counts, per connection,
   the incoming calls that ended without being answered (missed,
-  declined, `busy`, suppressed by this rule). When a connection has
+  declined, `busy`, suppressed by this rule). (0.88.15, owner decision
+  2026-11-11) Calls the member couldn't answer because of the vault hold
+  (§3.6.3: offers that arrive while held, and incoming calls the hold's
+  start ended) are missed calls but are **not** counted, and neither is
+  a ringing call ended because calls were turned off. When a connection has
   **3 in the last 10 minutes or 10 in the last 24 hours**, a further
   offer from it rings no device and is not answered; it is recorded as
   an ended call with reason `unavailable` and as a missed call, and
