@@ -40,6 +40,9 @@ changelog:
     caller times out; outgoing: `call.end{unavailable}` to the peer vault,
     whose devices stop ringing and record a missed call, counted there as
     usual), and an active call carries on. §3.6.3 notes the first.
+    Also (vettid-vault #226) §10.10 "Call forms": an answer with part of
+    form 2, or a malformed form 2 member, is a share that does not
+    verify.
   - 0.88.14: 2026-11-11, erratum (owner decisions 2026-11-11 on calls C2
     glare, GC #8303 a, a; vettid-vault #224; numbered after #570, #571 and
     #572, and merged after them). §10.10 "Glare": when its own call loses, the vault also sends
@@ -14654,7 +14657,13 @@ the calling device, which alone knows what it sent.
   signed `suites` (the SDP attribute is ignored and removed), and its
   `call.answer` carries `suite`, `offered`, `confirm` and `enc_sig`
   over `m2`; its SDP carries no VettID attribute. In form 1 it answers
-  as at S10. An answer is in exactly one form.
+  as at S10. An answer is in exactly one form. (0.88.15) A vault treats a
+  `call.answer` with only some of `suite`, `offered` and `confirm`, or
+  with one of them malformed, as a share that does not verify: from its
+  own device, `drop.call_share` and `call.end{unavailable}` to that
+  device (the call still rings on the others); from the peer vault,
+  `drop.call_share`, and the call keeps ringing until it ends or times
+  out.
 - **The calling device**, for an answer with `suite`: verifies the
   signatures over `m2`; requires `offered` to equal the list it sent
   and `suite` to be in it and in its registry; verifies `confirm`. For
