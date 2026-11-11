@@ -34,11 +34,16 @@ changelog:
     refuses rather than drop what it does not know) fails closed: audited
     `feature.load_failed`, kept and written back unchanged at every flush
     (never replaced by an empty state), and the feature does not run until
-    an unlock that reads it: its device types are answered
-    `unsupported_type`, its peer types are dropped, and its timers and
-    observers do not run. Before, the vault ignored the error and ran the
-    feature empty, so a member's "calls off" for a connection could turn
-    back on. §10.9 lists the audit kind.
+    an unlock that reads it: its types are unknown types (§11.10.8,
+    answered `unsupported_type`), and its timers and observers do not run.
+    (Owner decision 2026-11-11, GC #8529 a.) A feature other features
+    call directly (audit, connauth, credential, critical, grants, items,
+    leash, vote, wallet) cannot be left out that way: when its part does
+    not read, the unlock and a recovery's open are refused with the new
+    code `state_unreadable` (§11.4, §11.14.6), before any write. Before,
+    the vault ignored the error and ran the feature empty, so a member's
+    "calls off" for a connection could turn back on. §10.9 lists the
+    audit kind.
   - 0.88.16: 2026-11-11, erratum (owner decisions 2026-11-11, GC #8361 a and
     #8374 a: bind both parties into form 2 before release C2, in which form
     2 first ships; vettid-vault #226; numbered after #574 and merged after
@@ -4186,22 +4191,36 @@ that does not read, because it is damaged or because a later release
 wrote it (a feature refuses a state of a later version rather than drop
 what it does not know), **fails closed**: a feature that held a rule
 (calls off for a connection, a limit) must never run as if it held none.
-Until an unlock that reads it:
+
+Some features are called directly by others: the audit log, connection
+authorizations, the credential, critical secrets, grants, items, the
+leash, votes and the wallet. The vault cannot run without them, so when
+one of their parts does not read the vault does not open: the unlock is
+answered `state_unreadable` (§11.4) and a recovery's open likewise
+(§11.14.6), before anything is written, sent or reported `unlocked`.
+Nothing is lost: an unlock by a release that reads the part opens the
+vault with it whole.
+
+For any other feature, until an unlock that reads its part:
 
 - the vault audits `feature.load_failed` (`ref` = the feature's name;
-  nothing of the data), once per unlock;
+  nothing of the data), once each time the state is opened (an unlock, a
+  recovery's open);
 - it keeps the part exactly as stored and writes it back unchanged at
   every flush: never an empty state in its place, so a later release that
   can read it finds it whole;
-- the feature does not run. A message of its device types is answered
-  `unsupported_type`, as from a release without the feature (an app then
-  hides it until the next unlock, as it does for such a release); a
-  message of its peer types is dropped as from a feature this vault does
-  not have (for calls: no offer rings, and the caller times out); its
-  timers, housekeeping and observers do not run;
+- the feature does not run. Its types are unknown types, as for a feature
+  this release does not register (§11.10.8): a message without `re`, from
+  a device or a connection, is answered `unsupported_type` (an app then
+  hides the feature until the next unlock, as it does for such a release;
+  for calls, an offer rings nothing and the caller's vault learns at once
+  that the call cannot be made), and one with `re` is dropped; its timers,
+  housekeeping and observers do not run;
 - the rest of the vault runs as usual.
 
-The member learns of it from History (`feature.load_failed`).
+The member learns of it from History (`feature.load_failed`). While the
+feature does not run, nothing of the vault updates its kept part (a
+connection removed meanwhile, for example, is still named in it).
 
 The **sealed header** is a small record sealed to the enclave's attestation,
 not to the DEK, so that an unlock can be checked before the DEK exists. It
@@ -18794,8 +18813,14 @@ one of:
   first-handshake invitation the unlock leaves and renews, the one the vault
   will answer; E's when E's invitation was kept. Absent otherwise and from an
   older vault.
-- `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|signer_refused|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup|device_secret|transfer_incomplete|state_unsupported",
-  "header_seq": m, "retry_after": <s>}` — `state_unsupported` (0.87.1):
+- `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|signer_refused|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup|device_secret|transfer_incomplete|state_unsupported|state_unreadable",
+  "header_seq": m, "retry_after": <s>}` — `state_unreadable` (0.88.17):
+  the state opened, but the part of a feature others call directly does
+  not read (§3.3 "Feature data that does not read"); nothing after the
+  state opens is written, nothing is lost, and an unlock by a release that
+  reads it opens the vault. It is not a PIN failure. The member must not
+  be told to set the vault up again; an app that does not know the code
+  shows its usual failure. `state_unsupported` (0.87.1):
   the state opened but lacks `messaging_release` 29 or more (§6.3.1 "No
   upgrade: release 29 starts clean"); nothing after the state opens is
   written, and the member re-enrols; the app says "This vault was made
@@ -23683,7 +23708,7 @@ at register and padded to 4,096 bytes:
   "release", "release_number", "unlock_id", "attempt_used": true|false,
   "attempts": {"used": n, "of": 10}}`. `vault_bundle` carries the vault's
   rotated keys;
-- `{"ok": false, "code": "wrong|wrong_again|attempt_lost|quiet|wait|busy|exhausted|closed|not_armed|stored_mismatch|counter_unavailable|no_recovery|expired|attestation|manifest|wrong_release|retry|bad_request|state_unsupported",
+- `{"ok": false, "code": "wrong|wrong_again|attempt_lost|quiet|wait|busy|exhausted|closed|not_armed|stored_mismatch|counter_unavailable|no_recovery|expired|attestation|manifest|wrong_release|retry|bad_request|state_unsupported|state_unreadable",
   "attempt_used": true|false, "attempts": {"used": n, "of": 10},
   "retry_at": "<ts>"}`. `attempts`
   is present whenever the counter answered. `retry_at` comes with
@@ -23717,6 +23742,7 @@ at register and padded to 4,096 bytes:
   | `quiet`, `wait`, `closed`, `exhausted` | `false` from step 3, or from a `Spend` that took nothing; `true` when step 4b refused to test a spent attempt |
   | `stored_mismatch`, `vault_missing` | `false` before the spend (step 2; a stored state that cannot be read); `true` after it (step 6: the state, the keys or the backup copy cannot be opened) |
   | `state_unsupported` (0.87.1) | `true` at step 6, after the spend (the state opens only then); (0.88.1) `false` on a repeat through the `next` wrap, which spends none; it lacks `messaging_release` 29 or more (§6.3.1 "No upgrade: release 29 starts clean"). The app says "This vault was made by an earlier version of VettID and must be set up again." (wording approved by the owner 2026-11-06, GC 01M6RV1QRM1403G0Z8G2W2C6ZS) |
+  | `state_unreadable` (0.88.17) | as `state_unsupported`: `true` at step 6, `false` on a repeat through the `next` wrap; the part of a feature others call directly does not read (§3.3 "Feature data that does not read"). Nothing is written, nothing is lost; the vault is not to be set up again |
   | `retry` | `false` from step 3b; `true` whenever the spend happened: the run ended at any point after it, before or after step 1 of the order of writes was stored, including a failure to register at the relay or to store steps 2 and 3 (the entry may have been right) |
   | every other code (`wrong_again`, `busy`, `counter_unavailable`, `not_armed`, `no_recovery`, `expired`, `attestation`, `manifest`, `wrong_release`, `bad_request`, `device_secret`) | `false` |
 
