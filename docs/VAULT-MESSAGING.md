@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.10
+version: 0.88.14
 date: 2026-11-11
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md (0.3.0)
   - MEMBER-API.md (2.14.0)
-  - ANDROID-PLAN.md (0.1.120)
-  - IOS-PLAN.md (0.1.63; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.123)
+  - IOS-PLAN.md (0.1.67; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.10; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -28,6 +28,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.14: 2026-11-11, erratum (owner decisions 2026-11-11 on calls C2
+    glare, vettid-vault #224; numbered after #571 and #572). §10.10
+    "Glare": when its own call loses, the vault also sends the peer vault
+    `call.end{busy}` for it, which a peer that already dropped it
+    ignores and one that has not yet seen it uses to stop ringing; the
+    device that answers *Y* without asking answers with *X*'s media, so
+    an audio call never turns on the camera by itself. ANDROID-PLAN
+    0.1.123 and IOS-PLAN 0.1.67 note the second.
   - 0.88.10: 2026-11-11, erratum (lead; vettid-vault #218, GC #6875; owner
     decisions #6866 a, #7711 a, #7806 a, #7861 a, #7862 a, #8099 a;
     both blind reviews). Completes
@@ -14470,12 +14478,19 @@ other at once, one call connects.
   `drop.call_glare` (`ref` = *Y*). *X* goes on.
 - *Y* wins: the vault ends *X* (`ended`, reason `busy`), sends its
   owner devices `call.end{call_id: X, reason: "busy", superseded_by: Y}`
-  and the peer vault nothing, and then handles *Y* as any offer: every
-  owner device rings.
+  and (0.88.14, owner decision 2026-11-11) the peer vault
+  `call.end{call_id: X, reason: "busy"}`, and then handles *Y* as any
+  offer: every owner device rings. The peer vault, which applies the same
+  rule, has dropped *X* and ignores that end (it holds no record of *X*);
+  one that has not yet seen *X* (offers crossing on the way) stops ringing
+  for it instead of ringing for a call already over.
 - The device that placed *X*, on `call.end` with `superseded_by` = *Y*
   followed or preceded by the offer *Y* from the same connection, while
   its screen still shows the outgoing call, **answers *Y* without
-  asking** (the member asked for this call seconds ago). Any other
+  asking** (the member asked for this call seconds ago), (0.88.14, owner
+  decision 2026-11-11) **with *X*'s media**: if *X* was an audio call it
+  answers *Y* with audio only, even when *Y* is a video call, and the
+  camera stays off until the member turns it on. Any other
   device rings as usual and is told `answered_elsewhere`. A device
   that does not know `superseded_by` shows "busy" and then rings for
   *Y*; the member answers by hand.

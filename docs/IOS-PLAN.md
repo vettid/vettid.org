@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.66
-date: 2026-11-10
+version: 0.1.67
+date: 2026-11-11
 changelog:
+  - 0.1.67: erratum, 2026-11-11 (ANDROID-PLAN 0.1.123, VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). §4 Calls: after a glare, the iPhone answers the winning call with its own call's media, as Android does: no camera by itself.
   - 0.1.66: erratum, 2026-11-10, as built (vettid-ios #241, in review; the container-read audit, GC #7243). §4 History export, §4.16 and §6.9: the History export, as the vote proof already does, writes its file to a directory of its own in tmp/ with complete protection, hands it over as a copy (`UIDocumentPickerViewController(forExporting:asCopy: true)`), and removes it on every answer, on a failure, when the screen leaves, when the §4.4 (1) cover closes the picker, at launch and when the screen opens again. SwiftUI `.fileExporter` is not used: it leaves its file in tmp/ with default protection. Complete protection helps only while the iPhone is locked; on an unlocked phone the defense is that the file is short-lived. Not yet: removal when the app goes to the background (a vettid-ios follow-up). The photo share sheet is unchanged: it hands the system bytes, no file.
   - 0.1.65: erratum, 2026-11-07 (ANDROID-PLAN 0.1.122, RELEASE-UPDATES 0.3.4; owner decision a). The unlock screen's release offer follows ANDROID-PLAN §4 "What's new": PIN first, a compact notice with the security line and the fingerprint, What's new one tap away in a sheet, approval not gated on opening it.
   - 0.1.64: erratum, 2026-11-05 (ANDROID-PLAN 0.1.121, VAULT-MESSAGING 0.85.2; owner decisions a and a/a). The iPhone's transfer-in follows ANDROID-PLAN §4 "Transfer (new phone)": past the 11-minute deadline it collects for the settlement window (about 90 s) in the background, never cancels its own collect, retries failed collects, ends a rejection as rejected and hides the comparison code meanwhile.
@@ -754,7 +755,7 @@ Only these differ on iOS:
 | History export | "Save to Files" (`UIDocumentPickerViewController(forExporting:asCopy: true)`; 0.1.66, from the app version with vettid-ios #241, in review: the file's handling is §6.9's row) in place of "Save to…". (0.1.63; from the app version with vettid-ios #209, in review) `bad_request` is the request's own fault and shows the vault's code; only `unsupported_type` says the vault release is too old. Android maps `bad_request` to "old vault" today and is to follow (ANDROID-PLAN 0.1.120). |
 | Transfer to a new phone (this phone the old one) | (0.1.63; from the app version with vettid-ios #209, in review) When the wait for the new phone fails (not the code's own end), the app rejects the transfer (`device.transfer.reject`), so its code cannot be used, and returns to the start with the failure said. Android shows the "expired" screen. |
 | Unlock, a refused update | (0.1.63; from the app version with vettid-ios #209, in review) The reason is said in words, with the refused release's own number, for the codes the app has a sentence for (`ios_unlock_update_refused_why`, a draft for the owner); any other code gets Android's `unlock_update_refused` with the code filtered, never raw. Android shows the code. |
-| Calls (later) | CallKit, and PushKit to ring (needs APNs). |
+| Calls (later) | CallKit, and PushKit to ring (needs APNs). (0.1.67) After a glare (VAULT-MESSAGING 0.88.14 §10.10), the iPhone that answers the winning call without asking answers with its own lost call's media, as ANDROID-PLAN 0.1.123 says: an audio call never turns the camera on by itself. |
 
 ### 4.1 Event titles (0.1.11)
 

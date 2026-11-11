@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.122
-date: 2026-11-07
+version: 0.1.123
+date: 2026-11-11
 changelog:
+  - 0.1.123: erratum, 2026-11-11 (VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). "Video in calls (C4)": after a glare, the phone that answers the winning call without asking (`superseded_by`) answers with its own call's media, so an audio call never turns on the camera by itself.
   - 0.1.122: erratum, 2026-11-07 (RELEASE-UPDATES 0.3.4; owner decision a, Ground Control thread 01M6SQ6VMNMB0C2CRPNZYNWKBB). §4 "Vault update" and "What's new": on the unlock screen the PIN keypad and Unlock come first; the release offer below them is a compact notice ("Update available: release N", the security line, the fingerprint and "Approve the update with this unlock"), with "What's new in release N" as a link that opens a sheet holding the full What's new, "Also in earlier releases" and Full release notes. Approving does not require opening the sheet. The security line comes from the release log like the rest of What's new: while it loads, the notice shows the progress line, and if it can't be had, "Release notes unavailable"; approval stays enabled either way. `security_text` stays in the sheet. The update screen is unchanged. Existing texts only (Android's `unlock_offer_title` and `unlock_offer_approve` already hold "Update available: release N" and "Approve the update with this unlock").
   - 0.1.121: erratum, 2026-11-05 (VAULT-MESSAGING 0.85.2; owner decisions a and a/a). §4 "Transfer (new phone)": past the 11-minute deadline the new phone collects for a settlement window (about 90 s) instead of once, in the background; rules and tests.
   - 0.1.120: erratum, 2026-11-05 (owner decisions of 2026-11-03 and
@@ -5117,6 +5118,12 @@ release with `call.update` (V7, not yet in VAULT-MESSAGING §10.10).*
 
 On top of voice calls, C4 adds:
 
+- (0.1.123, VAULT-MESSAGING 0.88.14 §10.10 "Glare"; owner decision
+  2026-11-11) **A glare never turns the camera on.** The phone that
+  answers the winning call *Y* without asking (on `call.end` with
+  `superseded_by`) answers with its own lost call *X*'s media: after an
+  audio call *X* it answers *Y* with audio only, even when *Y* is a video
+  call, and the camera stays off until the member turns it on.
 - **The camera**: `call.start{media: "video"}`, the front camera first,
   VP8 always and H.264 through the phone's hardware codec only, VP9 and
   AV1 off (CALLS-PLAN §4); frame encryption covers the video track as
