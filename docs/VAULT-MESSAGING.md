@@ -34,8 +34,10 @@ changelog:
     it). §10.10 "Signed key-exchange shares": `m2` now ends with the
     caller's and the callee's vault identity keys (32 bytes each) before
     the share, each party taking them from its own records, never from the
-    message; "Key confirmation": `confirm` covers them too; `k_call` and
-    the media keys are unchanged. A connection that passes one member's
+    message; "Key confirmation": `confirm` covers them too, and (owner
+    decision GC #8387 a, a second lock) form 2's `k_call` names them in
+    its HKDF `info`, so the direction and frame keys of a relayed call's
+    two sides differ; form 1's key schedule is unchanged. A connection that passes one member's
     call to another as its own then never connects ("Residual", new row):
     re-vouched, the signatures fail; re-signed with its own device, the
     calling device refuses the answer on `confirm`, now normative ("Key
@@ -44,8 +46,9 @@ changelog:
     until every release that accepts form 1 is removed ("Call forms",
     "Mixed releases"). What each device shows when
     a check fails. From the release that retires form 1, a form 1 answer
-    to a form 2 offer is refused too. §16: the confirmation vectors
-    recomputed.
+    to a form 2 offer is refused too. §16: form 2's `k_call`,
+    `k_confirm`, `confirm`, direction and frame keys, and a relayed
+    call's.
   - 0.88.15: 2026-11-11, erratum (owner decisions 2026-11-11 on calls C2
     permission and limits, GC #8321 a, a; vettid-vault #225; numbered
     after #573 and merged after it). §10.10 "Permission and limits":
@@ -10571,7 +10574,11 @@ an answer to an unknown or expired id is dropped.
   `SetupBaseS(ek, info = "vettid/vms/2/call" || call_id)` and returns the
   resulting `enc` in `call.answer`. Both devices derive
   `K = ctx.Export("vettid/vms/2/call-key", 32)`, and from it
-  `k_call = HKDF-SHA-256(ikm = K, salt = "vettid-call-v1", info = call_id)`.
+  `k_call = HKDF-SHA-256(ikm = K, salt = "vettid-call-v1", info = call_id)`;
+  (0.88.16) in a form 2 call (§10.10 "Call forms": the answering device
+  when it answers in form 2, the calling device for an answer with
+  `suite`) `info = call_id || caller_ik || callee_ik`, the two members'
+  vault identity keys as each device names them in `m2`.
   The vaults relay `ek` and `enc` and never hold `k_call`.
 - (0.28.0) `k_call` is never a frame key: each device derives two
   direction keys from it, bound to the negotiated media suite, and from
@@ -14671,7 +14678,8 @@ to B as its own call, and B's answer back to A:
   device computed `confirm` over "C calls B", A's device checks it over
   "A calls C", so A's device refuses the answer before it sets any key
   ("Key confirmation"). No key is set on A's side, no media flows, and C
-  never holds `k_call`. B sees the call end as unencrypted ("What each
+  never holds `k_call`; and A's and B's `k_call` differ, so even a
+  device that skipped the confirmation would decrypt nothing. B sees the call end as unencrypted ("What each
   device shows" below).
 
 So the signatures stop the cheap relay at the vaults, and the
@@ -14775,14 +14783,22 @@ with `chosen` and `list(offered)` as in `m2` (the list as the answering
 device read it), and (0.88.16) `caller_ik` and `callee_ik` as each
 device puts them into `m2` (the table under "Signed key-exchange
 shares"): the answering device computes `confirm` with its own view,
-the calling device checks it with its own. `k_call`, `k_confirm` and
-the media keys are not changed: the confirmation gates every key (the
-calling device sets none until `confirm` verifies, the answering device
-sends no microphone audio until a frame decrypts), so binding it binds
-the call, and the suites' key schedule and its vectors stand. That holds
-while calls carry audio only ("one audio section" today); video (C4)
-MUST hold back the camera track in the same way, as every outgoing
-media track, until a frame decrypts.
+the calling device checks it with its own.
+
+(0.88.16, owner decision 2026-11-11) **Two locks.** In form 2 the call
+key itself names both members as well (§10 "Calls"):
+
+```
+k_call (form 2) = HKDF-SHA-256(ikm = K, salt = "vettid-call-v1", info = call_id || caller_ik (32) || callee_ik (32), L = 32)
+```
+
+and `k_confirm`, the direction keys and the frame keys follow from it
+unchanged ("Media suites and keys"). The confirmation is the first lock:
+the calling device sets no key until it verifies, the answering device
+enables no outgoing track until a frame decrypts. The key is the
+second: the two sides of a call passed on by a third vault derive
+different keys, so no frame decrypts even on a device that skipped the
+confirmation by mistake. Form 1's `k_call` is unchanged.
 
 - The **answering device** computes `confirm` when it has `k_call` and
   sends it in `call.answer`. It sets its keys and enables both
@@ -14844,7 +14860,7 @@ calls, as it is for everything else of the member (§2.1).
 | The member's own vault swaps a share and learns `k_call` | Possible; trusted (§2.1) | **Unchanged** |
 | A vault changes the list of suites or the choice | Undetected at signalling time; the keys then differ and nothing is heard; audio may be sent under the weaker suite's keys until the failure shows | Rejected by the signature check before the callee rings or the caller uses the answer. A member's own vault could still do it together with a swapped share (the row above) |
 | Audio sent before the other side is known to hold the keys | Yes | No (key confirmation) |
-| (0.88.16) A connection C passes one member's call to another as its own (A calls C; C re-vouches A's device to B as its own call, and B's answer back to A): A and B talk, each believing the other is C; C learns no key | Possible: `m` names neither member | Never connects: `m2` and `confirm` name the caller's and the callee's vault, each side from its own records. Re-vouched, the signatures fail and nothing rings; re-signed with C's own device, B's phone rings and the calling device refuses the answer on `confirm`, so no key is set and B's call ends as unencrypted. Until every release that accepts form 1 is removed, C can still remove form 2 and get the S10 outcome ("Call forms", "Mixed releases") |
+| (0.88.16) A connection C passes one member's call to another as its own (A calls C; C re-vouches A's device to B as its own call, and B's answer back to A): A and B talk, each believing the other is C; C learns no key | Possible: `m` names neither member | Never connects: `m2` and `confirm` name the caller's and the callee's vault, each side from its own records. Re-vouched, the signatures fail and nothing rings; re-signed with C's own device, B's phone rings and the calling device refuses the answer on `confirm`, so no key is set and B's call ends as unencrypted; and the two sides' `k_call` differ (the second lock), so nothing would decrypt even without the confirmation. Until every release that accepts form 1 is removed, C can still remove form 2 and get the S10 outcome ("Call forms", "Mixed releases") |
 | A vault changes the SDP (fingerprint, candidates, sections) | Possible: the SDP is not signed. Media that is not encrypted under the call's keys is never played ("Rules for a device") | **Unchanged** |
 | A vault leaves out or changes the ICE servers of its own devices | Its own devices' vault signs them; nobody else can | **Unchanged**; from C2 the list is no longer empty |
 | Both vaults see both members' addresses in the signalling | Yes (accepted, CALLS-PLAN D1) | **Unchanged** |
@@ -15029,8 +15045,10 @@ suite's keys until a receiver notices, and an attacker who also drops
 the media packets keeps both from noticing. That gains ciphertext under
 the weaker suite, not the audio. With one suite in use it cannot
 matter; it is why form 1 is confined to suite 1 and why form 2 signs
-the negotiation and confirms the keys. Form 2 does not change the
-derivation, which keeps binding the keys to what was negotiated.
+the negotiation and confirms the keys. Form 2 does not change this
+derivation, which keeps binding the keys to what was negotiated; (0.88.16)
+its input, form 2's `k_call`, also names both members ("Key
+confirmation").
 
 *The direction keys.*
 
@@ -29773,26 +29791,51 @@ above); **to be confirmed by the vault's and the app's
 implementations**, which add them, and vectors for `m2` and its
 signatures, to `calls.json`:
 
-```
-k_confirm                         = 12c88150b1abc8da386bf6a3696d93d62822219b8bd78e261a0f76f324ba3745
-```
-
-(0.88.16) `confirm` names both vaults. With the vault identity keys of
-`calls.json`'s two parties (TEST ONLY, from its `caller` and `callee`
-seeds):
+(0.88.16) Form 2 names both vaults in `k_call` and in `confirm`. With
+`calls.json`'s exporter secret `K`, `call_id` and the vault identity
+keys of its two parties (TEST ONLY, from its `caller` and `callee`
+seeds); the form 1 `k_call` above is unchanged:
 
 ```
 caller_ik                         = c050c5637a44fa8629fff3cccce2300cb362a63d99d95fc54145266f4332445a
 callee_ik                         = f80cccdce4ae1c07ae208a2adf99a310ae4207e0306fa0236110b06827bbb8d0
-offered "1",   chosen "1": confirm = 0cfdbf10d4624ed32da80474ae3ffd94ab17f829af7883fb21cba9cbd0061f2d
-offered "2 1", chosen "2": confirm = ea748381b580a0e357de4c85b5e280e3e52da159ea940b4c0963e06ce19e5447
-offered "2 1", chosen "1": confirm = 0746ef9a7cf8d208bd7d6f891002fdc25c7d49e2cf6930d63199f10ba2a7c6e0
-the two keys swapped ("2 1", "1")  = 6a2cdbe0ef774d64b56a470df8ae82c23e72aa07aaece7516ad0420c463487e0  (MUST NOT verify)
+k_call (form 2)                   = fc69525bf7681cf0aa0bf2109578a36ba249fef9ea06a7f10bf6f44668d5612e
+k_confirm                         = efc0b1e6cd50c9d22063ba085f3ca828581ffde1441f1769227f65b1c6b60122
+offered "1",   chosen "1": confirm = 79c34a326ba978264d68200745b47606b51e21e76a392d00211d277b4613eb78
+offered "2 1", chosen "2": confirm = ae9cd7eb039aec21e28e12980d752412c0454713227ad338b2a9192235640976
+offered "2 1", chosen "1": confirm = 5ed63e824d485ef4e2af8ac7d58936fec1eec26a437b5506722692e5db83357c
+the two keys swapped ("2 1", "1")  = 987cb11aea0528421f48a28898b26e1e1b1d8bf98c9c8dde0b60046eb52f5dec  (MUST NOT verify)
 ```
 
-The values of 0.88.15 and before (`confirm` without the two keys) are
-withdrawn: no release carried them. `calls.json`'s `offer_share2` and
-`answer_share2` change with `m2`.
+The form 2 direction and frame keys, from that `k_call` (the apps'
+media vectors for form 2; the frame of the form 1 example above
+encrypts the same way under these keys):
+
+```
+offered "1",   chosen "1": k_dir("caller") = f50365693517abe27d0128be02100c7fa28d4ef8b849a49a760edb0f9bf4c51f
+                           frame key        = 83366919df86b7fc3a43c5c92f8367bd
+offered "1",   chosen "1": k_dir("callee") = 91912e5c6fbdda2784745c28b07102a55c58cddc50cd2aef7d3a211568ced27e
+                           frame key        = f48a7399a6eebe7f53324dc50de746f7
+offered "2 1", chosen "2": k_dir("caller") = 4ac64a47eeb6199469d98039e28131e86927ae28adf6c5a302cffc295d27b542
+                           frame key (suite 2, 32 bytes) = 576b179f1a55bbb44af932f3b613a258229eee91098b046dc35f8ea8fa6d9447
+offered "2 1", chosen "1": k_dir("caller") = 157c0c53b1c46a9f90b8497b119546119000c34847440c537ae28cc556d46659
+```
+
+A call passed on by a third vault C (`calls.json` `relay_vault_ik_b64`,
+seed 0x56): the callee derives "C calls B", the caller "A calls C", from
+the same `K`:
+
+```
+relay_ik                          = 88df556413538b002015e9619b01bdb5cc48c7215645792563f5460f7307a763
+the callee's k_call ("C calls B") = 658f2ce918bdb72fec26036eea2ad4a8b34e5e813713f301fd70c377639af947
+its confirm ("2 1", "1")          = 50abad6efd920a5dc6eb226a5daf8cff00fcca0bbc261d454637f0faf9641f0e  (MUST NOT verify at the caller)
+```
+
+The values of 0.88.15 and before (`k_confirm` from the form 1 `k_call`,
+`confirm` without the two keys) and of the first 0.88.16 draft are
+withdrawn: no release carried them. `calls.json`'s `offer_share2`,
+`answer_share2`, `k_confirm_hex` and `confirm_b64` change with them, and
+it gains `k_call2_hex`.
 
 **0.32.0.** The claim-check blob of §5.5 had no vector, and
 attachments (§10.5.1) make it cross-implementation: the app seals what
