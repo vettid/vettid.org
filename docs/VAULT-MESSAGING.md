@@ -45,7 +45,7 @@ changelog:
     hour with `count` and `connection_name`; none for the vault's own
     upkeep, none after the member's own removal of the connection
     (still audited), and none again for an entry already told. **The
-    late window is told** (lead decisions #7901 a, #7906): a tried entry,
+    late window is told** (lead decisions #7901 a, #7906 b): a tried entry,
     or an untried one that could not be sealed again, deposited as it is
     with a `ts` more than 2 days old (and within 16 days) is told
     `message.delivery_unconfirmed`, once, at that deposit; it may still
@@ -10043,8 +10043,8 @@ under another epoch is the key change's, above), the vault judges its
   later deposits wait behind it, in order. Under a demoted epoch it
   waits (its old bytes are not sent), and the demotion's rehold takes
   it. If it cannot be sealed again, it is deposited as it is while its
-  `ts` is within 16 days (and the member is told, as in the last item
-  below), and ends otherwise as case 3 (`drop.held_unsealable`).
+  `ts` is within 16 days (and the member is told, as for a tried entry below
+  16 days), and ends otherwise as case 3 (`drop.held_unsealable`).
 - **Tried** (an attempt may have reached the relay) and `ts` older than
   16 days: not delivered, case 2 (`drop.undelivered_window`), checked
   at deposit as well as at a key change. It is never stamped again: a
@@ -10052,8 +10052,10 @@ under another epoch is the key change's, above), the vault judges its
 - **Tried**, `ts` older than 2 days and within 16 days: it is deposited
   as it is (a fresh `ts` could make the peer run it twice). The relay's
   hold may take it past the peer's window, so the member is told, once,
-  that it may not have been delivered: audited
-  `drop.unconfirmed_late` and `message.delivery_unconfirmed` (below);
+  that it may not have been delivered (`message.delivery_unconfirmed`,
+  below), and the vault's internal audit notes it (`unconfirmed_late`;
+  it is not a `drop.*` entry in the member's log: the message still
+  goes);
   the entry records that it was told, with the write after the deposit
   (a crash before that write can tell the member again after the
   restart: twice, never not at all). The same holds for an untried
@@ -10077,8 +10079,9 @@ write comes before its first drain, so normally nothing waits for it. A
 lock right after a clean load drains (nothing goes), writes not-clean,
 drains, and writes clean after that drain. **Trade-off** (accepted by the lead, GC
 #7805): after an unclean end a waiting message that was in fact untried
-is not stamped again, and if it then waits past 16 days the member is
-told it "may not have been delivered" (below): a crash costs a notice,
+is not stamped again, and the member is told it "may not have been
+delivered" (below) when it is deposited more than 2 days after its
+`ts`, or when it waits past 16 days: a crash costs a notice,
 never a duplicate. Every deploy that stops the enclave without locking
 counts as such an end.
 
@@ -10127,10 +10130,11 @@ mailbox, `stale`, a fork suspension and a refusal. The apps' texts
 - A tried entry, or one that could not be sealed again and was
   deposited as it is (above), deposited within 16 days of its `ts` but
   collected by the peer after them is refused `stale_or_future` by the
-  peer. The member is no longer left unaware: they are told "may not have
-  been delivered" at that deposit (when it is more than 2 days old), but
-  it may still arrive, and they are not told which. The late window ends
-  (not delivered) only where the deposit itself would be past 16 days.
+  peer. The member is told "may not have been delivered" at that
+  deposit (when the `ts` is more than 2 days old), but it may still
+  arrive, and they are not told which. The vault ends such an entry
+  itself (`undelivered_window`) only where the deposit would be past 16
+  days.
 - `RestampAfter` assumes the relay's 14-day hold; a longer
   `message_ttl_seconds` reopens it.
 - A re-stamped message has a new `seq`: a receiver can show it after
@@ -10139,7 +10143,8 @@ mailbox, `stale`, a fork suspension and a refusal. The apps' texts
 - A deposit answered `5xx` or not at all counts as possibly stored
   (tried, above): it is not stamped again; deposited more than 2 days
   after its `ts` it is told at that deposit, and past 16 days it is not
-  delivered and told, both as `message.delivery_unconfirmed` (before
+  delivered and, unless already told at a late deposit, told then; both
+  as `message.delivery_unconfirmed` (before
   0.88.10 such an entry was refused by the peer, untold).
 
 Flushes SHOULD be coalesced over a window of about 100 ms. Devices apply the
