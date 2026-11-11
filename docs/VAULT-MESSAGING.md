@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.8
+version: 0.88.9
 date: 2026-11-11
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,16 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.9: 2026-11-11, erratum (vettid-vault card GC #6647, the final
+    release 29 review's residual). §6.3.1 Responder, new "A stale
+    reconnect answer ends at a later message": `R` abandons its open
+    answer to a reconnect of `I`'s when a message from `I` other than
+    `hs.fin` opens under an epoch newer than the one that `hs.init`
+    named, with a later inner `ts` (not a restore's answer, nor one to a
+    reconnect naming a replaced line's epoch). §3.4.1
+    Residuals, "A stale reconnect answer after a rekey's confirmation",
+    is closed by it, and §6.3.1 Initiator's "I's open reconnects end at
+    its rekey's confirmation" points to it.
   - 0.88.8: 2026-11-11, erratum (lead; vettid-android #345, GC #6847, both
     blind reviews; vettid-ios to follow, card GC #7777). §8.6
     `quota_exceeded`, for a device (§6.3.1 "Devices and agents"): a
@@ -5140,9 +5150,10 @@ each recipient Q).
   gets no `hs.fin`, and since its deposit was accepted, no carried token's
   refusal ends it either: it waits until `L` (16 days), holding `R`'s
   rekeys back, and between two persons `R`'s reconnects too. Liveness only:
-  `I` can still rekey toward `R`, and nothing is lost or split. A fix (`R`
-  drops such an answer when a message from `I` opens under a newer epoch
-  with a later `ts`) is post-29 work.
+  `I` can still rekey toward `R`, and nothing is lost or split. (0.88.9)
+  Closed: `R` abandons such an answer at `I`'s next message under the newer
+  epoch (§6.3.1 Responder, "A stale reconnect answer ends at a later
+  message"); it still waits for `L` if `I` sends nothing more.
 - (0.88.2) **A stale rekey `hs.init` redelivered after a reconnect.** `R`
   drops its open rekey answers when it establishes `I`'s reconnect
   (§6.3.1 "A reconnect ends R's rekey answers"), but a rekey `hs.init` of
@@ -7539,7 +7550,9 @@ suspended. With this rule `I` finds nothing for that answer (§6.3.1, an
 `hs.resp` for no open handshake is acked and dropped) and sends no
 `hs.fin`. It mirrors "I's rekeys end at its reconnect's `hs.resp`". If
 `R`'s answer was deposited before `I` confirmed the rekey, it ends neither
-by a carried token's refusal nor by an `hs.fin`: it waits for `L` (§3.4.1
+by a carried token's refusal nor by an `hs.fin`: (0.88.9) it ends at `I`'s
+next message under the rekey's epoch (Responder, "A stale reconnect answer
+ends at a later message"), and waits for `L` only if none comes (§3.4.1
 Residuals, "A stale reconnect answer after a rekey's confirmation").
 
 After abandoning a rekey's pending epoch (at `B` or for want of a token),
@@ -7605,6 +7618,23 @@ answers carry no tokens, so nothing is revoked. A later `hs.fin` for one
 (a redelivery, §8.4) is acked and dropped; without this, rule E below would
 destroy the reconnect's epoch after it was confirmed, a false fork. It also
 frees `R`'s rekeys, which an open answer would hold for 16 days (§6.5).
+
+(0.88.9) **A stale reconnect answer ends at a later message.** When a
+message from `I`, other than `hs.fin`, opens under an epoch with `I` newer
+(later in establishing order, §3.4.1) than the epoch an open answer of
+`R`'s to `I`'s reconnect named, and its inner `ts` is later than that
+`hs.init`'s, `R` abandons that answer in the write that accepts the
+message: the tokens its `hs.resp` carried are revoked, and an `hs.resp`
+not yet deposited is not sent. `I` made that message after the reconnect's
+`hs.init` and under another epoch, so it had ended that reconnect (Initiator,
+"I's open reconnects end at its rekey's confirmation", or "A verified
+`hs.fin` comes first", §6.6) and sends no `hs.fin` for it. Without this the
+answer waits for `L` (16 days), holding `R`'s rekeys back (§6.5) and, between
+two persons, its reconnects (§6.6 "Between two persons"). An answer to a
+restore's reconnect (one that named an older epoch, §6.6 "After a restore")
+and one to a reconnect that named an epoch of a replaced line (fork
+evidence, judged at its `hs.fin`, §6.6 "Fork detection") are kept: they
+name such an epoch by design. It is a connection's rule.
 
 **Rule E.** In the write that establishes a rekey's or reconnect's epoch
 at its verified `hs.fin`, `R` destroys every other epoch with `I` later
