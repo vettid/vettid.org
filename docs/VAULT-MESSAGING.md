@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.9
+version: 0.88.13
 date: 2026-11-11
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,20 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.88.13: 2026-11-11, erratum (owner decisions 2026-11-11 on calls
+    C2, vettid-vault #222). §3.6.3 and the allow-list rows of the holder
+    and a desktop, §6.8 and §10.10 "Ringing": a call answered before the
+    deadline also has its `call.keepalive` pass the hold; one answered at
+    or after the deadline is ended `unavailable` when the hold begins,
+    the peer vault and the owner devices told, as is an outgoing call the
+    peer answers while held. §6.8 and §10.10 "Devices": a desktop's
+    active call outlives an expired access session, only that call's
+    `call.keepalive`, `call.ice` and `call.end` passing, and the vault's
+    `call.ice` and `call.end` for it reaching the desktop; an access ended
+    on purpose (`device.session.end`) ends the call. §10.10
+    "Liveness": the 90 s silence is judged at the end of each batch,
+    after its messages, and a gap of over 30 s in collecting starts the
+    count again.
   - 0.88.9: 2026-11-11, erratum (vettid-vault card GC #6647, the final
     release 29 review's residual). §6.3.1 Responder, new "A stale
     reconnect answer ends at a later message": `R` abandons its open
@@ -6551,8 +6565,16 @@ the hold off, `"held"` with it on.
   the middle of answering or ring for nothing, and an answer from a phone
   in someone else's hands would let them speak as the member. A call
   answered before the deadline continues: its device's `call.ice` and
-  `call.end` are forwarded until it ends (the check is never forced
-  mid-action, §3.6.5).
+  `call.end` are forwarded, and (0.88.13) its `call.keepalive` is taken
+  (§10.10 "Liveness"), until it ends (the check is never forced
+  mid-action, §3.6.5). (0.88.13, owner decision 2026-11-11) A call
+  answered at or after the deadline (a desktop may answer while the
+  check is due, or after `hold_off_until` lapses) does not continue: when
+  the hold begins it is `ended` with reason `unavailable`, and
+  `call.end{unavailable}` goes to the peer vault and the owner devices,
+  rather than leaving 90 s of silence to end it. An outgoing call that
+  the peer answers while the vault is held was answered after the
+  deadline too: it is ended the same way, never made `active`.
 - **Presence.** A held vault does not answer `presence.ping` (§10.17):
   it looks locked or offline, as any refusal does (§9.2).
 - **Owner fan-out.** No `sync.event`, `feed.event`, `message.new` or
@@ -6578,9 +6600,9 @@ every `drop.*` entry, §10.9). Allowed while held:
 
 | Sender | Types |
 |---|---|
-| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); `push.register`, `push.confirm` (0.30.0) and `push.unregister` (0.24.0: the wakes for `vault.held` and the alarm depend on a current token, §14.2); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline; (0.37.0) `location.share.stop` (§10.16): ending a disclosure is always possible, as locking is |
+| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); `push.register`, `push.confirm` (0.30.0) and `push.unregister` (0.24.0: the wakes for `vault.held` and the alarm depend on a current token, §14.2); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` and (0.88.13) `call.keepalive` of a call answered before the deadline; (0.37.0) `location.share.stop` (§10.16): ending a disclosure is always possible, as locking is |
 | A recovering app (§11.11.5) | Its own set, unchanged by the hold: `credential.utk.get`, `credential.recover`, `vault.status` (reduced) and the token and address types (0.16.0 removed `credential.reset` and `vault.delete` from it). A recovery completes while held and starts the clock (§3.6.1). (0.33.0, release R) No such app exists: a recovery completes in the open, and the phone is the holder from its first message (§11.14.6) |
-| A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session; `session_id` optional, 0.82.5), `call.end` and `call.ice` of a call it answered before the deadline, (0.37.0) `location.share.stop` |
+| A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session; `session_id` optional, 0.82.5), `call.end`, `call.ice` and (0.88.13) `call.keepalive` of a call it answered before the deadline, (0.37.0) `location.share.stop` |
 | An agent | `vault.status`, `device.session.end{}` (its own session; `session_id` optional, 0.82.5) |
 | Any device | The handshake (`hs.init`, `hs.resp`, `hs.fin`: rekeys and reconnects), `relay.token.issued`, `relay.token.refresh`, `relay.address.update`, (0.85.4) `device.features` |
 
@@ -9486,7 +9508,23 @@ While the vault is held, a session is suspended but still returned.
   `relay.token.issued`, `relay.token.refresh`, `relay.address.update`,
   (0.85.4) `device.features` and the handshake. Feature messages the vault addresses to one device (such
   as a call's answer) also reach a desktop or agent only within its
-  session; responses and the messages of this section always do.
+  session, except (0.88.13) a call's `call.ice` and `call.end` to its
+  call device (below); responses and the messages of this section
+  always do.
+- (0.88.13, owner decisions 2026-11-11) **A desktop's call outlives an
+  expired session.** While a desktop is the call device of a live
+  `active` call (§10.10), its own `call.keepalive`, `call.ice` and
+  `call.end` for that call pass a session that has expired, and the
+  vault's `call.ice` and `call.end` for that call (the peer's candidates
+  and hang-up, an end the vault decides, the answer to a keep-alive for
+  a call that is gone) reach it: the call continues until it ends, as a
+  call does through the hold (§3.6.3). Nothing else passes either way,
+  the vault checks that the call is that device's, and the call still
+  ends at 12 h at most. **Access ended on purpose ends the call:** a
+  `device.session.end` (the member's End access, "Deny and end access
+  now", or the desktop's own end) also ends that desktop's call in
+  progress, `ended` with reason `unavailable`, `call.end{unavailable}` to
+  the peer vault and to the owner devices, that desktop included.
 - Within it, a **desktop** may send the types listed for it in §10. Some
   of them are **step-up types**: the vault holds each such request until
   an app approves it (below). They are the types that reveal a secret
@@ -9626,8 +9664,9 @@ apps re-read `pending.list` after the check (§10.4.2).
 **While the vault is held** (§3.6.3), access sessions are suspended: a
 desktop or agent may send only `vault.status`, `device.session.end{}`
 (with or without `session_id`, 0.82.5) and the transport types (a
-desktop also `vault.lock`, and `call.end` and `call.ice` of a call it
-answered before the deadline); everything else is answered
+desktop also `vault.lock`, and `call.end`, `call.ice` and (0.88.13)
+`call.keepalive` of a call it answered before the deadline); everything
+else is answered
 `owner_check_required`. Held requests were answered
 `owner_check_required` when the hold began, and no app may grant a
 session or decide an approval until a check ends the hold. A session's
@@ -14079,7 +14118,9 @@ release before C2: none of them changes calls. Production has no calls
 and answers calls, each with its own key exchange. The access session is
 the authorization: call types are not step-up types, and placing or
 answering a call needs no per-call approval. A desktop without a session
-is not rung (§9.1) and its `call.start` is answered `session_required`.
+is not rung (§9.1) and its `call.start` is answered `session_required`;
+(0.88.13) a call it is already in outlives an expired session, and ends
+with an access ended on purpose (§6.8).
 Agents never place or take calls. (0.69.0) Nor does a service
 connection (`peer_kind` `"service"`, §6.4 "Service connections"):
 `call.start` and `call.permission.set` naming one are `forbidden`, and a
@@ -14142,8 +14183,11 @@ new one on the other device.
   not answer, not even `busy`: the caller times out as with a locked
   callee, and the callee's vault records a missed call. A call ringing
   when the hold begins stops ringing on the devices
-  (`call.end{unavailable}` to them only); a call answered before it
-  continues until it ends. A held caller's `call.start` is answered
+  (`call.end{unavailable}` to them only); a call answered before the
+  deadline continues until it ends, its `call.keepalive` passing the hold
+  too, and (0.88.13) one answered at or after the deadline is ended
+  `unavailable` when the hold begins, the peer vault and the devices told
+  (§3.6.3). A held caller's `call.start` is answered
   `owner_check_required`. Otherwise, if a call is ringing or active the
   vault answers `call.end{busy}` ((C2) except in a glare, below).
   Otherwise it sends every owner app and desktop (within its access
@@ -14250,12 +14294,16 @@ device of an active call is gone.
   writes already). A device that knows its vault to be C2 ("Mixed
   releases") MUST send it, in either form.
 - A watched, `active` call whose last keep-alive is more than **90 s**
-  old is ended at the next housekeeping, so within 120 s of the last
-  keep-alive: `ended` with reason `failed`, `call.end{failed}` to the
-  peer vault and to the owner devices, audited `call.ended`. The 90 s
+  old is ended at the end of a batch, after the batch's messages (0.88.13:
+  so a keep-alive in that batch counts first), so within about 120 s of
+  the last keep-alive: `ended` with reason `failed`, `call.end{failed}` to
+  the peer vault and to the owner devices, audited `call.ended`. The 90 s
   count from the answer until the first keep-alive, and from the unlock
   for a call that was active when the vault was unlocked (the times are
-  not in the state).
+  not in the state). (0.88.13) A gap of more than 30 s between two
+  housekeepings is time the vault was not collecting (a relay blip, a
+  task swap), when the device's keep-alives may not have reached it: the
+  count starts again at the gap's end, as at the unlock.
 - A call that is not watched (its device is an app from before C2)
   keeps S10's rule: live for 12 h. That is what lets an S10-era app use
   a C2 vault. A later release refuses unwatched calls ("Mixed
