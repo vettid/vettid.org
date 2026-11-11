@@ -37,8 +37,10 @@ changelog:
     an unlock that reads it: its types are unknown types (§11.10.8,
     answered `unsupported_type`), and its timers and observers do not run.
     (Owner decision 2026-11-11, GC #8520, answered a in #8529.) A
-    feature other features call directly (audit, connauth, credential, critical, grants, items,
-    leash, vote, wallet) cannot be left out that way: when its part does
+    feature other features call directly (audit, connauth, credential,
+    critical, grants, items, leash, vote, wallet), and the feed (GC #8583
+    a: every notice is written to it, some once only), cannot be left
+    out that way: when its part does
     not read, the unlock and a recovery's open are refused with the new
     code `state_unreadable` (§11.4, §11.14.6), after the release
     decisions and before the state is written (a recovery's open has
@@ -4196,7 +4198,9 @@ than drop what it does not know), **fails closed**: a feature that held a rule
 
 Some features are called directly by others: the audit log, connection
 authentication, the credential, critical secrets, grants, items, the
-leash, votes and the wallet. The vault cannot run without them, so when
+leash, votes and the wallet. So is the feed, to which every feature and
+the vault write their notices, some of them once only (owner decision
+2026-11-11, GC #8583 a). The vault cannot run without them, so when
 one of their parts does not read the vault does not open: the unlock is
 answered `state_unreadable` (§11.4) and a recovery's open likewise
 (§11.14.6). The release decisions come first (§11.10.4: a header of a
