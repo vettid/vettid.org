@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.68
+version: 0.1.69
 date: 2026-11-11
 changelog:
+  - 0.1.69: erratum, 2026-11-11 (ANDROID-PLAN 0.1.125; owner decision a, GC #8641). §4.17 takes ANDROID-PLAN's texts, now including the four refusal reasons of their own (never the unlock's error text); its reference reads 0.1.124 and 0.1.125.
   - 0.1.68: 2026-11-11 (ANDROID-PLAN 0.1.124; owner decisions a, GC #8451, #8476 and #8511). The iPhone follows ANDROID-PLAN §4 "Advanced security, attestation in detail and the check's progress": Advanced security in Settings, the attestation in detail with "Copy all", and the owner check's "Checking with your vault…" and "Check passed". §4.17: what the iPhone shows for itself (the App Attest state only), the haptic, the clipboard and the back gesture; Allow screenshots moves to Advanced security; §6.9: the verification record.
   - 0.1.67: erratum, 2026-11-11 (ANDROID-PLAN 0.1.123, VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). §4 Calls: after a glare, the iPhone answers the winning call with its own call's media, as Android does: no camera by itself.
   - 0.1.66: erratum, 2026-11-10, as built (vettid-ios #241, in review; the container-read audit, GC #7243). §4 History export, §4.16 and §6.9: the History export, as the vote proof already does, writes its file to a directory of its own in tmp/ with complete protection, hands it over as a copy (`UIDocumentPickerViewController(forExporting:asCopy: true)`), and removes it on every answer, on a failure, when the screen leaves, when the §4.4 (1) cover closes the picker, at launch and when the screen opens again. SwiftUI `.fileExporter` is not used: it leaves its file in tmp/ with default protection. Complete protection helps only while the iPhone is locked; on an unlocked phone the defense is that the file is short-lived. Not yet: removal when the app goes to the background (a vettid-ios follow-up). The photo share sheet is unchanged: it hands the system bytes, no file.
@@ -1892,7 +1893,7 @@ reconnect, and a vote is not in Messages, in the approvals indicator
 ### 4.17 Advanced security, attestation in detail and the check's progress (0.1.68)
 
 As ANDROID-PLAN §4 "Advanced security, attestation in detail and the
-check's progress" (0.1.124), the same texts and order; the string keys
+check's progress" (0.1.124; the refusal texts 0.1.125), the same texts and order; the string keys
 take Android's names (`ios_` only for what the iPhone adds). On the
 iPhone:
 
