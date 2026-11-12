@@ -38,8 +38,8 @@ changelog:
     epoch a reconnect named when it was `R`'s current but unconfirmed one,
     and `I`'s later honest message under it (after abandoning its pending
     reconnect epoch) suspended the pair: a false fork. The "A reconnect ends
-    R's rekey answers" reason is restated to match; the R29-R5/R6 test
-    references are corrected. No change for a vault, an app or a service
+    R's rekey answers" reason and the Initiator's dropped-`hs.fin` reason
+    are restated to match. No change for a vault, an app or a service
     built from the code.
   - 0.89.1: 2026-11-12, erratum (found by the blind re-check of
     service-vault #146, GC #9021). §6.2 `rotations`: a rekey's
@@ -7819,8 +7819,10 @@ write. (0.88.2) In the same write `I` drops its `hs.fin` for the epoch
 that it does not know to have been accepted by the relay (for example
 refused `token_expired` and waiting for a token), with its outbox entry;
 it is never sent later, as rule E's `R` drops its own. Sent after a newer
-epoch was established at `R`, it would make `R`'s rule E destroy that
-epoch while `I` sends under it, a false fork (found by the release 29
+epoch was established at `R`, it would establish an epoch `I` abandoned
+and, (0.89.2) where its handshake named `R`'s confirmed epoch while that
+epoch was not current, make `R`'s rule E destroy the newer epoch while
+`I` sends under it, a false fork (found by the release 29
 search after R29-T1, where a reconnect's `hs.fin` on its carried token
 overtakes a waiting one, §8.4). One the relay did accept can still reach
 `R` late (a redelivery, §8.4); `R` drops its open rekey answers at the
@@ -7961,8 +7963,8 @@ Initiator rules it rests on, on either side as a member vault does.
 **Rule E.** (0.89.2) In the write that establishes, at its verified
 `hs.fin`, the epoch of a rekey or reconnect that named `R`'s confirmed
 epoch while that epoch was not current (judged at its `hs.init`;
-Responder, above), `R` destroys every other epoch with `I` later than the
-confirmed one and records them with the accepted `hs.init`'s inner `ts`. "Destroyed" means: its send key and `rk` are erased, and its
+Responder, above), `R` destroys every other epoch with `I` later than its
+confirmed epoch in that write and records them with the accepted `hs.init`'s inner `ts`. "Destroyed" means: its send key and `rk` are erased, and its
 receive key is kept as a superseded epoch's (§6.5 "Key retention"), for
 16 days from its destruction, only to authenticate messages under it for
 the `ts` rule below. That rule needs the inner `ts`, which is inside the
@@ -7978,10 +7980,13 @@ itself began and abandoned while pending: that one is handled as the
 Initiator paragraph says (processed without confirming it, never fork
 evidence by rule E; (0.87.1) §3.4.1 "Epochs abandoned while pending, at
 P's `identity.rotate`" may still end it or suspend). (0.89.2) A rekey or
-reconnect that named any other epoch (`R`'s current one, its own pending
-one, or one it abandoned while pending) destroys nothing by rule E: the
-named epoch is the one `I` returns to if it abandons the new one
-(Initiator), so a later message from `I` under it is no evidence.
+reconnect that named any other epoch (for example `R`'s current one, its
+own pending one, or one it abandoned while pending) destroys nothing by
+rule E: the named epoch is the one `I` returns to if it abandons the new
+one (Initiator), so a later message from `I` under it is no evidence. An
+older epoch `R` accepts as `ctx` (§6.6 "After a restore") destroys nothing
+either; one that is fork evidence (§3.4.1 "Fork by ctx") suspends at
+`hs.fin` instead.
 
 **Crossing** (§6.5). `I`, holding a pending epoch, drops a rekey `hs.init`
 from `R` under the current epoch if its inner `ts` is not later than that
@@ -8245,8 +8250,8 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-R2 | §6.3.1 Responder | r29_scenarios_test.go:253; r29_flag_test.go:23 |
 | R29-R3 ((0.88.1) also every 12 days) | §6.3.1 Responder; hs.confirm again | r29_f_test.go:170; r29_reconfirm_test.go:39, :61, :84, :104, :128, :152; V/client/reconfirm_test.go:16, :125, :162 |
 | R29-R4 | §6.3.1 Responder; §6.6 | r29_f_test.go:252; r29_scenarios_test.go:408 |
-| R29-R5 | §6.3.1 Rule E | r29_round6_test.go:95; r29_f_test.go:252; r29_review4_test.go:231 |
-| R29-R6 | §6.3.1 Rule E; §3.4.1 acceptFrom | r29_scenarios_test.go:468, :502; r29_oldcopy_test.go:249 |
+| R29-R5 | §6.3.1 Rule E | r29_round6_test.go:70; r29_f_test.go:252; r29_review4_test.go:231 |
+| R29-R6 | §6.3.1 Rule E; §3.4.1 acceptFrom | r29_scenarios_test.go:442; r29_oldcopy_test.go:248 |
 | R29-X1 | §6.3.1 Crossing | r29_scenarios_test.go:374 |
 | R29-X2 | §6.5; §6.6 | r29_scenarios_test.go:536; r29_round6_test.go:274 |
 | R29-X3 | §6.3.1 Rule J | r29_scenarios_test.go:336 |
