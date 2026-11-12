@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.89.1
+version: 0.89.2
 date: 2026-11-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,20 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.89.2: 2026-11-12, erratum (as built in vettid-vault: `ruleE` runs
+    only when the handshake named the confirmed epoch, handshakes.go
+    `responderEstablish`; found while service-vault wrote its release-29
+    note, GC #9134). §6.3.1 Rule E applies only at the `hs.fin` of a rekey
+    or reconnect that named `R`'s confirmed epoch while that epoch was not
+    current, as 0.86.3 said ("such a handshake's epoch"); 0.87.0's restating
+    dropped that qualifier. Read literally, the 0.87.0 text destroyed the
+    epoch a reconnect named when it was `R`'s current but unconfirmed one,
+    and `I`'s later honest message under it (after abandoning its pending
+    reconnect epoch) suspended the pair: a false fork. The "A reconnect ends
+    R's rekey answers" reason and the Initiator's dropped-`hs.fin` reason
+    are restated to match, and §3.4.1 Residuals names the copy that uses
+    an unconfirmed epoch such a reconnect passed over. No change for a vault, an app or a service
+    built from the code.
   - 0.89.1: 2026-11-12, erratum (found by the blind re-check of
     service-vault #146, GC #9021). §6.2 `rotations`: a rekey's
     `hs.init` and `hs.resp` carry the links toward every peer (0.87.0
@@ -5387,6 +5401,16 @@ each recipient Q).
   while S1 holds it), K9 has not yet judged the epoch, so the copy's
   messages under it are still accepted where Table A accepts the
   `sender` (its current key, or an earlier key before its cut-off).
+- (0.89.2) **A copy using an unconfirmed epoch a reconnect passed over.**
+  Rule E applies only to a handshake that named `R`'s confirmed epoch
+  while it was not current (§6.3.1). A reconnect that names `R`'s current
+  epoch while that one is unconfirmed destroys nothing, so an earlier
+  unconfirmed epoch `R` activated as responder (later than the confirmed
+  one) is kept as superseded. An honest `I` never sends under it again,
+  but an old copy's message under it, with a later `ts`, is accepted, and
+  can move `R`'s confirmed epoch to it, until its 16-day keep ends. As
+  built in vettid-vault and in the trust model; the same class as the
+  next residual.
 - (0.87.1) **A copy using an epoch Q abandoned while pending, outside
   R29-K9** (accepted by the owner 2026-11-06, decision b, GC
   01M6RJF5NZBS92JEYXJXTWKSKM). "Epochs abandoned while pending, at P's
@@ -7806,8 +7830,10 @@ write. (0.88.2) In the same write `I` drops its `hs.fin` for the epoch
 that it does not know to have been accepted by the relay (for example
 refused `token_expired` and waiting for a token), with its outbox entry;
 it is never sent later, as rule E's `R` drops its own. Sent after a newer
-epoch was established at `R`, it would make `R`'s rule E destroy that
-epoch while `I` sends under it, a false fork (found by the release 29
+epoch was established at `R`, it would establish an epoch `I` abandoned
+and, (0.89.2) where its handshake named `R`'s confirmed epoch while that
+epoch was not current, make `R`'s rule E destroy the newer epoch while
+`I` sends under it, a false fork (found by the release 29
 search after R29-T1, where a reconnect's `hs.fin` on its carried token
 overtakes a waiting one, §8.4). One the relay did accept can still reach
 `R` late (a redelivery, §8.4); `R` drops its open rekey answers at the
@@ -7911,8 +7937,10 @@ pending epoch and its open rekeys there (Initiator, "I's rekeys end at its
 reconnect's `hs.resp`"), and `I` starts no rekey while a reconnect is
 open. Release 29's rekey
 answers carry no tokens, so nothing is revoked. A later `hs.fin` for one
-(a redelivery, §8.4) is acked and dropped; without this, rule E below would
-destroy the reconnect's epoch after it was confirmed, a false fork. It also
+(a redelivery, §8.4) is acked and dropped; without this, it would
+establish an epoch `I` abandoned and, where that rekey named the confirmed
+epoch while it was not current, rule E below would destroy the
+reconnect's epoch after `I` confirmed it, a false fork. It also
 frees `R`'s rekeys, which an open answer would hold for 16 days (§6.5).
 
 (0.88.9) **A stale reconnect answer ends at a later message.** When a
@@ -7943,10 +7971,13 @@ epoch older than the confirmed one (§3.4.1 "Fork by ctx"). It is a
 connection's rule. A service vault follows this rule, and the two
 Initiator rules it rests on, on either side as a member vault does.
 
-**Rule E.** In the write that establishes a rekey's or reconnect's epoch
-at its verified `hs.fin`, `R` destroys every other epoch with `I` later
-than the confirmed one and records them with the accepted `hs.init`'s
-inner `ts`. "Destroyed" means: its send key and `rk` are erased, and its
+**Rule E.** (0.89.2) In the write that establishes, at its verified
+`hs.fin`, the epoch of a rekey or reconnect that named `R`'s confirmed
+epoch while that epoch was not current (judged at its `hs.init`;
+Responder, above), `R` destroys every other epoch with `I` later than its
+confirmed epoch in that write and records them with the accepted
+`hs.init`'s inner `ts`. "Destroyed" means: its send key and `rk` are
+erased, and its
 receive key is kept as a superseded epoch's (§6.5 "Key retention"), for
 16 days from its destruction, only to authenticate messages under it for
 the `ts` rule below. That rule needs the inner `ts`, which is inside the
@@ -7961,7 +7992,14 @@ recorded: `R` suspends (§6.6 "Fork detection", `ref` = `epoch`, with
 itself began and abandoned while pending: that one is handled as the
 Initiator paragraph says (processed without confirming it, never fork
 evidence by rule E; (0.87.1) §3.4.1 "Epochs abandoned while pending, at
-P's `identity.rotate`" may still end it or suspend).
+P's `identity.rotate`" may still end it or suspend). (0.89.2) A rekey or
+reconnect that named any other epoch (for example `R`'s current one, its
+own pending one, or one it abandoned while pending) destroys nothing by
+rule E: the named epoch is the one `I` returns to if it abandons the new
+one (Initiator), so a later message from `I` under it is no evidence. An
+older epoch `R` accepts as `ctx` (§6.6 "After a restore") destroys nothing
+either; one that is fork evidence (§3.4.1 "Fork by ctx") suspends at
+`hs.fin` instead.
 
 **Crossing** (§6.5). `I`, holding a pending epoch, drops a rekey `hs.init`
 from `R` under the current epoch if its inner `ts` is not later than that
