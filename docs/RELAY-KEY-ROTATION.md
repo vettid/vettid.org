@@ -1,11 +1,13 @@
-# Relay-key rotation without wait cycles: design note (draft 7)
+# Relay-key rotation without wait cycles: design note (draft 8)
 
 For the owner and the lead. This note is read against VAULT-MESSAGING
-0.89.1 (origin/master); the two errata of 0.89.1 change nothing below.
-Every quoted section reads as in 0.88.18. RELAY-PROTOCOL is read on the
-same master.
+0.89.2 (origin/master). The errata of 0.89.1 and 0.89.2 change nothing
+below: 0.89.2 narrows rule E, which this design does not rely on. Every
+quoted section reads as in 0.88.18. RELAY-PROTOCOL is read on the same
+master.
 
-The owner decided every open question on 2026-11-12 (§7). This draft
+The owner decided every open question on 2026-11-12 (§7), including three
+follow-ups (7.16 to 7.18). This draft
 describes the chosen design only. Options the owner did not choose appear
 once each, as "not chosen", in §7.
 
@@ -33,7 +35,8 @@ spec. Sections 6 and 7 are internal.
 | The liveness table, the bound and the residuals are restated for the chosen set | 4; 5; 6 |
 | New: "Spec changes this implies" | after 5 |
 | §6 becomes the next steps under 7.13 a | 6 |
-| Interactions between the chosen answers that need a look are listed, not resolved | 7.16 |
+| Interactions between the chosen answers that need a look are listed, not resolved | 7.16 (draft 7) |
+| **Draft 8: follow-up decisions** (owner decisions 2026-11-12). Waiting on held tokens closes the G4 case after a follow (2.8, 7.16 a). Relay links are kept as seen while a record is suspended (2.9, 7.17 b). A refused update's tokens are taken (2.7, 7.18 a). Two model fixes. The bar for the build. Residuals 11 and 12. "Points for the spec-text PR's blind review" | 2.7; 2.8; 2.9; 4; 5; 6; 7; review points |
 
 The draft 6 changes table is kept at the end of this note, for the record.
 
@@ -489,15 +492,83 @@ sealed under P's then-current epoch.
   write that refuses it, after rule C: binding L's `ik` links first, then
   the relay links. This mirrors §6.6 "The links of a refused reconnect".
   - Q then knows P's new mailbox, and its next try goes there under 2.4.
-  - Its tokens are not taken.
-  - *Unsure:* which K′-mailbox token Q's try then uses. It may be the
-    reconnect token of a later accepted message, or one that P's own 2.4
-    messages carry. To be checked in the model.
+- **The tokens of a refused update are taken** (owner decision
+  2026-11-12, 7.18 a). In that same write, Q keeps the update's
+  K′-mailbox tokens as held tokens under rule T. Rule T's issuer and
+  `sub` checks still apply. Q's next try uses them, which answers which
+  K′ token that try uses.
 - **Safety.**
-  - The relay links carry K's and K′'s signatures, made in the rotation's
-    first write.
-  - The `ik` links are checked by Table B before any relay link is
-    followed.
+  - The relay links carry K's and K′'s signatures, made in P's first
+    write.
+  - The `ik` links of binding L are checked by Table B before any relay
+    link is followed, in the refusing write too.
+  - The tokens are signed by K′.
+  - A replay carries only tokens P really issued.
+  - This argument has not been reviewed yet (see "Points for the
+    spec-text PR's blind review").
+- **The model never reaches this path,** so it is not measured.
+
+### 2.8 G4H: waiting on held tokens when both sides rotate (owner decision 2026-11-12, 7.16 a)
+
+**The case.** Both sides rotate. X has followed Y, so X's tokens for Y's
+old mailbox are dropped. X's only tokens for Y's new mailbox name X's
+newer key X′. They are Y's rule-0 tokens, minted after Y followed X.
+Under 7.4 c those tokens do not move X's S2. So:
+1. X's own S1 messages, deposited with its older key, find no standing
+   token.
+2. X's no-token reconnect finds no reconnect token, and "The reconnect
+   bound" makes the pair `stale`.
+3. S1 then ends the other side.
+
+**The rule.** While X holds tokens from Y's mailbox, kept under rule T,
+that name X's newer key, X does not judge "no valid standing token" or
+"no reconnect token" as `stale`.
+- **Its bound:** the earlier of those tokens' `exp` and X's S1 cap (60
+  days after X's second write, 7.10 b). After that the judgement runs as
+  today.
+- **What it extends:** 0.88.2's "No reconnect while carried tokens wait"
+  (§6.3.1) and its exception in "The reconnect bound". The shipped code
+  has the same wait for carried tokens (`carriedWait`).
+- **What it does not do:** it moves no message and picks no deposit key.
+  It only keeps X from giving up while the token Y has already issued for
+  X′ is on its way to being usable: Y's `relay.token.issued` advances
+  X's S2.
+
+**Model.** Honest stale ends went from 13 and 6 to 0 and 0 (two seeds).
+
+**Safety.**
+- The token is minted by Y's new mailbox key. It binds the mailbox, X′,
+  its expiry and its reconnect flag.
+- It was kept only from a message X authenticated.
+- A copy of X taken before the rotation lacks X′, and the relay checks
+  the depositing key against the token's `sub` (RELAY-PROTOCOL §5.3 step
+  7).
+- A copy of Y able to mint such a token already holds Y's live mailbox,
+  which is an accepted residual.
+- This argument has not been reviewed yet (review points).
+
+### 2.9 Relay links seen while a record is suspended (owner decision 2026-11-12, 7.17 b)
+
+**The rule.** At `acceptFrom` step 1, while Q's record of P is suspended,
+relay links that pass rule C are kept as **seen**, as step 3 keeps them
+(rule C's "seen", within its cap of 32).
+
+**The case it closes.**
+1. An old copy P′ forks P's `ik` and relay key.
+2. P′'s update {K→K_copy} arrives while Q is suspended on the `ik`
+   conflict. Today Q does not keep it.
+3. The member keeps the real P (`connection.rotation.resolve`).
+4. Q then follows P's real update or 2.4 reconnect, and never sees the
+   copy's relay successor.
+
+With the rule, the real successor meets rule C after the resolve and
+ends as a visible relay fork: `resolve` answers `not_found`, and the
+member makes a new invitation. This is the relay-key counterpart of
+§3.4.1 Residuals' 0.88.2 identity-successor case.
+
+**Model.** I4 went to 0.
+
+**Review.** The rule is not yet reviewed (review points).
 
 ---
 
@@ -653,6 +724,7 @@ Why Φ decreases:
 | Q's acknowledgment (μ) | (a) Q has an epoch: rule U's `relay.token.issued`. (b) Q is demoted: its reconnect runs (S-a, S-d), N1 restarts it if needed, rule 1 delivers P's answer and `hs.confirm`, and Q's prompt `relay.token.issued` advances S2. (c) Q is pending: N2 lets P's `hs.confirm` through, then (a). (d) Q is responding: N2 lets P's `hs.fin` through, then (a) | (a) one hop; (b) about 6`U` from `w`; (c), (d) one hop more / "The reconnect bound" | Q never waits for a message that P holds for want of Q's acknowledgment: every message Q needs passes S1 and the cut-off |
 | A demoted Q with its own pending reconnect | S-a's guard: retried at `B` | 32 days | S1 is paused while P has Q's authenticated `hs.fin` (7.10 b) |
 | P with no usable reconnect token after a revocation | the no-token judgement suspended during S1 (2.5); the previous rows | within S1 | the revocation is Q's own follow |
+| Both sides rotated: X holds only tokens naming its newer key | the no-token judgements suspended (2.8) until Y's `relay.token.issued` advances X's S2 | those tokens' `exp`, or S1's 60-day cap | the tokens were already issued by Y; nothing waits on X |
 | A refused reconnect `hs.init` | a failed try at once; the next try once a newer mailbox is known (2.7) | one hop after the links | — |
 | P's held rekey messages | S2's re-deposit, or dropped (S-a, §6.3.1); `B` from the queued `hs.fin` (S-c) | one round / `B` | not needed for progress under G1-N |
 | P's other entries held by S1 | S2's advance (Q's `relay.token.issued`) | as μ | — |
@@ -680,8 +752,7 @@ counted from `w`.
 - 0.88.2's list;
 - S1, at 30 days of S1 time and 60 days at the cap;
 - the gate's deadline;
-- G8 on the 2.4 path, past the 14-day grace;
-- the open interaction of 7.16 (1), if the model shows it.
+- G8 on the 2.4 path, past the 14-day grace.
 
 ---
 
@@ -697,11 +768,10 @@ counted from `w`.
   - **Within one hop.** Q's `relay.token.issued` names an `iss` that P
     does not know yet. It is deferred, then refused, and the next resend
     replaces it.
-  - **After P followed Q.** P's later update names Q's new key (S3),
-    while Q, in its own S1, deposits only with its old key. P's rule U
-    has also revoked Q's reconnect token for the old key. So a demoted Q
-    has no usable reconnect token. The fix proposed in draft 6, an update
-    as an S2 source, went with 7.4 a. This case is open (7.16 (1)).
+  - **After one side followed the other** (G4H). X's only tokens for Y's
+    new mailbox name X's newer key, and its other tokens are gone. This
+    is closed by 2.8: X waits on those tokens instead of going `stale`.
+    Model: 13 and 6 honest stale ends went to 0 and 0.
 - **G5.** S2's restart, as specified today, uses the reconnect token that
   Q's `relay.token.issued` delivers.
 - **G6, G7, G9.** Closed by 2.5, 2.4 and 2.7.
@@ -714,6 +784,7 @@ counted from `w`.
 - **H5 and the reconnect token's quota.**
   - N1 uses the update's fresh K′ reconnect token.
   - 2.5 removes the failed tries on a revoked token.
+- **I4: a relay successor seen while suspended.** Closed by 2.9.
 - **The gate, rule U, H5.** No other cycle found.
 
 ### The residuals of the chosen design
@@ -745,6 +816,16 @@ The owner accepted these by choosing this set (owner decision
    the demoted case that is about one hop longer than an earlier advance
    (7.4 c).
 10. **The rapid-rotation rate** is to be measured again under rotation.
+11. **P ends `stale` by S1 while Q still holds refused deposits.**
+    - When: only in runs that are not honest (an old copy, a lock longer
+      than the grace, injected loss).
+    - What Q sees: Q cannot learn of P's S1 end, because `markStale` only
+      abandons P's own handshakes. Q's messages stay "Waiting to reach …"
+      until the hold's limit, then become `message.not_delivered`.
+    - The gap between the two sides' views can exceed 60 days.
+12. **S-a's guard can overlap an S1 `stale`.** The guard's wait, up to
+    `B`, overlaps S1's end only in runs that are not honest. It never
+    causes an honest `stale`.
 
 ---
 
@@ -768,8 +849,13 @@ The owner accepted these by choosing this set (owner decision
     deposit.
   - Following by 2.4's links.
   - The links of a refused update (2.7).
-- **§3.4.1 rule T.** The reconnect clause: `iss` is the announced key's
-  mailbox.
+- **§3.4.1 rule T.**
+  - The reconnect clause: `iss` is the announced key's mailbox.
+  - The tokens of an update refused only for its demoted or destroyed
+    epoch are kept (2.7, 7.18 a).
+- **§3.4.1 `acceptFrom` step 1, and rule C's "seen".** Relay links that
+  pass rule C are kept as seen while the record is suspended (2.9, 7.17
+  b).
 - **§3.4.1 S1 to S3.**
   - S1's clock pauses on Q's authenticated messages (16, 30 and 60 days).
   - S2's same-bytes re-deposit covers only held-token entries, never an
@@ -782,6 +868,9 @@ The owner accepted these by choosing this set (owner decision
   - A revoked reconnect token for an earlier key is not a failed try, and
     the no-token judgement is suspended during S1 (2.5).
   - A refused reconnect `hs.init` is a failed try at once (2.7).
+  - The no-token judgements are suspended while held tokens naming the
+    side's newer key wait (2.8). This extends the existing exception for
+    carried tokens.
 - **§3.4.1 "After a demotion".** S-a, with its guard, and N1.
 - **§3.4.1 elsewhere.**
   - The lost-token sentence is qualified.
@@ -801,6 +890,8 @@ The owner accepted these by choosing this set (owner decision
 - **§6.3.1.**
   - Rule J amended.
   - `B` starts at the queued `hs.fin` (S-c).
+  - "No reconnect while carried tokens wait" is extended to held tokens
+    naming the side's newer key (2.8, 7.16 a).
 - **§6.5.** The crossing sentence gets its exception.
 - **§6.6.**
   - "Initiating" and "Authentication" for linked keys.
@@ -904,6 +995,20 @@ are in S1. A reconnect `hs.init` keeps the mailbox it was queued for, as
 - An experiment that abandons the rekey instead leaves the stale counts
   unchanged.
 
+**Two model fixes.** These corrected the chosen set's step 3 in the
+model:
+- the binding-L switch now records the relay fork on an identity
+  conflict;
+- the reconnect relay links of 2.4 now go through rule C.
+
+**The bar for the build.** On the model, with the chosen set plus 2.8 and
+2.9, at 10,000 runs on each of two seeds:
+- **Rotation on:** 0 and 1 runs with a violation. The 1 is the long-known
+  I1 loss (run seed 17911184776986070625).
+- **Rotation off:** 0 and 2, both already known.
+
+This is the bar to carry into the spec-text PR and the code.
+
 ### Steps
 
 1. **The model, with the chosen rules, each behind its own switch.**
@@ -920,8 +1025,10 @@ are in S1. A reconnect `hs.init` keeps the mailbox it was queued for, as
        update;
      - the 14-day grace, the 60-day hold, and the telling;
      - S1's pause (16, 30 and 60 days).
+     - 2.8 (waiting on held tokens), 2.9 (links seen while suspended),
+       and 2.7's tokens of a refused update. The model does not reach the
+       last of these yet; a schedule for it is needed.
    - Two concurrent own handshakes per side, as the vault allows.
-   - The open case of 7.16 (1), measured.
    - Run with `TRUSTMODEL_RELAYROT=1`, with and without ROTBURST, at
      10,000 runs, then at 100,000.
    - The old-copy actor must break I3 when binding L is off.
@@ -954,7 +1061,10 @@ are in S1. A reconnect `hs.init` keeps the mailbox it was queued for, as
      - rule 0: no token of Q's names a key it only saw announced;
      - no S9 fork text in an honest run;
      - no `stale` from "no reconnect token" while in S1 after a
-       revocation for an earlier key;
+       revocation for an earlier key, or while held tokens naming the
+       side's newer key wait (2.8);
+     - a relay successor that arrived while suspended ends as a visible
+       relay fork after the resolve (2.9);
      - a demoted P takes Q's token only under a new epoch;
      - every `201`'d deposit is collected, re-deposited or told;
      - every held message is shown as held.
@@ -965,7 +1075,8 @@ are in S1. A reconnect `hs.init` keeps the mailbox it was queued for, as
 4. **The bar.**
    - 0 honest runs end `stale`, diverged or suspended outside the
      residuals of §5, at 10,000 runs per mode: `R29RP_RELAYROT` crossed
-     with every mode, plus every mode alone.
+     with every mode, plus every mode alone. This matches the model's bar
+     above.
    - Counted from the `-v` class table and the counters (`-test.v` for a
      prebuilt binary), never from a PASS.
    - Each new oracle is shown to fire before its zero is reported.
@@ -1095,37 +1206,63 @@ not chosen get one line each.
 4. **S9 at S1's end:** "<connection name> may have connected to an old
    copy of your vault. Contact <connection name>."
 
-### 7.16 Interactions to look at (not decided here)
+### 7.16 G4H: both sides rotated, only tokens naming the newer key
 
-1. **7.4 c leaves the G4 "after P followed Q" case without a fix.**
-   - The case: P's rule U revokes Q's reconnect token for Q's old key,
-     and P's later tokens name Q's new key. Q, in its own S1, deposits
-     with its old key, so a demoted Q has no usable reconnect token.
-   - Draft 6's fix was an update as an S2 source, and it went with 7.4 a.
-     It may not have worked anyway: a demoted Q refuses that update under
-     its demoted epoch.
-   - G4 appears in about half of the model's stale ends. This case's
-     share is not known.
-   - A fix would be either G2-B extended to held reconnect tokens, or a
-     residual. Either one goes beyond the decisions taken. To be measured
-     in the model before the spec PR.
-2. **The hold's 60 days against S1's clock.**
-   - For a peer that cannot be reached (G9's waiting case, G8 on 2.4), P
-     ends the connection `stale` at 30 days of S1 time. S1 does not pause,
-     because nothing authenticated arrives from Q.
-   - Meanwhile Q shows "Waiting to reach …" for up to 60 days. The two
-     sides show different states for up to 30 days.
-3. **S-a's guard and S1's pause.**
-   - A demoted Q with a pending reconnect waits up to `B` (32 days).
-   - S1 pauses for 16 days after Q's last authenticated message (its
-     `hs.fin`), then runs again.
-   - The 60-day cap covers the wait. Whether 30 days of S1 time can run
-     out within it depends on when Q's `hs.fin` came. The model counts
-     this (S-a's guard waits).
-4. **Three answers change shipped vault behaviour:** 2.5 (the no-token
-   judgement), 2.7 (the refusal path) and 7.6 (the relay's deployed
-   grace). 7.1 a is about S-a to S-d only, so this is not a conflict,
-   but these changes need their own code review.
+- **Decided: a, `wait on held tokens`** (owner decision 2026-11-12). The
+  rule is 2.8, bounded by those tokens' `exp` and S1's 60-day cap.
+- Not chosen: b, `accept as residual` (about 0.1% of honest runs where
+  both sides rotate end `stale`).
+
+### 7.17 I4: a relay successor that arrives while suspended
+
+- **Decided: b, `keep links seen`** (owner decision 2026-11-12).
+  The rule is 2.9.
+- Not chosen: a, `accept as residual` (the relay-key counterpart of
+  0.88.2's identity-successor residual).
+
+### 7.18 The tokens of a refused update (2.7)
+
+- **Decided: a, `take its tokens`** (owner decision 2026-11-12). Kept as
+  held tokens under rule T (2.7).
+- Not chosen: b, `leave as is` (Q's next try may lack a K′ token).
+
+### Interactions that remain
+
+- **The hold's 60 days against S1.** Residual 11 (5) covers it. It
+  occurs only in runs that are not honest.
+- **S-a's guard against S1's pause.** Residual 12 (5) covers it, also
+  only in runs that are not honest.
+- **Changes to shipped vault behaviour.** Four rules change it: 2.5 (the
+  no-token judgement), 2.7 (the refusal path, and the tokens of a refused
+  update), 2.8 (the wait on held tokens) and 2.9 (step 1). 7.6 changes
+  the relay's deployed grace. 7.1 a covers S-a to S-d only, so these need
+  their own code review.
+
+---
+
+## Points for the spec-text PR's blind review
+
+These safety arguments, and one rule, have not been reviewed. Check them
+when the rules become normative:
+
+1. **2.8 (7.16 a).** That waiting on rule-T tokens naming X′ gives no
+   copy anything:
+   - the token's bindings (mailbox, X′, `exp`, reconnect flag);
+   - kept only from an authenticated message;
+   - the relay's check of the depositing key against `sub`;
+   - a copy of Y that can mint the token already holds the live mailbox.
+2. **2.7's tokens of a refused update (7.18 a).** That taking them under a
+   demoted or destroyed epoch is safe:
+   - the K′ signature;
+   - the link signed by both keys at P's first write;
+   - binding L's `ik` links checked by Table B first, in the refusing
+     write;
+   - rule T's issuer and `sub` checks;
+   - replays carry only tokens P issued.
+3. **2.9 (7.17 b).** That keeping relay links as seen during a suspension
+   cannot be used to block a later honest follow. The links are capped at
+   32 per peer; a link dropped at `connection.rotation.resolve` is not
+   kept.
 
 ---
 
