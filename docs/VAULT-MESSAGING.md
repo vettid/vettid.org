@@ -39,7 +39,8 @@ changelog:
     and `I`'s later honest message under it (after abandoning its pending
     reconnect epoch) suspended the pair: a false fork. The "A reconnect ends
     R's rekey answers" reason and the Initiator's dropped-`hs.fin` reason
-    are restated to match. No change for a vault, an app or a service
+    are restated to match, and §3.4.1 Residuals names the copy that uses
+    an unconfirmed epoch such a reconnect passed over. No change for a vault, an app or a service
     built from the code.
   - 0.89.1: 2026-11-12, erratum (found by the blind re-check of
     service-vault #146, GC #9021). §6.2 `rotations`: a rekey's
@@ -5400,6 +5401,16 @@ each recipient Q).
   while S1 holds it), K9 has not yet judged the epoch, so the copy's
   messages under it are still accepted where Table A accepts the
   `sender` (its current key, or an earlier key before its cut-off).
+- (0.89.2) **A copy using an unconfirmed epoch a reconnect passed over.**
+  Rule E applies only to a handshake that named `R`'s confirmed epoch
+  while it was not current (§6.3.1). A reconnect that names `R`'s current
+  epoch while that one is unconfirmed destroys nothing, so an earlier
+  unconfirmed epoch `R` activated as responder (later than the confirmed
+  one) is kept as superseded. An honest `I` never sends under it again,
+  but an old copy's message under it, with a later `ts`, is accepted, and
+  can move `R`'s confirmed epoch to it, until its 16-day keep ends. As
+  built in vettid-vault and in the trust model; the same class as the
+  next residual.
 - (0.87.1) **A copy using an epoch Q abandoned while pending, outside
   R29-K9** (accepted by the owner 2026-11-06, decision b, GC
   01M6RJF5NZBS92JEYXJXTWKSKM). "Epochs abandoned while pending, at P's
@@ -7929,7 +7940,7 @@ answers carry no tokens, so nothing is revoked. A later `hs.fin` for one
 (a redelivery, §8.4) is acked and dropped; without this, it would
 establish an epoch `I` abandoned and, where that rekey named the confirmed
 epoch while it was not current, rule E below would destroy the
-reconnect's epoch after it was confirmed, a false fork. It also
+reconnect's epoch after `I` confirmed it, a false fork. It also
 frees `R`'s rekeys, which an open answer would hold for 16 days (§6.5).
 
 (0.88.9) **A stale reconnect answer ends at a later message.** When a
@@ -7964,7 +7975,9 @@ Initiator rules it rests on, on either side as a member vault does.
 `hs.fin`, the epoch of a rekey or reconnect that named `R`'s confirmed
 epoch while that epoch was not current (judged at its `hs.init`;
 Responder, above), `R` destroys every other epoch with `I` later than its
-confirmed epoch in that write and records them with the accepted `hs.init`'s inner `ts`. "Destroyed" means: its send key and `rk` are erased, and its
+confirmed epoch in that write and records them with the accepted
+`hs.init`'s inner `ts`. "Destroyed" means: its send key and `rk` are
+erased, and its
 receive key is kept as a superseded epoch's (§6.5 "Key retention"), for
 16 days from its destruction, only to authenticate messages under it for
 the `ts` rule below. That rule needs the inner `ts`, which is inside the
