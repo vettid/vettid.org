@@ -11957,7 +11957,9 @@ vault signs a fresh challenge with the member's **credential key**
       - `outage` (object, exactly `{from: integer, to: integer, source:
         string}`): Outage from, Outage to and Reported by.
 
-    An integer is a JSON number with no fraction or exponent. A time is
+    An integer is a JSON number with no fraction or exponent, at most
+    2^53 − 1 in magnitude (§5.3); one the app cannot hold exactly does
+    not match the form, and the raw view shows it. A time is
     an integer from 0 to 253,402,300,799 (Unix seconds up to the year
     9999), shown as date and time in the member's time zone with the
     zone named, and in UTC, with seconds whenever they are not zero. Any
@@ -11969,15 +11971,18 @@ vault signs a fresh challenge with the member's **credential key**
     (as U+2068 FIRST STRONG ISOLATE … U+2069 POP DIRECTIONAL ISOLATE
     would make it), with the punctuation and numbers outside every
     isolate, so right-to-left text in one string cannot move a
-    neighbouring key, value, number or bracket. One block of wrapped
-    JSON text is not a raw view.
+    neighboring key, value, number or bracket. A string value is shown
+    with its quotation marks, outside its isolate, so the string "10"
+    and the number 10, or "true" and true, never look the same. One
+    block of wrapped JSON text is not a raw view.
 
     **Text**, in every value and in the raw view (these rules replace
     §10.8 "Showing received text" on this screen):
     - It is shown as plain text: never rendered as markup, and no links
       are made from it.
     - Each value is laid out as an isolated run (first strong
-      direction, its own block), so the bidirectional order of one
+      direction, its own block, or in the raw view its own isolate), so
+      the bidirectional order of one
       value cannot reach another value or a label.
     - A line break (LF only) is kept in Motion and in Quorum's text, at
       most two in a row; a third and later in a row are shown as markers.
@@ -12014,8 +12019,8 @@ vault signs a fresh challenge with the member's **credential key**
     `connection.authenticate.approve` `{request_id, document_sha256}`,
     with the hash it checked. The vault answers `not_found` first (as
     before), then by this table, then `credential_locked` and
-    `transfer_incomplete` (as before). Every row but the two that sign
-    leaves the challenge open and signs nothing.
+    `transfer_incomplete` (as before). Every row that answers with a
+    code leaves the challenge open and signs nothing.
 
     | The challenge | `document_sha256` | Fetched by this device? | Answer |
     |---|---|---|---|
@@ -12043,7 +12048,8 @@ vault signs a fresh challenge with the member's **credential key**
       (the approval's status shows them as not answered). Since a vault
       advertises `approval_document` only while its app lists it (above),
       this happens only when an older app approves on a vault whose
-      advertisement has not yet caught up.
+      advertisement has not yet caught up, or the challenge was sent
+      before it did.
     - A purpose-form signature does not commit to the document, and its
       response has no `document_sha256`.
   - **The document form.**
@@ -21670,7 +21676,7 @@ not the optional features of §11.10.8, which the channel file chooses.
 | `vote_rows` | `other_rows` and `rows_unavailable` of `vote.results.submit` (§10.19.6 step 3) | the vault release implementing 0.83.3 (added ahead of its release by owner decision with this PR's merge go, 2026-11-03, as `item_ways` was) |
 | `relay_follow` | The receiving side of §3.4.1 (`acceptFrom`, rules C, U, T, H5, S1–S9); also advertised to connections in `features` (§10.8) and by devices in `device.features` (§3.4.1 "The gate") | the vault release implementing 0.85 (added ahead of its release by owner decision O6c, 2026-11-05) |
 | `hs_confirm` | The vault implements §6.3.1, activation on confirmation (`hs.confirm`, the pending and confirmed epochs, rule E, the received flag); also advertised to connections in `features` (§10.8) and by devices in `device.features` (§6.3.1 "Capability") | vault release 29 (owner decision R1; 0.87.0) |
-| `approval_document` | §10.4 "Approval documents": the vault checks, keeps and serves an approval's document and signs the document form; also advertised to service connections in `features` (§10.8) while the member's app lists it in `device.features` | the first vault release implementing 0.89.0 (added ahead of its release with this specification) |
+| `approval_document` | §10.4 "Approval documents": the vault checks, keeps and serves an approval's document and signs the document form; also advertised to service connections in `features` (§10.8) while the member's app lists it in `device.features` | the first vault release implementing 0.89.0 (added ahead of its release by owner decision with this PR's merge go, as `vote_rows` was) |
 | `transfer_outcome` | §6.7.1 "The transfer's outcome": the vault tells a transfer's new phone every outcome after `hs.fin` (`device.transfer.ended`), so the new phone waits for it instead of 0.85.2's settlement window (§11.14.10 rule 5) | the first vault release implementing 0.88.0 (after release 29) |
 
 A name is added to this table only with the release that implements it,
@@ -30188,7 +30194,6 @@ Follow-ups:
     2026-11-02, GC #1551 "a, then plan b").** §10.4 "Approval
     documents" is specified. Building it is planned:
     - **vettid-vault (GC #1557):**
-      - advertise `approval_document`;
       - check the document (the four checks, 16 levels) and keep it,
         with `document_required`, sealed with the ask;
       - answer `connection.authenticate.document`, and keep the record
@@ -30225,7 +30230,8 @@ Follow-ups:
         (its `CanonicalJSON` allows 64), the 1,024-byte `summary`, and
         its own character set;
       - verify the document form, and never count a purpose-form
-        answer toward a `document_required` approval: its status names
+        answer toward an approval whose `context` cannot show the action
+        whole: its status names
         that admin with the reason, so it never fails silently.
 
       Only then may a vote carry a motion text, a quorum text, a longer
