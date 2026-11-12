@@ -40,6 +40,7 @@ internal.
 | The scope of N2 and G1-A | Pairs of vaults only (a device rotates no `ik`, so binding L binds nothing) | 2.2; 2.3 |
 | `tickDemoted`'s guard | Written into S-a. Its wait reaches `B` (32 days), longer than S1's 30, so 7.10's recommendation moves to b | 2.2; 4; 7.10 |
 | 3.3's `U` counting | Recounted: no crash, then +`U` for a C2 crash | 3.3 |
+| Relay forwarding as first written was unsafe: the relay keeps the successor named by the last K-signed rotate, so any K holder, an old copy included, chooses where forwarding goes; and honouring K tokens at K′ lets a K holder mint new ones | Replaced by "d-contested": one successor ever, forwarding only after the grace, only deposit-scoped tokens issued before the rotate, no move of leftovers, and its own design and review before any relay change. 7.6 recommends c | 1.5; 2.7; 3.3; 5; 6; 7.6–7.9; 7.11 |
 | Nits | S-d is between persons; dependency wording in 7; rule 5 depends on 7.5; 1.4's wording; the rule-0 citation; "never moves back"; the model's non-naming reconnect noted; `ab9beb8` is on branch `i7-realcode` | throughout |
 
 ---
@@ -175,8 +176,8 @@ The device then sends `hs.confirm` again with K′ at its 12-day resend
 The losses tied to the grace (G7-like and G8-like) **do** occur for a
 device that is offline past the grace. Its deposits to the old mailbox
 end `mailbox_unknown`, and a device cannot reconnect. §6.6 "Limits"
-already accepts this: the device is paired again. The relay-side option
-of 7.6 would close it.
+already accepts this: the device is paired again. The contested relay
+forwarding of 7.6 d would narrow it, if it is ever built.
 
 ### 1.6 G6: the revoked reconnect token, and S9
 
@@ -572,8 +573,10 @@ needs a rotation by Q, so it belongs under "both sides rotate" (4).
   rotation's first write. The `ik` links are checked by Table B before
   any relay link is followed, so no copy taken before that write gains
   anything.
-- **Under relay forwarding (7.6 d)**, Q's `hs.init` to P's old id lands
-  in P's successor, and the gap does not arise.
+- **Under contested relay forwarding (7.6 d)**, after P's grace Q's
+  `hs.init` to P's old id would land in P's successor, if its token
+  qualifies (3.3). Until that has had its own design and review, 2.7 is
+  the fix.
 
 ---
 
@@ -681,20 +684,49 @@ Its cost:
 
 No clock skew is involved, because only relay `msg_id`s are compared.
 
-**Relay forwarding (new option).**
-- The relay links a rotated mailbox to its successor at the rotate. It
-  already knows the link, since the rotate is signed by K.
-- During and after the grace, the successor honours the predecessor's
-  deposit tokens, its denylist included, until those tokens expire.
-- A deposit to the predecessor's id, after the predecessor ends, lands in
-  the successor. When the predecessor ends, its uncollected messages move
-  to the successor.
-- A sender learns `mailbox_moved {successor}` only as a hint. It still
-  follows only by signed links.
-- What it closes: the grace loss, G7, G8 and the refused deposits, all
-  without lengthening an old copy's hold on K. A copy cannot collect the
-  successor without K′.
-- Cost: a RELAY-PROTOCOL change and a relay release.
+**Relay forwarding, as first written, is unsafe.** It had the relay link
+a rotated mailbox to its successor and the successor honour K's tokens.
+Two problems follow from that:
+- **Who names the successor.** The relay keeps the successor named by the
+  **last** rotate signed by K, not the first. Any holder of K, an old
+  copy included, chooses where forwarding goes, and a replaying host can
+  order the requests. K's leftovers and every later deposit on K's tokens
+  (standing up to 30 days, reconnect up to 400 days) would then land
+  silently at the copy, under epochs it holds. Rule C, binding L and K9
+  never run, and P is never told.
+- **Minting.** Honouring K's tokens at K′ lets a holder of K mint new K
+  tokens during the grace (with `exp` up to 400 days) and deposit into
+  P's real K′.
+
+The copy's hold on K would then last up to 400 days, silently. There
+are smaller problems too:
+- A revocation made after K ends is lost (S7).
+- Used open tokens and the quota counters reset.
+- Moved messages break the per-mailbox order and the cut-offs.
+- Chains, deletes and re-registration are unspecified.
+
+**Contested forwarding ("d-contested").** This is a narrower form, for
+the owner to weigh. It is not designed here.
+- **One successor, ever.** After a rotate, another rotate signed by K
+  that names a different key, a delete of K, or a re-registration of K
+  turns forwarding off for good. The relay then answers
+  `successor_conflict`, and P audits that as a fork.
+- **Only after the grace.** Forwarding starts at the end of the grace,
+  not during it.
+- **Only some tokens.** It honours only deposit-scoped tokens (`scope =
+  deposit`) whose `iat` is before the rotate, for at most about 30 days
+  after the grace. Both denylists are checked and the counters carry
+  over. Open tokens are never forwarded.
+- **No move of leftovers.** Messages left in K at its end are not moved.
+  They go through the telling (7.9 a). 7.7 a and 7.9 a stay mandatory.
+- **What it covers.** Refused deposits, G7, G8 and G9 after the grace,
+  for qualifying tokens within the cap.
+- **The residual.** If the only rotate the relay sees for K is a copy's
+  (P has made none yet, for example because it stays locked through the
+  grace), that link is uncontested. Forwarding then goes to the copy
+  until the cap.
+- **Cost.** A RELAY-PROTOCOL change and a relay release. It needs its
+  own design and a blind review before any relay change.
 
 #### The options compared (7.6, 7.7, 7.9)
 
@@ -703,7 +735,8 @@ No clock skew is involved, because only relay `msg_id`s are compared.
 | A long grace, 9`U` (36 days) | kept, read by P | none refused under A3 | yes, under A3 | 36 days |
 | 7 days + the hold + the telling | re-deposited | held, then re-addressed | no: both sides hold until the hold's limit, then `stale` | 7 days |
 | A grace of at least 3`U` (14 days) + the hold + the telling | re-deposited | held | on the update path only (3`U`) | 14 days |
-| Relay forwarding | moved to the successor | none | yes | 7 days |
+| Relay forwarding as first written (unsafe) | moved to whatever successor the last K-signed rotate names | none | yes | up to 400 days, silently, at a copy that names the successor |
+| Contested forwarding (d-contested) + the hold + the telling | before the grace's end: read by P; leftovers re-deposited by the telling | after the grace, forwarded for qualifying tokens within the cap; others held | yes, within the cap, for qualifying tokens | 7 days; in the uncontested-copy residual, up to the cap (about 30 days after the grace) |
 
 The **second write** should also list its S1 state.
 
@@ -818,7 +851,8 @@ settling at `t_r` + 12`U`, so the bound is `t_r` + 13`U`.
 - **G5.** S2's restart without a K′ reconnect token: the reconnect is
   kept (rule 6).
 - **G6, G7.** Closed by 2.5 and 2.4.
-- **G9.** Closed by 2.7, or by relay forwarding.
+- **G9.** Closed by 2.7. Contested forwarding would also cover it after
+  the grace, if it is ever built.
 - **G8: both sides' old mailboxes end.** P rotates K→K′ and Q rotates
   J→J′. Each knows the other only at the old address. If neither update
   arrives before the other's grace ends:
@@ -826,8 +860,10 @@ settling at `t_r` + 12`U`, so the bound is `t_r` + 13`U`.
   - 2.4's reconnect goes to the same dead mailbox;
   - both sides hold until the hold's limit, then end `stale`.
 
-  Its bound per option is in 3.3. Only relay forwarding closes it without
-  a long grace. Where it remains, the member sees a new text (7.15).
+  Its bound per option is in 3.3. A long grace covers it under A3.
+  Contested forwarding would cover it within its cap, but it is not yet
+  designed. Under the recommended 7.6 c it remains on the 2.4 path, and
+  the member sees a new text (7.15).
 - **H5 and the reconnect token's quota.**
   - N1 uses the update's fresh K′ reconnect token.
   - 2.5 removes the failed tries on a revoked token.
@@ -931,7 +967,7 @@ queued for, as `startReconnectCtx` does.
      - the hold;
      - the telling;
      - the grace lengths;
-     - relay forwarding.
+     - contested forwarding, only once it has its own design.
    - Run each at 10,000 runs, then at 100,000, with and without
      ROTBURST.
    - Model two concurrent own handshakes per side (a reconnect beside an
@@ -946,7 +982,8 @@ queued for, as `startReconnectCtx` does.
    - G2-H, G1-N, 2.4 and 2.5, plus the chosen 7.6–7.9 mechanisms.
    - A stub relay with: an idempotent rotate, the grace with collects
      from both mailboxes, tombstones, `mailbox_unknown` after the grace,
-     step 7 of §5.3, and the denylist. Add forwarding if 7.6 picks it.
+     step 7 of §5.3, and the denylist. Add contested forwarding only if 7.6
+     picks it after its own review.
 3. **Mode `R29RP_RELAYROT`.**
    - **Rotations:** all three paths and the decoupled keys.
    - **Crashes:** C1, C2, C3, C2′, CR, CF.
@@ -1097,16 +1134,21 @@ This covers S-a to S-d, with Rule J and §6.5 amended.
 - **c = `14 days, hold and tell`**
   - Cost: needs 7.7 a and 7.9 a. Covers G8 on the update path (3`U`)
     only.
-- **d = `relay forwards to new`**
-  - Covers the grace loss, G7, G8 and refused deposits, with no longer
-    hold on K. Devices are covered too.
-  - Cost: a RELAY-PROTOCOL change and a relay release. 7.7 to 7.9 then
-    matter only for refusals from relays that lack it.
+- **d = `forwarding, contested`** (3.3)
+  - What it is: one successor ever (a conflict turns it off for good, as
+    `successor_conflict`, audited as a fork); forwarding only after the
+    grace; only deposit-scoped tokens issued before the rotate, capped at
+    about 30 days after the grace; no move of leftovers.
+  - Covers refused deposits, G7, G8 and G9 after the grace, within the
+    cap.
+  - Cost:
+    - A RELAY-PROTOCOL change and a relay release. It needs its own design
+      and a blind review before any relay change.
+    - 7.7 a and 7.9 a stay mandatory.
+    - An uncontested copy link remains when P misses the whole grace.
+    - Forwarding as first written is unsafe (3.3): it is not on offer.
 - Depends on 7.5.
-- **Recommendation: c, or d once reviewed.** d is new and has not had
-  its own review yet: who owns the successor link when a copy holding K
-  races the rotate, and what honouring K tokens at K′ changes in
-  RELAY-PROTOCOL §5.3, are open.
+- **Recommendation: c.**
 
 ### 7.7 The Q-side hold: does it exist?
 
@@ -1114,8 +1156,8 @@ This covers S-a to S-d, with Rule J and §6.5 amended.
   - Cost: held messages need a shown state (7.8).
 - **b = `no hold, stale as today`**
   - Cost: every refusal after the grace ends the connection `stale`.
-- Depends on 7.6. Under 7.6 d, it covers only relays without
-  forwarding.
+- Depends on 7.6. It is needed under every choice of 7.6, d included
+  (for leftovers and for tokens outside its cap).
 - **Recommendation: a.**
 
 ### 7.8 The hold's limit, and how a held message is shown
@@ -1134,7 +1176,7 @@ These are member-facing; the texts are in 7.15.
 - Depends on 7.7 a and 7.10.
 - **Recommendation: b.**
 
-### 7.9 The telling (`relay.mailbox.closed`; only under 7.6 b or c)
+### 7.9 The telling (`relay.mailbox.closed`; under 7.6 b, c or d)
 
 - **a = `tell and re-deposit`** (3.3)
   - Cost: a new message type. Q keeps its deposits to K until told or
@@ -1178,8 +1220,9 @@ Depends on 7.4: under 7.4 a, rule 8's window must also fit inside it.
 - **b = `keep the 16-day wait`**
   - Cost: G9 stays. A demoted side that missed the grace ends `stale` by
     S1 before its next try.
-- Under 7.6 d (relay forwarding) G9 does not arise, but b would still
-  hold a try for 16 days after any other refusal.
+- Under 7.6 d, contested forwarding would also cover G9 after the
+  grace, within its cap. a is still needed during the grace and outside
+  the cap.
 - **Recommendation: a.**
 
 ### 7.12 S9 (G6)
