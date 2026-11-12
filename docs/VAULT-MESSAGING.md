@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.89.0
+version: 0.89.1
 date: 2026-11-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,16 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.89.1: 2026-11-12, erratum (found by the blind re-check of
+    service-vault #146, GC #9021). §6.2 `rotations`: a rekey's
+    `hs.init` and `hs.resp` carry the links toward every peer (0.87.0
+    S8, as vettid-vault builds it), not "only toward a peer that has
+    advertised `features`", which was the 0.86.3 text left in place
+    when 0.87.0 changed S8. §6.5 and §3.4.1 S5: a side also starts no
+    rekey while its own rekey `hs.init` awaits `hs.resp` (at most the
+    handshake's lifetime, §6.3.1; not one kept only as a replaced
+    line's record), as vettid-vault builds it; service-vault's block
+    is wider. No change for a vault, an app or a service.
   - 0.89.0: 2026-11-12, **approval documents** (owner decision
     2026-11-02, GC #1551 "a, then plan b"; task GC #1556). §10.4
     "Approval documents": an `approval` challenge from a service MAY
@@ -5273,7 +5283,8 @@ each recipient Q).
   than 1 hour after P's first `identity.rotate` to Q; at most 3 times per
   peer per rotation, and at most once per hour. At any time (§6.5) P
   starts no rekey with a peer while one of its answers to that peer still
-  awaits `hs.fin` or while its own epoch with it is pending (§6.3.1). This
+  awaits `hs.fin`, while its own epoch with it is pending (§6.3.1), or
+  (0.89.1) while its own rekey `hs.init` to it awaits `hs.resp`. This
   does not override §6.6 "After a restore" (a restored side issues no
   `identity.rotate` until its reconnects are settled).
 - **S6, first contacts** (owner decision 2026-11-05, "gap 2"). In the
@@ -7541,9 +7552,10 @@ Field rules:
   shows the names on the request as §10.8 says for a profile (account
   names, not verified). A device's `profile` is unchanged.
 - `rotations` is used only for reconnects (§6.6) and (0.85.0)
-  rekeys (§3.4.1 S8), in both `hs.init` and `hs.resp` ((0.86.3) a
-  rekey's, only toward a peer that has advertised `features`, S8); it
-  MUST be absent for every other purpose.
+  rekeys (§3.4.1 S8), in both `hs.init` and `hs.resp` ((0.87.0,
+  0.89.1) a rekey's toward every peer, the whole chain since the signer
+  of the epoch it rekeys, S8); it MUST be absent for every other
+  purpose.
 - `device_attest` is used only for purpose `app` (§6.7, §11.7).
 - `api_key` (0.15.0) is the new app's app key (§11.12). It is REQUIRED in
   the `hs.init` of a transfer (§6.7.1) and MUST be absent otherwise (an
@@ -8865,8 +8877,12 @@ own open handshake, and "own `th1` lower: it completes at the peer's
 two reconnects between a service and a member (§6.6). A
 crossing handshake a side cannot answer is acked and dropped.
 A side starts no rekey with a
-peer while one of its answers to that peer awaits `hs.fin` or while its
-own new epoch awaits confirmation (§6.3.1; S5 in general).
+peer while one of its answers to that peer awaits `hs.fin`, while its
+own new epoch awaits confirmation, or (0.89.1) while its own rekey
+`hs.init` to that peer awaits `hs.resp` (at most the handshake's
+lifetime, §6.3.1 "Lifetimes"; not a rekey kept only as a replaced
+line's record, §6.6 "Fork detection"). A side MAY be stricter (S5 in
+general).
 
 Reaching the limit does not stop sending: both sides keep sending in the
 old epoch until the new epoch activates (at the initiator, at
