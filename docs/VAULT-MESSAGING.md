@@ -46,7 +46,9 @@ changelog:
     is written (a recovery's open has spent its attempt by then). An
     approved move, and a pending move's completion, still record and seal
     for the next release with the part carried unchanged and the
-    header's credential bits as stored (GC #8621 a; §11.10.4). Before,
+    header's credential bits as stored (GC #8621 a; §11.10.4); the
+    approved move also stores the `feature.load_failed` audit entries, and
+    a refused abandonment leaves the move to be completed. Before,
     the vault ignored the error and ran the feature empty, so a member's
     "calls off" for a connection could turn back on. §10.9 lists the
     audit kind.
@@ -4216,7 +4218,12 @@ record the move and seal the header for that release, with the part
 carried unchanged and the header's credential bits as stored; they
 open nothing, run no feature's handlers, timers or observers, send no
 message and report no `unlocked` (owner decision 2026-11-11, GC #8621
-a), so that a release that reads the part can be reached. A recovery's open has
+a), so that a release that reads the part can be reached. The approved
+move's write also stores the opening's `feature.load_failed` entries in
+the audit log, so History shows why; a pending move's completion writes
+the header only. An approval to abandon a pending move resumes under this
+release, so it is refused like a plain unlock; the move stays recorded,
+and the next unlock at the release it moves from completes it. A recovery's open has
 already spent its attempt by then (the DEK exists only once the attempt
 is spent; the counter's records are made), so each such open uses one
 of the generation's attempts.
@@ -4239,8 +4246,12 @@ For any other feature, until an unlock that reads its part:
 - the rest of the vault runs as usual.
 
 The member learns of it from History (`feature.load_failed`). While the
-feature does not run, nothing of the vault updates its kept part (a
-connection removed meanwhile, for example, is still named in it).
+feature does not run, nothing of the vault updates its kept part: a
+connection removed meanwhile is still named in it, and the removal's
+clean-up for that feature is not done (for location, a share with the
+removed connection is not ended, §7.4); an ask the part holds is not
+counted among the pending ones. A release that reads the part again is
+to reconcile it with the current connections (vettid-vault #232, #236).
 
 The **sealed header** is a small record sealed to the enclave's attestation,
 not to the DEK, so that an unlock can be checked before the DEK exists. It
