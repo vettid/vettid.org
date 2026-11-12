@@ -82,8 +82,7 @@ changelog:
         `connection`'s `relay_held`, the `reason` of `connection.event`
         and of the feed item), §11.10.9 (`relay_follow`'s meaning for a
         vault).
-    - (0.90.0) The peer gate needs no new capability (owner decision
-      2026-11-12): `relay_follow` now means §3.4.1 and §3.4.2 for a vault
+    - (0.90.0) The peer gate needs no new capability: `relay_follow` now means §3.4.1 and §3.4.2 for a vault
       (no shipped vault advertises it, A5), and §3.4.1 alone for a
       device; a service vault advertises it only once it implements
       both.
@@ -6076,7 +6075,7 @@ until both ended `stale`:
 - Deposits to the old mailbox after its end were lost, silently or by
   `stale`.
 
-**RK0. Who advertises `relay_follow`** (owner decision 2026-11-12). A
+**RK0. Who advertises `relay_follow`.** A
 vault advertises `relay_follow` (§3.4.1 "The gate", §10.8, §11.10.9)
 only if it implements both §3.4.1 and this subsection.
 - **The gate stays as it is.** A vault rotates its relay key only once
