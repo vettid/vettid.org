@@ -1,6 +1,6 @@
 # VettID Relay Protocol
 
-**Version:** 0.10.2 (draft)
+**Version:** 0.11.0 (draft)
 **Status:** Pre-implementation draft for review
 
 ## 1. Purpose & design principles
@@ -400,7 +400,9 @@ POST /v1/mailbox/rotate              (signed by CURRENT registered key)
 ```
 
 Rotation creates the successor mailbox and marks the old one for deletion after
-a grace period (relay config, default 7 days, during which both collect).
+a grace period (relay config, default (0.11.0) 14 days, during which both collect;
+until 0.11.0 the default was 7 days). (0.11.0) A relay that serves VettID vaults
+MUST NOT set it below 14 days (VAULT-MESSAGING §3.4.2 RK14).
 Because mailbox_id is key-derived, rotation changes the address; owners are
 responsible for re-issuing deposit tokens and notifying connections over E2E
 channels. Tokens issued under the old key die with it — this is a feature.
@@ -1667,6 +1669,17 @@ Properties:
 The push gateway API is specified separately.
 
 ## 10. Changelog
+
+- **0.11.0** — with VAULT-MESSAGING 0.90.0 (owner decisions
+  2026-11-12). §6.7: the rotation grace's default is 14 days (it was
+  7). This applies to every mailbox, a device's included. A deployed
+  relay sets it to 14 days, and a relay that serves vaults MUST NOT set
+  it lower. A vault rotating its relay key waits on
+  peers that may be locked for several days at a time; the old mailbox
+  must live until a peer has unlocked, read the new address and stopped
+  writing to the old one, and the vault has collected it once more.
+  The cost is that an old copy holding the old key keeps the live old
+  mailbox that long at every rotation. No wire change.
 
 - **0.10.2** — with VAULT-MESSAGING 0.85.0 (draft). §6.7: an old
   mailbox in its grace accepts deposits under its tokens and owner

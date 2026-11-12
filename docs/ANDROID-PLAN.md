@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.126
+version: 0.1.127
 date: 2026-11-12
 changelog:
+  - 0.1.127: 2026-11-12 (VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4 "Relay-key rotation texts". The texts, owner-approved 2026-11-12, are: the held state, per message, of messages to a connection whose vault moved (`relay_held`); `connection.stale` with `reason: "relay_moved"`; S9's text for `connection.fork_suspected` (`ref` = `relay_revoked`); `message.not_delivered` at the hold's 60-day limit; and `message.delivery_unconfirmed` reused at the telling's limit (VAULT-MESSAGING §3.4.2 RK9, RK14). None of them shows before a vault release that rotates relay keys.
   - 0.1.126: erratum, 2026-11-12 (owner decision a, GC #9050). §4 "Locking the vault", "While pending": besides the lock and a pending `call.end`, the phone's `hs.resp` to a rekey the vault started goes while a lock is pending (while the vault's rekey awaits it, the vault starts no other rekey with this phone for up to 16 days); everything else the phone would send waits until the lock ends; the session's own handshake and token messages are still processed, the rekey's `hs.fin` included. Android already sends the `hs.resp` while a lock is pending; holding what else it sends is GC #9027.
   - 0.1.125: erratum, 2026-11-11 (owner decision a, GC #8641; as built in vettid-android #353). §4 "Attestation in detail": the reason after "Every check passed, but this phone refused the release:" is one of four texts of its own (not active for an enrollment, older, another instance, a time scale this build does not accept), never the unlock's error text, which contradicted "every check passed"; another instance and the time scale are refusals after line 9 as built; a removed release is the host's 410, not a refusal of the phone's; line 9's cell no longer reads as if a release not active for an enrollment failed it; while the route waits for a move, a pass still naming the release moved from is not recorded, so the screen keeps the last record, and a failure or refusal meanwhile is recorded. Four new texts.
   - 0.1.124: 2026-11-11 (owner decisions a, GC #8451, #8476 and #8511). Settings → Security keeps the rows used often (Recovery included) and moves the rest behind **Advanced security**; the attestation screen shows each link of the chain, one line per check the app performs (passed, failed or not checked), the release's source and this phone, with "Copy all"; the owner check shows "Checking with your vault…" while the vault verifies (Lock vault still enabled), then "Check passed". §4 "Advanced security, attestation in detail and the check's progress"; the Settings and Owner check rows; §4 "Locking the vault" and "Recovery and unlock from release R" point to Advanced security; §5 "What the phone keeps": the verification record.
@@ -7245,6 +7246,24 @@ verified release", now the "Release" row) and `settings_attestation_version`
   announcement and the return on each pass path; the presence-needed
   pass unchanged; each failure back to the form; "probably locked" to
   its screen; the back gesture ignored during each non-gated check.
+
+### Relay-key rotation texts (0.1.127)
+
+Approved by the owner (2026-11-12; VAULT-MESSAGING 0.90.0 §3.4.2). They
+show only with a vault release that rotates relay keys. The strings live
+in string resources; `<First Last>` is the connection's name as
+elsewhere (§4 Notifications).
+
+| Where | When | Text |
+|---|---|---|
+| The conversation and the connection | The connection carries `relay_held` (refetched at `connection.changed`, whose `version` does not change): the member's messages to it wait for its vault's new address. While it is set, **every** message of the member's to it with no `delivered` receipt shows this, per message, instead of "Sending", never as sent. A message already told `message.not_delivered` or `message.delivery_unconfirmed` keeps that state. This is broader than the vault's hold on purpose (VAULT-MESSAGING §3.4.2 RK14) | "Waiting to reach <First Last> at their vault's new address." |
+| Notifications, History | `connection.stale` (and `connection.event` `stale`) with `reason: "relay_moved"` (VAULT-MESSAGING §3.4.2 RK14) | "<First Last> and your vault both moved to new addresses and couldn't reach each other. Connect again with a new invitation." |
+| Notifications, History | `connection.fork_suspected` with `ref` = `relay_revoked` (S9, judged at S1's end, §3.4.2 RK9) | "<connection name> may have connected to an old copy of your vault. Contact <connection name>." |
+| Notifications | The hold's 60-day limit (§3.4.2 RK14): `message.not_delivered` | The approved text of VAULT-MESSAGING §8.3, unchanged |
+| Notifications | The telling's limit (§3.4.2 RK14): no `relay.mailbox.closed` within 60 days of the vault's follow, `message.delivery_unconfirmed` | The approved text of VAULT-MESSAGING §8.3, unchanged |
+
+When `relay_held` goes, the messages show their usual state again: sent
+once deposited, or "couldn't be delivered" if the vault ended them.
 
 ## 5. Architecture
 
