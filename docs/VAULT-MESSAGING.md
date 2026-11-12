@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.1
+version: 0.90.2
 date: 2026-11-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -26,8 +26,28 @@ related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.6; D3, D4, D5; §4 the automation CA)
   - VAULT-HOST-PROTOCOL.md (0.1.16; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
-  - STAGING-TIME-SCALE.md (0.1.7, design note for 0.43.0: the inventory of waits, choices T1–T9)
+  - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.2: 2026-11-12, **§3.4.2 made precise for the implementation**
+    (erratum):
+    - RK6: a restarted reconnect goes only on a held reconnect token for
+      the new mailbox, never an unadopted carried one (§6.3.1). The
+      carried token was never needed: an RK8 follow either ends Q's
+      reconnect or is made by it.
+    - RK7: "later" is establishment order at Q, without pending or
+      abandoned epochs. An `hs.fin`'s pass closes only on an epoch
+      established later than that `hs.fin`.
+    - RK10: "knows a newer mailbox" means one followed, by rule U or
+      RK8.
+    - RK14 step 1: P ends its collects of K 14 days after the rotate,
+      the least grace RELAY-PROTOCOL §6.7 allows.
+    - RK14 step 3: only durable member session messages are kept, as
+      their inner messages. A per-peer cap is pending owner decision,
+      and an entry dropped past it is told if it would have been
+      deposited again.
+    - RK14 step 5: an attachment whose blob was in the ended mailbox is
+      uploaded again, as for `missing`, or sent without a blob.
+    - RK14 step 6: the time scale of the telling's deadline is stated.
   - 0.90.1: 2026-11-12, **erratum to §3.4.2 RK11's "As built" note.**
     Release 29's demotion retry makes a connection `stale` for "no
     reconnect token" as §6.3.1 specifies: it acts only on a demoted
@@ -5188,7 +5208,8 @@ vaults (§3.4.2), three exceptions apply:
 - a definite refusal of a try's `hs.init` that is tied to rotation (in
   S1, `mailbox_unknown`, or a reconnect token revoked for an earlier key)
   ends the try at once and counts as a failed one, except as the next
-  item says. The next try starts once a newer mailbox of P's is known.
+  item says. The next try starts once Q has followed P to a newer
+  mailbox (rule U or RK8).
   Every other refusal stays silent, as above (RK10);
 - a `token_revoked` on a reconnect token Q issued for an earlier relay
   key of P's is no failed try, except as the next item says. "No
@@ -6225,13 +6246,21 @@ meets both conditions:
 - its `hs.init` carried tokens naming the passed key;
 - it has sent no `hs.fin`.
 
-Q starts each one again, with tokens naming the new key. It deposits the
-new try on the reconnect token of the message it followed: the update's
-`reconnect_token`, or the reconnect message's (RK8).
-- **No reconnect token in that message:** Q starts the reconnect again
-  once it holds a reconnect token for P's new mailbox. It waits at most
-  until RK13's cap, or, when Q is not itself in S1, 60 days after the
-  follow.
+Q starts each one again, with tokens naming the new key. (0.90.2) It
+deposits the new try only on a **held** reconnect token for P's new
+mailbox. That is one Q keeps under rule T: the followed update's
+`reconnect_token`, a `relay.token.issued`, or a token Q adopted at a
+confirmation (§6.3.1). It never uses a carried token that is not yet
+adopted, because carried tokens serve only their own handshake's
+messages (§6.3.1).
+- **No such token yet:** Q starts the reconnect again once it holds one.
+  It waits at most until RK13's cap, or, when Q is not itself in S1, 60
+  days after the follow.
+- **An RK8 follow needs no carried token here.** At an `hs.init`'s
+  follow, the establishment of P's reconnect has already ended Q's own
+  open reconnect (§6.6 "A verified `hs.fin` comes first"). At an
+  `hs.resp`'s follow, the reconnect is the one whose message made the
+  follow, so it is not restarted.
 - **Not restarted:** the reconnect whose own message made the follow.
 - **Revocation:** the abandonment revokes the tokens the abandoned
   `hs.init` carried, as Q's own step (§6.3.1 "Revocation by the
@@ -6250,7 +6279,15 @@ refusing them:
 
 **When the pass closes.** Each pass closes per epoch: once Q has accepted,
 under that epoch or a later one, a message from a relay key of P's later
-than the message's `sender`. Per epoch, not per pair, is needed for
+than the message's `sender`.
+- (0.90.2) **Epoch order.** "Later" is establishment order at Q: the
+  position at Q of the message that established each epoch (§3.4.1
+  Terms, "Epoch signer"). Pending epochs, and epochs abandoned while
+  pending, are not counted.
+- (0.90.2) **For an `hs.fin`,** its epoch is the one it would establish,
+  at the `hs.fin`'s own position. Its pass is closed only by a message
+  Q has accepted from a later relay key under an epoch established by a
+  message at a later position than that `hs.fin`. Per epoch, not per pair, is needed for
 liveness: a later key accepted under one epoch says nothing about a
 handshake still open under another.
 RK6 does not cover these cases, because it restarts only Q's own
@@ -6349,6 +6386,9 @@ device's relay key.
 - **The next try.**
   - After a `mailbox_unknown`, it starts as soon as the side knows a
     newer mailbox of the peer's, not at the try's 16-day expiry.
+    (0.90.2) "Knows" means a mailbox the side has followed, by rule U or
+    RK8. A newer mailbox seen only in an update it refused or did not
+    follow does not count.
   - After any other refusal covered here, it starts at the try's expiry,
     or as soon as a new reconnect token for the peer arrives.
 - **No newer mailbox known.** A `mailbox_unknown` is then not counted.
@@ -6477,11 +6517,18 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
   telling.
 
 **The telling.**
-1. **P records what it collected.** P ends its collects of K's mailbox
-   at the grace's end, 14 days after the rotate on its own clock, or
-   earlier when a
-   collect is answered `mailbox_unknown`. A K mailbox that still answers
-   after that is not P's: a copy may have registered K again. P then
+1. **P records what it collected.** (0.90.2) P ends its collects of K's
+   mailbox 14 days after the rotate on its own clock, or earlier when a
+   collect is answered `mailbox_unknown`. Fourteen days is the least
+   grace RELAY-PROTOCOL §6.7 allows a relay that serves vaults. A relay
+   configured with a longer grace keeps the mailbox longer, but P does
+   not collect it after its 14 days:
+   - anything deposited there later is above `last_msg_id`, and the
+     telling has it deposited again (steps 3 to 5);
+   - a K mailbox that answers P after that time may also be a copy's
+     re-registration of K, so P never trusts it.
+
+   P then
    records `last_msg_id` for that mailbox: the largest `msg_id` such that
    P has acked every message the relay gave it from that mailbox, up to
    and including that id.
@@ -6506,6 +6553,21 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
    come. This is a rolling window of the entries themselves, not a log.
    It stays in real time on staging, since it covers the relay's
    handling of the peer's old mailbox.
+   - (0.90.2) **Which entries.** Only durable member session messages:
+     the member's own messages as §8.3 "The member's notice" defines
+     them. Handshake messages (`hs.*`), `relay.address.update`,
+     `relay.token.issued` and `relay.token.refresh`, the vault's other
+     upkeep, and best-effort and ephemeral messages are not kept.
+   - (0.90.2) **What is kept.** The entry's inner message, so that it can
+     be sealed again under the current epoch (the send key of the epoch
+     it went under may be gone), with its inner `id`, its `msg_id` and
+     its `201`'s time. It is kept in the vault's state like the outbox.
+   - (0.90.2) **The cap** (pending owner decision): at most
+     `KEEP_MAX_ENTRIES` entries and `KEEP_MAX_BYTES` bytes of kept inners
+     per peer. Past the cap, the oldest kept inner is dropped, but its
+     inner `id` and `msg_id` are kept until its window ends. If step 5
+     would deposit such an entry again, it is told
+     `message.delivery_unconfirmed` instead.
    - **When Q follows P away from a mailbox M,** Q pins the entries it
      still keeps for M. It keeps them until P's `relay.mailbox.closed`
      for M, or 60 days after that follow (divided by `time_scale`,
@@ -6519,8 +6581,18 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
 5. **Q deposits again what P never got.** Q deposits every pinned entry
    whose `msg_id` is greater than `last_msg_id` again, to P's current
    mailbox. It drops the rest.
+   - (0.90.2) **Attachments.** For a `message.attachment.deliver` whose
+     blob was in the ended mailbox, Q makes a fresh upload to P's
+     current mailbox first, as for a `missing` (§10.5.1 "Delivery to the
+     peer"). It counts against `attachment_reoffers` and
+     `peer_reuploads`, and the re-deposited message carries the new
+     `blob` and `expires_at`. If Q no longer stores the attachment, or
+     its limits are spent, Q sends the message without `blob` and
+     `expires_at`. The recipient then asks with `missing`, and the
+     attachment ends as §10.5.1 says when no upload comes.
 6. **If no telling comes.** An entry still pinned 60 days after the
-   follow, with no `relay.mailbox.closed` for its mailbox, is told as
+   follow (divided by `time_scale`, STAGING-TIME-SCALE S22, as the pin
+   is), with no `relay.mailbox.closed` for its mailbox, is told as
    `message.delivery_unconfirmed` (§8.3; its approved text, used for this
    case by owner decision 2026-11-12).
 
@@ -6576,7 +6648,8 @@ Invariants).
     new epoch (RK9).
   - A revoked reconnect token is no failed try (RK9). Held tokens naming
     the newer key are waited on (RK11).
-  - A refused reconnect is retried once a newer mailbox is known (RK10).
+  - A refused reconnect is retried once a newer mailbox is followed
+    (RK10).
   - Held deposits end at the follow (RK14).
 - **No side waits for a message the other holds** for want of its own
   acknowledgment.
