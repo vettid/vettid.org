@@ -47,10 +47,11 @@ changelog:
       say so.
     - RK14 step 3: durable session entries are kept as their inner
       messages, except upkeep that recovers by itself. An entry leaves
-      the keep at its receipt, a delete, its `exp`, or the connection's
-      removal (§7.4). A per-peer cap is pending owner decision; a small
+      the keep at its receipt, its `exp`, or the connection's removal
+      (§7.4). A per-peer cap is pending owner decision; a small
       record of the dropped entries stays, and they are told if they
-      would have been deposited again.
+      would have been deposited again. A local `message.delete` does not
+      unsend: a kept entry stays, and a deleted message is never told.
     - RK14 step 5: an attachment whose blob was in the ended mailbox is
       uploaded again under §10.5.1's conditions for `missing`, or sent
       without a blob.
@@ -6591,12 +6592,18 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
    - (0.90.2) **When an entry leaves the keep.** Each of these ends it,
      before its 60 days:
      - its `delivered` `message.receipt`, when Q receives it;
-     - the member's `message.delete` of it. It ends silently: there is
-       no re-deposit and no notice, since the member deleted it;
      - its `exp` passing. It is dropped as `drop.held_expired`
        (§3.4.1);
      - the connection's removal or a block (§7.4), which deletes all of
        that connection's kept and pinned entries.
+
+     A local `message.delete` does not unsend (§10.4, "local only"): a
+     kept entry stays, and may be deposited again. Nothing is shown for a
+     deleted message, so the vault leaves a message the member deleted
+     out of the member's notice (§8.3): it is audited only. Step 6 and
+     the cap's record never tell it, and the app shows no notice for it.
+     The app plans need no rule for this, because the notice never
+     reaches them.
    - (0.90.2) **What is kept.** The entry's inner message, so that it can
      be sealed again under the current epoch (the send key of the epoch
      it went under may be gone), with its inner `id`, its `msg_id` and
