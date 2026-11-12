@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.69
-date: 2026-11-11
+version: 0.1.70
+date: 2026-11-12
 changelog:
+  - 0.1.70: erratum, 2026-11-12 (ANDROID-PLAN 0.1.126; owner decision a, GC #9050). The iPhone follows ANDROID-PLAN §4 "Locking the vault", "While pending": besides the lock and a pending `call.end`, the phone's `hs.resp` to a rekey the vault started goes while a lock is pending; everything else it would send waits until the lock ends; the rekey's `hs.fin` is still processed. Built in GC #8918's work.
   - 0.1.69: erratum, 2026-11-11 (ANDROID-PLAN 0.1.125; owner decision a, GC #8641). §4.17 takes ANDROID-PLAN's texts, now including the four refusal reasons of their own (never the unlock's error text); its reference reads 0.1.124 and 0.1.125.
   - 0.1.68: 2026-11-11 (ANDROID-PLAN 0.1.124; owner decisions a, GC #8451, #8476 and #8511). The iPhone follows ANDROID-PLAN §4 "Advanced security, attestation in detail and the check's progress": Advanced security in Settings, the attestation in detail with "Copy all", and the owner check's "Checking with your vault…" and "Check passed". §4.17: what the iPhone shows for itself (the App Attest state only), the haptic, the clipboard and the back gesture; Allow screenshots moves to Advanced security; §6.9: the verification record.
   - 0.1.67: erratum, 2026-11-11 (ANDROID-PLAN 0.1.123, VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). §4 Calls: after a glare, the iPhone answers the winning call with its own call's media, as Android does: no camera by itself.

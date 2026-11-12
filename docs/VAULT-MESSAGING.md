@@ -33,7 +33,10 @@ changelog:
     `hs.init` and `hs.resp` carry the links toward every peer (0.87.0
     S8, as vettid-vault builds it), not "only toward a peer that has
     advertised `features`", which was the 0.86.3 text left in place
-    when 0.87.0 changed S8. No change for a vault, an app or a service.
+    when 0.87.0 changed S8. §6.5: a side also starts no rekey while its
+    own rekey `hs.init` awaits `hs.resp` (at most the handshake's
+    lifetime, §6.3.1), as vettid-vault builds it. No change for a
+    vault, an app or a service.
   - 0.89.0: 2026-11-12, **approval documents** (owner decision
     2026-11-02, GC #1551 "a, then plan b"; task GC #1556). §10.4
     "Approval documents": an `approval` challenge from a service MAY
@@ -7547,11 +7550,10 @@ Field rules:
   shows the names on the request as §10.8 says for a profile (account
   names, not verified). A device's `profile` is unchanged.
 - `rotations` is used only for reconnects (§6.6) and (0.85.0)
-  rekeys (§3.4.1 S8), in both `hs.init` and `hs.resp` ((0.87.0) a
-  rekey's toward every peer, the whole chain since the signer of the
-  epoch it rekeys, S8; 0.89.1 erratum: this sentence still read "only
-  toward a peer that has advertised `features`", the 0.86.3 text that
-  0.87.0 replaced); it MUST be absent for every other purpose.
+  rekeys (§3.4.1 S8), in both `hs.init` and `hs.resp` ((0.87.0,
+  0.89.1) a rekey's toward every peer, the whole chain since the signer
+  of the epoch it rekeys, S8); it MUST be absent for every other
+  purpose.
 - `device_attest` is used only for purpose `app` (§6.7, §11.7).
 - `api_key` (0.15.0) is the new app's app key (§11.12). It is REQUIRED in
   the `hs.init` of a transfer (§6.7.1) and MUST be absent otherwise (an
@@ -8873,8 +8875,11 @@ own open handshake, and "own `th1` lower: it completes at the peer's
 two reconnects between a service and a member (§6.6). A
 crossing handshake a side cannot answer is acked and dropped.
 A side starts no rekey with a
-peer while one of its answers to that peer awaits `hs.fin` or while its
-own new epoch awaits confirmation (§6.3.1; S5 in general).
+peer while one of its answers to that peer awaits `hs.fin`, while its
+own new epoch awaits confirmation, or (0.89.1, as vettid-vault builds
+it) while its own rekey `hs.init` to that peer awaits `hs.resp`, which
+lasts at most the handshake's lifetime (§6.3.1 "Lifetimes"; S5 in
+general).
 
 Reaching the limit does not stop sending: both sides keep sending in the
 old epoch until the new epoch activates (at the initiator, at
