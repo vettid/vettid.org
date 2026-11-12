@@ -1,8 +1,8 @@
 ---
 title: STAGING-TIME-SCALE
 status: draft, approved by the owner 2026-10-18
-version: 0.1.6
-date: 2026-11-05
+version: 0.1.7
+date: 2026-11-12
 owner: Al Liebl (Mesmer)
 component: vault (enclave, release constants), member API, apps (Android, iOS), dev stack
 related:
@@ -14,6 +14,7 @@ related:
   - VAULT-LOCK.md (0.1.2) (the idle lock), AGENT-PLAN.md (0.1.6) (the dev stack's held-vault test)
   - vettid-vault `main` f0976ee (read only: `enclave/releasecfg/*.json`, `releasecfg.go` and the timer constants)
 changelog:
+  - 0.1.7: VAULT-MESSAGING 0.90.0 (owner decisions 2026-11-12). S21: S1's 60-day cap for relay-key rotation between vaults (§3.4.2 RK13). S22: the 60-day hold of deposits refused `mailbox_unknown` (§3.4.2 RK14). Both are the vault's own waits and are divided by `time_scale`. RK13's 16-day window and the telling's grace window follow the relay's times and stay real time.
   - 0.1.6: VAULT-MESSAGING 0.85.4. S18–S20: the relay-key gate's 30-day deadline and §3.4.1 S1's 30 days before an unfollowed recipient goes `stale` (the vault's, and a device's for its own key) are a party's own waits and are divided by `time_scale` (30 h at 24)
   - 0.1.5: VAULT-MESSAGING 0.82.0 (owner decision 2026-11-01). N16: an
     `approval` challenge's life (up to 24 h) is not scaled by the vault;
@@ -110,6 +111,8 @@ value at `time_scale` 24.
 | S18 | Relay-key gate deadline: the vault rotates without the recipients still not advertising `relay_follow` (VAULT-MESSAGING 0.85.4) | vault | §3.4.1 "The gate" | 30 days after the owed mark was set | 30 h |
 | S19 | A recipient that has not followed the vault's new relay key becomes `stale` (VAULT-MESSAGING 0.85.0) | vault | §3.4.1 S1 | 30 days after the second write | 30 h; the relay's grace and the tokens' lives stay real time (N6, N7) |
 | S20 | A device that rotated its own relay key: its vault, if it has not followed, becomes `stale` for the device (VAULT-MESSAGING 0.85.0) | app (Android, iOS), desktop, agent | §3.4.1 S1 | 30 days after the device's second write | 30 h |
+| S21 | Between vaults, S1's cap: a recipient that has not acknowledged becomes `stale` at the latest (VAULT-MESSAGING 0.90.0) | vault | §3.4.2 RK13 | 60 days after the second write (S19's 30 days pause on the peer's authenticated messages within 16 days, which stay real time) | 60 h |
+| S22 | The hold of deposits refused `mailbox_unknown` ends, `message.not_delivered` (VAULT-MESSAGING 0.90.0) | vault | §3.4.2 RK14 | 60 days after the first refusal | 60 h; also the telling's 60 days after a follow (§3.4.2 RK14). The telling's keeping window, the relay's grace, stays real time |
 
 Already short on staging and left as is: the **recovery waits** `W(k)`
 (§11.14.6), whose unit `recovery_wait_unit_seconds` is 86,400 in

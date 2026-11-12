@@ -1673,8 +1673,9 @@ The push gateway API is specified separately.
   2026-11-12). §6.7: the rotation grace's default is 14 days (it was
   7). This applies to every mailbox, a device's included. A deployed
   relay sets it to 14 days. A vault rotating its relay key waits on
-  peers that may be locked for days; a grace shorter than about three of
-  their absences could end the old mailbox before a peer has followed.
+  peers that may be locked for several days at a time; the old mailbox
+  must live until a peer has unlocked, read the new address and stopped
+  writing to the old one, and the vault has collected it once more.
   The cost is that an old copy holding the old key keeps the live old
   mailbox that long at every rotation. No wire change.
 

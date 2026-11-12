@@ -1926,18 +1926,22 @@ Approved by the owner (2026-11-12). The same as ANDROID-PLAN §4
 must stay identical. They show only with a vault release that rotates
 relay keys (VAULT-MESSAGING 0.90.0 §3.4.2).
 
-- **A held message** (the connection carries `relay_held`): "Waiting to
-  reach <First Last> at their vault's new address." It replaces
-  "Sending" for each undelivered message sent since `since`, and never
-  shows as sent.
+- **A held message** (the connection carries `relay_held`, refetched at
+  `connection.changed`): "Waiting to reach <First Last> at their vault's
+  new address." It shows per message, for **each** of the member's
+  messages to that connection with no `delivered` receipt yet, in place
+  of "Sending", and never as sent.
 - **`connection.stale` with `reason: "relay_moved"`:** "<First Last> and
   your vault both moved to new addresses and couldn't reach each other.
   Connect again with a new invitation."
 - **`connection.fork_suspected` with `ref` = `relay_revoked`:**
   "<connection name> may have connected to an old copy of your vault.
   Contact <connection name>."
-- **`message.delivery_unconfirmed` at the hold's 60-day limit:** the
-  approved text of VAULT-MESSAGING §8.3, unchanged.
+- **The hold's 60-day limit** (VAULT-MESSAGING §3.4.2 RK14):
+  `message.not_delivered`, its approved text of §8.3, unchanged.
+- **The telling's limit** (no `relay.mailbox.closed` within 60 days of
+  the vault's follow, §3.4.2 RK14): `message.delivery_unconfirmed`, its
+  approved text of §8.3, unchanged.
 
 ## 5. Architecture
 
