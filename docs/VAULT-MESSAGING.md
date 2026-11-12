@@ -29,6 +29,31 @@ related:
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.88.18: 2026-11-11, erratum (as built in vettid-vault #235, call wake V4). §14.2 (C2) a call wake: an ordinary wake's `5xx` backoff does not hold it, a running `429` wait holds every wake (call wakes included) and its merged ordinary triggers after the call stops ringing, a call wake's retries are its own (5 s, 30 s, 120 s), a call arriving during an earlier call wake's retry or `429` wait rides that attempt uncounted while one of that wake's own calls still rings, a dropped call wake drops the ordinary retry it carried, ordinary triggers arriving during a call wake keep its backoff, and a call wake moves neither the 5 s rule nor the over-cap rhythm. Clarifies "as soon as no wake is in flight"; no change for an app.
+  - 0.88.17: 2026-11-11, erratum (owner decision 2026-11-11, GC #8440 a;
+    vettid-vault #227). §3.3: **feature data that does not read** at
+    unlock (damaged, or written by a later release, which a feature
+    refuses rather than drop what it does not know) fails closed: audited
+    `feature.load_failed`, kept and written back unchanged at every flush
+    (never replaced by an empty state), and the feature does not run until
+    an unlock that reads it: its types are unknown types (§11.10.8,
+    answered `unsupported_type`), and its timers and observers do not run.
+    (Owner decision 2026-11-11, GC #8520, answered a in #8529.) A
+    feature other features call directly (audit, connauth, credential,
+    critical, grants, items, leash, vote, wallet), and the feed (GC #8583
+    a: every notice is written to it, some once only), cannot be left
+    out that way: when its part does not read, the unlock and a
+    recovery's open are refused with the new code `state_unreadable`
+    (§11.4, §11.14.6), after the release decisions and before the state
+    is written (a recovery's open has spent its attempt by then). An
+    approved move, and a pending move's completion, still record and seal
+    for the next release with the part carried unchanged and the
+    header's credential bits as stored (GC #8621 a; §11.10.4), also from
+    the release a move went to before it confirms it (GC #8689 a); the
+    approved move also stores the `feature.load_failed` audit entries, and
+    a refused abandonment leaves the move to be completed. Before,
+    the vault ignored the error and ran the feature empty, so a member's
+    "calls off" for a connection could turn back on. §10.9 lists the
+    audit kind.
   - 0.88.16: 2026-11-11, erratum (owner decisions 2026-11-11, GC #8361 a and
     #8374 a: bind both parties into form 2 before release C2, in which form
     2 first ships; vettid-vault #226; numbered after #574 and merged after
@@ -4169,6 +4194,73 @@ Rules for all keys:
   rules the state was written under, `29`; a state without it is refused
   (§6.3.1 "No upgrade: release 29 starts clean");
 - feature data.
+
+(0.88.17, owner decision 2026-11-11) **Feature data that does not read.**
+At unlock each feature reads its own part of the feature data. A part
+that does not read, because it is damaged or because a later release
+wrote it (calls, for one, refuses a state of a later version rather
+than drop what it does not know), **fails closed**: a feature that held a rule
+(calls off for a connection, a limit) must never run as if it held none.
+
+Some features are called directly by others: the audit log, connection
+authentication, the credential, critical secrets, grants, items, the
+leash, votes and the wallet. So is the feed, to which every feature and
+the vault write their notices, some of them once only (owner decision
+2026-11-11, GC #8583 a). The vault cannot run without them, so when
+one of their parts does not read the vault does not open: the unlock is
+answered `state_unreadable` (§11.4) and a recovery's open likewise
+(§11.14.6). The release decisions come first (§11.10.4: a header of a
+release the vault has left is still `wrong_release`), and §12.5's
+`deleting` check before them, as the one write; then the refusal comes
+before the state is written, before any message and before `unlocked`
+is reported. Nothing of the vault is lost: an unlock by a release that
+reads the part opens the vault with it whole. An approved move to
+another release (§11.10.4), and the completion of a pending move, still
+record the move and seal the header for that release, with the part
+carried unchanged and the header's credential bits as stored; they
+open nothing, run no feature's handlers, timers or observers, send no
+message and report no `unlocked` (owner decision 2026-11-11, GC #8621
+a), so that a release that reads the part can be reached. That holds
+from the release a move went to as well, before it has confirmed the
+move: when it cannot read the part either, it does not confirm the move,
+and an approved update to a later active release is recorded as a move
+from the release the vault is still sealed at and sealed for that release
+in the same way (owner decision 2026-11-12, GC #8689 a); without one it
+refuses `state_unreadable`. Its own header is left, answering
+`wrong_release`, and the vault's deletion removes it. The approved
+move's write also stores the opening's `feature.load_failed` entries in
+the audit log, so History shows why; a pending move's completion writes
+the header only. An approval to abandon a pending move resumes under this
+release, so it is refused like a plain unlock; the move stays recorded,
+and the next unlock at the release it moves from completes it. A recovery's open has
+already spent its attempt by then (the DEK exists only once the attempt
+is spent; the counter's records are made), so each such open uses one
+of the generation's attempts.
+
+For any other feature, until an unlock that reads its part:
+
+- the vault audits `feature.load_failed` (`ref` = the feature's name;
+  nothing of the data), once each time the state is opened (an unlock, a
+  recovery's open);
+- it keeps the part exactly as stored and writes it back unchanged at
+  every flush: never an empty state in its place, so a later release that
+  can read it finds it whole;
+- the feature does not run. Its types are unknown types, as for a feature
+  this release does not register (§11.10.8): a message without `re`, from
+  a device or a connection, is answered `unsupported_type` (an app then
+  hides the feature until the next unlock, as it does for such a release;
+  for calls, an offer rings nothing and the caller's vault learns at once
+  that the call cannot be made), and one with `re` is dropped; its timers,
+  housekeeping and observers do not run;
+- the rest of the vault runs as usual.
+
+The member learns of it from History (`feature.load_failed`). While the
+feature does not run, nothing of the vault updates its kept part: a
+connection removed meanwhile is still named in it, and the removal's
+clean-up for that feature is not done (for location, a share with the
+removed connection is not ended, §7.4); an ask the part holds is not
+counted among the pending ones. A release that reads the part again is
+to reconcile it with the current connections (vettid-vault #232, #236).
 
 The **sealed header** is a small record sealed to the enclave's attestation,
 not to the DEK, so that an unlock can be checked before the DEK exists. It
@@ -13984,7 +14076,8 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   SDP or keys), `drop.call_share` (§10.10); (0.28.0, release C2)
   `drop.call_glare`, `drop.call_off`, `drop.call_rate` (`connection_id`,
   `ref` = `call_id`), `call.permission_off`, `call.permission_on`
-  (`connection_id`) (§10.10); `leash.grant.issued`, `leash.grant.updated`,
+  (`connection_id`) (§10.10); (0.88.17) `feature.load_failed` (`ref` =
+  the feature's name; §3.3); `leash.grant.issued`, `leash.grant.updated`,
   `leash.grant.revoked`, `leash.rate_limited` (`device_id` = the agent,
   `ref` = `grant_id`), (0.88.5) `leash.grant.dropped` (`device_id` = the
   agent, `ref` = `damaged`, `mismatch`, `expired`, `id_taken` or `cap`:
@@ -18760,8 +18853,18 @@ one of:
   first-handshake invitation the unlock leaves and renews, the one the vault
   will answer; E's when E's invitation was kept. Absent otherwise and from an
   older vault.
-- `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|signer_refused|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup|device_secret|transfer_incomplete|state_unsupported",
-  "header_seq": m, "retry_after": <s>}` — `state_unsupported` (0.87.1):
+- `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|signer_refused|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup|device_secret|transfer_incomplete|state_unsupported|state_unreadable",
+  "header_seq": m, "retry_after": <s>}` — `state_unreadable` (0.88.17):
+  the state opened, but the part of a feature others call directly does
+  not read (§3.3 "Feature data that does not read"); nothing after the
+  state opens is written, nothing is lost, and an unlock by a release that
+  reads it opens the vault. It is not a PIN failure. The member must not
+  be told to set the vault up again: the app says "Your vault can't be
+  opened right now. Nothing in it has been changed. Please try again
+  later." (wording approved by the owner 2026-11-11, GC #8549); an app
+  that does not know the code shows its usual failure. It comes after
+  the release decisions: a header of a release the vault has left is
+  still `wrong_release`. `state_unsupported` (0.87.1):
   the state opened but lacks `messaging_release` 29 or more (§6.3.1 "No
   upgrade: release 29 starts clean"); nothing after the state opens is
   written, and the member re-enrols; the app says "This vault was made
@@ -20254,7 +20357,12 @@ approval is bound to the app's unlock key as well.
 #### 11.10.4 The move
 
 Every unlock request names the current signed manifest by its hash and
-serial, and the host supplies the document (§11.4, §11.5). An enclave of
+serial, and the host supplies the document (§11.4, §11.5). (0.88.17) A
+state with a part that a feature others call directly cannot read is
+still moved (steps 6 and 7), the part carried unchanged, also by an
+approved update at the release a move went to before it confirms it;
+only the resumption under this release is refused (§3.3 "Feature data
+that does not read"). An enclave of
 release N processes an unlock in this order:
 
 1. The normal checks of §11.4, in their order, up to and including the
@@ -23587,7 +23695,10 @@ binding and replay rules of §11.3 and §11.6 and then, **in this order**:
    header.state_seq`, §13.2; (0.87.1) then §12.5's `deleting` check, and
    then §6.3.1 "No upgrade: release 29 starts clean": a state without
    `messaging_release` 29 or more is answered `state_unsupported` and
-   nothing further is written); opens the vault's backup copy of the
+   nothing further is written; (0.88.17) then §3.3 "Feature data that
+   does not read": a part of a feature others call directly that does
+   not read is answered `state_unreadable`, and nothing further is
+   written); opens the vault's backup copy of the
    credential with the same password (§3.5.6); and then, in the order of
    writes of §11.14.2: rotates the CEK and re-keys every critical item
    (§10.7); makes the phone the vault's app and the credential's holder;
@@ -23649,7 +23760,7 @@ at register and padded to 4,096 bytes:
   "release", "release_number", "unlock_id", "attempt_used": true|false,
   "attempts": {"used": n, "of": 10}}`. `vault_bundle` carries the vault's
   rotated keys;
-- `{"ok": false, "code": "wrong|wrong_again|attempt_lost|quiet|wait|busy|exhausted|closed|not_armed|stored_mismatch|counter_unavailable|no_recovery|expired|attestation|manifest|wrong_release|retry|bad_request|state_unsupported",
+- `{"ok": false, "code": "wrong|wrong_again|attempt_lost|quiet|wait|busy|exhausted|closed|not_armed|stored_mismatch|counter_unavailable|no_recovery|expired|attestation|manifest|wrong_release|retry|bad_request|state_unsupported|state_unreadable",
   "attempt_used": true|false, "attempts": {"used": n, "of": 10},
   "retry_at": "<ts>"}`. `attempts`
   is present whenever the counter answered. `retry_at` comes with
@@ -23683,6 +23794,7 @@ at register and padded to 4,096 bytes:
   | `quiet`, `wait`, `closed`, `exhausted` | `false` from step 3, or from a `Spend` that took nothing; `true` when step 4b refused to test a spent attempt |
   | `stored_mismatch`, `vault_missing` | `false` before the spend (step 2; a stored state that cannot be read); `true` after it (step 6: the state, the keys or the backup copy cannot be opened) |
   | `state_unsupported` (0.87.1) | `true` at step 6, after the spend (the state opens only then); (0.88.1) `false` on a repeat through the `next` wrap, which spends none; it lacks `messaging_release` 29 or more (§6.3.1 "No upgrade: release 29 starts clean"). The app says "This vault was made by an earlier version of VettID and must be set up again." (wording approved by the owner 2026-11-06, GC 01M6RV1QRM1403G0Z8G2W2C6ZS) |
+  | `state_unreadable` (0.88.17) | as `state_unsupported`: `true` at step 6, `false` on a repeat through the `next` wrap; the part of a feature others call directly does not read (§3.3 "Feature data that does not read"). The state is not written and nothing of the vault is lost, but the attempt is spent; the vault is not to be set up again. The app says "Your vault can't be opened right now. Nothing in it has been changed. Wait for a VettID update before you try again: each try uses one of your recovery attempts." (wording approved by the owner 2026-11-11, GC #8568; the unlock's text, which invites a retry, is not used here) |
   | `retry` | `false` from step 3b; `true` whenever the spend happened: the run ended at any point after it, before or after step 1 of the order of writes was stored, including a failure to register at the relay or to store steps 2 and 3 (the entry may have been right) |
   | every other code (`wrong_again`, `busy`, `counter_unavailable`, `not_armed`, `no_recovery`, `expired`, `attestation`, `manifest`, `wrong_release`, `bad_request`, `device_secret`) | `false` |
 
