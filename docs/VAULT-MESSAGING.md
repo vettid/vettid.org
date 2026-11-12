@@ -46,7 +46,8 @@ changelog:
     is written (a recovery's open has spent its attempt by then). An
     approved move, and a pending move's completion, still record and seal
     for the next release with the part carried unchanged and the
-    header's credential bits as stored (GC #8621 a; §11.10.4); the
+    header's credential bits as stored (GC #8621 a; §11.10.4), also from
+    the release a move went to before it confirms it (GC #8689 a); the
     approved move also stores the `feature.load_failed` audit entries, and
     a refused abandonment leaves the move to be completed. Before,
     the vault ignored the error and ran the feature empty, so a member's
@@ -4218,7 +4219,14 @@ record the move and seal the header for that release, with the part
 carried unchanged and the header's credential bits as stored; they
 open nothing, run no feature's handlers, timers or observers, send no
 message and report no `unlocked` (owner decision 2026-11-11, GC #8621
-a), so that a release that reads the part can be reached. The approved
+a), so that a release that reads the part can be reached. That holds
+from the release a move went to as well, before it has confirmed the
+move: when it cannot read the part either, it does not confirm the move,
+and an approved update to a later active release is recorded as a move
+from the release the vault is still sealed at and sealed for that release
+in the same way (owner decision 2026-11-12, GC #8689 a); without one it
+refuses `state_unreadable`. Its own header is left, answering
+`wrong_release`, and the vault's deletion removes it. The approved
 move's write also stores the opening's `feature.load_failed` entries in
 the audit log, so History shows why; a pending move's completion writes
 the header only. An approval to abandon a pending move resumes under this
@@ -20350,9 +20358,10 @@ approval is bound to the app's unlock key as well.
 Every unlock request names the current signed manifest by its hash and
 serial, and the host supplies the document (§11.4, §11.5). (0.88.17) A
 state with a part that a feature others call directly cannot read is
-still moved (steps 6 and 7), the part carried unchanged; only the
-resumption under this release is refused (§3.3 "Feature data that does
-not read"). An enclave of
+still moved (steps 6 and 7), the part carried unchanged, also by an
+approved update at the release a move went to before it confirms it;
+only the resumption under this release is refused (§3.3 "Feature data
+that does not read"). An enclave of
 release N processes an unlock in this order:
 
 1. The normal checks of §11.4, in their order, up to and including the
