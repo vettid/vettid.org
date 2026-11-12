@@ -648,7 +648,7 @@ other's grace ends. From the later rotate that takes about 2`U` + `U`
   connection's end. Or at the hold's limit (7.8), after which §8.6
   applies as today.
 - **What the member sees.** A held message shows as held, not as sent:
-  "Waiting to reach <name> at its new address." (new text, 7.15).
+  "Waiting to reach <First Last> at its new address." (new text, 7.15).
 - **What a copy can see.** A refused deposit is not stored at the relay,
   so an old copy that collects K cannot read it.
 - **What the hold cannot save.** Deposits the relay already **accepted**.
@@ -1103,7 +1103,10 @@ This covers S-a to S-d, with Rule J and §6.5 amended.
   - Cost: a RELAY-PROTOCOL change and a relay release. 7.7 to 7.9 then
     matter only for refusals from relays that lack it.
 - Depends on 7.5.
-- **Recommendation: d.** If no relay change is wanted now, c.
+- **Recommendation: c, or d once reviewed.** d is new and has not had
+  its own review yet: who owns the successor link when a copy holding K
+  races the rotate, and what honouring K tokens at K′ changes in
+  RELAY-PROTOCOL §5.3, are open.
 
 ### 7.7 The Q-side hold: does it exist?
 
@@ -1217,11 +1220,11 @@ Depends on 7.4: under 7.4 a, rule 8's window must also fit inside it.
 Each applies only under the choice named.
 
 1. **The held state** of a message (7.7 a, 7.8): "Waiting to reach
-   <name> at its new address."
+   <First Last> at its new address."
 2. **`message.delivery_unconfirmed`** (7.9 a, at the hold's limit). This
    reuses the approved text ("A message to <name> may not have been
    delivered: …"). Confirm that it fits this new trigger.
-3. **G8's stale** (both sides moved, under 7.6 b or c): "<name> and your
+3. **G8's stale** (both sides moved, under 7.6 b or c): "<First Last> and your
    vault both moved to new addresses and couldn't reach each other.
    Connect again with a new invitation."
 4. **S9 at S1's end** (7.12 b). This reuses S9's text, which is still
