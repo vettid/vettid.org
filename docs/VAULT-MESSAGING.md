@@ -38,22 +38,25 @@ changelog:
     the document (strict JCS, the three members, `context` ending in
     the first 16 hex digits of its hash) or drops the challenge
     (`drop.approval_document`), keeps it with the ask (256 KiB per
-    connection),
-    and advertises `approval_document` in `features` to services
-    (§10.8). The apps fetch it with the new
+    connection), and advertises `approval_document` in `features` to
+    services (§10.8) only while its app lists it in `device.features`
+    (§10.2; a capability, §11.10.9). The apps fetch it with the new
     `connection.authenticate.document` and show every part of it:
-    what is asked, the service's line and summary, and the request
-    under fixed labels when it matches its action's form exactly, else
-    its whole canonical text. Control, format, separator, unassigned
-    and ignorable characters are shown as markers, each value in an
-    isolated block. Nothing is cut, and Approve is only on the full
+    what is asked (titles for the seven actions service-vault sends,
+    a warning only for an unknown one), the service's line and summary,
+    and the request under fixed labels when it matches its action's
+    form exactly, else a raw view: a tree with each key and string value
+    isolated. Control, format, separator, private-use, unassigned and
+    ignorable characters, extra combining marks and spaces other than
+    U+0020 are shown as markers, each value in an isolated block. Nothing is cut, and Approve is only on the full
     screen once all of it has been shown. The app sends the document's
     hash with `.approve`, and the vault signs under the new label
     `"vettid/vms/2/conn-auth-document"` over `len(purpose) || purpose
     || SHA-256(document) || m` (audited
-    `connection.authenticate.document_signed`; an approve from a device
-    that did not fetch the document gets the new code
-    `document_not_fetched`). An app before 0.89.0 gets the new code
+    `connection.authenticate.document_signed`; an approve with the
+    matching hash from a device that did not fetch the document gets
+    the new code `document_not_fetched`, and the fetch record is never
+    consulted without a hash). An app before 0.89.0 gets the new code
     `update_required` on a `document_required` challenge, and otherwise signs the purpose form as before; a
     service asks a `document_required` approval only of vaults that
     advertise it, and never counts a purpose-form answer toward one.
@@ -10965,8 +10968,9 @@ an answer to an unknown or expired id is dropped.
       without `document_sha256` for a challenge that is
       `document_required`, from an app that does not show approval
       documents (§10.4 "Approval documents"); and
-      `document_not_fetched`: the same with `document_sha256` from a
-      device that has not fetched the document;
+      `document_not_fetched`: `document_sha256` equal to the document's
+      hash from a device that has not fetched the document (never sent
+      when `document_sha256` is absent);
     - `blocked`: `connection.invite.accept` of an invitation from a
       blocked identity (§10.4);
   - and (0.6.0) no new codes: `forbidden` also answers an agent's request
@@ -11107,7 +11111,7 @@ an answer to an unknown or expired id is dropped.
 | `vault.locking` (ephemeral) | — | `{reason?}` (0.29.0, release L: `{reason?, unlock_id}`, the unlock this lock ends), with `exp` = now + 60 s; an app ignores one whose `ts` is not later than its latest successful unlock result's (§11.4, 0.23.3); `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0), `"idle"` for the idle lock (§3.6.8; 0.29.0, release L) |
 | `hs.confirm` (0.86.0) | — | `{}`, session mode under the new epoch; any message under it confirms as well (§6.3.1) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
-| `device.features` (D→V) | — | `{features: [name]}` (0.85.4): the receiving-side capabilities the device implements (`relay_follow` and (0.86.0) `hs_confirm`), each `[a-z0-9_]{1,32}`, sorted, unique, at most 32; sent after each epoch it activates, and (0.86.0) the same list in the inner `features` of every message it deposits to its vault (§5.3, §10.8). The vault ignores names it does not know, drops and audits a malformed body (`drop.features_malformed`), and keeps the last list per device in the DEK state, written only when it changes (each of `relay_follow` and `hs_confirm` once seen stays, §3.4.1 "The gate") |
+| `device.features` (D→V) | — | `{features: [name]}` (0.85.4): the receiving-side capabilities the device implements (`relay_follow` and (0.86.0) `hs_confirm`; (0.89.0) from the app also `approval_document`, §10.4 "Approval documents", which is **not** sticky: the vault uses the last list), each `[a-z0-9_]{1,32}`, sorted, unique, at most 32; sent after each epoch it activates, and (0.86.0) the same list in the inner `features` of every message it deposits to its vault (§5.3, §10.8). The vault ignores names it does not know, drops and audits a malformed body (`drop.features_malformed`), and keeps the last list per device in the DEK state, written only when it changes (each of `relay_follow` and `hs_confirm` once seen stays, §3.4.1 "The gate") |
 | `relay.token.refresh` (req) | `{}` | `{kind: "standing", token}` |
 | `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>, rotations?}` ((0.85.0) `rotations`: the links before `rotation`, §3.4.1 S8) |
 | `relay.address.update` | — | `{relay: {url, mailbox, pk}, token, reconnect_token?, links}` ((0.85.0) `links`: the signed relay links, §3.4.1 rule U) |
@@ -11357,7 +11361,7 @@ vault signs a fresh challenge with the member's **credential key**
 | `connection.authenticate.challenge` (V↔V) | — | `{request_id, nonce, context?, purpose?, match_code?, document?, document_required?}`, with `exp` (up to 24 h for an `approval` from a service, 0.82.0); `document` and `document_required` (0.89.0) only with `purpose: "approval"`, "Approval documents" below |
 | `connection.authenticate.pending` (V→D, apps and desktops) | — | `{connection_id, request_id, context?, purpose?, match_code?, document_sha256?, document_size?, document_required?, exp}` (`document_*`, 0.89.0: the challenge holds a checked document) |
 | `connection.authenticate.document` (app, desktop; 0.89.0) | `{request_id}` | `{document}`: the challenge's document, standard base64, whenever `pending.list` would list the ask for that device; `not_found` otherwise, and for a challenge without a document ("Approval documents") |
-| `connection.authenticate.approve` (app) | `{request_id, document_sha256?}` (0.89.0, "Approval documents") | `{}`; (0.89.0, in the order of "Approval documents") `bad_request` for a `document_sha256` that is not the challenge's document's, or given for a challenge without one, `document_not_fetched` from a device that did not fetch the document, and `update_required` for none on a `document_required` challenge, the challenge staying open; `credential_locked` outside the unlock window; `not_found` for an unknown, decided, expired or withdrawn `request_id` (named in 0.80.0); `transfer_incomplete` while a transfer's credential-key statement is held, the challenge staying open (§11.14.10, 0.83.11) |
+| `connection.authenticate.approve` (app) | `{request_id, document_sha256?}` (0.89.0, "Approval documents") | `{}`; (0.89.0, in the order of "Approval documents") by the decision table of "Approving" (`bad_request` for a `document_sha256` that is not the challenge's document's, or given for a challenge without one; `document_not_fetched` for the matching one from a device that has not fetched the document; `update_required` for none on a `document_required` challenge), the challenge staying open; `credential_locked` outside the unlock window; `not_found` for an unknown, decided, expired or withdrawn `request_id` (named in 0.80.0); `transfer_incomplete` while a transfer's credential-key statement is held, the challenge staying open (§11.14.10, 0.83.11) |
 | `connection.authenticate.deny` (app, desktop) | `{request_id}` | `{}`; `not_found` as for `.approve` |
 | `connection.authenticate.response` (V↔V) | — | `{request_id, status: "signed", key, sig, signed_at, purpose?, document_sha256?, rotations?}` or `{request_id, status: "denied"}` (`document_sha256`, 0.89.0: the signature commits to the document) |
 | `connection.authenticate.withdraw` (V↔V, challenger → responder; 0.80.0) | — | `{request_id}`: the challenger will no longer accept the challenge (below); nothing is sent back |
@@ -11417,7 +11421,9 @@ vault signs a fresh challenge with the member's **credential key**
   ```
 
   (`purpose` in UTF-8, `m` as above), and its signed response carries
-  `purpose` with the same value. Without a purpose it signs `m` under
+  `purpose` with the same value. (0.89.0) An `approval` challenge that
+  carries a document is signed in the document form instead, when the
+  app showed the document ("Approval documents" below). Without a purpose it signs `m` under
   `"vettid/vms/2/conn-auth"` as before, and the response has no
   `purpose`. The purpose is signed although it changes only the
   receiver's gate and screens, because the signature is the
@@ -11498,7 +11504,8 @@ vault signs a fresh challenge with the member's **credential key**
 - The requesting vault checks that the response answers an outstanding
   challenge it sent to that connection, verifies `sig` under `key` over
   `m` (or, since 0.65.0, over `m_p` under its label when the response
-  carries `purpose`), and tells every owner device the verdict: `reason`
+  carries `purpose`; or, since 0.89.0, over `m_d` when it carries
+  `document_sha256`, "Approval documents" below), and tells every owner device the verdict: `reason`
   is `denied` or `bad_signature`. A response whose `purpose` is not the
   challenge's, or that carries `purpose` for a challenge without one, is
   `bad_signature`. A response without `purpose` to a challenge with one
@@ -11779,7 +11786,9 @@ vault signs a fresh challenge with the member's **credential key**
     `purpose: "approval"`:
     - `document`: the bytes, standard base64 with padding;
     - **`document_required: true`**, exactly when `context` does not
-      show every field of the document whole (BALLOT-PROTOCOL §3.4).
+      show every field of the document whole (BALLOT-PROTOCOL §3.4): the
+      same predicate by which the challenger refuses to count an answer
+      that does not commit to the document (below).
       This is so for a motion text, a quorum text, a longer title or
       another outage rule. It is valid only with `document`. Its only
       value is `true`; when it does not apply, the member is absent.
@@ -11788,20 +11797,34 @@ vault signs a fresh challenge with the member's **credential key**
       answers by its own record of what it sent, never by the flag.
 
     Before it sends a document, the challenger MUST check it as the
-    receiver will (all four checks below), so that a member's vault
-    never drops one the challenger meant to send: the drop is silent to
-    the challenger (§9.2). `context` MUST end with the 16 lower-case hex
+    receiver will (all four checks below, the 16 levels and the
+    1,024-byte `summary` included), so that a member's vault never drops
+    one the challenger meant to send: the drop is silent to the
+    challenger (§9.2). A challenge's document is fixed for its
+    `request_id`: the challenger never sends another document under the
+    same `request_id`. `context` MUST end with the 16 lower-case hex
     digits of `d[0:8]`. The service's `… — ref <16 hex>` does. That
     `ref` is a display aid only, **not a commitment**: two documents
     sharing its 64 bits can be found with about 2^32 work. Only the
     document form below commits to a document. Nothing else about the
     challenge changes: it is one ask, with the same `exp` and the same
     limits (§10.4.1).
-  - **Which members' vaults can show it.** From 0.89.0 a vault adds
-    `approval_document` to the `features` of its `profile.update` to a
-    service connection (§10.8), exactly when its image implements this
-    section. That is the existing statement of what the vault can do,
-    as for `vote`. A service asks for an approval that is
+  - **Which members can be shown it.** Showing the document needs both
+    the vault and the member's app (the device of role `app`), so the
+    vault states both.
+    - An app that implements this section lists `approval_document` in
+      its `device.features` (§10.2).
+    - From 0.89.0 a vault adds `approval_document` to the `features` of
+      its `profile.update` to a service connection (§10.8) exactly while
+      its image implements this section **and** the last
+      `device.features` of its app lists the name.
+    - Unlike `relay_follow`, the name is not sticky. When the app's list
+      no longer carries it (an older app after a transfer or a
+      reinstall), the vault sends the update without it, and with it
+      again once the app's list has it.
+
+    That is the existing statement of what the vault can do, as for
+    `vote`. A service asks for an approval that is
     `document_required` only of admins whose last `features` carry
     `approval_document`. If fewer than the threshold can be asked, it
     refuses to create the approval at once and names the admins who
@@ -11829,8 +11852,8 @@ vault signs a fresh challenge with the member's **credential key**
     These checks are among those a message's type makes at once, before
     §10.4.1 decides whether the ask is suppressed. A challenge that
     fails any of them is **dropped and audited** `drop.approval_document`
-    (`ref` = `<connection_id> <reason>`), as a malformed message is
-    (§9.2):
+    (`ref` = `<connection_id> <reason>`, under the bounds of every
+    `drop.*` entry, §10.9), as a malformed message is (§9.2):
     - it gets no answer, not even a suppressed ask's neutral one;
     - it counts toward no rate bucket and takes no received or
       long-lived place;
@@ -11839,12 +11862,14 @@ vault signs a fresh challenge with the member's **credential key**
 
     A challenge that passes is an ask like any other.
   - **Keeping the document.** It is vault state, kept and sealed with
-    the ask (§3.3), so it survives a lock or a hold as the ask does
-    (§3.6.3). It is erased when the ask closes: decided, expired or
+    the ask (§3.3; a vault MAY keep each document as a separate sealed
+    object tied to its ask), so it survives a lock or a hold as the ask
+    does (§3.6.3). It is erased when the ask closes: decided, expired or
     withdrawn. A suppressed challenge's document is not kept, since its
     neutral answer needs none.
-    - Each document adds at most 65,536 bytes, so at most 262,144 bytes
-      for a connection's 4 received challenges. That is the only bound:
+    - Each document adds at most 65,536 bytes of document (its decoded
+      bytes, before sealing), so at most 262,144 bytes for a
+      connection's 4 received challenges. That is the only bound:
       there is no vault-wide cap, which would make one service's
       documents drop another's challenges in a way neither could check.
       A vault's documents grow with its number of service connections,
@@ -11878,33 +11903,47 @@ vault signs a fresh challenge with the member's **credential key**
     you to approve"), then these parts, in this order, each under the
     app's own fixed label, and each value in a block of its own that
     looks clearly different from the labels:
-    1. **What is asked:** the app's own title for a known `action`
-       ("New vote" for `proposal.create`, "Extend a vote" for
-       `vote.extend`). For any other action, it shows the `action` name
-       itself, with "<name> asks for something this app doesn't know.
-       Read all of it before you approve."
+    1. **What is asked:** the app's own title for a known `action`:
+
+       | `action` | Title |
+       |---|---|
+       | `proposal.create` | New vote |
+       | `vote.extend` | Extend a vote |
+       | `admin_set.add` | Add an admin |
+       | `admin_set.remove` | Remove an admin |
+       | `admin.repin` | Re-pin an admin's key |
+       | `contract_template.change` | Change the contract template |
+       | `assignment.push` | Send an assignment |
+
+       These are the actions service-vault asks approval for (SERVICE-VAULT
+       §7). For any other action, the app shows the `action` name itself,
+       with "<name> asks for something this app doesn't know. Read all of
+       it before you approve." A known action is never shown with that
+       warning.
     2. **The service's description:** `context`, the service's own
        line. Then "What you approve is the request below", because the
        document, not this line, is what is signed.
     3. **The service's summary:** `summary`, verbatim.
     4. **The request:**
-       - For a known action whose `payload` matches that action's form
-         exactly (below), its fields under the app's labels.
-       - Otherwise (an unknown action, a missing or extra member at any
-         depth, a value of another type), the **whole document's**
-         canonical text, wrapped, under "Request details". Nothing goes
-         under a label then.
+       - For a known action that has a form (below) and whose `payload`
+         matches it exactly, its fields under the app's labels.
+       - Otherwise (an action without a form yet, an unknown action, a
+         missing or extra member at any depth, a value of another type),
+         the **whole document's** raw view (below) under "Request
+         details". Nothing goes under a label then.
        - The app never puts a default value under a label.
 
     The forms, and their labels in this order:
     - `proposal.create`: exactly the members
       - `title` (string): Title.
-      - `text` (string): Motion; "None" when it is empty.
+      - `text` (string): Motion; when it is empty, "None" in the label
+        style, outside any value block.
       - `choices` (array of objects, each exactly `{label: string}`):
         Choices, each `label` in order. Then "Abstain", with "added by
         the service" (BALLOT-PROTOCOL §3.4).
       - `quorum` (object, exactly `{text: string, min_ballots:
-        integer}`, `min_ballots` from 0 to 1,000,000): Quorum, as
+        integer}`, `min_ballots` at least 0, as service-vault and the
+        vote checks of §10.19.4 require): Quorum, as
         `min_ballots` ballots, with `text` when it is not empty.
       - `binding` (boolean): Binding or Advisory.
       - `removed_may_vote` (boolean): "Members removed after the roster
@@ -11921,17 +11960,28 @@ vault signs a fresh challenge with the member's **credential key**
     An integer is a JSON number with no fraction or exponent. A time is
     an integer from 0 to 253,402,300,799 (Unix seconds up to the year
     9999), shown as date and time in the member's time zone with the
-    zone named, and in UTC. Any other value makes the payload not match
-    its form.
+    zone named, and in UTC, with seconds whenever they are not zero. Any
+    other value makes the payload not match its form.
 
-    **Text**, in every value and in the canonical text:
+    **The raw view** shows the document as a tree, one member or array
+    element to a line, indented by depth, with the base direction
+    left-to-right. Each key and each string value is its own isolate
+    (as U+2068 FIRST STRONG ISOLATE … U+2069 POP DIRECTIONAL ISOLATE
+    would make it), with the punctuation and numbers outside every
+    isolate, so right-to-left text in one string cannot move a
+    neighbouring key, value, number or bracket. One block of wrapped
+    JSON text is not a raw view.
+
+    **Text**, in every value and in the raw view (these rules replace
+    §10.8 "Showing received text" on this screen):
     - It is shown as plain text: never rendered as markup, and no links
       are made from it.
     - Each value is laid out as an isolated run (first strong
       direction, its own block), so the bidirectional order of one
       value cannot reach another value or a label.
-    - A line break (LF only) is kept in Motion and in Quorum's text.
-      Anywhere else it is shown as a marker.
+    - A line break (LF only) is kept in Motion and in Quorum's text, at
+      most two in a row; a third and later in a row are shown as markers.
+      Anywhere else a line break is shown as a marker.
     - Shown as a visible marker naming the code point (`⟨U+202E⟩`),
       never applied:
       - any other control character (Cc, U+0085 included);
@@ -11941,7 +11991,12 @@ vault signs a fresh challenge with the member's **credential key**
         newer than the app's Unicode data is unassigned to it);
       - any other Default_Ignorable_Code_Point (the Hangul fillers and
         the variation selectors among them);
-      - every combining mark (Mn, Me) after the second in a row.
+      - every combining mark (Mn, Me) after the second in a row;
+      - a space separator (Zs) other than U+0020 SPACE.
+    - This marks on purpose the joiners U+200C and U+200D and the
+      variation selectors (U+FE0F included), so an emoji sequence or a
+      script that uses joiners shows its markers here: that is the
+      intended cost of showing exactly what is signed.
     - So no text can reorder, hide or imitate other text or a label.
     - Long lines wrap. Nothing is cut.
 
@@ -11957,35 +12012,40 @@ vault signs a fresh challenge with the member's **credential key**
     (§10.4).
   - **Approving.** An app that showed the document as above sends
     `connection.authenticate.approve` `{request_id, document_sha256}`,
-    with the hash it checked. The vault answers in this order: first
-    `not_found` (as before), then the document's checks below, then
-    `credential_locked` and `transfer_incomplete` (as before). For a
-    challenge that holds a document:
-    - with `document_sha256` equal to `d`, from a device that fetched
-      the document with `.document`: it signs the **document form**
-      below;
-    - with any other `document_sha256`: `bad_request`. It signs
-      nothing, and the challenge stays open;
-    - from a device that has not fetched the document:
-      **`document_not_fetched`** (new code). It signs nothing, and the
-      challenge stays open. The app fetches it again and, if the bytes
-      differ from those it showed, shows the new document from the
-      start before Approve is enabled again;
-    - without `document_sha256` (an app before 0.89.0, which does not
-      show documents), when the challenge is `document_required`:
-      **`update_required`** (new code). It signs nothing, and the
-      challenge stays open. The old app shows the approval as failed,
-      and the member can approve after updating, instead of believing
-      they approved something that cannot count. The challenger sees
-      no answer from that admin yet (the approval's status shows them
-      as not answered);
-    - without `document_sha256`, when it is not `document_required`
-      (`context` shows the whole action): it signs the purpose form
-      above, as before. That signature does not commit to the
-      document, and the response has no `document_sha256`.
+    with the hash it checked. The vault answers `not_found` first (as
+    before), then by this table, then `credential_locked` and
+    `transfer_incomplete` (as before). Every row but the two that sign
+    leaves the challenge open and signs nothing.
 
-    `document_sha256` for a challenge without a document is
-    `bad_request`, and the challenge stays open.
+    | The challenge | `document_sha256` | Fetched by this device? | Answer |
+    |---|---|---|---|
+    | holds a document | equal to `d` | yes | signs the **document form** (below) |
+    | holds a document | equal to `d` | no | **`document_not_fetched`** (new code) |
+    | holds a document | present, not `d` | (not consulted) | `bad_request` |
+    | holds a document and is `document_required` | absent | (not consulted) | **`update_required`** (new code) |
+    | holds a document, not `document_required` | absent | (not consulted) | signs the **purpose form** (above), as before |
+    | has no document | present | (not consulted) | `bad_request` |
+    | has no document | absent | (not consulted) | as before |
+
+    - **The fetch record** is consulted only when `document_sha256` is
+      present and equal to `d`, and it records fetches of that `d`. So an
+      app before 0.89.0, which never fetches and never sends a hash, is
+      never refused for not fetching. On a challenge that merely
+      carries a document, it signs the purpose form exactly as before.
+    - **On `document_not_fetched`**, the app fetches the document again.
+      If the bytes differ from those it showed, it shows the new
+      document from the start before Approve is enabled again.
+    - **On `update_required`**, an app before 0.89.0 shows its usual
+      failure for an error answer to `.approve`, and the request stays
+      among its open asks (`pending.list`). The member can approve after
+      updating, instead of believing they approved something that
+      cannot count. The challenger sees no answer from that admin yet
+      (the approval's status shows them as not answered). Since a vault
+      advertises `approval_document` only while its app lists it (above),
+      this happens only when an older app approves on a vault whose
+      advertisement has not yet caught up.
+    - A purpose-form signature does not commit to the document, and its
+      response has no `document_sha256`.
   - **The document form.**
 
     ```
@@ -12013,8 +12073,9 @@ vault signs a fresh challenge with the member's **credential key**
     A response without `document_sha256` is verified as before. It
     shows that the member approved `context`, not the document. A
     challenger **MUST NOT count it** toward an action whose `context`
-    does not show every field of the document whole (one it sent as
-    `document_required`). It MUST also tell the admin's side that the
+    does not show every field of the document whole: the property
+    itself decides, whatever `document_required` said (which the
+    challenger sets by the same predicate, above). It MUST also tell the admin's side that the
     answer did not count (BALLOT-PROTOCOL §3.4: the approval's status
     names the admin with the reason), never let it pass silently.
   - **Labels** (the check that "Labels" above requires).
@@ -13832,9 +13893,11 @@ The **profile object** holds the extras' display name and photo. Sent by
     `vote`, present exactly when the image registers it, which is how
     a service learns that a member's vault can vote (§10.19.1); and
     (0.89.0) `approval_document`, which is not a registered feature
-    but a capability of the image, present exactly when the image
-    implements §10.4 "Approval documents": this is how a service learns
-    that a member's vault can show an approval's document;
+    but a capability (§11.10.9), present exactly while the image
+    implements §10.4 "Approval documents" and the last `device.features`
+    of the member's app lists it: this is how a service learns that the
+    member's vault and app can show an approval's document. The vault
+    sends a new update when that changes;
   - (0.85.4) to **every** connection, person or service: the
     receiving-side capabilities `relay_follow` and (0.86.0)
     `hs_confirm`, each present exactly when the image lists that
@@ -21607,6 +21670,7 @@ not the optional features of §11.10.8, which the channel file chooses.
 | `vote_rows` | `other_rows` and `rows_unavailable` of `vote.results.submit` (§10.19.6 step 3) | the vault release implementing 0.83.3 (added ahead of its release by owner decision with this PR's merge go, 2026-11-03, as `item_ways` was) |
 | `relay_follow` | The receiving side of §3.4.1 (`acceptFrom`, rules C, U, T, H5, S1–S9); also advertised to connections in `features` (§10.8) and by devices in `device.features` (§3.4.1 "The gate") | the vault release implementing 0.85 (added ahead of its release by owner decision O6c, 2026-11-05) |
 | `hs_confirm` | The vault implements §6.3.1, activation on confirmation (`hs.confirm`, the pending and confirmed epochs, rule E, the received flag); also advertised to connections in `features` (§10.8) and by devices in `device.features` (§6.3.1 "Capability") | vault release 29 (owner decision R1; 0.87.0) |
+| `approval_document` | §10.4 "Approval documents": the vault checks, keeps and serves an approval's document and signs the document form; also advertised to service connections in `features` (§10.8) while the member's app lists it in `device.features` | the first vault release implementing 0.89.0 (added ahead of its release with this specification) |
 | `transfer_outcome` | §6.7.1 "The transfer's outcome": the vault tells a transfer's new phone every outcome after `hs.fin` (`device.transfer.ended`), so the new phone waits for it instead of 0.85.2's settlement window (§11.14.10 rule 5) | the first vault release implementing 0.88.0 (after release 29) |
 
 A name is added to this table only with the release that implements it,
@@ -30129,14 +30193,19 @@ Follow-ups:
         with `document_required`, sealed with the ask;
       - answer `connection.authenticate.document`, and keep the record
         of the devices that fetched it;
-      - answer `.approve` in the stated order (`bad_request`,
-        `document_not_fetched`, `update_required`);
+      - advertise `approval_document` only while its app's
+        `device.features` lists it;
+      - answer `.approve` by the decision table (the fetch record
+        consulted only for a present, matching hash);
       - sign the document form, and audit `document_signed`;
       - add the vector of §16 to the vectors files.
     - **Android and iOS (GC #1558, #1559):**
       - fetch and check the document;
       - show the screen's four parts, the request under fixed labels
         only when it matches its form exactly, under the text rules;
+      - list `approval_document` in `device.features`;
+      - show the titles of the seven known actions, and the raw view as
+        a tree with each key and string value isolated;
       - approve only from that screen, once all of it has been on
         screen, and send `document_sha256`;
       - on `document_not_fetched`, fetch again and show anew a document
@@ -30152,6 +30221,9 @@ Follow-ups:
       - ask such an approval only of admins whose vaults advertise
         `approval_document`, and refuse at once (naming the others)
         when fewer than the threshold can be asked;
+      - enforce before sending what a member's vault checks: 16 levels
+        (its `CanonicalJSON` allows 64), the 1,024-byte `summary`, and
+        its own character set;
       - verify the document form, and never count a purpose-form
         answer toward a `document_required` approval: its status names
         that admin with the reason, so it never fails silently.
