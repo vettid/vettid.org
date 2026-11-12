@@ -28,7 +28,7 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.88.18: 2026-11-11, erratum (as built in vettid-vault #235, call wake V4). §14.2 (C2) a call wake: an ordinary wake's `5xx` backoff does not hold it, a running `429` wait holds every wake (call wakes included) and its merged ordinary triggers after the call stops ringing, a call wake's retries are its own (5 s, 30 s, 120 s), and a call arriving during an earlier call wake's retry or `429` wait rides that attempt uncounted. Clarifies "as soon as no wake is in flight"; no change for an app.
+  - 0.88.18: 2026-11-11, erratum (as built in vettid-vault #235, call wake V4). §14.2 (C2) a call wake: an ordinary wake's `5xx` backoff does not hold it, a running `429` wait holds every wake (call wakes included) and its merged ordinary triggers after the call stops ringing, a call wake's retries are its own (5 s, 30 s, 120 s), a call arriving during an earlier call wake's retry or `429` wait rides that attempt uncounted while one of that wake's own calls still rings, a dropped call wake drops the ordinary retry it carried, ordinary triggers arriving during a call wake keep its backoff, and a call wake moves neither the 5 s rule nor the over-cap rhythm. Clarifies "as soon as no wake is in flight"; no change for an app.
   - 0.88.16: 2026-11-11, erratum (owner decisions 2026-11-11, GC #8361 a and
     #8374 a: bind both parties into form 2 before release C2, in which form
     2 first ships; vettid-vault #226; numbered after #574 and merged after
@@ -26715,12 +26715,17 @@ trigger 1). Desktops and agents are never woken.
   it waits merges into it (0.88.18: an ordinary wake waiting out a `5xx`
   backoff is not in flight and does not hold it; a running `429` wait,
   whichever wake got it, holds every wake, call wakes included, and the
-  ordinary triggers merged into a call wake keep its backoff after the
-  call stops ringing; a call wake has its own retries of 5 s, 30 s and
-  120 s, whatever an ordinary wake has used; a call that arrives while an
-  earlier call wake waits for its retry or its `429` wait rides that
-  attempt and is not counted again). It counts toward neither the 30 nor
-  the 10,
+  ordinary triggers waiting in a call wake, merged when it was sent or
+  arriving while it was in flight, keep its backoff after the call stops
+  ringing; a call wake has its own retries of 5 s, 30 s and 120 s,
+  whatever an ordinary wake has used, and a call wake dropped after its
+  last retry drops the ordinary retry it carried; a call that arrives
+  while an earlier call wake waits for its retry or its `429` wait rides
+  that attempt and is not counted again, but only while one of that
+  wake's own calls still rings, else it goes as a fresh call wake; a
+  call wake moves neither the 5 s rule nor the 10-minute over-cap rhythm
+  of ordinary wakes, so an ordinary wake can follow it within 5 s, at
+  most 20 times an hour). It counts toward neither the 30 nor the 10,
   but toward its own cap of **20 call wakes per rolling hour**; past
   that, trigger 5 is handled as an ordinary trigger (debounced, under the
   30). A call wake is sent only while its call is still `ringing`: if the
