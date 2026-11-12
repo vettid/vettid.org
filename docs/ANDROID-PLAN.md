@@ -7256,7 +7256,7 @@ elsewhere (§4 Notifications).
 
 | Where | When | Text |
 |---|---|---|
-| The conversation and the connection | The connection carries `relay_held` (refetched at `connection.changed`, whose `version` does not change): the member's messages to it wait for its vault's new address. **Each** of the member's messages to it with no `delivered` receipt yet shows this, per message, instead of "Sending", never as sent | "Waiting to reach <First Last> at their vault's new address." |
+| The conversation and the connection | The connection carries `relay_held` (refetched at `connection.changed`, whose `version` does not change): the member's messages to it wait for its vault's new address. While it is set, **every** message of the member's to it with no `delivered` receipt shows this, per message, instead of "Sending", never as sent. A message already told `message.not_delivered` or `message.delivery_unconfirmed` keeps that state. This is broader than the vault's hold on purpose (VAULT-MESSAGING §3.4.2 RK14) | "Waiting to reach <First Last> at their vault's new address." |
 | Notifications, History | `connection.stale` (and `connection.event` `stale`) with `reason: "relay_moved"` (VAULT-MESSAGING §3.4.2 RK14) | "<First Last> and your vault both moved to new addresses and couldn't reach each other. Connect again with a new invitation." |
 | Notifications, History | `connection.fork_suspected` with `ref` = `relay_revoked` (S9, judged at S1's end, §3.4.2 RK9) | "<connection name> may have connected to an old copy of your vault. Contact <connection name>." |
 | Notifications | The hold's 60-day limit (§3.4.2 RK14): `message.not_delivered` | The approved text of VAULT-MESSAGING §8.3, unchanged |

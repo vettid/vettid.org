@@ -83,7 +83,9 @@ changelog:
         vault).
     - The peer gate needs no new capability: `relay_follow` now means
       §3.4.1 and §3.4.2 for a vault, a service vault included, and
-      §3.4.1 alone for a device (RK0).
+      §3.4.1 alone for a device (RK0). A service vault release that
+      advertised it before §3.4.2 existed is not deployed, and that
+      advertisement is being removed.
     - **Member texts,** approved by the owner 2026-11-12:
       - the held state, per message;
       - the stale text when both sides' mailboxes moved;
@@ -4595,7 +4597,9 @@ create-only.
     peers deposited there and the vault had not collected; and from
     then until the second write, the peers, not yet told the new
     address (the updates are held), have their deposits to the old
-    mailbox refused `mailbox_unknown`.
+    mailbox refused `mailbox_unknown`. (0.90.0) Between vaults that
+    implement §3.4.2, those refused deposits are held, and the accepted
+    ones are told or deposited again (RK14).
   - **After the grace.** The old mailbox is gone, so the rotate is
     answered `mailbox_unknown`. The vault then registers the **stored**
     pending key (RELAY-PROTOCOL §6.1). A `200` means an earlier rotate
@@ -5672,17 +5676,29 @@ each recipient Q).
     telling has them deposited again. Those still pinned 60 days after
     the follow, with no `relay.mailbox.closed`, are told
     `message.delivery_unconfirmed`. Entries deposited to a mailbox Q
-    never follows P away from are dropped silently after the grace
-    window: such a mailbox still lives, or the relay kept them.
+    never follows P away from are dropped silently 60 days after their
+    `201`: such a mailbox still lives, or the relay kept them.
+  - **Arrival order after a relay restart** (SQLite store only; the
+    deployed relays use the shared (DynamoDB) store, which keeps the
+    per-mailbox order). RELAY-PROTOCOL §6.2 guarantees per-mailbox ULID
+    order on the SQLite store only against the messages still stored. A
+    relay on that store that restarts after deleting acked messages
+    could give a later deposit a smaller `msg_id` than one P already
+    acked. Q would then compare against `last_msg_id` wrongly and drop an
+    entry P never got.
   - **Devices have no telling.** A device that rotates its relay key,
     or whose vault does, gets no `relay.mailbox.closed`. Its deposits to
     an ended mailbox are lost, as before 0.90.0.
   - **A deleted peer whose `connection.removed` was lost.** The member
     sees up to 60 days of "Waiting to reach …" before
-    `message.not_delivered`.
-  - **A recipient that does not follow within S1** ends `stale`: 30 days
-    of S1 time, at most 60 days. Where a reconnect token for an earlier
-    key was revoked, the member sees S9's text (§3.4.2 RK9).
+    `message.not_delivered`. If this side was in its own S1, its stale
+    text is the `relay_moved` one ("both moved"), which is then wrong.
+  - **A recipient that does not acknowledge within S1** ends `stale`: 30
+    days of S1 time, at most 60 days. Where a reconnect token for an
+    earlier key was revoked, the member sees S9's text (§3.4.2 RK9). An
+    honest Q that followed has revoked that token too. So S9's text can
+    be a false alarm, but only outside A3: Q followed, and its token did
+    not reach P before the cap.
   - **A relay fork is shown at S1's end**, not 24 hours after the
     revocation.
   - **A device offline past the grace** is paired again (§6.6 "Limits").
@@ -6097,10 +6113,9 @@ only if it implements both §3.4.1 and this subsection.
 - **The reason.** RK2, RK6, RK7, RK8's acceptance, RK12, the RK14
   hold and `relay.mailbox.closed` are receiving-side rules, and a peer
   without them would bring the waits back. No member vault release
-  advertises `relay_follow` (A5). A service vault release that advertised
-  it before this subsection existed is not deployed, and that
-  advertisement is being removed. From 0.90.0 on, `relay_follow` from a
-  vault means this subsection too.
+  advertises `relay_follow` (A5), and no deployed service vault release
+  does. From 0.90.0 on, `relay_follow` from a vault means this subsection
+  too.
 - **Devices.** This subsection is between vaults only, so for a device
   `relay_follow` still means §3.4.1 alone.
 - **A service vault** (vettid/service-vault) follows this subsection as
@@ -6126,6 +6141,9 @@ strict F1, works as follows.
     revoking any tokens they carried (a release-29 rekey carries none).
     It also abandons its pending **rekey** epoch with the peer, if it
     has one.
+  - At strict F1, as built, the demotion's own write abandons the side's
+    open rekeys with the peer first, before the reconnect is tried. So
+    they are abandoned even when the reconnect cannot start.
 - **RK1-a, retries.** While the current epoch stays demoted, the side
   retries the reconnect only when it holds no pending epoch of its own.
   A pending epoch of either purpose blocks a retry until it is confirmed,
@@ -6222,7 +6240,7 @@ refusing them:
   current `ik` for P established;
 - an **`hs.fin` for an answer Q has open**, when its `sig_I` verifies
   under the `ik` Q's answer pinned, and that `ik` is Q's current `ik` for
-  P.
+  P. Its epoch is the one that `hs.fin` establishes.
 
 **When the pass closes.** Each pass closes per epoch: once Q has accepted,
 under that epoch or a later one, a message from a relay key of P's later
@@ -6271,6 +6289,12 @@ device's relay key.
   - If rule U's checks or RK5's requirement fail, Q follows nothing and
     refuses the message (rule U's reason), so the handshake does not
     complete.
+  - If Q has already followed P away from the announced key, Q refuses
+    the message (`superseded_relay`).
+  - If every link is one Q has already followed (the announced key is
+    Q's current key for P), the follow changes nothing: the links are
+    skipped as rule U skips them, the handshake goes on, and the tokens
+    are taken by rule T as for any reconnect.
 - **At P's second write,** P abandons its open reconnects with Q that
   announced K and have sent no `hs.fin`. It starts them again under this
   rule.
@@ -6296,7 +6320,8 @@ device's relay key.
     epoch. The message that delivers is then Q's `relay.token.issued` in
     answer to P's next update resend (rule U's duplicate path).
   - That resend goes under the epoch P's own demotion reconnect (RK8)
-    made, at P's next unlock after that epoch is current.
+    made, at P's next unlock after that epoch is current. The wait is
+    bounded by RK13's cap.
 - **S9 at S1's end** (owner decision 2026-11-12). Suppose S1 ends a
   recipient `stale` while a reconnect token Q issued for an earlier key
   of P was revoked during S1.
@@ -6378,12 +6403,13 @@ S1's clock.
 - **`time_scale`.** The 30 days and the 60-day cap are the vault's own
   waits, divided by `time_scale` (§11.10.8; STAGING-TIME-SCALE S19,
   S21). The 16 days are §8.4's durable `ts` window, longer than the
-  relay's 14-day hold, so a message the relay held its whole time still
-  counts. They stay real time on staging, where the relay's times are
+  relay's 14-day message retention, so a message the relay kept its
+  whole time still counts. They stay real time on staging, where the relay's times are
   not scaled.
 - **What it bounds.** RK6, RK9, RK10, RK11 and §3.4 "When the old key is
   deleted", for a side in its own S1. A side not in its own S1 bounds
-  RK6's and RK10's waits at 60 days from the follow or the first
+  RK6's and RK10's waits at 60 days (the vault's own waits, divided by
+  `time_scale`, STAGING-TIME-SCALE S22) from the follow or the first
   refusal instead.
 
 **RK14. The old mailbox's end** (owner decisions 2026-11-12).
@@ -6402,6 +6428,8 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
   - A handshake message so refused is not held: it ends as a refusal of
     its carried token does (§6.3.1 "A carried token refused").
   - After the hold's limit, a `mailbox_unknown` ends an entry at once.
+    This holds per hold episode: it resets when `relay_held` ends at a
+    follow, and a later refusal starts a new hold.
 - **What holding means.**
   - A held deposit is not ended (§8.3 "Not delivered", case 5).
   - It is not a failed try, and not a reason for `stale`.
@@ -6429,15 +6457,21 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
 - Its appearance and its end send `sync.event{kind:
   "connection.changed"}`, with the connection's `version` unchanged:
   `relay_held` is not an edit.
-- The apps show as held, never as sent, **each** of the member's
-  messages to that connection that is still in the vault's outbox or
-  pinned for the telling and has no `delivered` receipt yet
-  (`message.receipt`): "Waiting to reach <First Last> at their vault's
-  new address." (approved by the owner 2026-11-12).
+- While `relay_held` is set, the apps show as held, never as sent,
+  **every** message of the member's to that connection that has no
+  `delivered` receipt (`message.receipt`): "Waiting to reach <First
+  Last> at their vault's new address." (approved by the owner
+  2026-11-12). A message already told `message.not_delivered` or
+  `message.delivery_unconfirmed` keeps that state.
+- This app rule is intentionally broader than the vault's hold: the app
+  sees neither the outbox nor the pin, so it also shows held a message
+  the relay accepted that is waiting for P to collect it, or for the
+  telling.
 
 **The telling.**
 1. **P records what it collected.** P ends its collects of K's mailbox
-   at the grace's end, by its own record of the rotate, or earlier when a
+   at the grace's end, 14 days after the rotate on its own clock, or
+   earlier when a
    collect is answered `mailbox_unknown`. A K mailbox that still answers
    after that is not P's: a copy may have registered K again. P then
    records `last_msg_id` for that mailbox: the largest `msg_id` such that
@@ -6445,8 +6479,9 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
    and including that id.
    - Erring low costs nothing, because P drops a copy by its inner `id`
      (§8.2).
-   - The relay's ULIDs stay in arrival order across P's restarts
-     (RELAY-PROTOCOL §6.2).
+   - The relay's ULIDs are in arrival order per mailbox
+     (RELAY-PROTOCOL §6.2). See the residual "Arrival order after a relay
+     restart".
 2. **P sends the telling.** P sends each connection a separate durable
    message, **`relay.mailbox.closed {mailbox, last_msg_id}`**, under its
    then-current epoch with that connection.
@@ -6460,8 +6495,9 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
 3. **Q keeps its recent deposits.** Q keeps each of its outbox entries
    that the relay accepted (`201`) into a peer vault's mailbox, with that
    `msg_id`, for 60 days after the `201`, the longest a follow can still
-   come. This is a rolling window of the entries themselves, not a
-   log.
+   come. This is a rolling window of the entries themselves, not a log.
+   It stays in real time on staging, since it covers the relay's
+   handling of the peer's old mailbox.
    - **When Q follows P away from a mailbox M,** Q pins the entries it
      still keeps for M. It keeps them until P's `relay.mailbox.closed`
      for M, or 60 days after that follow (divided by `time_scale`,
@@ -6484,8 +6520,8 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
 deposits re-addressed at a follow.
 - Each is sealed again under the epoch current at that deposit, with the
   same inner `id`, and judged by §8.3 "At deposit".
-- It may take a fresh `ts` and a new `seq` (it is treated as not tried)
-  in two cases:
+- It MUST take a fresh `ts` and a new `seq` (it is treated as not
+  tried) in two cases:
   - its `msg_id` is greater than `last_msg_id`;
   - it was refused `mailbox_unknown`, which proves the relay never stored
     it.
@@ -8350,7 +8386,10 @@ Field rules:
   and `hs.resp` of a reconnect, and only when the key the message is
   deposited with is earlier than the key it announces: the signed relay
   links, in rule U's form, from the deposit key up to the announced key,
-  1 to 32 of them. In an `hs.init` the announced key is `from.relay.pk`.
+  1 to 32 of them. The first link's `old` MUST be the key the message is
+  deposited with (its collect `sender`), and the last link's `new` MUST
+  be the announced key. In an `hs.init` the announced key is
+  `from.relay.pk`.
   An `hs.resp` that carries `relay_links` MUST carry `relay`, the
   announced address, and `relay` MUST be absent otherwise. `relay.pk`
   MUST equal the last link's `new`, `relay.mailbox` MUST be the mailbox
@@ -10987,7 +11026,10 @@ Both of the following layers are REQUIRED:
    ((0.88.7) a vault keeps them 16 days and 5 minutes: the durable `ts`
    window of §8.4 with its future skew, so that a copy whose `ts` is kept,
    §8.3 "Re-sealed at a key change", is refused for its `ts` before its
-   `id` is forgotten).
+   `id` is forgotten). (0.90.0) The inner `id`s a vault processed from
+   one of its own rotated mailboxes are kept until 60 days after it sends
+   `relay.mailbox.closed` for that mailbox (§3.4.2 RK14, §8.3 "Deposited
+   again after a mailbox ended").
    This layer catches sender retransmissions, which the relay stores under
    different `msg_id`s. Responses are cached for 24 h, so a duplicate request
    gets the cached response again and is not re-executed.
@@ -11183,10 +11225,11 @@ An entry Q deposits again because P's `relay.mailbox.closed` shows P
 never collected it (`msg_id` greater than `last_msg_id`), and a held
 entry re-addressed at a follow after `mailbox_unknown` (the relay never
 stored it), are **not tried**. Each is sealed again under the current
-epoch with the same inner `id`, a fresh `ts` and a new `seq`, and judged
-by "At deposit" below as not tried. P's dedupe by inner `id` (§8.2), kept
-16 days past its `relay.mailbox.closed`, drops a copy of anything P did
-process. Every other entry deposited again keeps its `ts`.
+epoch with the same inner `id`, and MUST take a fresh `ts` and a new
+`seq`; it is judged by "At deposit" below as not tried. P's dedupe by
+inner `id` (§8.2), kept 60 days past its `relay.mailbox.closed`, drops a
+copy of anything P did process. Every other entry deposited again keeps
+its `ts`.
 
 **At deposit.** Before each deposit of a waiting durable message to a
 connection that is sealed under the connection's current epoch, with the
@@ -12100,10 +12143,13 @@ connection: { "id": "<id>", "kind": "connection", "state": "active", "name": "..
   `mailbox_unknown` (§3.4.2 RK14), and absent otherwise; `since` is the
   time of the first such refusal. Its appearance and its end send
   `sync.event{kind: "connection.changed"}` with `version` unchanged (it is
-  not an edit). The apps show each of the member's messages to it that
-  has no `delivered` receipt yet as held, never as sent: "Waiting to
-  reach <First Last> at their vault's new address." (approved by the
-  owner 2026-11-12).
+  not an edit). While it is set, the apps show every message of the
+  member's to it that has no `delivered` receipt as held, never as sent:
+  "Waiting to reach <First Last> at their vault's new address." (approved
+  by the owner 2026-11-12). A message already told
+  `message.not_delivered` or `message.delivery_unconfirmed` keeps that
+  state. The rule is broader than the vault's hold on purpose (§3.4.2
+  RK14).
 
 - **`peer_kind`** (0.69.0) is `"service"` for a connection the inviter
   declared a service in its invitation (§6.4 "Service connections"),

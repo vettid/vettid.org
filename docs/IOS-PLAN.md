@@ -1928,9 +1928,11 @@ relay keys (VAULT-MESSAGING 0.90.0 §3.4.2).
 
 - **A held message** (the connection carries `relay_held`, refetched at
   `connection.changed`): "Waiting to reach <First Last> at their vault's
-  new address." It shows per message, for **each** of the member's
-  messages to that connection with no `delivered` receipt yet, in place
-  of "Sending", and never as sent.
+  new address." While it is set, it shows per message, for **every**
+  message of the member's to that connection with no `delivered`
+  receipt, in place of "Sending", and never as sent. A message already
+  told `message.not_delivered` or `message.delivery_unconfirmed` keeps
+  that state.
 - **`connection.stale` with `reason: "relay_moved"`:** "<First Last> and
   your vault both moved to new addresses and couldn't reach each other.
   Connect again with a new invitation."
