@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.70
+version: 0.1.71
 date: 2026-11-12
 changelog:
+  - 0.1.71: 2026-11-12 (ANDROID-PLAN 0.1.127, VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4.18 "Relay-key rotation texts": the iPhone shows ANDROID-PLAN §4 "Relay-key rotation texts", owner-approved 2026-11-12, in the same places and with the same texts.
   - 0.1.70: erratum, 2026-11-12 (ANDROID-PLAN 0.1.126; owner decision a, GC #9050). The iPhone follows ANDROID-PLAN §4 "Locking the vault", "While pending": besides the lock and a pending `call.end`, the phone's `hs.resp` to a rekey the vault started goes while a lock is pending; everything else it would send waits until the lock ends; the rekey's `hs.fin` is still processed. Built in GC #8918's work.
   - 0.1.69: erratum, 2026-11-11 (ANDROID-PLAN 0.1.125; owner decision a, GC #8641). §4.17 takes ANDROID-PLAN's texts, now including the four refusal reasons of their own (never the unlock's error text); its reference reads 0.1.124 and 0.1.125.
   - 0.1.68: 2026-11-11 (ANDROID-PLAN 0.1.124; owner decisions a, GC #8451, #8476 and #8511). The iPhone follows ANDROID-PLAN §4 "Advanced security, attestation in detail and the check's progress": Advanced security in Settings, the attestation in detail with "Copy all", and the owner check's "Checking with your vault…" and "Check passed". §4.17: what the iPhone shows for itself (the App Attest state only), the haptic, the clipboard and the back gesture; Allow screenshots moves to Advanced security; §6.9: the verification record.
@@ -1917,6 +1918,26 @@ iPhone:
   the back arrow and the system back gesture (ID14).
 - **Test:** "Copy all" on the iPhone holds no This iPhone section, no
   App Attest state or key id, no attestation object and no check time.
+
+### 4.18 Relay-key rotation texts (0.1.71)
+
+Approved by the owner (2026-11-12). The same as ANDROID-PLAN §4
+"Relay-key rotation texts" (0.1.127). ANDROID-PLAN governs, and the two
+must stay identical. They show only with a vault release that rotates
+relay keys (VAULT-MESSAGING 0.90.0 §3.4.2).
+
+- **A held message** (the connection carries `relay_held`): "Waiting to
+  reach <First Last> at their vault's new address." It replaces
+  "Sending" for each undelivered message sent since `since`, and never
+  shows as sent.
+- **`connection.stale` with `reason: "relay_moved"`:** "<First Last> and
+  your vault both moved to new addresses and couldn't reach each other.
+  Connect again with a new invitation."
+- **`connection.fork_suspected` with `ref` = `relay_revoked`:**
+  "<connection name> may have connected to an old copy of your vault.
+  Contact <connection name>."
+- **`message.delivery_unconfirmed` at the hold's 60-day limit:** the
+  approved text of VAULT-MESSAGING §8.3, unchanged.
 
 ## 5. Architecture
 
