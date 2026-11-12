@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.125
-date: 2026-11-11
+version: 0.1.126
+date: 2026-11-12
 changelog:
+  - 0.1.126: erratum, 2026-11-12 (owner decision a, GC #9050). §4 "Locking the vault", "While pending": besides the lock and a pending `call.end`, the phone's `hs.resp` to a rekey the vault started goes while a lock is pending (dropping it would hold the vault's rekeys, at each unlock and every 7 days, until the handshake expires); the phone's other answers to vault messages wait until the lock ends. Android already sends the `hs.resp` while a lock is pending; holding its other answers is GC #9027, and the iPhone does both in #8918's work.
   - 0.1.125: erratum, 2026-11-11 (owner decision a, GC #8641; as built in vettid-android #353). §4 "Attestation in detail": the reason after "Every check passed, but this phone refused the release:" is one of four texts of its own (not active for an enrollment, older, another instance, a time scale this build does not accept), never the unlock's error text, which contradicted "every check passed"; another instance and the time scale are refusals after line 9 as built; a removed release is the host's 410, not a refusal of the phone's; line 9's cell no longer reads as if a release not active for an enrollment failed it; while the route waits for a move, a pass still naming the release moved from is not recorded, so the screen keeps the last record, and a failure or refusal meanwhile is recorded. Four new texts.
   - 0.1.124: 2026-11-11 (owner decisions a, GC #8451, #8476 and #8511). Settings → Security keeps the rows used often (Recovery included) and moves the rest behind **Advanced security**; the attestation screen shows each link of the chain, one line per check the app performs (passed, failed or not checked), the release's source and this phone, with "Copy all"; the owner check shows "Checking with your vault…" while the vault verifies (Lock vault still enabled), then "Check passed". §4 "Advanced security, attestation in detail and the check's progress"; the Settings and Owner check rows; §4 "Locking the vault" and "Recovery and unlock from release R" point to Advanced security; §5 "What the phone keeps": the verification record.
   - 0.1.123: erratum, 2026-11-11 (VAULT-MESSAGING 0.88.14; owner decision a, GC #8303). "Video in calls (C4)": after a glare, the phone that answers the winning call without asking (`superseded_by`) answers with its own call's media, so an audio call never turns on the camera by itself.
@@ -2796,8 +2797,14 @@ as drafts (VAULT-LOCK L16) and are final with #127 merged.*
   before release L it is `done` whether or not the vault locked
   (VAULT-LOCK F8).
 - **While pending:** locked on this phone whatever the status says;
-  nothing is sent to the vault but the lock and a pending `call.end`;
-  nothing the vault sends is taken into the app. An unlock is allowed
+  nothing is sent to the vault but the lock, a pending `call.end` and
+  (0.1.126) the phone's `hs.resp` to a rekey the vault started, which
+  carries no member data and, if dropped, would hold the vault's next
+  rekey until the handshake expires (VAULT-MESSAGING §6.5, §6.6); the
+  phone's other answers to vault messages (a token refresh answer,
+  token renewals, `hs.confirm`, `device.features`, a pairing's
+  `hs.fin`) wait until the lock ends; nothing the vault
+  sends is taken into the app. An unlock is allowed
   and, when it succeeds, ends the pending lock.
 - **Retries:** after 1, 2, 5, 10 s, four times 30 s, then every 60 s,
   through the member API, within the route's limit, while the app's
