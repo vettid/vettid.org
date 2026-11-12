@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.0
+version: 0.90.1
 date: 2026-11-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,12 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.7, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.1: 2026-11-12, **erratum to §3.4.2 RK11's "As built" note.**
+    Release 29's demotion retry makes a connection `stale` for "no
+    reconnect token" as §6.3.1 specifies: it acts only on a demoted
+    current epoch, whose carried tokens are discarded ("Discarded, never
+    adopted"), so §6.3.1's carried-token wait cannot apply there. The note
+    said the retry skipped that wait. No rule changes.
   - 0.90.0: 2026-11-12, **relay-key rotation without wait cycles**
     (owner decisions 2026-11-12).
     - **New §3.4.2.** The rules a vault release MUST implement before it
@@ -6376,9 +6382,11 @@ device's relay key.
   tokens wait" to these held tokens. It moves no message, and it picks no
   deposit key.
 - **As built.** Release 29's retry of a demotion reconnect makes the
-  connection `stale` for "no reconnect token" without checking §6.3.1's
-  carried-token wait. A release that implements this subsection checks
-  both that wait and RK11's there.
+  connection `stale` for "no reconnect token" as §6.3.1 specifies: it acts
+  only on a demoted current epoch, whose carried tokens are discarded
+  ("Discarded, never adopted"), so the carried-token wait cannot apply
+  there (0.90.1). A release that implements this subsection checks RK11's
+  wait there.
 
 **RK12. Relay links seen while suspended.** At `acceptFrom` step 1, while
 Q's record of P is suspended, the relay links a message carries that
