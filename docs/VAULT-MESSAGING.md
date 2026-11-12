@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.88.18
-date: 2026-11-11
+version: 0.89.0
+date: 2026-11-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -28,6 +28,29 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.6, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.89.0: 2026-11-12, **approval documents** (owner decision
+    2026-11-02, GC #1551 "a, then plan b"; task GC #1556). §10.4
+    "Approval documents": an `approval` challenge from a service MAY
+    carry the action's full canonical document (`document`, at most
+    65,536 bytes, the bytes whose SHA-256 is the service's
+    `action_hash`). The member's vault checks it (strict JCS, the three
+    members, `context` ending in the first 16 hex digits of its hash)
+    or drops the challenge (`drop.approval_document`); the apps fetch it
+    with the new `connection.authenticate.document`, show it whole
+    (fixed labels for `proposal.create` and `vote.extend`, the
+    canonical text otherwise; format and bidirectional characters made
+    visible, nothing rendered or cut), and send its hash with
+    `.approve`; the vault then signs under the new label
+    `"vettid/vms/2/conn-auth-document"` over `len(purpose) || purpose
+    || SHA-256(document) || m`, and the response carries
+    `document_sha256`. An app or a vault before 0.89.0 signs as before:
+    the response does not commit to the document, and the challenger
+    decides (BALLOT-PROTOCOL §3.4 counts such a signature only for an
+    action its one-line summary shows whole). §10.4.2: the
+    `authenticate` entry and `connection.authenticate.pending` carry
+    `document_sha256` and `document_size`. §10.9: `drop.approval_document`.
+    §15 item 53, §16 vector. Needs a vault release and both apps; the
+    service-vault side follows in BALLOT-PROTOCOL.
   - 0.88.18: 2026-11-11, erratum (as built in vettid-vault #235, call wake V4). §14.2 (C2) a call wake: an ordinary wake's `5xx` backoff does not hold it, a running `429` wait holds every wake (call wakes included) and its merged ordinary triggers after the call stops ringing, a call wake's retries are its own (5 s, 30 s, 120 s), a call arriving during an earlier call wake's retry or `429` wait rides that attempt uncounted while one of that wake's own calls still rings, a dropped call wake drops the ordinary retry it carried, ordinary triggers arriving during a call wake keep its backoff, and a call wake moves neither the 5 s rule nor the over-cap rhythm. Clarifies "as soon as no wake is in flight"; no change for an app.
   - 0.88.17: 2026-11-11, erratum (owner decision 2026-11-11, GC #8440 a;
     vettid-vault #227). §3.3: **feature data that does not read** at
@@ -10709,7 +10732,7 @@ an answer to an unknown or expired id is dropped.
 | | `connection.removed` | V↔V | | Notify the peer |
 | | `connection.event` | V→D | | Added, pending, stale, removed, rekeyed, reconnected |
 | | `block.add`, `.remove`, `.list` | D→V | req | Block list (§7.4) |
-| | `connection.authenticate.request`, `.approve`, `.deny`, `.list` | D→V | req | Member authentication (§10.4) |
+| | `connection.authenticate.request`, `.approve`, `.deny`, `.list`, `.document` | D→V | req | Member authentication (§10.4); `.document` fetches an approval challenge's document (0.89.0) |
 | | `connection.asks.mute`, `connection.asks.resume` | D→V | req | Mute or resume a connection's asks (§10.4.1, 0.23.0) |
 | | `connection.authenticate.challenge`, `.response`, `.withdraw`, `.rotated` | V↔V | | Challenge; the member's signature or refusal; the challenger withdraws a challenge (0.80.0); credential-key rotation statements |
 | | `connection.authenticate.pending` / `.result` / `.key` | V→D | | Asked to authenticate; the verdict; the pinned key followed a rotation |
@@ -11316,11 +11339,12 @@ vault signs a fresh challenge with the member's **credential key**
 | Type | Request body | Response / event body |
 |---|---|---|
 | `connection.authenticate.request` (app, desktop) | `{connection_id, context?, purpose?, match_code?}` | `{request_id, exp}` |
-| `connection.authenticate.challenge` (V↔V) | — | `{request_id, nonce, context?, purpose?, match_code?}`, with `exp` (up to 24 h for an `approval` from a service, 0.82.0) |
-| `connection.authenticate.pending` (V→D, apps and desktops) | — | `{connection_id, request_id, context?, purpose?, match_code?, exp}` |
-| `connection.authenticate.approve` (app) | `{request_id}` | `{}`; `credential_locked` outside the unlock window; `not_found` for an unknown, decided, expired or withdrawn `request_id` (named in 0.80.0); `transfer_incomplete` while a transfer's credential-key statement is held, the challenge staying open (§11.14.10, 0.83.11) |
+| `connection.authenticate.challenge` (V↔V) | — | `{request_id, nonce, context?, purpose?, match_code?, document?}`, with `exp` (up to 24 h for an `approval` from a service, 0.82.0); `document` (0.89.0) only with `purpose: "approval"`, "Approval documents" below |
+| `connection.authenticate.pending` (V→D, apps and desktops) | — | `{connection_id, request_id, context?, purpose?, match_code?, document_sha256?, document_size?, exp}` (`document_*`, 0.89.0: the challenge holds a checked document) |
+| `connection.authenticate.document` (app, desktop; 0.89.0) | `{request_id}` | `{document}`: the challenge's document, standard base64; `not_found` as for `.approve`, and for a challenge without a document |
+| `connection.authenticate.approve` (app) | `{request_id, document_sha256?}` (0.89.0, "Approval documents") | `{}`; `bad_request` for a `document_sha256` that is not the challenge's document's, or given for a challenge without one, the challenge staying open; `credential_locked` outside the unlock window; `not_found` for an unknown, decided, expired or withdrawn `request_id` (named in 0.80.0); `transfer_incomplete` while a transfer's credential-key statement is held, the challenge staying open (§11.14.10, 0.83.11) |
 | `connection.authenticate.deny` (app, desktop) | `{request_id}` | `{}`; `not_found` as for `.approve` |
-| `connection.authenticate.response` (V↔V) | — | `{request_id, status: "signed", key, sig, signed_at, purpose?, rotations?}` or `{request_id, status: "denied"}` |
+| `connection.authenticate.response` (V↔V) | — | `{request_id, status: "signed", key, sig, signed_at, purpose?, document_sha256?, rotations?}` or `{request_id, status: "denied"}` (`document_sha256`, 0.89.0: the signature commits to the document) |
 | `connection.authenticate.withdraw` (V↔V, challenger → responder; 0.80.0) | — | `{request_id}`: the challenger will no longer accept the challenge (below); nothing is sent back |
 | `connection.authenticate.rotated` (V↔V) | — | `{rotations: [<statement>, ...]}` (1–32 credential-key rotation statements, §3.5.5) |
 | `connection.authenticate.key` (V→D, every owner app and desktop) | — | `{connection_id, key}`: the pinned key followed a rotation |
@@ -11715,6 +11739,164 @@ vault signs a fresh challenge with the member's **credential key**
     `approved: false` (as "decided on another device, or expired"),
     shows the raw audit kind in History, and leaves the bell item
     unread until the member reads it.
+- **Approval documents** (0.89.0; owner decision 2026-11-02, GC #1551
+  "a, then plan b"). An `approval` challenge's `context` is one line of
+  at most 256 bytes. So a service can put to its admins only what such
+  a line shows whole: BALLOT-PROTOCOL §3.4 refuses a vote with a motion
+  text, a quorum text, a title over 35 bytes or another outage rule,
+  since the admins could not read them before approving. An `approval`
+  challenge from a service MAY now carry the action's whole
+  **document**. The member's vault checks it, the app shows it whole,
+  and the member's signature covers it.
+  - **The document** is the bytes of `JCS({"action": action,
+    "payload": payload, "summary": summary})` (RFC 8785): the action
+    as the service hashes it into its `action_hash`, which is
+    `SHA-256(document)` (service-vault `sdk/go/servicevault`
+    `CanonicalAction`). `action` is 1 to 64 bytes of `[a-z0-9_.]`;
+    `summary` is a string of at most 1,024 bytes; `payload` is a JSON
+    object. The document is at most **65,536 bytes**. `d` below is
+    `SHA-256(document)` (32 bytes).
+  - **Challenger.** A service vault MAY add `document` (the bytes,
+    standard base64 with padding) to a challenge with `purpose:
+    "approval"`. Its `context` MUST end with the 16 lower-case hex
+    digits of the first 8 bytes of `d` (the service's
+    `… — ref <16 hex>` does). It is not sent with any other purpose, and
+    nothing else about the challenge changes: one ask, the same
+    `exp`, the same limits (§10.4.1).
+  - **Receiver.** `document` counts only on a challenge with `purpose:
+    "approval"` that arrives on a service connection (`peer_kind:
+    "service"`, §6.4). On any other challenge it is ignored (not
+    checked, kept, passed on or signed), so it never changes a sign-in
+    or a member's challenge. On an approval challenge from a service,
+    the vault checks, in this order:
+    1. it is a string of standard base64 with padding that decodes to
+       at most 65,536 bytes;
+    2. the bytes parse strictly (§5.3, no duplicate names) as an object
+       with exactly the members `action`, `payload` and `summary`, of
+       the types and bounds above;
+    3. the bytes are canonical: re-serialised by RFC 8785 they are
+       identical (BALLOT-PROTOCOL §2);
+    4. `context` is present and ends with the 16 lower-case hex digits
+       of `d[0:8]`.
+
+    A challenge that fails any of these is **dropped and audited**
+    `drop.approval_document` (`ref` = `<connection_id> <reason>`, the
+    reason being `encoding`, `size`, `shape`, `canonical` or `ref`).
+    It is not an ask and nothing is sent back, as for a malformed
+    message (§9.2). It is not shown without its document, because the
+    service meant the member to read the document. A challenge that
+    passes is an ask like any other, and its document is kept with it
+    until the ask closes (decided, expired or withdrawn). The document
+    adds at most 65,536 bytes per received challenge, so at most
+    262,144 bytes for a connection's 4 received challenges.
+  - **To the apps.** `connection.authenticate.pending`, and its
+    `pending.list` entry (§10.4.2), carry `document_sha256` (standard
+    base64 of `d`) and `document_size` (its byte length), never the
+    document itself. An app fetches the document with
+    `connection.authenticate.document` `{request_id}`, which answers
+    `{document}` (standard base64), or `not_found` for an unknown,
+    decided, expired or withdrawn `request_id` and for a challenge
+    without a document. The app checks that the decoded bytes hash to
+    `document_sha256` and are `document_size` long. If they don't, the
+    app shows "This request can't be shown" and offers only Deny.
+  - **What the app shows.** The approval screen of §10.4 ("<name> asks
+    you to approve", `context` in full), then the document, **whole**.
+    - For `proposal.create`: the vote's fields under the app's own
+      labels, in this order: Title (`title`), Motion (`text`; "None"
+      when empty), Choices (each `choices[].label` in order, then
+      "Abstain", which the service always adds, BALLOT-PROTOCOL §3.4),
+      Quorum (`quorum.min_ballots` ballots, and `quorum.text` when not
+      empty), Binding or Advisory (`binding`), Members removed after
+      the roster date may vote (`removed_may_vote`: Yes or No), Opens
+      and Closes (`opens_at`, `closes_at`), Outage rule
+      (`outage_rule`).
+    - For `vote.extend`: Vote (`proposal_id`, with the title as
+      `summary` gives it), New close (`closes_at`), Outage from and to
+      (`outage.from`, `outage.to`) and Reported by (`outage.source`).
+    - Any member of `payload` that the action's list above doesn't
+      name, and every `payload` of any other action, is shown under
+      "Other details" as the document's canonical JSON text. A field
+      is never left out.
+    - Times are Unix seconds, shown as date and time in the member's
+      time zone with the zone named, and in UTC.
+    - Text is shown as plain text. It is never rendered as markup and
+      no links are made from it. Line breaks are kept. A format
+      character (Unicode general category Cf, the bidirectional
+      controls among them) or a control character other than a line
+      break is shown as a visible marker naming its code point
+      (`⟨U+202E⟩`), never applied, so no text can reorder or hide other
+      text.
+    - Nothing is cut. A long document scrolls, and **Approve is enabled
+      only once the whole document has been on screen**. Deny is always
+      available.
+    - A value of the wrong type for its label is shown under "Other
+      details" as JSON text.
+
+    ANDROID-PLAN and IOS-PLAN give the texts and the accessibility
+    labels. A desktop MAY fetch and show the document; it only denies
+    (§10.4).
+  - **Approving.** An app that showed the document whole sends
+    `connection.authenticate.approve` `{request_id, document_sha256}`
+    with the hash it checked. For a challenge holding a document, the
+    vault then:
+    - with `document_sha256` equal to `d`: signs the **document form**
+      below;
+    - with any other `document_sha256`: answers `bad_request`, signs
+      nothing and keeps the challenge open;
+    - without `document_sha256` (an app before 0.89.0, which does not
+      show documents): signs as for a challenge without a document
+      (the purpose form above). That signature does not commit to the
+      document, and the response has no `document_sha256`.
+
+    `document_sha256` on a challenge without a document is
+    `bad_request`, and the challenge stays open.
+  - **The document form.**
+
+    ```
+    m_d = len(purpose) (1) || purpose || d (32) || m
+    sig = Ed25519(credential key, "vettid/vms/2/conn-auth-document" || m_d)
+    ```
+
+    `purpose` (always `approval` here) and `m` are as in "Signed with
+    the purpose". The signed response carries `purpose` and
+    `document_sha256` (standard base64 of `d`). `d` comes before `m`
+    because `m` ends with the variable-length `context`.
+  - **The challenger** verifies a response that carries
+    `document_sha256` under the document form. That `document_sha256`
+    must equal the `d` of the document it sent; one that differs, or a
+    `document_sha256` in the answer to a challenge it sent without a
+    document, is `bad_signature`. A response without `document_sha256`
+    is verified as before. That signature shows the member approved
+    `context`, not the document. A challenger SHOULD count it only for
+    an action whose `context` shows every field of the document whole
+    (BALLOT-PROTOCOL §3.4).
+  - **Labels** (the check that "Labels" above requires). The new label
+    `"vettid/vms/2/conn-auth-document"` and
+    `"vettid/vms/2/conn-auth-purpose"` differ in the byte after
+    `conn-auth-` (`d`, `p`), so neither is a prefix of the other.
+    `"vettid/vms/2/conn-auth"` is a prefix of it. A signature of `m`
+    under the shorter label would equal one of `m_d` under the new label
+    only if `m` began with `-document`, then the length byte,
+    `approval` and 14 bytes of `d`. `m` begins with `challenger_ik`, the
+    challenger's 32-byte identity key as the signer has it on record,
+    so its first 18 bytes would have to be that fixed string. That
+    means choosing an Ed25519 public key's first 144 bits, which is
+    infeasible. The converse is the same equation.
+  - **Older vaults and apps.** A vault before 0.89.0 ignores
+    `document` (§10.1: unknown members are ignored), shows `context` and
+    signs the purpose form, as an app before 0.89.0 does on a newer
+    vault. In both cases the response has no `document_sha256`, and
+    the challenger sees that the member was not shown the document. No
+    capability check is needed. A service sends the document to every
+    admin and counts only what each answer commits to. An action whose
+    one-line summary is whole (BALLOT-PROTOCOL §3.4's limits today) is
+    approved by old and new vaults and apps alike. A longer one counts
+    only the admins whose vault and app showed and signed its document.
+  - **Not signed or kept elsewhere.** The document is not in the
+    feed item, the notification, `.result` or the audit log
+    (`connection.authenticate.signed` keeps `ref` = `request_id`). A
+    vault holds no document after its challenge closes. The challenger keeps
+    its own copy as its evidence of what was approved.
 - Approvals, denials and verdicts are audited
   (`connection.authenticate.requested`, `.signed`, `.denied`,
   `connection.authenticated`, `connection.authenticate_failed`,
@@ -12013,7 +12195,7 @@ which are not asks). Five kinds arrived only as events and were lost;
 
 | `kind` | `body`: exactly the body of the event it repeats | Section |
 |---|---|---|
-| `authenticate` | `connection.authenticate.pending`: `{connection_id, request_id, context?, purpose?, match_code?, exp}` (a valid `match_code`, 0.79.0) | §10.4 |
+| `authenticate` | `connection.authenticate.pending`: `{connection_id, request_id, context?, purpose?, match_code?, document_sha256?, document_size?, exp}` (a valid `match_code`, 0.79.0; `document_*`, 0.89.0: never the document itself, which `connection.authenticate.document` fetches) | §10.4 |
 | `session` | `device.session.pending`: `{request_id, device_id, role, name, seconds, exp}` | §6.8 |
 | `approval` | `approval.pending`: `{approval_id, device_id, role, name, type, body, exp, flags?}` | §6.8 |
 | `action` | `action.pending`: `{invocation_id, connection_id, action_id, sensitivity, params, exp}` | §10.14 |
@@ -14125,7 +14307,9 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   or refused (§6.3, §6.6, §7.3, §8.4), with the runtime's reason, such as
   `drop.rate_limited`, `drop.one_app` (§6.7), the suppressed asks
   `drop.ask_muted`, `drop.ask_paused`, `drop.ask_cooldown`,
-  `drop.ask_pending` and `drop.ask_rate` (§10.4.1, 0.23.0), `drop.profile_ik_mismatch`
+  `drop.ask_pending` and `drop.ask_rate` (§10.4.1, 0.23.0), (0.89.0)
+  `drop.approval_document` (§10.4 "Approval documents", `ref` =
+  `<connection_id> <reason>`), `drop.profile_ik_mismatch`
   and `drop.profile_malformed` (§10.8, 0.18.0), `drop.owner_check`
   (§3.6.3), (0.85.4) `drop.features_malformed` (`device.features`,
   §10.2), (0.87.0, as built) `drop.unknown_kid` (a message under no
@@ -29770,6 +29954,28 @@ Follow-ups:
     sends under an epoch it never activated, so the harmless case still
     shows nothing.
 
+53. **Approval documents: the follow-ups (0.89.0; owner decision
+    2026-11-02, GC #1551 "a, then plan b").** §10.4 "Approval
+    documents" is specified. Building it is planned:
+    - **vettid-vault:** carry, check and keep the document, answer
+      `connection.authenticate.document`, sign the document form, and
+      add the vector of §16 to the vectors files (GC #1557).
+    - **Android and iOS:** fetch, check and show the document, enable
+      Approve only once the whole document has been on screen, and
+      send `document_sha256` (GC #1558, #1559). ANDROID-PLAN and
+      IOS-PLAN give the texts and the accessibility labels.
+    - **service-vault (BALLOT-PROTOCOL §3.4):** send the document with
+      every approval challenge, verify the document form, and count a
+      signature without it only for an action that its one-line summary
+      shows whole. Only then may a vote carry a motion text, a quorum
+      text, a longer title or another outage rule, with only the
+      admins whose answers commit to its document counting toward its
+      approval.
+
+    Not in 0.89.0: a wider character set for titles and labels (it
+    still waits for a confusables check, BALLOT-PROTOCOL §3.4), and a
+    document for a member's own challenges (`connection.authenticate.request`).
+
 ## 16. Test vectors
 
 These vectors use fixed seeds and are for **test use only**. The complete
@@ -29839,6 +30045,26 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
   key    : 32 x 0x09 (base64 CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=)
   SHA-256("vettid/vms/2/ck-fp" || key) : e939754d09aaa93a6bd164b82df791506a5224bdd42a19e1dc023176ee6fe9b5
   shown  : e939 754d 09aa a93a
+
+§10.4 approval document, document form (0.89.0; computed for this document with
+      service-vault CanonicalAction and Go 1.26 crypto/ed25519; to be added
+      to the vectors files with the vault's implementation)
+  credential key seed : 32 x 0x31  pk SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0=
+  challenger_ik       : pk of seed 32 x 0x32  XiEsCYDks5/AlyETSqAhCTdO39JgwNPQPLUByNZUV6k=
+  responder_ik        : pk of seed 32 x 0x33  F8t5+ytBIPKx7GXkGY1uCLKOgT/rAeSkAIObheGAgM4=
+  nonce               : 32 x 0x34
+  request_id          : 01JB2Z6V9K3M4N5P6Q7R8S9T30
+  purpose             : approval
+  document (473 B)    : {"action":"proposal.create","payload":{"binding":true,"choices":[{"label":"Yes"},{"label":"No"}],"closes_at":1796720400,"opens_at":1796115600,"outage_rule":"Extended by a relay outage over 1 hour, 24 h at most.","quorum":{"min_ballots":10,"text":"A tenth of the members."},"removed_may_vote":false,"text":"The members adopt the 2027 budget as circulated on 2026-11-20.\nThe board reports on it quarterly.","title":"Adopt the 2027 budget"},"summary":"Adopt the 2027 budget"}
+  d = SHA-256(document): e8af8815891e434b34fe3fedafb270f8df3bcae3a22017b92e92063e11340bf5
+  document_sha256     : 6K+IFYkeQ0s0/j/tr7Jw+N87yuOiIBe5LpIGPhE0C/U=
+  context (105 B)     : "Approve on Example Service: New vote: Adopt the 2027 budget (full text attached) — ref e8af8815891e434b"
+  m_d (268 B)         : 0x08 || "approval" || d || challenger_ik || responder_ik || nonce || request_id || context
+  sig                 : fXeHmkPFSXoOzjCfBuguXwK9xgXwIPRgd34Y74A3cIgDlxtm3KHaDjrUBus1Z8jYTUGK9Vda5od/K9KnwFPsAw==
+      = Ed25519(credential key, "vettid/vms/2/conn-auth-document" || m_d)
+  the purpose form of the same challenge (an app or vault before 0.89.0):
+  sig                 : YeR8cdEVXH9I8fCb71wWuXgp31enSddxQAkavfZlN4+eREyka+TcFUETDRAj+GH3sFuvoYMgntUTJcBPpyzqAw==
+      = Ed25519(credential key, "vettid/vms/2/conn-auth-purpose" || 0x08 || "approval" || m)
 
 §11 alternate channel                                           (altchan.json)
   ETK seed 32 x 0x06; descriptor bytes and user_data, devatt challenges
