@@ -6329,8 +6329,9 @@ device's relay key.
   silent, as "The reconnect bound" says, and the next try comes at the
   try's expiry. Reconnects with no rotation in play do not change.
 - **An update Q refuses has none of its links followed** and none of its
-  tokens kept, whatever the reason for the refusal (pending owner
-  decision). For example, Q may
+  tokens kept, whatever the reason for the refusal (owner decision
+  2026-11-12: an old copy's update under a demoted epoch would otherwise
+  redirect Q unseen). For example, Q may
   have demoted the epoch it travels under. The residual "A demoted Q
   past P's grace" describes what follows.
 
