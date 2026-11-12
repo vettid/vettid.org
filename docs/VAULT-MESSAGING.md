@@ -37,7 +37,8 @@ changelog:
     one-line `context` cannot show it whole. The member's vault checks
     the document (strict JCS, the three members, `context` ending in
     the first 16 hex digits of its hash) or drops the challenge
-    (`drop.approval_document`), keeps it with the ask (2 MiB in all),
+    (`drop.approval_document`), keeps it with the ask (256 KiB per
+    connection),
     and advertises `approval_document` in `features` to services
     (§10.8). The apps fetch it with the new
     `connection.authenticate.document` and show every part of it:
@@ -50,9 +51,10 @@ changelog:
     hash with `.approve`, and the vault signs under the new label
     `"vettid/vms/2/conn-auth-document"` over `len(purpose) || purpose
     || SHA-256(document) || m` (audited
-    `connection.authenticate.document_signed`). An app before 0.89.0
-    gets the new code `update_required` on a `document_required`
-    challenge, and otherwise signs the purpose form as before; a
+    `connection.authenticate.document_signed`; an approve from a device
+    that did not fetch the document gets the new code
+    `document_not_fetched`). An app before 0.89.0 gets the new code
+    `update_required` on a `document_required` challenge, and otherwise signs the purpose form as before; a
     service asks a `document_required` approval only of vaults that
     advertise it, and never counts a purpose-form answer toward one.
     §10.4.2, §10.8, §10.9, §15 item 53, §16 vector. Needs a vault
@@ -10959,6 +10961,12 @@ an answer to an unknown or expired id is dropped.
       whose calls the member turned off (§10.10);
     - `credential_locked`: the operation signs with the credential key
       and the unlock window is closed (§3.5.3, §10.4);
+    - (0.89.0) `update_required`: `connection.authenticate.approve`
+      without `document_sha256` for a challenge that is
+      `document_required`, from an app that does not show approval
+      documents (§10.4 "Approval documents"); and
+      `document_not_fetched`: the same with `document_sha256` from a
+      device that has not fetched the document;
     - `blocked`: `connection.invite.accept` of an invitation from a
       blocked identity (§10.4);
   - and (0.6.0) no new codes: `forbidden` also answers an agent's request
@@ -11349,7 +11357,7 @@ vault signs a fresh challenge with the member's **credential key**
 | `connection.authenticate.challenge` (V↔V) | — | `{request_id, nonce, context?, purpose?, match_code?, document?, document_required?}`, with `exp` (up to 24 h for an `approval` from a service, 0.82.0); `document` and `document_required` (0.89.0) only with `purpose: "approval"`, "Approval documents" below |
 | `connection.authenticate.pending` (V→D, apps and desktops) | — | `{connection_id, request_id, context?, purpose?, match_code?, document_sha256?, document_size?, document_required?, exp}` (`document_*`, 0.89.0: the challenge holds a checked document) |
 | `connection.authenticate.document` (app, desktop; 0.89.0) | `{request_id}` | `{document}`: the challenge's document, standard base64, whenever `pending.list` would list the ask for that device; `not_found` otherwise, and for a challenge without a document ("Approval documents") |
-| `connection.authenticate.approve` (app) | `{request_id, document_sha256?}` (0.89.0, "Approval documents") | `{}`; (0.89.0, in the order of "Approval documents") `bad_request` for a `document_sha256` that is not the challenge's document's, from a device that did not fetch the document, or given for a challenge without one, and `update_required` for none on a `document_required` challenge, the challenge staying open; `credential_locked` outside the unlock window; `not_found` for an unknown, decided, expired or withdrawn `request_id` (named in 0.80.0); `transfer_incomplete` while a transfer's credential-key statement is held, the challenge staying open (§11.14.10, 0.83.11) |
+| `connection.authenticate.approve` (app) | `{request_id, document_sha256?}` (0.89.0, "Approval documents") | `{}`; (0.89.0, in the order of "Approval documents") `bad_request` for a `document_sha256` that is not the challenge's document's, or given for a challenge without one, `document_not_fetched` from a device that did not fetch the document, and `update_required` for none on a `document_required` challenge, the challenge staying open; `credential_locked` outside the unlock window; `not_found` for an unknown, decided, expired or withdrawn `request_id` (named in 0.80.0); `transfer_incomplete` while a transfer's credential-key statement is held, the challenge staying open (§11.14.10, 0.83.11) |
 | `connection.authenticate.deny` (app, desktop) | `{request_id}` | `{}`; `not_found` as for `.approve` |
 | `connection.authenticate.response` (V↔V) | — | `{request_id, status: "signed", key, sig, signed_at, purpose?, document_sha256?, rotations?}` or `{request_id, status: "denied"}` (`document_sha256`, 0.89.0: the signature commits to the document) |
 | `connection.authenticate.withdraw` (V↔V, challenger → responder; 0.80.0) | — | `{request_id}`: the challenger will no longer accept the challenge (below); nothing is sent back |
@@ -11773,7 +11781,11 @@ vault signs a fresh challenge with the member's **credential key**
     - **`document_required: true`**, exactly when `context` does not
       show every field of the document whole (BALLOT-PROTOCOL §3.4).
       This is so for a motion text, a quorum text, a longer title or
-      another outage rule. It is valid only with `document`.
+      another outage rule. It is valid only with `document`. Its only
+      value is `true`; when it does not apply, the member is absent.
+      It is **not signed**: it tells the member's vault and app how to
+      treat an approval without the document. The challenger counts
+      answers by its own record of what it sent, never by the flag.
 
     Before it sends a document, the challenger MUST check it as the
     receiver will (all four checks below), so that a member's vault
@@ -11801,7 +11813,8 @@ vault signs a fresh challenge with the member's **credential key**
     they are ignored (not checked, kept, passed on or signed), so they
     never change a sign-in or a member's challenge. `document_required`
     without `document` is ignored. On an approval challenge from a
-    service that carries `document`, the vault checks:
+    service that carries `document`, the vault checks (a
+    `document_required` with any value other than `true` fails check 2):
     1. it is a string of standard base64 with padding that decodes to
        at most 65,536 bytes (reason `size` or `encoding`);
     2. the bytes parse strictly (§5.3, no duplicate names, nested at
@@ -11831,10 +11844,11 @@ vault signs a fresh challenge with the member's **credential key**
     withdrawn. A suppressed challenge's document is not kept, since its
     neutral answer needs none.
     - Each document adds at most 65,536 bytes, so at most 262,144 bytes
-      for a connection's 4 received challenges.
-    - A vault holds at most **2 MiB of documents in all**. A challenge
-      whose document would go past that is dropped as above (reason
-      `storage`).
+      for a connection's 4 received challenges. That is the only bound:
+      there is no vault-wide cap, which would make one service's
+      documents drop another's challenges in a way neither could check.
+      A vault's documents grow with its number of service connections,
+      at most 256 KiB each.
     - Both the challenge and the `.document` answer go inline, at most
       87,384 bytes of base64, well under §5.5's 245,760 bytes. This is
       an exception to §5.5's claim-check advice for content over 64
@@ -11852,7 +11866,10 @@ vault signs a fresh challenge with the member's **credential key**
       expired or withdrawn `request_id`, and for a challenge without a
       document.
     - The credential's unlock window is not needed to read it.
-    - The vault records which devices fetched each document.
+    - The vault records which devices fetched each document. The record
+      is kept and sealed with the ask (it survives a lock, a hold and a
+      restart) and erased with it. Only a fetch by the device that
+      approves counts: a desktop's fetch does not count for the app.
     - The app checks that the decoded bytes hash to `document_sha256`
       and are `document_size` long. It parses them as the vault did.
       If any of this fails, it shows "This request can't be shown" and
@@ -11887,8 +11904,8 @@ vault signs a fresh challenge with the member's **credential key**
         Choices, each `label` in order. Then "Abstain", with "added by
         the service" (BALLOT-PROTOCOL §3.4).
       - `quorum` (object, exactly `{text: string, min_ballots:
-        integer}`): Quorum, as `min_ballots` ballots, with `text` when
-        it is not empty.
+        integer}`, `min_ballots` from 0 to 1,000,000): Quorum, as
+        `min_ballots` ballots, with `text` when it is not empty.
       - `binding` (boolean): Binding or Advisory.
       - `removed_may_vote` (boolean): "Members removed after the roster
         date may vote", Yes or No.
@@ -11947,15 +11964,21 @@ vault signs a fresh challenge with the member's **credential key**
     - with `document_sha256` equal to `d`, from a device that fetched
       the document with `.document`: it signs the **document form**
       below;
-    - with any other `document_sha256`, or from a device that did not
-      fetch it: `bad_request`. It signs nothing, and the challenge stays
-      open;
+    - with any other `document_sha256`: `bad_request`. It signs
+      nothing, and the challenge stays open;
+    - from a device that has not fetched the document:
+      **`document_not_fetched`** (new code). It signs nothing, and the
+      challenge stays open. The app fetches it again and, if the bytes
+      differ from those it showed, shows the new document from the
+      start before Approve is enabled again;
     - without `document_sha256` (an app before 0.89.0, which does not
       show documents), when the challenge is `document_required`:
       **`update_required`** (new code). It signs nothing, and the
       challenge stays open. The old app shows the approval as failed,
       and the member can approve after updating, instead of believing
-      they approved something that cannot count;
+      they approved something that cannot count. The challenger sees
+      no answer from that admin yet (the approval's status shows them
+      as not answered);
     - without `document_sha256`, when it is not `document_required`
       (`context` shows the whole action): it signs the purpose form
       above, as before. That signature does not commit to the
@@ -12006,7 +12029,8 @@ vault signs a fresh challenge with the member's **credential key**
       bytes of `d` (32 bytes in all), so that `challenger_ik` had
       exactly those bytes. Two facts each rule that out:
       - `challenger_ik` is a key the challenger proved it holds at the
-        handshake (§6.3: `hs.resp` is signed with it), and no one can
+        handshake (§6.3: its `hs.resp` or `hs.fin` is signed with it,
+        as it answered or started the handshake), and no one can
         make a key pair whose public key has 18 chosen bytes;
       - bytes 32 to 63 of `m` are the signing vault's own
         `responder_ik`, so `d[14:32]` would have to equal its first 18
@@ -13807,8 +13831,9 @@ The **profile object** holds the extras' display name and photo. Sent by
     features its image registers (§11.10.8) that a service can use:
     `vote`, present exactly when the image registers it, which is how
     a service learns that a member's vault can vote (§10.19.1); and
-    (0.89.0) `approval_document`, present exactly when the image
-    implements §10.4 "Approval documents", which is how a service learns
+    (0.89.0) `approval_document`, which is not a registered feature
+    but a capability of the image, present exactly when the image
+    implements §10.4 "Approval documents": this is how a service learns
     that a member's vault can show an approval's document;
   - (0.85.4) to **every** connection, person or service: the
     receiving-side capabilities `relay_follow` and (0.86.0)
@@ -13818,9 +13843,10 @@ The **profile object** holds the extras' display name and photo. Sent by
     (0.87.0) advertised only: no rule depends on it except the notice of
     §6.3.1 "An app from before release 29").
   A person connection is sent no other name. Names are only ever added,
-  except `vote` as a service sees it: a service keeps the last
-  `features` from each connection, and a later update that leaves
-  `vote` out removes it. A vault reads only `relay_follow` and
+  except `vote` and (0.89.0) `approval_document` as a service sees them:
+  a service keeps the last `features` from each connection, and a later
+  update that leaves either out removes it (after a rollback, or a move
+  to an image without it). A vault reads only `relay_follow` and
   `hs_confirm` from any connection, person or service, and keeps each
   once seen (a later update without it does not remove it, §3.4.1 "The
   gate") and ignores the other names. A receiver that does not know the member
@@ -14449,7 +14475,7 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `drop.ask_pending` and `drop.ask_rate` (§10.4.1, 0.23.0), (0.89.0)
   `drop.approval_document` (§10.4 "Approval documents", `ref` =
   `<connection_id> <reason>`, the reason one of `encoding`, `size`,
-  `shape`, `depth`, `canonical`, `ref`, `storage`), `drop.profile_ik_mismatch`
+  `shape`, `depth`, `canonical`, `ref`), `drop.profile_ik_mismatch`
   and `drop.profile_malformed` (§10.8, 0.18.0), `drop.owner_check`
   (§3.6.3), (0.85.4) `drop.features_malformed` (`device.features`,
   §10.2), (0.87.0, as built) `drop.unknown_kid` (a message under no
@@ -30097,13 +30123,27 @@ Follow-ups:
 53. **Approval documents: the follow-ups (0.89.0; owner decision
     2026-11-02, GC #1551 "a, then plan b").** §10.4 "Approval
     documents" is specified. Building it is planned:
-    - **vettid-vault:** carry, check and keep the document, answer
-      `connection.authenticate.document`, sign the document form, and
-      add the vector of §16 to the vectors files (GC #1557).
-    - **Android and iOS:** fetch, check and show the document, enable
-      Approve only once the whole document has been on screen, and
-      send `document_sha256` (GC #1558, #1559). ANDROID-PLAN and
-      IOS-PLAN give the texts and the accessibility labels.
+    - **vettid-vault (GC #1557):**
+      - advertise `approval_document`;
+      - check the document (the four checks, 16 levels) and keep it,
+        with `document_required`, sealed with the ask;
+      - answer `connection.authenticate.document`, and keep the record
+        of the devices that fetched it;
+      - answer `.approve` in the stated order (`bad_request`,
+        `document_not_fetched`, `update_required`);
+      - sign the document form, and audit `document_signed`;
+      - add the vector of §16 to the vectors files.
+    - **Android and iOS (GC #1558, #1559):**
+      - fetch and check the document;
+      - show the screen's four parts, the request under fixed labels
+        only when it matches its form exactly, under the text rules;
+      - approve only from that screen, once all of it has been on
+        screen, and send `document_sha256`;
+      - on `document_not_fetched`, fetch again and show anew a document
+        that changed.
+
+      ANDROID-PLAN and IOS-PLAN give the texts and the accessibility
+      labels.
     - **service-vault (BALLOT-PROTOCOL §3.4):**
       - check every document as a member's vault will, and send it with
         every approval challenge;
@@ -30210,7 +30250,9 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
   m_d (268 B)         : 0x08 || "approval" || d || challenger_ik || responder_ik || nonce || request_id || context
   sig                 : fXeHmkPFSXoOzjCfBuguXwK9xgXwIPRgd34Y74A3cIgDlxtm3KHaDjrUBus1Z8jYTUGK9Vda5od/K9KnwFPsAw==
       = Ed25519(credential key, "vettid/vms/2/conn-auth-document" || m_d)
-  the purpose form of the same challenge (an app or vault before 0.89.0):
+  document_required   : true (the document has a motion text; the flag is not signed)
+  the purpose form of the same challenge (a vault before 0.89.0, for a
+  challenge that is not document_required):
   sig                 : YeR8cdEVXH9I8fCb71wWuXgp31enSddxQAkavfZlN4+eREyka+TcFUETDRAj+GH3sFuvoYMgntUTJcBPpyzqAw==
       = Ed25519(credential key, "vettid/vms/2/conn-auth-purpose" || 0x08 || "approval" || m)
 
