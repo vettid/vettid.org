@@ -28,7 +28,7 @@ internal.
 | the 14-day grace is not complete on the 2.4 path | The grace is sized per path (5`U` and 9`U`). The 2.4-path loss is stated, and so are the changes to the deployed relay configuration and to RELAY-PROTOCOL §6.7, devices included | 3.3; 7.5 |
 | both sides rotating relay keys | The stranding is stated, with what it needs from the grace, a harness schedule, and a residual for when that is not met | 5 (G8); 6; 7.5 |
 | the both-sides bound has no ceiling | S1's clock restarts when P follows a link of Q's, under a hard cap. The numbers are in the choices of 7.6 | 4; 7.6 |
-| the trust model is aligned with S-a to S-d | Numbers before and after the alignment. G2 is the main real gap. A finding without rotation is listed as under investigation | 1.3; 6 |
+| the trust model is aligned with S-a to S-d | Numbers before and after the alignment. G2 is the main real gap. A finding without rotation was a model error (resolved, step 5) | 1.3; 6 |
 | §7 | Reordered, with each question's dependencies in its choice text. 7.6 has its numbers. S9 has one choice. New questions on the acknowledgment rule and on the hold's length | 7 |
 | the 2.4 prompt arrives from K after the cut-off | Q keeps its tokens by rule T as held tokens, and uses them for its own `relay.token.issued` | 2.4 |
 | G4 with an unknown `iss` | Says which key a kept reconnect uses. Rule 3 now covers deferred tokens | 2.1 rule 3; 5 |
@@ -704,8 +704,8 @@ What these numbers say:
   pairs end through G2, so G2 is the main real gap, at about 1% of runs.
 - One I1 loss (G3 + G7) also occurs in the default configuration, which
   suggests it is a coincidence. One I2 per run set is not yet classified.
-- One finding in the default configuration (no relay-key rotation) is
-  under investigation; see the residuals in step 5.
+- One finding in the default configuration (no relay-key rotation) was a
+  model error, now resolved; see the residuals in step 5.
 
 ### Steps
 
@@ -769,10 +769,13 @@ What these numbers say:
    - The decoupled-rotation copy.
    - The grace loss beyond the chosen grace, unless it is told.
    - The hold's limit when a `connection.removed` is lost.
-   - *Under investigation:* one finding in the default configuration
+   - *Resolved, a model error:* one finding in the default configuration
      (no relay-key rotation), seen after the alignment with the shipped
-     behaviour. It is being checked against the vault code and is not
-     classified here.
+     behaviour: an old copy's reconnect that replaces the peer's rekey went
+     unseen. The vault code makes it visible at the honest side's reconnect
+     `hs.fin` through Fork by ctx (vettid-vault `ab9beb8`, a test only). The
+     model now does the same (`0cbab85`). The exposure before that is the
+     release-29 residual of VAULT-MESSAGING §3.4.1.
 
 ---
 
