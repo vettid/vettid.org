@@ -1,42 +1,37 @@
-# Relay-key rotation without wait cycles: design note (draft 3)
+# Relay-key rotation without wait cycles: design note (draft 4)
 
-For the owner and the lead. This note is checked against VAULT-MESSAGING
-0.89.0 (origin/master). The quoted sections are the same text as in
-0.88.18; they are only 35 lines further down. RELAY-PROTOCOL is read on the
-same master. Sections 1 to 5 are written to move into the spec; sections 6
-and 7 are internal.
+For the owner and the lead. This note is read against VAULT-MESSAGING
+0.89.1 (origin/master). 0.89.1 makes two errata to §6.2 and §6.5 (a rekey
+carries links toward every peer; no rekey is started while a side's own
+rekey `hs.init` awaits `hs.resp`). Neither changes anything below. Every
+section quoted reads as in 0.88.18. RELAY-PROTOCOL is read on the same
+master.
 
-Words used throughout:
-- **P** rotates its relay key from K to K′. **Q** is one of P's
-  recipients.
-- **P's key for Q** is S1's term: the key P deposits to Q with.
-- **Q has followed** means Q has applied a relay link K→K′, by rule U or
-  by 2.4 below. From then on K is "earlier" at Q, with a **cut-off**.
+Sections 1 to 5 are meant to move into the spec. Sections 6 and 7 are
+internal.
+
+**Names used throughout.**
+- **P** rotates its relay key from K to K′. **Q** is one recipient.
+- **P's key for Q** is S1's term.
+- **Q has followed** means Q has applied the link K→K′. From then on, K is
+  "earlier" at Q, and K has a **cut-off**.
 - **S1 toward Q** is the time during which P's key for Q is not P's
   current key.
 
-## Changes since draft 2
+## Changes since draft 3
 
 | Item | Change | Where |
 |---|---|---|
-| High 1 (S9 and the failed try) | New gap G6. During S1, `token_revoked` on a reconnect token for K is no failed try. S9 waits one round. Added to the liveness table and the harness stub, and asked as an owner question | 1.6; 2.5; 4; 6; 7.7 |
-| High 2 (P has no epoch at its second write) | New gap G7. P's reconnect carries the relay links and announces K′ (2.4); a longer grace is the alternative. Asked as an owner question | 1.7; 2.4; 4; 7.5 |
-| Medium 3 (G1-A widens a residual) | The pass is narrowed to messages from K before the first message Q accepts from K′. The residual that remains is stated | 2.2; 2.3 |
-| Medium 4 (the bound; whether a rekey answer holds the reconnect) | Checked in the vault code: only answers to **reconnects** hold Q's reconnect (B is right). The bound is recomputed for one rotation and for both sides rotating (A's case). The recommendation moves to G1-N. 7.8 is now "spec follows the shipped code" | 1.3; 2.2; 4; 7.2; 7.8 |
-| Medium 5 (7.4 a was unbounded) | The pause now needs evidence from Q, with a cap; the cost is corrected | 7.4 |
-| Medium 6 (`t_r`, A2, Φ) | `t_r` is redefined and the gate deadline added. A2 now reads A3. Φ gains ν ("Q followed") | 4 |
-| Medium 7 (the Q-side hold) | It is conditioned on no newer update. Held entries are no failed tries. The silent loss of deposits P never collected is listed, with a proposed way to tell Q | 3.3; 7.6 |
-| Low: "same bar" wording; `hs.resp` tokens bound by HPKE | Fixed | 2.1 |
-| Low: G4 with an unknown `iss` | Argued, and put in the G4 harness mode | 5; 6 |
-| Low: part 3 restart | Restarts only if no epoch was established since the rekey began (G1-A) | 2.3 |
-| Low: binding L can demote Q | Stated in the "Q following" row | 4 |
-| Low: the order of S2's restart in the establishing write | Stated | 2.1, rule 6 |
-| Low: rule 5 after the grace | The `hs.resp` carries no tokens | 2.1, rule 5 |
-| Low: rule U revokes the carried reconnect token of Q's open reconnect | The mirror restart makes that Q's own abandonment; P never adopts it | 2.2 |
-| Low: G2-B covers most of G3 | Stated; it shapes 7.2 | 2.2 |
-| Low: the device's refused `hs.confirm` | It resolves; not a cycle | 1.5 |
-| Nits | I3 wording, the 1.1 citation, the `hs.fin` links wording, and a crash row for the recovery's fresh key | 2.3; 1.1; 2.3; 3.2 |
-| Resolved: the deployed grace; the reason for "Nothing else counts"; K9 at the update | Folded in, with the owner told plainly what 7.1 and 7.2 re-decide | 3.3; 2.1; 2.2; 2.6; 7.1; 7.2 |
+| 1. Token `sub` | Rule 0: every token Q issues names P's key on Q's record, never `from.relay.pk`. New harness oracle: S2 never advances before Q's follow write | 2.1 rule 0; 6 |
+| 2. Rule 5 against 2.4 | During S1, the tokens in P's handshake messages are minted by K′'s mailbox. §3.4 (a)'s old-key exception goes unused for reconnects | 2.1 rule 5; 2.4 |
+| 3. S2's restart | The handshake whose message made the advance is exempt | 2.1 rule 6 |
+| 4. Spec against shipped code | Checked in the vault. The shipped behaviour is written into the design (N3 is shipped, N4 is replaced by the shipped drop), and Rule J and §6.5's crossing sentence are amended. 7.8 is restated | 1.3; 2.2; 7.8 |
+| 5. P's `hs.resp` past the grace | During S1, P's reconnect `hs.resp` also carries the relay links and K′ tokens, and Q follows at `sig_R`. The §6.2 changes are listed | 2.4 |
+| 6. The 2.4 bound | About 6`U`, through the prompt path. This is spelled out, and "P demoted" is moved under "both sides rotate" | 2.4; 4 |
+| 7. P's open reconnects at the second write | They are restarted per 2.4 | 2.4 |
+| 8. The grace loss | It now covers the case without a crash, and C3 and C2′ are corrected. A grace of at least 14 days is the only complete option. The cost of the Q-side hold for a deleted peer is added. 7.6 is restated | 3.2; 3.3; 7.6 |
+| Lows and nits | The binding-L guarantee is restated. The hold ends at a 2.4 follow. 2.5 says which token the restart uses. The liveness table states that rekeys are not needed. Φ is reworded. An unknown `iss` rests on the handshake's authentication. N1 comes after establishment. Rule 3 gets a bound. 7.1 b is reframed. 2.4's spec list is completed. §11.14.2 is cited. 1.7 cites §6.6 "Limits" | throughout |
+| Resolved | N1 adds no rapid-rotation cost. K9 also runs on a duplicate update. The reason for "Nothing else counts" is kept by G2-H | 2.2; 2.6; 2.1 |
 
 ---
 
@@ -44,360 +39,409 @@ Words used throughout:
 
 ### 1.1 What "demoted" means
 
-"Demoted" is a state of an epoch (§3.4.1). An epoch is demoted in three
-ways:
-- by position: "Epochs after an `ik` link", where the epoch "stops being
-  current (if it was)";
+"Demoted" is a state of an epoch (§3.4.1). An epoch is demoted:
+- by position ("Epochs after an `ik` link");
 - by "Strict F1";
-- from the start, by a link: §3.4.1 "Pending epochs at a link" ("Such an
-  epoch is demoted from the start").
+- from the start, by a link ("Pending epochs at a link").
 
-A **demoted Q** is a Q in the state of §3.4.1 "After a demotion of the
-current epoch". Q has no current epoch with P, sends "nothing but
-handshake messages", and holds its durable messages. That includes
-`relay.token.issued`, which also has no epoch to be sealed under, because
-earlier epochs' send keys are erased (§6.5 "Key retention").
+A **demoted Q** is in the state of "After a demotion of the current
+epoch":
+- it has no current epoch with P;
+- it sends "nothing but handshake messages";
+- it holds its durable messages, `relay.token.issued` included, which
+  also has no epoch to be sealed under (earlier send keys are erased,
+  §6.5).
 
 A Q whose own reconnect is **pending** is in the same position (§6.3.1
-Initiator), and usually has no valid standing token either.
+Initiator).
 
-These demotions are honest, and they happen around `ik` rotations. For
-example: P's rekey is pending at P and active at Q, and then P rotates.
-S5 abandons the pending epoch, P's `identity.rotate` travels under the
-earlier epoch E, and strict F1 demotes Q's epoch.
+Honest demotions happen around `ik` rotations.
 
 ### 1.2 The rules involved
 
-- **§3.4 "The signal".** "received from it `relay.token.issued` for the
-  new `sub` ... Nothing else counts". This is owner decision "gap 1" of
-  2026-11-05 (the 0.85.0 draft, vettid.org at c7ee8f7, built in
-  vettid-vault #203), on the premise of vettid.org #536 decision O1a.
-- **S1.** "P deposits to Q only with it", and S1's list of messages that
-  may still go out.
-- **S2.** P's key for Q advances "when Q's token arrives".
-- **S3.** Tokens name "Q's relay key as P knows it".
-- **S9.** If P gets `token_revoked` on a token Q issued to an earlier key
-  of P that is still P's key for Q, and Q's token for P's current key has
-  not arrived "24 hours after" P's next short collect, P raises a fork
-  alarm.
-- **Rule U.** Q sends `relay.token.issued` "After that write", and
-  "revokes the reconnect tokens it issued to the passed keys".
-- **§6.3.1.** The handshake's own messages are "each deposited with the
-  carried standing token".
-- **RELAY-PROTOCOL §5.3 step 7.** "`X-VettID-Key` == token `sub`".
-- **Table A, row "Earlier, after its cut-off".** Everything is refused
-  (`superseded_relay`) except the update, the tokens of
-  `relay.token.issued`, and an `identity.rotate` whose links are all
-  already followed.
-- **Table A's preamble.** An `hs.init` whose `sender` is not its
-  `from.relay.pk` is refused.
-- **The update carries relay links only.** `identity.rotate` travels
-  separately, and §8.4 does not order the two.
-- **RELAY-PROTOCOL §6.7.** The old mailbox lives for the grace after the
-  **rotate**. The relay's default is 7 days, and the deployment does not
+- **§3.4 "The signal".** "Nothing else counts". This is owner decision
+  "gap 1" (2026-11-05; the 0.85.0 draft, vettid.org c7ee8f7; vettid-vault
+  #203), on the premise of vettid.org #536 O1a. The reason recorded for
+  it: the alternative signal, a deposit seen under a `jti`, was not
+  authenticated and gave P no token for K′.
+- **S1, S2, S3.** As quoted in the spec.
+- **S9.** A fork alarm "24 hours after" a `token_revoked` on a token Q
+  issued to P's earlier key.
+- **Rule U.** Q sends `relay.token.issued` "After that write". Q "revokes
+  the reconnect tokens it issued to the passed keys".
+- **Rule T.** For a reconnect `hs.init`, the tokens' `iss` must be "the
+  mailbox its `from.relay` names".
+- **§6.2.** A reconnect's `hs.init` and `hs.resp` carry `token` and
+  `reconnect_token` ("required").
+- **§6.3.** "The collect `sender` ... MUST equal `from.relay.pk` for
+  `hs.init`".
+- **§6.3.1.** Carried tokens are used only for the handshake's own
+  messages, and are adopted at confirmation.
+- **RELAY-PROTOCOL §5.3 step 7.** The deposit key must equal the token's
+  `sub`.
+- **Table A, "Earlier, after its cut-off".** Everything is refused except
+  the update, the tokens of `relay.token.issued`, and an `identity.rotate`
+  that is already followed.
+- **Table A's preamble.** An `hs.init`'s `sender` must equal its
+  `from.relay.pk`.
+- **The update carries relay links only.** §8.4 gives no order between it
+  and `identity.rotate`.
+- **RELAY-PROTOCOL §6.7.** The old mailbox lives for the grace, counted
+  from the **rotate**. The default is 7 days, and the deployment does not
   override it.
+- **§8.6.** `mailbox_unknown`: "Re-resolve the address, or mark the
+  connection `stale`".
 
 ### 1.3 G1: a rekey's `hs.fin` against a demoted Q
 
-1. **P's first write.** P's new `ik` is current and K′ is pending.
-   `identity.rotate` goes out. S5 restarts P's rekey under the new `ik`;
-   its `hs.init` is deposited with K.
-2. **Q is demoted.** Q follows the `ik` link, and strict F1 demotes Q's
-   current epoch.
-3. **Q answers P's rekey.** The rekey names Q's confirmed epoch, which is
-   "accepted as if it were current".
-4. **P's second write.** S1 is now active toward Q, and P deposits the
-   update with K.
-5. **Q follows the update.** Q's `relay.token.issued` for K′ is **held**,
-   because Q is demoted.
-6. **P's `hs.fin` is held.** S1 holds the rekey's `hs.fin`; it would also
-   land after the cut-off if it were let out.
+1. **P's first write.** `identity.rotate` goes out. S5 restarts P's rekey,
+   whose `hs.init` is deposited with K.
+2. **Strict F1 demotes Q.**
+3. **Q answers P's rekey.** It names Q's confirmed epoch.
+4. **P's second write.** S1 is active, and the update leaves with K.
+5. **Q follows.** Its `relay.token.issued` is held, because Q is demoted.
+6. **S1 holds P's rekey `hs.fin`.** It would also land after the cut-off.
 
-Q gets a current epoch either from that `hs.fin` (held), or from its own
-demotion reconnect.
+**What the spec says next.** The spec text lets the cycle close:
+- Rule J: "Then neither the rekey block of §6.5 nor §6.6's holds `R`
+  back, and it may reconnect". This reads as "a rekey answer holds Q's
+  reconnect".
+- §6.5: "The lower-`th1` rule applies to any two crossing handshakes of a
+  connection, whatever their purposes". Under it, Q's demotion reconnect
+  yields to P's rekey when the rekey's `th1` is lower. That is about half
+  the time, and Q then waits for the held `hs.fin`.
 
-**Whether the rekey answer holds Q's reconnect.** In the shipped vault it
-does not. `startReconnectCtx` refuses to start only while
-`answeredReconnects` is non-empty, which lists answers to **reconnects**
-only; `canReconnect` does the same. So Q's demotion reconnect starts at
-once, and G2 (and, in some orders, G3) is what breaks it. G1 is therefore
-a cycle only together with G2 and G3; G1 alone is a held message.
+**What the shipped vault does.** It reads otherwise. Checked on
+vettid-vault main:
+- `reconnectNaming` (vault/reconnect.go), the reconnect started after a
+  demotion or by strict F1, abandons the vault's own rekeys and drops its
+  open answers to the peer's rekeys ("they would block it").
+- While such a reconnect is open, a rekey `hs.init` from the peer is
+  discarded and audited `rekey_replaced_by_reconnect`
+  (vault/handshakes.go).
+- `startReconnectCtx` and `canReconnect` hold a reconnect only behind
+  answers to **reconnects** (`answeredReconnects`).
+- `makePending` makes the epoch pending, with `FinAt`, at the write that
+  queues the `hs.fin` (vault/confirm.go). So `B` runs from the queued
+  `hs.fin`.
 
-**How it ends.** At P, nothing bounds the held `hs.fin`. `B` runs "from
-`hs.fin`" and starts "Once `I` has sent `hs.fin`", and the 16-day initiator
-lifetime covers only "awaiting `hs.resp`". This is confirmed unbounded.
-At Q, the answer expires at `L`, and Q's reconnect tries fail by G2. The
-pair ends `stale` by "The reconnect bound", or by S1's 30 days.
+Under the shipped behaviour, Q's demotion reconnect runs at once. G1
+closes only together with G2 and G3, which break that reconnect.
+
+**At P.** Under the spec text, the held `hs.fin` has no bound. `B` starts
+"Once `I` has sent `hs.fin`". The shipped code already bounds it.
 
 ### 1.4 G2: the answer to Q's reconnect
 
-- Q has followed, so Q's `hs.init` carries tokens with `sub` = K′ (S3).
-- P deposits its `hs.resp` with the carried token, using K (S1).
-- The relay refuses it (`signature_invalid`, §5.3 step 7).
-- Even if it did not, Q would refuse it (`superseded_relay`).
-
-Every try expires after 16 days, and the third failure makes the pair
-`stale`.
+1. Q has followed, so its `hs.init`'s tokens name K′ (S3).
+2. P deposits its `hs.resp` with K (S1). The relay refuses it (§5.3 step
+   7).
+3. Even if the relay accepted it, Q would refuse it (`superseded_relay`).
+4. Each try expires after 16 days. The third makes the pair `stale`.
 
 ### 1.5 Device pairs
 
-- A vault never demotes a device's epochs and never reconnects to a
-  device. A device demotes nothing and starts no rekey or reconnect. So G1,
-  G2, G3, G6 and G7 occur only between two vaults.
-- **A device as P.** The device's `hs.resp` to the vault's rekey is not on
-  S1's list. It waits for the vault's `relay.token.issued`, which comes at
-  once (the vault always has a current epoch with the device).
-- **The device's `hs.confirm`.** It is on S1's list. If it lands after the
-  vault's cut-off, the vault refuses it. The vault's rekey epoch then stays
-  pending, but the vault still sends its token. S2 advances, and the
-  device re-sends `hs.confirm` (per batch, or after 12 days) with K′. That
-  is a delay, not a cycle.
-- **A device as Q.** It is never demoted and never pending, so its token
-  goes out at once.
+A vault never demotes a device's epochs and never reconnects to one. A
+device does neither either. So G1, G2, G3, G6 and G7 occur only between
+two vaults.
 
-### 1.6 G6: the revoked reconnect token and S9 (new)
+A device's `hs.confirm` landing after the vault's cut-off is refused.
+This resolves:
+1. The vault still has a current epoch and sends its token.
+2. S2 advances.
+3. The device re-sends `hs.confirm` with K′.
 
-Q follows P's update, and rule U revokes the reconnect tokens Q issued to
-K. Suppose P now has no current epoch with Q, or its standing token has
-expired, during S1. P reconnects with the reconnect token for K and gets
-`token_revoked`.
-- §8.6 makes that a failed try under "The reconnect bound".
-- If Q is demoted, its `relay.token.issued` stays held for more than 24
-  hours, so S9 raises "may have connected to an old copy of your vault"
-  in an honest run.
-- After three such tries, P makes the pair `stale`.
+So it is a delay, not a cycle.
 
-### 1.7 G7: P has no current epoch at its second write (new)
+### 1.6 G6: the revoked reconnect token and S9
 
-- The update is a session message, so P holds it while P is demoted or
-  its reconnect is pending.
-- P's only way back to an epoch is a reconnect. Today that reconnect
-  announces K and is deposited with K, so Q answers into K's mailbox.
-- That mailbox dies 7 days after the rotate, while a round can take up to
-  16 days (A3).
-- After that, nothing carries K′ to Q. The resends of §3.4 (b) are updates
-  and are still held. Q's deposits to K's mailbox fail with
-  `mailbox_unknown`.
-- This is not a crash case, and a 14-day grace does not cover it either.
+Q follows P's update, and rule U revokes Q's reconnect tokens for K. Now
+suppose that, during S1, P has no current epoch with Q, or its standing
+token has expired.
+- P reconnects on the revoked K token and gets `token_revoked`. That is a
+  failed try (§8.6).
+- With Q demoted, Q's token waits more than 24 hours, so S9 raises the
+  "old copy of your vault" alarm in an honest run.
+- Three such tries make the pair `stale`.
+
+### 1.7 G7: P has no current epoch at its second write
+
+- The update is a session message, so it is held while P is demoted or
+  pending.
+- P's reconnect announces K and is answered into K's mailbox. That mailbox
+  dies 7 days after the rotate, while a round can take 16 days.
+- After that, nothing carries K′ to Q.
+
+§6.6 "Limits" accepts this today: "After the grace, or for a device, it
+needs a new invite or pairing". So 2.4 changes a stated limit.
 
 ---
 
 ## 2. The design
 
-None of this changes behaviour that release 29 builds (A5). The places
-where it extends a release-29 rule are named below.
+Nothing here changes behaviour that release 29 builds (A5), except as
+named in 2.2 (writing the shipped behaviour into the spec).
 
 ### 2.1 G2: the hybrid G2-H (recommended)
 
-1. **Deposit key of a carried token.** A message on a carried token
-   (`hs.resp`, `hs.fin`, `hs.confirm` and its re-sends) is deposited with
-   the key that token's `sub` names, if P still holds that key. This is
-   G2-B. If P no longer holds it, the answer is dropped, as under rule J,
-   and Q's next try names K′.
-2. **When S2 advances.** S2 also advances, to the newest of P's keys
-   named by a token from Q, when the token comes in:
-   - a reconnect `hs.init` from Q whose `hs.fin` P has verified (`sig_I`,
-     at establishment);
+0. **The `sub` of Q's tokens.** Every token Q puts in any message to P
+   (`hs.init`, `hs.resp`, `relay.token.issued`, `connection.approved`)
+   names as `sub` P's relay key **on Q's record**, never a key the message
+   only announces (`from.relay.pk`). This mirrors S3. Under 2.4 it keeps
+   Q's `hs.resp` naming K until Q's follow write, so that P's `hs.fin`
+   goes with K, which Q accepts.
+1. **Deposit key.** A message P sends on a carried token is deposited with
+   the key that token's `sub` names, if P still holds it (G2-B). Otherwise
+   the answer is dropped, as under rule J, and Q's next try names K′.
+2. **When S2 advances.** S2 advances to the newest of P's keys named by a
+   token from Q in any of:
+   - a reconnect `hs.init` from Q, at the verified `hs.fin` that
+     establishes it;
    - an `hs.resp` from Q that P accepts. Its tokens are bound to the
-     handshake by its HPKE context (sealed to P's ephemeral key), not by
-     `sig_R`. P accepts the `hs.resp` only after `sig_R` verifies;
-   - an adoption, or `relay.token.issued`.
+     handshake by its HPKE context, not by `sig_R`. P accepts it after
+     `sig_R` verifies;
+   - an adoption;
+   - `relay.token.issued`.
 
-   Tokens are matched to Q by the connection, not by `iss`.
+   Tokens are matched to Q by connection. When a token's `iss` is a
+   mailbox P does not know yet (both sides rotating), the advance rests on
+   the handshake's authentication, not on verifying the token. P uses the
+   token only once rule T keeps it (5, G4).
 3. **No reconnect while carried tokens wait (P's side).** While P holds
    undiscarded carried tokens from Q that name a key P holds, P does not
-   take §8.6's "no valid standing token" path. This extends a release-29
-   rule, and only during S1.
-4. **S2's re-deposit.** It re-deposits only entries on held tokens.
-   Entries on carried tokens keep their own token's key (rule 1). An entry
-   that needs a held token for K′ waits for one.
-5. **Tokens P puts in a handshake message during S1.** They are minted by
-   the mailbox of the key the message is deposited with. Past the grace,
-   K's mailbox no longer exists, so an `hs.resp` deposited with K carries
-   **no** tokens: Q keeps its held tokens and adopts none. P's tokens for
-   K′ then reach Q with the update or with P's reconnect (2.4).
-6. **Order in an establishing write.** In the write that establishes Q's
-   reconnect at P, the establishment runs first: it ends P's own crossing
-   reconnect and pending epoch (§6.3.1, §6.6). S2's advance runs after, and
-   any restart it makes applies only to handshakes still open then.
+   take §8.6's "no valid standing token" path. This is bounded by the
+   carried standing token's `exp`, and by the handshake's own lifetime
+   (`L` for an answer, `B` for a pending epoch), whichever ends first.
+   Then it is §8.6 as today. This extends a release-29 rule, and only
+   during S1.
+4. **S2's re-deposit** applies only to entries on held tokens. Entries on
+   carried tokens keep their own key (rule 1).
+5. **Tokens in P's handshake messages during S1** are minted by the
+   mailbox of P's **current** key K′:
+   - in a reconnect `hs.init`, that is the mailbox `from.relay` names
+     (2.4), as rule T requires;
+   - in an `hs.resp`, they travel with the relay links (2.4), which let Q
+     keep them.
 
-**Security.** An advance needs Q's `ik` or Q's epoch keys: the same bar as
-an authenticated handshake with Q. It is not quite the bar of
-`relay.token.issued`. A copy of Q taken after Q's last `ik` rotation but
-before Q's last rekey can sign a handshake, but cannot seal under Q's
-current epoch. Such a copy already counts as Q (§3.4.1 Residuals, the
-case of a copy taken after a rotation's first write). An unauthenticated
-token only picks the deposit key for its own handshake's messages. G2-A
-(any verified token advances S2) stays rejected: it lets an old copy of Q
-split the pair silently.
+   §3.4 (a)'s exception ("it mints the standing and reconnect tokens of a
+   reconnect `hs.init` it deposits with the old key ... for the old
+   mailbox") then goes unused for reconnects, and can be dropped.
+6. **S2's restarts.** At an advance, S2 restarts P's open reconnects that
+   went with K and have sent no `hs.fin`. The handshake whose message made
+   the advance is exempt ("other than the one whose message made the
+   change", as H5 says). Each restart uses a reconnect token naming K′;
+   without one, the reconnect is kept as it is. In a write that
+   establishes Q's reconnect at P, the order is:
+   1. the establishment, which ends P's crossing reconnect and pending
+      epoch;
+   2. the advance;
+   3. any restart, of what is still open.
 
-**What this re-decides.** "Gap 1" (2026-11-05) said nothing but
-`relay.token.issued` counts. Its premise, from #536 O1a, is read here as
-"the acknowledgment must prove that Q followed". A token Q minted that
-names K′ proves that, and G2-H accepts one only at an authenticated
-point. The owner is asked to re-decide gap 1 in this form (7.1).
+**Security.** An advance needs Q's `ik` or Q's epoch keys. That is the
+bar of an authenticated handshake with Q. A copy of Q taken after Q's
+last `ik` rotation can meet that bar. Such a copy already counts as Q
+(§11.14.2; the copy residuals of §3.4.1). An unauthenticated token only
+picks the deposit key for its own handshake. G2-A, under which any
+verified token advances S2, is weaker: an old copy of Q could then make
+P stop resending and deposit with K′ while the real Q never followed.
 
-### 2.2 G1 and G3: G1-N (recommended now)
+**What this re-decides.** The reason recorded for gap 1 was that the old
+signal was not authenticated and gave no K′ token. G2-H keeps that
+reason: its advances are authenticated, and each one delivers K′ tokens.
+It re-decides gap 1 in that form (7.1).
 
-The shipped vault does not hold Q's demotion reconnect behind a rekey
-answer (1.3). So G1 already has an exit through Q's reconnect once G2 is
-fixed. What remains is G3 and the bound at P. G1-N:
+### 2.2 G1 and G3: G1-N (recommended), with the shipped behaviour written into the spec
 
-**N1. Q's mirror of S2.** When Q follows a relay link, it abandons each of
-its open reconnects whose `hs.init` carried tokens naming the passed key
-and that has not yet sent `hs.fin`, and starts it again.
-- The abandonment revokes that handshake's carried tokens, as Q's own step
-  (§6.3.1 "Revocation by the issuer"). So rule U's revocation of the
-  reconnect tokens issued to K and Q's own abandonment are one act. P
-  never adopts the revoked token.
-- The new `hs.init`'s tokens name K′.
-- Cost: one more deposit on Q's held reconnect token for each relay-key
-  rotation that Q follows mid-reconnect. *Unsure* how this interacts with
-  the rapid-rotation residual; the harness counts it.
+**S. The shipped behaviour, written into the spec (7.8).**
+- **S-a.** A reconnect after a demotion, or by strict F1, abandons the
+  side's own rekeys and drops its open answers to the peer's rekeys,
+  revoking any tokens they carried.
+- **S-b.** While such a reconnect is open, a rekey `hs.init` from the peer
+  is discarded (`rekey_replaced_by_reconnect`).
+- **S-c.** A pending epoch, and `B`, start at the write that queues the
+  `hs.fin`. This was N3 in draft 3.
+- **S-d.** Only an answer to a peer's **reconnect** holds a side's own
+  reconnect (§6.6 "Between two persons").
+
+Two amendments follow from S:
+- **Rule J.** Its last sentence becomes "Then the rekey block of §6.5
+  does not hold `R` back". The §6.6 hold applies only to reconnect
+  answers.
+- **§6.5's crossing sentence** gains an exception: "... whatever their
+  purposes, except that a reconnect after a demotion or by strict F1
+  replaces the side's rekeys and its answers to the peer's (§3.4.1)".
+
+This amends release-29 spec text to match the release-29 code. It changes
+no behaviour.
+
+**N1. Q's mirror of S2.**
+- **The rule.** When Q follows a relay link, it abandons each of its own
+  open reconnects whose `hs.init` carried tokens naming the passed key and
+  that has not sent `hs.fin`, and starts it again with tokens naming K′.
+  The abandonment revokes that handshake's carried tokens as Q's own step,
+  so rule U's revocation and the abandonment are one act. P never adopts
+  the revoked token.
+- **The token.** The restart is deposited on the update's fresh K′
+  reconnect token (rule U keeps it), not on the held K token. So it adds
+  nothing toward the rapid-rotation residual.
+- **The order.** In a write that also establishes a handshake, N1 runs
+  after the establishment, as rule 6 does.
 
 **N2. `hs.confirm` passes the cut-off.** In Table A, row "Earlier, after
-its cut-off", an `hs.confirm` goes on to processing (it confirms) when
-both of these hold:
-- the epoch it travels under was established with epoch keys signed under
-  Q's current `ik` for P (binding L, 2.6);
-- Q has accepted no message from P's newer key yet (2.3's narrowing).
+its cut-off", an `hs.confirm` is processed (it confirms) when:
+- its epoch's keys were established under a handshake signed by Q's
+  current `ik` for P, which binding L makes safe (2.6); and
+- Q has accepted no message from P's newer key yet.
 
-**N3. A held `hs.fin` starts `B`.** The epoch becomes pending, and `B`
-runs, from the write that queues the `hs.fin`. This is needed; 1.3 shows
-the wait is otherwise unbounded.
+**The G3 cases.**
+- Q followed before its `hs.init`: G2-B covers it.
+- Q followed after its `hs.init` and before `hs.fin`: N1 covers it.
+- Q followed after its `hs.fin`: N2 covers it.
 
-**N4. Q's stale answers to P's rekeys.** In the write that confirms its
-reconnect, Q drops its open answers to P's rekeys. This mirrors "A
-reconnect ends R's rekey answers" (§6.3.1), which is the responder's rule.
-Otherwise the answer from 1.3 step 3 holds Q's rekeys back until `L`
-(liveness only, like the stated residual "A stale rekey `hs.init`
-redelivered after a reconnect").
+**The held rekey `hs.fin`.**
+- If Q has an epoch, Q's token comes, and S2 re-deposits the `hs.fin`.
+- If Q is demoted, Q's reconnect drops its answer to the rekey (S-a), and
+  P's pending rekey epoch ends when Q's reconnect is established at P.
+  P's held `hs.fin` is dropped with it (§6.3.1).
 
-**Which G3 cases G1-N covers:**
-- Q followed **before** its `hs.init`: the tokens name K′, and G2-B sends
-  P's answer and `hs.confirm` with K′.
-- Q followed **after** its `hs.init` and before its `hs.fin`: N1 restarts
-  the reconnect.
-- Q followed **after** its `hs.fin` (pending): P's `hs.confirm` rides a
-  token naming K, after the cut-off. That needs N2. It is the only case
-  that does.
-- P's own rekey `hs.fin` stays held until S2 (not on S1's list).
-  - If Q has an epoch, Q's token comes and S2's existing re-deposit sends
-    the `hs.fin`.
-  - If Q is demoted, Q reconnects. Its establishment at P ends P's
-    pending rekey epoch, and the held `hs.fin` is dropped with it (§6.3.1:
-    "drops its `hs.fin` for the epoch that it does not know to have been
-    accepted").
-- A narrow order stays slow, and is bounded by one try. Q processes P's
-  update between answering P's reconnect and receiving P's `hs.fin`, so
-  P's `hs.fin` with K lands after the cut-off. Under 2.4, P's reconnect
-  carries the links, and Q follows only at that `hs.fin`. This order
-  arises only when an update deposited earlier is processed late.
-
-**What this reverses.** O1a ("refuse what comes from an earlier key after
-its cut-off") is reversed for `hs.confirm` only. The owner is told so
-in 7.2.
+**What this reverses.** O1a, for `hs.confirm` only (7.2).
 
 ### 2.3 G1-A (the broader alternative)
 
-- **Part 1.** S1 also lets out a rekey's `hs.init`, `hs.resp` and `hs.fin`.
-- **Part 2.** These pass the cut-off when the epoch they travel under, or
-  their handshake, is authenticated by epoch keys signed under Q's current
-  `ik` for P:
-  - an `hs.resp` or `hs.fin` for a handshake Q has open (its `sig_R`
-    verifies, or its `sig_I` verifies under the `ik` Q's answer pinned
-    after the `hs.init`'s links were applied);
-  - an `hs.confirm`;
-  - a session-mode rekey `hs.init`.
-- **Part 3.** When S2 advances, P restarts its rekeys that went with K and
-  have had no `hs.resp`. It does this only if no epoch with Q has been
-  established since that rekey began, so that Q's in-flight answer is not
-  stranded.
-- **Part 4.** As N3.
+**The parts.**
+- **Part 1.** S1 also lets out a rekey's `hs.init`, `hs.resp` and
+  `hs.fin`.
+- **Part 2.** Each of these passes the cut-off when it is authenticated
+  under Q's current `ik` for P:
+  - an `hs.resp`, by its `sig_R`;
+  - an `hs.fin`, by its `sig_I` under the `ik` that Q's answer pinned,
+    after the `hs.init`'s links were applied;
+  - an `hs.confirm` or a session-mode rekey `hs.init`, by epoch keys
+    established under a handshake signed by Q's current `ik`.
+- **Part 3.** At S2's advance, P restarts the rekeys that went with K and
+  got no `hs.resp`, but only if no epoch was established since each rekey
+  began.
 
-**The narrowing (applies to G1-A and to N2).** The pass holds only until Q
-first accepts a message from P's newer key. After S2, P deposits with K′
-using a held K′ token, so an honest P no longer needs the pass.
+**The narrowing.** N2 shares it: a pass holds only until Q first accepts
+a message from P's newer key.
 
-**The residual G1-A leaves.** Take a decoupled rotation: the gate-owed
-key, or the next key K2, generated after the `ik` that is current. A copy
+**The residual.** Some rotations are decoupled: a gate-owed key, or the
+next key after a pending one, is generated after the current `ik`. A copy
 taken between that `ik`'s write and the relay key's first write holds
-both that `ik` and K. Until the narrowing closes the pass, it can run a
-whole session-mode rekey with Q through K after the cut-off. It already
-counts as P (§3.4.1 Residuals), and the next `ik` rotation ends it. Under
-G1-N the same copy can only confirm an epoch, which the existing residual
-"An old copy ... can confirm Q's pending epoch as P" already covers.
+both. Until the narrowing closes, such a copy can run a whole rekey
+through K after the cut-off. It counts as P already, and the next `ik`
+rotation ends it. Under G1-N, that copy can only confirm, which is the
+existing residual "An old copy ... can confirm Q's pending epoch as P".
 
-**I3's wording, if G1-A or N2 is taken.** "... except tokens that pass
-rule T, duplicates of followed links, and (until Q first accepts a
-message from P's newer key) a handshake message or `hs.confirm` under
-epoch keys signed under Q's current `ik` for P, which a copy taken before
-that `ik` was written cannot make." Under G1-N the text is the same, with
-`hs.confirm` only.
+**I3's wording.** "... except tokens that pass rule T, duplicates of
+followed links, and, until Q first accepts a message from P's newer key,
+[G1-N: an `hs.confirm`; G1-A: a handshake message or `hs.confirm`] under
+epoch keys established under a handshake signed by Q's current `ik` for
+P, which a copy taken before that `ik` was written cannot make."
 
-### 2.4 G7: P's reconnect carries the relay links (recommended)
+### 2.4 G7 and the past-the-grace answer: links in reconnects (recommended)
 
-- **Spec change.** During S1, P's reconnect `hs.init` names its **current**
-  key in `from.relay` (K′), and carries `relay_links` from its `sender`
-  (K) to K′, plus binding L's `ik` links (`rotations` already carries
-  those). It is still deposited with K.
-- **Table A.** The preamble's sender check gives way when the links
-  connect `sender` to `from.relay.pk` and pass rule C. Table A then
-  accepts the message from K **before or after** K's cut-off, whenever
-  `from.relay.pk` is Q's current key for P, or is reached by these links.
-- **When Q follows.** Under rule U's checks, Q follows these links at the
-  verified `hs.fin`, when the reconnect is established; a reconnect
-  `hs.init` changes no state before `sig_I` (§6.6). The cut-off is that
-  `hs.fin`'s position, so the `hs.fin` itself, deposited with K, is
-  accepted.
-- **Where Q answers.** Q answers into K′'s mailbox (`from.relay`), using
-  the `hs.init`'s carried tokens, which K′'s mailbox minted (rule T: `iss`
-  = the mailbox of `from.relay`).
-- **Safety.** Both of a link's signatures are made by P's relay keys in
-  the rotation's first write. A copy taken before that write cannot make
-  them. A copy taken after it counts as P. A reconnect `hs.init` from K
-  after the cut-off that does **not** carry the links stays refused, so
-  the cap on answers is not opened to copies taken earlier.
-- **Effect.** P no longer needs K's mailbox, or a current epoch, to tell
-  Q the new address.
-- **Alternative.** The relay keeps the old mailbox while a recipient has
-  not acknowledged. Cost: an old copy keeps the live old mailbox for that
-  whole time, at every rotation. It is also a change to the relay
-  protocol.
+**The rules.**
+- **Announcing K′ during S1.** P's reconnect messages toward Q announce
+  K′:
+  - its `hs.init` names K′ in `from.relay`;
+  - its `hs.resp` to Q's reconnect does too, in a new field.
+
+  Both carry `relay_links` from K up to K′, P's `ik` links (`rotations`,
+  binding L), and `token` and `reconnect_token` minted by K′'s mailbox.
+  Both are still deposited with K (rule 1).
+- **Q accepts them** from K before or after K's cut-off, when the links
+  connect the `sender` to the announced key and pass rule C, and the
+  announced key is Q's current key for P or is reached through them.
+  Without the links, a reconnect `hs.init` from K after the cut-off stays
+  refused.
+- **When Q follows.** Q follows the links:
+  - for P's `hs.init`, at the verified `hs.fin` that establishes it (no
+    state changes before `sig_I`, §6.6). The cut-off is that `hs.fin`'s
+    position, so the `hs.fin` itself, deposited with K by rule 0 and rule
+    1, is accepted;
+  - for P's `hs.resp`, at its verified `sig_R`, in the write that
+    processes it. The cut-off is the `hs.resp`'s position. Q's `hs.fin`
+    then goes to K′'s mailbox on the `hs.resp`'s carried token.
+- **The second write.** In it, P abandons its open reconnects that
+  announced K and have sent no `hs.fin`, and starts them again by these
+  rules. Otherwise each of them, past the grace, costs a failed try of 16
+  days.
+- **The Q-side hold** (3.3) also ends at a follow by these rules.
+
+**How Q gets a K′-mailbox token it can use.**
+- **Today's machinery (the "prompt path").** The tokens carried in the
+  `hs.init` are adopted when Q's confirmed epoch reaches the reconnect's.
+  That happens at P's prompt `relay.token.issued` (§6.3.1 "The prompt to
+  adopt"). Until then they carry only the handshake's own messages, among
+  them Q's `hs.confirm` into K′'s mailbox. Q's `relay.token.issued` for
+  K′ then waits for the adoption.
+- **The alternative.** Keep the `hs.init`'s K′ tokens as held tokens at
+  the follow: `sig_I` covers them through `th`. This saves two hops, but
+  changes R29-T1's adoption rule.
+- **Recommendation.** The prompt path. No release-29 rule changes.
+
+**The changes to the spec.**
+- §6.2: `from.relay` during S1, the new `relay_links` field, and the
+  announced key in `hs.resp`. Tokens stay required in both messages, as
+  today.
+- §6.3: the collect `sender` check gives way to linked keys.
+- Table A's preamble.
+- S1's list: no change in kind, but the content changes.
+- §3.4 (a) exception 2 is dropped for reconnects.
+- Rule T's reconnect clause: `iss` = the mailbox of the announced key.
+- Rule U: following by these links.
+- §6.6 "Limits": the sentence that accepts G7 is removed.
+
+**Safety.** A link's two signatures are made by P's relay keys in the
+rotation's first write. A copy taken before that write cannot make them.
+A copy taken after it counts as P. The cap on answers is opened only to
+messages that carry valid links.
+
+**The bound for the 2.4 path.** It is about 6`U`: `hs.init`, `hs.resp`,
+`hs.fin` (Q follows), `hs.confirm` (P confirms and sends its prompt), the
+prompt (Q adopts and sends its token), then the token (S2). Add up to a
+round when P must first wait, for example for its own demotion to be
+resolved. That case needs Q to have rotated its `ik` as well, so it
+belongs under "both sides rotate" in 4.
+
+**The alternative to 2.4.** The relay keeps the old mailbox until every
+recipient has acknowledged. That widens the old-copy window, and needs a
+change to the relay protocol.
 
 ### 2.5 G6: the revoked reconnect token during S1
 
-- **Spec change.** During S1 toward Q, `token_revoked` on a reconnect
-  token for an earlier key of P is no failed try under "The reconnect
-  bound", and does not start S9 on its own. P stops trying on that
-  token and waits for Q's reconnect or Q's token. That wait is bounded by
-  4's table.
-- **S9.** S9's wait becomes one round (16 days, `L`) instead of 24 hours,
-  counted as today. An honest demoted Q acknowledges within a round
-  (G2-H, N1). A real fork is still seen, two weeks later. And S1's stale
-  catches a Q that never acknowledges anyway.
-- **Owner question:** 7.7.
+- **Spec change.** During S1 toward Q, a `token_revoked` on a reconnect
+  token for an earlier key of P is no failed try, and it does not start
+  S9 by itself. P stops using that token.
+- **What P waits for.** Q's reconnect, or Q's token. P's own reconnect is
+  started again, by 2.4, on the K′ reconnect token, once one arrives:
+  from S2's advance, or from Q's `relay.token.issued`.
+- **S9.** S9's wait becomes one round (16 days) instead of 24 hours (7.7).
 
 ### 2.6 Binding L: the update carries P's `ik` links (recommended)
 
-- **Spec change.**
-  - The update carries `rotations` as S8 gives an `identity.rotate`: P's
-    links from the signer of the epoch it travels in up to P's current
-    `ik`. They are made again at each resend.
-  - Q applies them first, in the same write, exactly as an
-    `identity.rotate`'s links: rule C, Table B, H5, the demotion rules,
-    and R29-K9's judgment.
-  - If Table B refuses one, Q follows no relay link from that update.
-- **What it guarantees.** At every cut-off, Q's current `ik` for P is at
-  least the one P held when it made the update. That is at least the one
-  current at the relay link's first write. So no copy taken before that
-  write passes N2, G1-A's part 2, or 2.4.
-- **R29-K9 at the update.** It is probably sound: the update is sealed
-  under P's current epoch, as `identity.rotate` is, so K9's argument
-  carries over. To be modelled (6).
-- **Effect on Q.** Q may itself be demoted by these links (strict F1).
-- **Alternative, binding R.** The relay link's signed body names the
-  `ik`. It needs a new format and vectors, and does not deliver the links.
+**The rules.**
+- The update carries `rotations`, as S8 says for `identity.rotate`, and
+  they are made again at each resend.
+- Q applies those links first, in the same write: rule C, Table B, H5,
+  the demotion rules, and R29-K9's judgment. K9 runs on a **duplicate**
+  update too, as it does on an `identity.rotate` that is already
+  followed.
+- If Table B refuses a link, Q follows no relay link from that update.
+
+**What it guarantees.** No copy taken before the write of the `ik`
+current at the relay link's first write passes N2, part 2 of G1-A, or
+2.4's ik check. It is not absolute for the decoupled rotations (2.3).
+
+**K9 at the update.** Probably sound: the update is sealed under P's
+current epoch, as `identity.rotate` is. To be modelled.
+
+**Side effect.** The update can demote Q itself, by strict F1.
+
+**The alternative, binding R.** Put the `ik` in the relay link's signed
+body. That needs a new format and test vectors, and it does not deliver
+the links.
 
 ---
 
@@ -405,349 +449,396 @@ that `ik` was written cannot make." Under G1-N the text is the same, with
 
 ### 3.1 What §3.4 says
 
-"The vault **stores first, then rotates, and retries with the same
-key**". This holds for all three paths. The one exception is a recovery's
-fresh key after a refused registration, which is registered before any
-state holds it.
+"stores first, then rotates, and retries with the same key". The three
+paths follow it. The exception is a recovery's fresh key after a refused
+registration.
 
 ### 3.2 What each crash point leaves
 
+"Grace loss" means: the deposits the relay accepted into K's mailbox
+after P's last collect of it are lost, without anyone being told, when
+the mailbox ends (3.3).
+
 | Crash point | State | Relay | Next unlock | Lost |
 |---|---|---|---|---|
-| C0: before the first write | K current; an owed mark, if one was written | the old mailbox | the mark retries; a `credential.rotate` is the member's to ask again | nothing |
-| C1: after the first write, before the rotate | K current, K′ pending; new `ik` current, `identity.rotate` sent | the old mailbox | the rotate, with the same K′ | nothing |
-| C2: after the rotate, before the second write | as C1 | both mailboxes; the grace runs from the rotate | the rotate again, then the second write; past the grace, `mailbox_unknown`, then register (`200` goes on; `201` re-mints every token) | locked past the grace: the old mailbox's uncollected deposits, and later deposits refused until the second write (3.3) |
-| C3: after the second write, before the updates go out | K′ current, K kept for deposits only | both mailboxes | the outbox delivers the updates | nothing |
-| C2′: after K1's second write, which also stores K2 (a relay-key rotation owed) | K1 current, K2 pending, the relay-key mark cleared | K1's mailbox; K's in its grace | as C1 for K2 (the rotate signed by K1) | nothing |
-| CR: after a definite refusal, before the write that records it | as C1 or C2 | unchanged | refused again, then that write | nothing; the audit comes one unlock later |
-| CF: a recovery's fresh key, registered before any state holds it; crash before step 2's write | the inherited key, refused | an empty mailbox nobody announced | the open is retried; a new fresh key | an orphaned empty mailbox (within the relay's limit of 3; stated in §3.4) |
+| C0: before the first write | K current; an owed mark, if one was written | old mailbox | the mark retries the rotation | nothing |
+| C1: after the first write, before the rotate | K current, K′ pending; the new `ik`; `identity.rotate` sent | old mailbox | the rotate again, with the same K′ | nothing |
+| C2: after the rotate, before the second write | as C1 | both mailboxes; the grace has started | the rotate again, then the second write; past the grace, the registration (`200`: continue; `201`: re-mint every token) | grace loss, widened by the time to the next unlock |
+| C3: after the second write, before the updates go out | K′ current; K kept for deposits | both | the outbox sends the updates | grace loss (as without a crash) |
+| C2′: after K1's second write, which also stores K2 | K1 current, K2 pending | K1's mailbox, and K's in its grace | as C1, for K2 | grace loss for K's mailbox, as C3 |
+| CR: a definite refusal, before the write that records it | as C1 or C2 | unchanged | refused again; then the refused write | nothing more than C1 or C2 |
+| CF: a recovery's fresh key, registered before any state holds it | the inherited key, refused | an empty mailbox nobody was told of | the open is retried | an orphaned mailbox (within the relay's limit of 3) |
 
-### 3.3 Is the rule complete?
+### 3.3 Is it complete?
 
-**Safety: yes.** I5 holds and the key is the same at every retry.
+**Safety: yes.**
 
-**Liveness: the deposits to the old mailbox need a rule.** The grace runs
-from the rotate. The updates go out at the second write, which can come
-`U` later, and Q needs one more hop to follow.
+**Liveness: no.**
 
-**Proposed hold on Q's side (recommended).** While the connection is
-active, and Q has received no update from P naming a mailbox newer than
-the refused one since the first refusal:
-- a deposit to P's mailbox refused `mailbox_unknown` is **held**: not
-  ended (`drop.undelivered_mailbox_unknown`, §8.3), no failed try, and no
-  reason for `stale`;
-- the hold ends when an update re-addresses the entries (rule U), when the
-  connection ends, or 30 days after the first refusal. Then §8.6 applies
-  as today.
+**Grace loss without any crash.** Under A3:
+- Q goes on depositing to K's mailbox until it follows: up to `U` after
+  the second write, and longer on the 2.4 path.
+- P collects K's mailbox only at its unlocks, at least once every `U`.
+- Deposits made after P's last collect, and before the mailbox ends, are
+  lost silently.
+- A crash before the second write widens this, and so does a lock outside
+  A3.
+- Q's deposits that the relay refuses after the mailbox ends hit §8.6's
+  `mailbox_unknown`, which today makes the connection `stale`.
 
-**A residual the hold cannot fix (new).** Q's deposits that the relay
-accepted (`201`) into K's mailbox, which P never collected before the
-mailbox died (C2 followed by a lock past the grace), are lost **silently**.
-Proposed way to tell Q:
-- After a C2 that ran past the grace (the rotate answered
-  `mailbox_unknown`), the update carries `old_collected_to`: the time up
-  to which P collected K's mailbox.
-- Q tells its member of every durable deposit into K's mailbox made after
-  that time and not answered, as `message.delivery_unconfirmed` (§8.3).
-- *Unsure* that P can know the time exactly. It is its last short collect
-  of K's mailbox before the crash, which P stores.
-- Owner question: 7.6.
+**The options.**
+- **(a) A relay grace of at least 3`U` plus a margin.** 14 days closes the
+  loss under A3, with or without a crash. The rotate is at most `U`
+  before the second write, Q follows within `U`, and P's next collect
+  comes within one more `U`. The grace is a relay configuration value.
+  - Cost: an old copy keeps the live old mailbox twice as long, at every
+    rotation (§3.4.1 Residuals).
+  - It is the only complete option within A3.
+- **(b) A hold on Q's side.**
+  - The rule. While the connection is active, and since the first refusal
+    no update from P has named a mailbox newer than the refused one, a
+    deposit to P's mailbox refused `mailbox_unknown` is held:
+    - it is not ended (`drop.undelivered_mailbox_unknown`), not a failed
+      try, and not a reason for `stale`;
+    - it ends at a follow (rule U or 2.4), at the connection's end, or 30
+      days after the first refusal.
+  - It saves the deposits that were **refused**, not those the relay
+    accepted.
+  - Cost: for a peer whose vault was deleted and whose
+    `connection.removed` was lost, the member gets 30 days of silence
+    instead of an immediate "not delivered".
+- **(c) `old_collected_to`.** P tells Q, in the update, up to when it
+  collected K's mailbox, so that Q can report lost deposits
+  (`message.delivery_unconfirmed`).
+  - Cost: P persists the collected-to time of every acked collect (not
+    only the leased ones). Q keeps a per-peer log of the deposits the
+    relay accepted, with their `deposited_at`. Clock skew needs a margin
+    (§4.1's 90 seconds).
+  - *Unsure* that it can be made exact.
 
-**The grace.** The deployment does not set it, so the relay's code default
-of 7 days applies. A longer grace doubles the time an old copy holds the
-live old mailbox, at every rotation, and still does not cover G7.
+**Recommendation.** (a) together with (b). (a) closes the loss within A3;
+(b) covers what is refused, including outside A3. Outside A3, a lost
+deposit that the relay accepted remains a residual, unless (c) is also
+built.
 
-The second write should also list its S1 state: P's key for Q per
-recipient, and the start of S1's clock.
+**The second write** should also list its S1 state.
 
 ---
 
-## 4. Liveness argument sketch (G2-H, G1-N, binding L, 2.4, 2.5, the Q-side hold)
+## 4. Liveness argument sketch
 
-This is in the style of §3.4.1 "Liveness between honest vaults (0.88.2)",
-for pairs of vaults. Device pairs are covered by 1.5.
+The design argued: G2-H, G1-N with S, binding L, 2.4, 2.5, and 3.3 (a)
+with (b). Only pairs of vaults are argued here; device pairs are 1.5.
 
-*Assumptions.*
-- A1 to A4 as in 0.88.2. **`t_r`** is the last write by either side that
-  stores a key: an `ik`, or a relay key, including a gate-owed key and the
-  next key after a pending one.
-- **A5′.** Relay keys rotate, both sides advertise `relay_follow`, and the
-  gate's deadline (30 days after its mark) bounds when a gate-owed key is
-  stored. So `t_r` is at most the deadline after the last `ik` rotation.
-- **A6.** The Q-side hold (3.3).
-- **A7.** No definite refusal of a rotate (that is the refused state,
-  which is visible).
+### Assumptions
 
-*Progress measure.* Φ = (π, ν, μ, λ, δ, ρ), compared in that order:
-- π: pending relay keys;
-- ν: (side, recipient) pairs where the recipient has not followed the
-  side's current relay key;
-- μ: pairs where the side's key for the recipient is not its current key;
-- λ, δ, ρ: as in 0.88.2.
+- **A1 to A4** as in 0.88.2.
+- **`t_r`** is the last write, by either side, that stores an `ik` or a
+  relay key. That includes a gate-owed key and the next key after a
+  pending one.
+- **A5′.** Relay keys rotate, and both sides advertise `relay_follow`. The
+  gate's deadline (30 days) bounds a gate-owed key.
+- **A6.** The grace is at least 14 days, and the Q-side hold applies.
+- **A7.** No rotate is definitively refused.
 
-After `t_r`, nothing adds to π, ν or μ: following and S2 only advance.
+### The progress measure
 
-*Why the order is sound.* Every step that raises a later component lowers
-an earlier one:
-- Under binding L, following a relay link also follows the `ik` links, so
-  δ and ρ rise only when ν or λ falls.
-- H5, the demotion rules and N1's restart fire only at a link (ν or λ
-  falls).
-- S2's restarts fire only at an advance (μ falls).
+Φ = (π, ν, μ, λ, δ, ρ), compared in that order:
+- **π**: the number of pending relay keys;
+- **ν**: the number of (side, recipient) pairs where the recipient has
+  not followed;
+- **μ**: the number of pairs where the side's key for the recipient is
+  not its current key;
+- **λ, δ, ρ**: as in 0.88.2.
 
-*Step 0.* π reaches 0 within `U` of `t_r`: one attempt is made at every
-unlock (A3), and the relay answers it (A2).
+**Why Φ only goes down.**
+- A pending key's second write raises ν and μ. But π falls in that same
+  write, so Φ still decreases.
+- Binding L ties the `ik` links to the follow, so δ and ρ rise only where
+  ν or λ falls.
+- S2's and N1's restarts happen only where μ or ν falls.
 
-*Step 1.* ν reaches 0 within 2`U` after the second write, or within one
-round if P has no epoch:
-- The update is let through by S1, and resent at each unlock.
-- While P has no epoch, P's reconnect carries the links (2.4).
-- Q follows them with their `ik` links (binding L), so λ also reaches 0 by
-  `t_r` + 3`U`, as in 0.88.2.
+**Step 0.** π reaches 0 within `U` of `t_r`. One attempt is made at each
+unlock (A3), and the relay answers (A2).
 
-*Step 2.* μ reaches 0. Every wait names what ends it:
+**Step 1.** ν reaches 0:
+- within 2`U` of the second write by the update;
+- within about 3`U` by the 2.4 path.
+
+λ reaches 0 by `t_r` + 3`U`.
+
+**Step 2.** μ reaches 0. Every wait names what ends it:
 
 | Wait | Ended by | Bound | Why no cycle |
 |---|---|---|---|
-| The update reaching Q | S1 lets it through; resent at each unlock. While **P** has no current epoch it is held, and P's reconnect carries the links instead (2.4) | `U`; with no epoch at P, one round | needs nothing from Q's acknowledgment |
-| Q following | rule U or 2.4, with binding L. The `ik` links can demote Q (strict F1); Q then acknowledges by the next row's (b) | one hop (2.4: at the reconnect's `hs.fin`) | needs nothing more from P |
-| Q's acknowledgment | (a) `relay.token.issued`, if Q has an epoch; (b) a demoted Q reconnects at once (no hold behind a rekey answer, 1.3), N1 restarts that reconnect if Q followed mid-reconnect, G2-H rule 1 makes the answer deliverable, and S2 advances at the verified `hs.fin` (rule 2); (c) a pending Q confirms on P's `hs.confirm` (N2), then (a) | one round + one hop / "The reconnect bound" | Q never waits for a message P holds for want of Q's acknowledgment |
-| P's reconnect on the revoked K token | not a try (2.5); P waits for the row above | the row above | the revocation is Q's own act of following |
-| P's held rekey `hs.fin` | S2's re-deposit; or dropped when Q's reconnect ends P's pending epoch; `B` from the queued write (N3) | one round / `B` | — |
-| P's entries held by S1 | S2's advance | above | every handshake message passes S1, or else is not needed (the held rekey `hs.fin`) |
-| P's entries needing a held K′ token | Q's `relay.token.issued` (the prompt, or rule U) | one hop after the advance | P starts no reconnect meanwhile (rule 3) |
-| Q's deposits to K's mailbox past the grace | held until the update (3.3) | as the first row | — |
-| S9 | waits a round (2.5) | 16 days | not a wait of the pair |
+| The update reaching Q | S1 lets it through, with resends. While P has no epoch, the 2.4 path carries the links instead | `U`; 2.4: three hops | needs nothing from Q's acknowledgment |
+| Q following | rule U or 2.4, with binding L. A demotion of Q by those links leads to row 3 (b) | one hop | needs nothing more from P |
+| Q's acknowledgment | (a) `relay.token.issued`, when Q has an epoch; (b) Q demoted: its reconnect runs at once (S-a, S-d), N1 restarts it if Q followed mid-reconnect, G2-H rule 1 delivers P's answer, and S2 advances at the verified `hs.fin`; (c) Q pending: N2 lets P's `hs.confirm` through, then (a) | one round plus a hop / "The reconnect bound" | Q never waits for a message P holds for want of Q's acknowledgment |
+| P's reconnect on a revoked K token | not a try (2.5); P waits for row 3, then restarts on a K′ token | row 3 | the revocation is Q's own follow |
+| P's held rekey messages | S2's re-deposit, or dropped by S-a and §6.3.1; `B` from the queued `hs.fin` (S-c) | one round / `B` | rekeys are not needed for progress under G1-N: each wait ends through a reconnect or S2 |
+| P's other entries held by S1 | S2's advance | above | — |
+| P's entries needing a held K′ token | Q's `relay.token.issued` (the prompt, or rule U) | one hop | P starts no reconnect meanwhile (rule 3, bounded) |
+| Q's refused deposits to K's mailbox | held until the follow (3.3 (b)) | rows 1 and 2 | — |
+| S9 | waits one round | 16 days | not a wait of the pair |
 
-*The bound.* Counted from P's second write `w`, the clock S1 uses:
-- **One side rotates.** The update takes ≤ `U` and Q's token ≤ `U`, so 2`U`.
-  With Q demoted: the update `U`, then a reconnect round of 4`U` whose
-  `hs.fin` advances S2 at its third hop, so about 4`U`. With P demoted
-  (2.4): one round plus a hop, about 5`U`. Worst case about 5`U`, which is
-  20 days at `U` = 4, inside 30.
-- **Both sides rotate `ik`s, and P's relay key.** Q may lack a current
-  epoch until 0.88.2's settling. That ends by `t_r` + 12`U`, then a hop for
-  the token: `t_r` + 13`U`. P's `w` can be as early as the first of these
-  rotations, so `w` + 13`U` or more, past 52 days at `U` = 4.
-- So S1's fixed 30 days cannot be shown to hold under A3 when both sides
-  rotate. That is 7.4.
+### The bound, counted from P's second write `w`
 
-*What still ends `stale`, visibly.*
+- **One side rotates.**
+  - Q has an epoch: 2`U`.
+  - Q is demoted: `U` for the update, then the reconnect's three hops to
+    the verified `hs.fin`, so about 4`U`.
+  - 2.4, when Q could not reach P: about 6`U`.
+  - The worst case, about 6`U` = 24 days at `U` = 4, is inside 30.
+- **Both sides rotate.** Q may have no current epoch until 0.88.2's
+  settling at `t_r` + 12`U`, and only then send its token: `t_r` + 13`U`.
+  P demoted at its second write needs Q to have rotated an `ik`, and adds
+  up to a round before its 2.4 reconnect runs. P's `w` can be as early as
+  the first of these rotations. So the wait from `w` is 52 days or more at
+  `U` = 4, past S1's 30.
+- **Hence 7.4.**
+
+### What still ends `stale`, visibly
+
 - 0.88.2's list;
-- S1's clock, as decided in 7.4;
+- S1's clock, as 7.4 decides it;
 - the gate's deadline;
 - G4's slow path, if the harness finds one.
 
 ---
 
-## 5. Other wait cycles with rotation on
+## 5. Other wait cycles with relay-key rotation on
 
-- **G3.** S1's list does not get past the cut-off. Covered by 2.2 (N1,
-  N2) or 2.3.
+- **G3.** S1's list does not get past the cut-off. Closed by 2.2 (or
+  2.3).
 - **G4: both sides rotate within one hop.**
-  - Q's `relay.token.issued` comes from Q's new mailbox, which P does not
-    know yet. Rule T defers it, then refuses it, and P's resend replaces it.
-  - Under G2-H, an authenticated handshake advances S2 even when the K′
-    tokens it carries have an `iss` P does not know. Rule 2 matches them
-    to Q by the connection.
-  - P cannot yet use such a token: rule T keeps it only once P has
-    followed Q's update. Q's update is let through by Q's own S1, so the
-    wait is one more hop. Argued as bounded; it is checked in the harness's
-    G4 mode.
-- **G5: S2's restart without a K′ reconnect token.** Kept, not restarted
-  (G2-H rules 4 and 6).
-- **G6, G7.** Section 1, fixed in 2.5 and 2.4.
+  - Q's `relay.token.issued` names an `iss` that P does not know yet. It is
+    deferred, then refused, and P's next resend replaces it.
+  - Under G2-H, an authenticated handshake still advances S2 (rule 2). P
+    can use the token only once rule T keeps it, that is, once P has
+    followed Q's own update, which goes out under Q's S1. That is one hop
+    more.
+  - Argued to be bounded; to be checked in the harness's G4 mode.
+- **G5: S2's restart without a K′ reconnect token.** The reconnect is
+  kept as it is, not restarted (rule 6).
+- **G6 and G7.** Closed by 2.5 and 2.4.
 - **H5 and the reconnect token's quota.**
-  - N1 adds at most one restart per followed relay link mid-reconnect.
-  - 2.5 removes the failed tries on revoked K tokens.
-  - *Unsure* about the effect on the rapid-rotation residual; the harness
-    counts it.
-- **The gate, rule U, H5.** No further cycle found. The gate ends at its
-  deadline (visibly). Rule U abandons no handshake except N1's restart,
-  which is Q's own. Binding L makes an update an `ik`-link carrier, which
-  0.88.2 already argues.
+  - N1 restarts on the update's fresh K′ reconnect token, so it adds
+    nothing to the rapid-rotation residual.
+  - 2.5 removes the failed tries on a revoked token.
+- **The gate, rule U and H5.** No other cycle found.
 
 ---
 
-## 6. The harness plan (internal)
+## 6. Harness plan (internal)
 
-**What exists.**
-- The vault code has no rotating side. `rotateIdentity` leaves the relay
-  key alone, a test pins A5, the `Relay` interface has no rotate, and the
-  receiving `hAddressUpdate` is pre-0.85.
-- The random-pair harness's modes: default, `R29RP_BURST`,
-  `R29RP_SHUFFLE`, `R29RP_REFRESH`, `R29RP_SPENT`, `R29RP_LOSTANS`, plus
-  `R29RP_TRACE` and `R29RP_REPEAT` for replay. None rotates a relay key.
-- The ~90 in 10,000 came from the trust model, `TRUSTMODEL_RELAYROT=1`, on
-  the vettid-vault branch `r29-oracle` (#207). Its S1 list is
-  `allowedWhileUnacked`, its Table A refuses an earlier key's `hs.confirm`
-  after the cut-off (G3), and its `mintPass` mints an `hs.resp`'s tokens
-  from P's current mailbox (G2-H rule 5).
+### What exists
 
-**Steps.**
+- **The vault code has no rotating side.**
+  - `rotateIdentity` leaves the relay key unchanged, and a test pins
+    assumption A5.
+  - `Relay` has no rotate call.
+  - `hAddressUpdate` is the receiving side from before 0.85.
+- **The random-pair harness has no relay-key mode.** Its modes are the
+  default, `R29RP_BURST`, `R29RP_SHUFFLE`, `R29RP_REFRESH`,
+  `R29RP_SPENT` and `R29RP_LOSTANS`, plus `R29RP_TRACE` and
+  `R29RP_REPEAT`.
+- **The ~90 in 10,000 come from the trust model.** That is
+  `TRUSTMODEL_RELAYROT=1` on vettid-vault branch `r29-oracle` (#207).
+  - Its S1 list is `allowedWhileUnacked`.
+  - Its Table A refuses an earlier key's `hs.confirm` after the cut-off
+    (G3).
+  - Its `mintPass` mints an `hs.resp`'s tokens from the current mailbox,
+    which is rule 5's question.
+  - *Unsure*: whether it models S-a to S-d. Its `startReconnect` paths
+    must match the shipped code.
+
+### Steps
+
 1. **The model first.**
-   - Classify the `stale` runs by mechanism: G1, G2, G3, G6, G7, the held
-     `hs.fin`, other.
-   - Put each fix behind its own switch: G2-H rules 1 to 6, N1 to N4,
-     G1-A parts 1 to 4 with the narrowing, 2.4, 2.5, binding L (with K9 at
-     the update), and the Q-side hold.
-   - Model the shipped reading that a rekey answer holds no reconnect.
-   - Run `TRUSTMODEL_RELAYROT=1`, with and without ROTBURST, at 10,000
-     runs, then 100,000.
-   - The old-copy actor must break I3 with binding L off, and hold with it
-     on.
-   - Add a device-pair config (1.5).
-2. **The real code on a branch that is not merged.**
-   - The rotating side, rule U with binding L, Table A's earlier rows,
-     G2-H, G1-N, 2.4, 2.5 and the hold.
-   - The stub relay needs: rotate (idempotent with the same key), the grace
-     with collects from both mailboxes, tombstones, `mailbox_unknown`
-     after the grace, §5.3 step 7, and **the denylist**. Without the
-     denylist rule U's revocation and G6 cannot show.
-3. **Mode `R29RP_RELAYROT`.**
-   - Rotations on all three paths, plus the decoupled ones (a gate-owed
-     key, K2 after a pending key).
-   - Crashes at C1, C2, C2′, CR and CF.
-   - Locks around the grace; P demoted at its second write (G7).
-   - A G4 sub-mode: both sides rotate within one hop, including K′ tokens
-     with an unknown `iss`.
-   - Oracles: I1 extended (ν = μ = 0, nothing held by S1); I2; I5; I3-lite
-     (nothing from an earlier key after its cut-off is accepted beyond N2
-     or part 2, and never after Q accepted from the newer key); no S9 feed
-     item in an honest run; counters of S2 advances by kind, reconnect-token
-     deposits per rotation, and `w` to μ = 0 against S1's clock.
-4. **The bar.** 0 honest runs `stale`, diverged or suspended outside
-   accepted residuals, at 10,000 runs per mode, for `R29RP_RELAYROT`
-   crossed with every existing mode, and every mode without it. Counted
-   from the `-v` class table and the counters (`-test.v` for a prebuilt
-   binary); a PASS exit status is not enough. Every new oracle is first
-   shown to fire.
+   - Classify the `stale` runs by mechanism: G1, G2, G3, G6, G7, other.
+   - Add each fix behind its own switch:
+     - G2-H rules 0 to 6;
+     - S-a to S-d;
+     - N1 and N2;
+     - G1-A, with its narrowing;
+     - 2.4, with both `hs.init` and `hs.resp`;
+     - 2.5;
+     - binding L, with K9 run on the update and on a duplicate update;
+     - 3.3 (a) and (b).
+   - Run it with `TRUSTMODEL_RELAYROT=1`, with and without ROTBURST, at
+     10,000 runs and then at 100,000.
+   - The old-copy actor must break I3 with binding L off.
+   - Add a device-pair configuration.
+2. **The real code, on a branch that is not merged.**
+   - Build the rotating side, rule U with binding L, Table A's
+     earlier-key rows, G2-H, G1-N, 2.4, 2.5 and the hold.
+   - The stub relay needs:
+     - a rotate that is idempotent when repeated with the same key;
+     - the grace, with collects from both mailboxes;
+     - tombstones;
+     - `mailbox_unknown` after the grace;
+     - the step-7 check of RELAY-PROTOCOL §5.3;
+     - the denylist.
+3. **A new mode, `R29RP_RELAYROT`.**
+   - **What it rotates.** All three paths, and the decoupled keys.
+   - **Crashes.** At C1, C2, C3, C2′, CR and CF.
+   - **Schedules.**
+     - locks around the grace;
+     - P demoted at its second write (G7);
+     - Q followed at each point of a reconnect (G3's three cases);
+     - a G4 sub-mode with an unknown `iss`.
+   - **Oracles.**
+     - I1 extended (ν = μ = 0, and nothing held by S1);
+     - I2 and I5;
+     - an I3-lite: nothing from an earlier key after its cut-off beyond
+       N2 or 2.4, and nothing after Q has accepted a message from the
+       newer key;
+     - **S2 never advances before Q's follow write**;
+     - no S9 feed item in an honest run;
+     - grace loss: every deposit the relay accepted is collected or told.
+   - **Counters.**
+     - S2 advances, by kind;
+     - reconnect-token deposits per rotation;
+     - the time from `w` to μ = 0, compared with S1's clock.
+4. **The bar.**
+   - 0 honest runs that end `stale`, diverged or suspended outside the
+     accepted residuals, at 10,000 runs per mode.
+   - The modes: `R29RP_RELAYROT` crossed with every existing mode, and
+     every existing mode without it.
+   - Counted from the `-v` class table and the counters (`-test.v` for a
+     prebuilt binary), never from a PASS.
+   - Each new oracle is shown to fire before its zero is reported.
 5. **Likely residuals.**
-   - S1's clock, per 7.4.
-   - A recipient away beyond it.
-   - G4, if it fails.
-   - The rapid-rotation rate, measured again.
-   - The decoupled-rotation copy (2.3, narrower under G1-N).
-   - The C2 deposits P never collected, unless 7.6 a is taken.
-   - The 30-day hold when `connection.removed` is lost.
+   - S1's clock, per 7.4;
+   - a recipient away beyond it;
+   - G4, if it fails;
+   - the rapid-rotation rate, measured again;
+   - the decoupled-rotation copy;
+   - grace loss outside A3, without (c);
+   - the hold's 30 days when a `connection.removed` is lost.
 
 ---
 
-## 7. Owner questions
+## 7. Owner questions (final)
 
-Each has choices of 24 characters or fewer, what each costs, and a
-recommendation.
+Each question gives its choices (24 characters or fewer), what each
+costs, and a recommendation.
 
-**7.1 How P learns that Q followed. This re-decides "gap 1" (2026-11-05).**
-- a = `hybrid: advance on auth`
-  - S2 also advances on a token from Q in an authenticated handshake
-    (G2-H).
+### 7.1 How P learns that Q followed (re-decides "gap 1", 2026-11-05)
+
+- **a = `hybrid: advance on auth`** (G2-H)
+  - S2 also advances on Q's token inside an authenticated handshake.
   - Cost: "Nothing else counts" becomes "nothing unauthenticated counts".
-    The bar is an authenticated handshake with Q.
-- b = `signal unchanged + G2-B`
-  - Only the deposit key of carried-token messages changes.
-  - Cost: P's other traffic waits one more hop, for Q's prompt.
-- Recommendation: **a**. **b** is acceptable if gap 1 is to stand as
-  decided.
+    Gap 1's reason (authentication, and a K′ token) is kept.
+- **b = `signal unchanged + G2-B`**
+  - Only the deposit key of messages on carried tokens changes.
+  - Cost: P's other traffic waits one more hop. G2-B on its own still
+    deposits with a key Q has not yet confirmed to P, which re-decides
+    part of O1a's premise. A held pending `hs.confirm` then still needs
+    N2.
+- **Recommendation: a.**
 
-**7.2 What passes Q's cut-off. This reverses O1a (#536) for the messages
-named.**
-- a = `hs.confirm + Q restart` (G1-N)
-  - Cost: one more reconnect deposit per followed link mid-reconnect. One
-    rare order waits one try.
-- b = `signed hs msgs pass` (G1-A)
-  - Cost: a larger Table A change, and the wider decoupled-copy residual
-    (2.3).
-- c = `nothing passes`
-  - Cost: G3 stays; a pending Q ends `stale` at `B`.
-- Recommendation: **a**. The shipped no-hold makes G1-A's extra reach
-  unnecessary.
+### 7.2 What passes Q's cut-off (reverses #536 O1a for what is named)
 
-**7.3 Binding the `ik` to the relay link.**
-- a = `ik links in the update` (binding L)
-  - Cost: the update's handler runs the identity path.
-- b = `ik in the relay link` (binding R)
-  - Cost: a new signed format and vectors, and the links are not
-    delivered.
-- Recommendation: **a**.
+- **a = `hs.confirm + Q restart`** (G1-N)
+  - Cost: one Table A cell for `hs.confirm`, and N1.
+  - No rapid-rotation cost.
+- **b = `signed hs msgs pass`** (G1-A)
+  - Cost: a wider Table A change.
+  - A wider copy residual in the decoupled rotations.
+- **c = `nothing passes`**
+  - Cost: G3 stays, and a pending Q ends `stale` at `B`.
+- **Recommendation: a.**
 
-**7.4 S1's 30 days against the convergence bound (past 52 days when both
-sides rotate).**
-- a = `pause S1 on Q evidence`
+### 7.3 Binding the `ik` to the relay link
+
+- **a = `ik links in the update`** (binding L)
+  - Cost: the update's handler runs the identity path, K9 included.
+- **b = `ik in the relay link`** (binding R)
+  - Cost: a new signed format and test vectors.
+  - It does not deliver the links.
+- **Recommendation: a.**
+
+### 7.4 S1's 30 days against the convergence bound (52 days or more when both sides rotate)
+
+- **a = `pause S1 on Q evidence`**
   - S1's clock does not run while P has accepted an authenticated message
-    from Q (a verified handshake message, or a session message under an
-    epoch) within the last 16 days.
-  - Hard cap: 60 days after the second write.
-  - Cost: an active Q that never follows is ended at most at 60 days
-    instead of 30. An absent Q is still ended at 30. The kept old key
-    costs nothing against a copy, which has it.
-- b = `S1 of 60 days`
-  - Cost: every unreached recipient is ended twice as late.
-- c = `tighten A3`
-  - Cost: with `U` ≤ 2 days, a member who stays locked 2 to 4 days can see
-    connections end.
-- Recommendation: **a**. These are member-facing numbers, so the owner
-  sets the 16 and the 60.
+    from Q within the last 16 days, capped at 60 days after the second
+    write.
+  - Cost: an active Q that never follows is ended at 60 days instead of
+    30. An absent Q is still ended at 30.
+- **b = `S1 of 60 days`**
+  - Cost: every recipient that cannot be reached is ended twice as late.
+- **c = `tighten A3`**
+  - Assume `U` ≤ 2 days.
+  - Cost: members who stay locked for 2 to 4 days lose connections.
+- **Recommendation: a.** The 16 and the 60 are member-facing numbers, so
+  they are the owner's to set.
 
-**7.5 P has no current epoch at its second write (G7).**
-- a = `links in P's reconnect` (2.4)
-  - Cost: Table A's sender check gives way to linked keys; one more field
-    in the `hs.init`.
-- b = `grace while unacked`
-  - Cost: an old copy keeps the live old mailbox until every recipient
-    acknowledges, at every rotation. It is a relay protocol change.
-- c = `accept as residual`
-  - Cost: a demoted P that rotates can lose connections, which end
-    `stale`.
-- Recommendation: **a**.
+### 7.5 Reaching Q when the old mailbox cannot (G7, and the answer past the grace)
 
-**7.6 Deposits into the old mailbox (a crash before the second write,
-then a long lock).**
-- a = `Q holds, P tells cutoff`
-  - The Q-side hold, plus `old_collected_to`, so lost deposits are told
-    (3.3).
-  - Cost: a new field, and up to 30 days of held messages if a
-    `connection.removed` is lost.
-- b = `Q holds only`
-  - Cost: the C2 deposits are lost silently, against the rule that no
-    loss is silent.
-- c = `grace of 14 days`
-  - Cost: an old copy holds the old mailbox twice as long. G7 is not
-    covered either.
-- Recommendation: **a**.
+- **a = `links in reconnects`** (2.4)
+  - Cost: changes to §6.2 and §6.3, to Table A's preamble and to rule T.
+  - It removes a limit §6.6 states.
+- **b = `grace while unacked`**
+  - The relay keeps the old mailbox until every recipient acknowledges.
+  - Cost: an old copy keeps the live mailbox that long, at every
+    rotation.
+  - It changes the relay protocol.
+- **c = `accept as residual`**
+  - Cost: a P that is demoted, or that is reached only past the grace,
+    loses the connection, which ends `stale`.
+- **Recommendation: a.**
 
-**7.7 S9 and the failed try during S1 (G6).**
-- a = `S9 after 16 days`
-  - S9 waits one round, and a revoked K reconnect token is no failed try.
+### 7.6 Deposits that the old mailbox loses at its end
+
+- **a = `grace 14 d + Q hold`**
+  - Cost: an old copy keeps the old mailbox twice as long.
+  - A deleted peer whose `connection.removed` is lost shows 30 days of
+    silence instead of "not delivered".
+  - Complete within A3.
+- **b = `Q hold + collected-to`**
+  - Cost: a new field.
+  - P persists its collected-to times, and Q logs every deposit the relay
+    accepted.
+  - Exactness under clock skew is *unsure*.
+- **c = `Q hold only`**
+  - Cost: deposits the relay accepted are lost silently. That breaks the
+    "no silent failures" rule.
+- **Recommendation: a.** The grace is a relay configuration value.
+
+### 7.7 S9 and the failed try during S1 (G6)
+
+- **a = `S9 after 16 days`**, and no failed try.
   - Cost: a real fork is shown up to two weeks later.
-- b = `S9 at 24 h, no try`
-  - Only the failed try is fixed.
+- **b = `S9 at 24 h, no try`**
   - Cost: an honest false "old copy" alarm whenever Q is demoted.
-- c = `S9 off during S1`
-  - Cost: forks are seen only through S1's stale.
-- Recommendation: **a**.
+- **c = `S9 off during S1`**
+  - Cost: forks are seen only through S1's `stale`.
+- **Recommendation: a.**
 
-**7.8 Does an open answer to P's rekey hold Q's reconnect? The shipped
-vault says no; the spec text is ambiguous.**
-- a = `no hold (as shipped)`
-  - Write the shipped behaviour into §6.6.
-  - Cost: none; G1 then exits through Q's reconnect.
-- b = `hold (change the code)`
-  - Cost: changes shipped release-29 behaviour, and needs G1-A or G1-C for
-    G1.
-- Recommendation: **a**.
+### 7.8 Write the shipped release-29 behaviour into the spec (S-a to S-d), amending Rule J and §6.5's crossing sentence
 
-**7.9 How to meet "search on the real code".**
-- a = `model, then code branch`
-  - Cost: the model's switches first.
-- b = `code branch only`
-  - Cost: slower attribution.
-- Recommendation: **a**. The real code has no rotating side to search yet.
+- **a = `spec follows shipped`**
+  - Cost: two amended sentences. No code change.
+  - Without it, G1 cycles about half the time under the text.
+- **b = `code follows the spec`**
+  - Cost: changes shipped behaviour.
+  - G1 then needs G1-A, plus a crossing rule.
+- **Recommendation: a.**
 
-**7.10 0.88.2's `hs.confirm` paragraph, which is wrong after the cut-off
-(G3).**
-- a = `fix in the redesign PR`
-  - Cost: none in release 29 (A5).
-- b = `erratum now`
+### 7.9 How to meet "search on the real code"
+
+- **a = `model, then code branch`**
+  - Cost: the model's switches come first.
+- **b = `code branch only`**
+  - Cost: attribution is slower.
+- **Recommendation: a.**
+
+### 7.10 0.88.2's `hs.confirm` paragraph (wrong after the cut-off)
+
+- **a = `fix in the redesign PR`**
+  - Cost: none for release 29.
+- **b = `erratum now`**
   - Cost: a spec round.
-- Recommendation: **a**.
+- **Recommendation: a.**
