@@ -33,10 +33,11 @@ changelog:
     `hs.init` and `hs.resp` carry the links toward every peer (0.87.0
     S8, as vettid-vault builds it), not "only toward a peer that has
     advertised `features`", which was the 0.86.3 text left in place
-    when 0.87.0 changed S8. §6.5: a side also starts no rekey while its
-    own rekey `hs.init` awaits `hs.resp` (at most the handshake's
-    lifetime, §6.3.1), as vettid-vault builds it. No change for a
-    vault, an app or a service.
+    when 0.87.0 changed S8. §6.5 and §3.4.1 S5: a side also starts no
+    rekey while its own rekey `hs.init` awaits `hs.resp` (at most the
+    handshake's lifetime, §6.3.1; not one kept only as a replaced
+    line's record), as vettid-vault builds it; service-vault's block
+    is wider. No change for a vault, an app or a service.
   - 0.89.0: 2026-11-12, **approval documents** (owner decision
     2026-11-02, GC #1551 "a, then plan b"; task GC #1556). §10.4
     "Approval documents": an `approval` challenge from a service MAY
@@ -5282,7 +5283,8 @@ each recipient Q).
   than 1 hour after P's first `identity.rotate` to Q; at most 3 times per
   peer per rotation, and at most once per hour. At any time (§6.5) P
   starts no rekey with a peer while one of its answers to that peer still
-  awaits `hs.fin` or while its own epoch with it is pending (§6.3.1). This
+  awaits `hs.fin`, while its own epoch with it is pending (§6.3.1), or
+  (0.89.1) while its own rekey `hs.init` to it awaits `hs.resp`. This
   does not override §6.6 "After a restore" (a restored side issues no
   `identity.rotate` until its reconnects are settled).
 - **S6, first contacts** (owner decision 2026-11-05, "gap 2"). In the
@@ -8876,9 +8878,10 @@ two reconnects between a service and a member (§6.6). A
 crossing handshake a side cannot answer is acked and dropped.
 A side starts no rekey with a
 peer while one of its answers to that peer awaits `hs.fin`, while its
-own new epoch awaits confirmation, or (0.89.1, as vettid-vault builds
-it) while its own rekey `hs.init` to that peer awaits `hs.resp`, which
-lasts at most the handshake's lifetime (§6.3.1 "Lifetimes"; S5 in
+own new epoch awaits confirmation, or (0.89.1) while its own rekey
+`hs.init` to that peer awaits `hs.resp` (at most the handshake's
+lifetime, §6.3.1 "Lifetimes"; not a rekey kept only as a replaced
+line's record, §6.6 "Fork detection"). A side MAY be stricter (S5 in
 general).
 
 Reaching the limit does not stop sending: both sides keep sending in the

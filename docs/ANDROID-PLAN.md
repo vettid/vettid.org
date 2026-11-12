@@ -2808,9 +2808,11 @@ as drafts (VAULT-LOCK L16) and are final with #127 merged.*
   `relay.token.refresh`, its token renewals and its own
   `relay.token.refresh`, `hs.confirm`, `device.features`, a pairing's
   `hs.fin`) waits until the lock ends. Nothing the vault sends is taken
-  into the app; the session's own handshake and token messages are
-  still processed, among them the `hs.fin` of the rekey the phone
-  answered, which makes the new epoch current. An unlock is allowed
+  into the app; the session's own messages (handshakes, tokens,
+  `identity.rotate`, `device.paired`) are still processed, among them
+  the `hs.fin` of the rekey the phone answered, which makes the new
+  epoch current, and what processing them would send waits as above,
+  the rekey's `hs.resp` aside. An unlock is allowed
   and, when it succeeds, ends the pending lock.
 - **Retries:** after 1, 2, 5, 10 s, four times 30 s, then every 60 s,
   through the member API, within the route's limit, while the app's
