@@ -6889,8 +6889,9 @@ the same bytes (RK5).
   checked before, against the `ik` they would lead to (RK10).
 - **The `ik` requirement.** Q follows the update's relay links, and keeps
   its tokens by rule U and rule T, only if one of these holds:
-  - after those identity links are applied, the chain from the update's
-    `ik` ends at Q's current `ik` for P;
+  - with those identity links taken as followed (0.90.6: they are
+    applied only once the update is to be followed, RK10), the chain
+    from the update's `ik` ends at Q's current `ik` for P;
   - the update's `ik` is Q's current `ik` for P.
 
   Otherwise, or if Table B refuses any of the links, Q follows no relay
