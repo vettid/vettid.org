@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.71
+version: 0.1.72
 date: 2026-11-12
 changelog:
+  - 0.1.72: erratum, 2026-11-12 (ANDROID-PLAN 0.1.128, VAULT-MESSAGING 0.90.4 §9.1 "A device collects before it deposits"; owner decision GC #9565 "b"). New §4.19: the iPhone follows ANDROID-PLAN §4 "Collect before sending to the vault": it deposits to its vault only after a catch-up pass (long-poll collects until an empty answer, any `relay.address.update` followed) since its launch, each return from the background and each reconnect, with a successful collect less than 24 hours old (`ContinuousClock`); the relay copy of `vault.lock` alone goes at once; a pass that cannot complete holds the deposits and shows ANDROID-PLAN's "Waiting for your vault" (NEW, for wording approval). §6.6: the pass is made by long poll before the WebSocket opens; the send on leaving needs no new pass while the socket was open.
   - 0.1.71: 2026-11-12 (ANDROID-PLAN 0.1.127, VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4.18 "Relay-key rotation texts": the iPhone shows ANDROID-PLAN §4 "Relay-key rotation texts", owner-approved 2026-11-12, in the same places and with the same texts.
   - 0.1.70: erratum, 2026-11-12 (ANDROID-PLAN 0.1.126; owner decision a, GC #9050). The iPhone follows ANDROID-PLAN §4 "Locking the vault", "While pending": besides the lock and a pending `call.end`, the phone's `hs.resp` to a rekey the vault started goes while a lock is pending; everything else it would send waits until the lock ends; the rekey's `hs.fin` is still processed. Built in GC #8918's work.
   - 0.1.69: erratum, 2026-11-11 (ANDROID-PLAN 0.1.125; owner decision a, GC #8641). §4.17 takes ANDROID-PLAN's texts, now including the four refusal reasons of their own (never the unlock's error text); its reference reads 0.1.124 and 0.1.125.
@@ -1945,6 +1946,35 @@ relay keys (VAULT-MESSAGING 0.90.0 §3.4.2).
   the vault's follow, §3.4.2 RK14): `message.delivery_unconfirmed`, its
   approved text of §8.3, unchanged.
 
+### 4.19 Collect before sending to the vault (0.1.72)
+
+The iPhone follows ANDROID-PLAN §4 "Collect before sending to the vault"
+(0.1.128; VAULT-MESSAGING 0.90.4 §9.1, owner decision GC #9565 "b").
+ANDROID-PLAN governs, and the two must stay the same. On the iPhone:
+
+- **The pass** is made at the launch, at each return from the
+  background (the scene becoming active after `didEnterBackground`),
+  and before each WebSocket connect and reconnect in VettIDRelay, by
+  long poll (`GET /v1/mailbox`, `wait=0` while a deposit waits) until an
+  empty answer, a `relay.address.update` in it followed or refused
+  before it ends.
+- **A recent collect**: the latest successful collect ended less than 24
+  hours ago (a long poll's answer, processed, or a message or a pong
+  received on the open WebSocket), measured on `ContinuousClock`
+  (counts time asleep), in real time, not divided by `time_scale`.
+- **The gate** sits in `VettIDVault` in front of every deposit to the
+  vault; the relay copy of `vault.lock` alone bypasses it, and the lock
+  stays pending until confirmed as on Android. A pending lock follows
+  an update and holds its `relay.token.issued` as ANDROID-PLAN §4
+  "Locking the vault" says.
+- **Waiting**: the same notice and texts as Android ("Waiting for your
+  vault", NEW, for wording approval with the app PRs), the same
+  "Sending" per message, the same path for a definite failure on the
+  phone's own mailbox.
+- **Calls**: none on the iPhone yet; when they come, as Android.
+- **Tests**: as ANDROID-PLAN lists, with the return from the background
+  in place of the foreground.
+
 ## 5. Architecture
 
 One Xcode project (`VettID.xcodeproj`) with the app target and local
@@ -2433,10 +2463,14 @@ iOS has no foreground service and suspends the app within seconds of
 leaving the screen.
 
 - **While open**: the relay WebSocket collects (VettIDRelay), as the
-  Android app does in the foreground.
+  Android app does in the foreground. (0.1.72) Before it opens, at the
+  launch, a return and a reconnect, the app makes the catch-up pass of
+  §4.19 by long poll.
 - **On leaving**: `beginBackgroundTask` to finish what is in flight
   (persist then ack, §8.3; a lock request; an outbox send), then close
-  the socket. Nothing assumes it ran longer; remove every feed item
+  the socket. (0.1.72) An outbox send then needs no new pass while the
+  socket was open; one that still waits on a pass (§4.19) stays in the
+  outbox for the next return. Nothing assumes it ran longer; remove every feed item
   notification (§6.7).
 - **Lock and app lock**: the app-lock timeout counts from the moment
   the scene went to the background, read on return; the vault's own
