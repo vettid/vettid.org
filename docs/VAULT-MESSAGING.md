@@ -7,6 +7,7 @@ owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
   - RELAY-PROTOCOL.md (0.11.1)
+  - VAULT-SERVICE-CONTRACT.md (1.0.0), VAULT-SERVICE-INDEPENDENCE.md (0.2.1)
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md (0.2.2)
@@ -16070,9 +16071,11 @@ The **profile object** holds the extras' display name and photo. Sent by
     (0.87.0) advertised only: no rule depends on it except the notice of
     §6.3.1 "An app from before release 29").
   A person connection is sent no other name. Names are only ever added,
-  except `vote` and (0.89.0) `approval_document` as a service sees them:
-  a service keeps the last `features` from each connection, and a later
-  update that leaves either out removes it (after a rollback, or a move
+  except `vote` and (0.89.0) `approval_document` on a member vault's
+  connection to a service, as the service reads them: it keeps the last
+  `features` from each connection, and a later
+  update that leaves either out removes it (from `profile.update` only,
+  0.90.10, below; after a rollback, or a move
   to an image without it). A vault reads only `relay_follow` and
   `hs_confirm` from any connection, person or service, and keeps each
   once seen (a later update without it does not remove it, §3.4.1 "The
@@ -16105,28 +16108,35 @@ The **profile object** holds the extras' display name and photo. Sent by
   VAULT-SERVICE-INDEPENDENCE R2). Every `profile.update` a member vault
   sends to a connection whose `peer_kind` is `"service"`, and every
   `profile.update` a service sends, carries `contract`: the
-  **major.minor** of VAULT-SERVICE-CONTRACT the sender implements, two
-  decimal numbers without leading zeros (`0|[1-9][0-9]{0,3}`) joined by
-  `.` (for example `"1.0"`), compared number by number (`"1.10"` is
-  later than `"1.9"`). It is a constant of the sender's image or release
+  **major.minor** of VAULT-SERVICE-CONTRACT the sender implements, a
+  JSON **string** of two decimal numbers without leading zeros
+  (`0|[1-9][0-9]{0,3}`) joined by `.` (for example `"1.0"`), compared
+  number by number (`"1.10"` is later than `"1.9"`). It is a constant of the sender's image or release
   (for a vault, measured with the image like §11.10.9's list; never the
   channel file). A person connection is never sent it, and a vault
   ignores it from one.
-  - **It is informational:** it serves VAULT-SERVICE-CONTRACT §4 only,
-    never selects behavior, and never relaxes a check
-    (VAULT-SERVICE-CONTRACT §5.2).
-  - **Receiving.** A value that is not of that form is ignored as if
-    absent: the update itself is kept (it is not `drop.profile_malformed`
-    and fails no strict parse). The receiver keeps the value of the
-    update it applies (step 4 below); an update it ignores or drops
-    changes nothing; an applied update without `contract` clears the
-    kept value (the peer may have rolled back). A receiver that does not
-    know the member ignores it (§10.1). An absent value means a peer
-    before contract 1.0.
+  - **It is informational:** contract 1.0 only records it. It serves
+    VAULT-SERVICE-CONTRACT §4's support table, never selects behavior,
+    never relaxes a check (VAULT-SERVICE-CONTRACT §5.2), and nothing
+    holds or refuses a connection by it.
+  - **Receiving.** A value of any other JSON type or form is ignored as
+    if absent: the update itself is kept (it is not
+    `drop.profile_malformed` and fails no strict parse). The receiver
+    keeps the value of the update it applies (step 4 below) as **the
+    last claimed**; an update it ignores or drops changes nothing; an
+    applied update without `contract` clears it. It may be stale: a
+    peer rolled back to a release from before `contract` sends no update
+    that clears it. A receiver that does not know the member ignores it
+    (§10.1). An absent value means a peer before contract 1.0.
   - **Sending.** The vault keeps, as state, the value it last sent to
     each service connection, and sends an update with the next `version`
-    (trigger 5 above) at the first unlock under an image whose value
-    differs, retried with the connection's other messages (§8.6). A
+    (trigger 5 above) to each **active** service connection at the first
+    unlock under an image whose value differs (a value never sent, as at
+    the first such image, differs), retried with the connection's other
+    messages (§8.6); a change that falls at the same unlock as trigger 4
+    goes in the same update. That state is additive: a reader that does
+    not know it ignores it, and it is never a reason for
+    `state_unreadable` (§3.3). A
     service does the same: it keeps the value it last sent to each
     connection, and sends an update with that connection's next
     `version` at its first start under a release whose value differs,
