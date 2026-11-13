@@ -1,7 +1,7 @@
 ---
 title: STAGING-TIME-SCALE
 status: draft, approved by the owner 2026-10-18
-version: 0.1.7
+version: 0.1.8
 date: 2026-11-12
 owner: Al Liebl (Mesmer)
 component: vault (enclave, release constants), member API, apps (Android, iOS), dev stack
@@ -14,6 +14,7 @@ related:
   - VAULT-LOCK.md (0.1.2) (the idle lock), AGENT-PLAN.md (0.1.6) (the dev stack's held-vault test)
   - vettid-vault `main` f0976ee (read only: `enclave/releasecfg/*.json`, `releasecfg.go` and the timer constants)
 changelog:
+  - 0.1.8: VAULT-MESSAGING 0.90.2. New N17: the telling's waits after a relay-key rotation stay real time (the vault's 13 days from its anchor before it ends its old mailbox's collects, never before its second write, the 60-day keep after each `201`, the 60-day re-deposit cutoff after the first telling, the pin and its `message.delivery_unconfirmed` deadline 60 days after a follow, and the 76-day dedupe, on the vault's clock from its telling's `201`), since they are tied to the relay's grace. S19 and S22 point to it; S22 keeps the hold and RK6's and RK10's 60-day waits, which are scaled. Values change on staging: the pin and its deadline, scaled under 0.1.7, now stay real time.
   - 0.1.7: VAULT-MESSAGING 0.90.0 (owner decisions 2026-11-12). S21: S1's 60-day cap for relay-key rotation between vaults (§3.4.2 RK13). S22: the 60-day hold of deposits refused `mailbox_unknown` (§3.4.2 RK14). Both are the vault's own waits and are divided by `time_scale`. S22 also covers the 60-day waits of RK6 and RK10 for a side not in its own S1, and the telling's 60 days after a follow. RK13's 16-day window and the telling's rolling 60-day keeping window after each `201` follow the relay's times and stay real time.
   - 0.1.6: VAULT-MESSAGING 0.85.4. S18–S20: the relay-key gate's 30-day deadline and §3.4.1 S1's 30 days before an unfollowed recipient goes `stale` (the vault's, and a device's for its own key) are a party's own waits and are divided by `time_scale` (30 h at 24)
   - 0.1.5: VAULT-MESSAGING 0.82.0 (owner decision 2026-11-01). N16: an
@@ -109,10 +110,10 @@ value at `time_scale` 24.
 | S16 | Vault update banner dismissed | app | ANDROID-PLAN 0.1.19 | at most 24 h | at most 1 h |
 | S17 | Wallet spend cap period (VAULT-MESSAGING 0.56.0; proposed, for the owner's approval) | vault | §10.18 "Spend caps" | rolling 24 h | rolling 1 h; the ledger keeps absolute times |
 | S18 | Relay-key gate deadline: the vault rotates without the recipients still not advertising `relay_follow` (VAULT-MESSAGING 0.85.4) | vault | §3.4.1 "The gate" | 30 days after the owed mark was set | 30 h |
-| S19 | A recipient that has not followed the vault's new relay key becomes `stale` (VAULT-MESSAGING 0.85.0) | vault | §3.4.1 S1 | 30 days after the second write | 30 h; the relay's grace and the tokens' lives stay real time (N6, N7) |
+| S19 | A recipient that has not followed the vault's new relay key becomes `stale` (VAULT-MESSAGING 0.85.0) | vault | §3.4.1 S1 | 30 days after the second write | 30 h; the relay's grace and the tokens' lives stay real time (N6, N7), and so do the telling's waits (N17) |
 | S20 | A device that rotated its own relay key: its vault, if it has not followed, becomes `stale` for the device (VAULT-MESSAGING 0.85.0) | app (Android, iOS), desktop, agent | §3.4.1 S1 | 30 days after the device's second write | 30 h |
 | S21 | Between vaults, S1's cap: a recipient that has not acknowledged becomes `stale` at the latest (VAULT-MESSAGING 0.90.0) | vault | §3.4.2 RK13 | 60 days after the second write (S19's 30 days pause on the peer's authenticated messages within 16 days, which stay real time) | 60 h |
-| S22 | The hold of deposits refused `mailbox_unknown` ends, `message.not_delivered` (VAULT-MESSAGING 0.90.0) | vault | §3.4.2 RK14 | 60 days after the first refusal | 60 h; also the telling's 60 days after a follow, and RK6's and RK10's 60-day waits for a side not in its own S1 (§3.4.2 RK13, RK14). The telling's rolling 60-day keeping window after each `201` stays real time |
+| S22 | The hold of deposits refused `mailbox_unknown` ends, `message.not_delivered` (VAULT-MESSAGING 0.90.0, 0.90.2) | vault | §3.4.2 RK14 | 60 days after the first refusal | 60 h; also RK6's and RK10's 60-day waits for a side not in its own S1 (§3.4.2 RK13, RK14). The telling's waits stay real time (N17) |
 
 Already short on staging and left as is: the **recovery waits** `W(k)`
 (§11.14.6), whose unit `recovery_wait_unit_seconds` is 86,400 in
@@ -139,6 +140,7 @@ scale does not divide it again (§6 T6).
 | N14 | Calls: busy for at most 12 h; ICE credentials 6 h | vault, calling service | as listed | The calling service's credentials are real time |
 | N15 | Push: blobs 90 days, renewal after 30 days, retired gateway keys 400 days | vault, gateway | as listed | The gateway's lifetimes |
 | N16 | Approval challenge life (0.82.0; the challenger's `exp`, and the receiver's cap of 24 h) | service-vault (challenger), vault (receiver) | `exp` up to 24 h; the cap is 24 h | Consistent with T4 (nothing between vaults is scaled). Service-vault has no `time_scale`; on staging the ServiceVault-staging deployment config sets its approval TTL (`SV_APPROVAL_TTL`) to at most 1 h, and service-vault refuses a longer value when it runs on the staging channel, so `exp` is short. The receiver's 24 h is a bound, not a wait. Staging to production gives at most 1 h; production to staging can hold a place up to 24 h, accepted |
+| N17 | The telling after a relay-key rotation (VAULT-MESSAGING 0.90.2, §3.4.2 RK14): a vault ends its collects of its old mailbox 13 days after its anchor (the start of its first rotate attempt away from that mailbox not refused with the relay's own `400` or `401`; the relay's 14-day grace less a day), and never before its second write; a sender keeps each deposit 60 days after its `201`, and deposits a pinned entry again only within 60 days of the first telling that covered it; a followed mailbox's entries are pinned until its `relay.mailbox.closed` or 60 days after the follow, and then told `message.delivery_unconfirmed`; the vault's dedupe of its old mailbox lasts 76 days on the vault's clock from its telling's `201` | vault | as listed | They are tied to the relay's 14-day grace and message retention, which are real time (N6). Scaled, the pin would end long before the telling could come |
 
 Shorter than an hour, and so never scaled: per-minute rate limits, the
 10-minute request windows and 5-minute approvals of access sessions, the
