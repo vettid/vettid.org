@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.2
+version: 0.90.4
 date: 2026-11-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,28 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.4: 2026-11-12, **erratum to §3.4.1 Strict F1: links applied at
+    `hs.fin`** (owner decision 2026-11-12). The links that a rekey or
+    reconnect `hs.init` carries, applied at its verified `hs.fin`, now
+    run Strict F1. E is the epoch the rekey's `hs.init` traveled under
+    (Q records it with its answer), or the epoch the reconnect named, as
+    a refused reconnect's links already did. x is the `hs.fin`. Before,
+    they ran only "Epochs after an `ik` link". An old copy of P could
+    set up an epoch with Q, signed by the link's `old_ik` and
+    established before x: between Q's `hs.resp` and P's `hs.fin`, or,
+    for a rekey naming the confirmed epoch while it was not current,
+    before the `hs.init`. That epoch was not demoted, and P's later
+    `identity.rotate` was ignored as already followed. Q went on
+    accepting the copy's messages under the epoch, against invariant
+    I3's last clause. Now the epoch is demoted, or Q suspends if its
+    received flag is set. Under rule E, Strict F1 runs first and rule E
+    then destroys the epoch. A rekey answer recorded before this version
+    (without its carrying epoch) runs no Strict F1. A reconnect's named
+    epoch was always recorded. The links of an `hs.resp` are unchanged:
+    the epoch Q's own `hs.init` used is still current there, or every
+    epoch after it is already demoted, so Strict F1 would do nothing.
+    Table B (Reached), the R29-K9 paragraph and §6.3.2 (R29-K7, R29-F3;
+    two test locations of R29-K7 corrected) are updated.
   - 0.90.2: 2026-11-12, **§3.4.2 made precise for the implementation**
     (erratum, with two owner decisions):
     - **New, by owner decision 2026-11-12:** the keep's cap is 2,000
@@ -5162,7 +5184,7 @@ the `hs.init`'s links are applied (§6.6).
 | `ik` | `identity.rotate` | `hs.init` (rekey, reconnect) | `hs.resp` to Q's handshake | `hs.fin` to Q's answer |
 |---|---|---|---|---|
 | Current | follow, then H5; refuse (`ik_rollback`) if a `new_ik` is an ancestor or rejected | answer | accept, then H5 if links were appended | accept (establish) |
-| Reached | — | answer | accept, links appended after `sig_R` verifies, then H5 | accept, links applied, then H5 |
+| Reached | — | answer | accept, links appended after `sig_R` verifies, then H5 | accept, links applied (with Strict F1, E the epoch the `hs.init` traveled under or named), then H5 |
 | Ancestor | every link already followed: ignore ((0.87.1) R29-K9 is still judged) | refuse (`ancestor_ik`; a reconnect also `reconnect_refused`, §6.6) | abort (`ancestor_ik`) | after `sig_I` verifies: a fork-evidence answer suspends (H5); else refuse (`ancestor_ik`). An `hs.fin` for an answer Q dropped does not reach this table (below) |
 | Rejected | refuse (`rejected_ik`) | refuse (`rejected_ik`) | abort (`rejected_ik`) | refuse (`rejected_ik`) |
 | Unknown | refuse (`unknown_ik`) | refuse (`unknown_ik`) | abort (`unknown_ik`) | — |
@@ -5217,7 +5239,10 @@ demotion, below) it holds the `identity.rotate` and seals it under the
 next epoch that becomes current, which is later at Q, so the argument
 below still holds. An `hs.resp` names Q's epoch, which can be
 older than P's current one, and links applied at an `hs.fin` travel under
-the new epoch, so neither is used. When Q follows or ignores an `identity.rotate`
+the new epoch, so neither is used. (0.90.4) Strict F1 still runs at
+that `hs.fin`, with E the epoch the `hs.init` traveled under or named
+("Strict F1 for links applied at `hs.fin`").
+When Q follows or ignores an `identity.rotate`
 from P under an epoch E, including one whose links are all already followed
 (Table B's Ancestor "ignore" and Table A's "Earlier, after its cut-off"
 "ignore": the judgement below is still made), then, in the write that
@@ -5308,6 +5333,65 @@ deposited before x, if Q processes it only after the demotion, is
 accepted and judged: if it would set the flag, Q suspends ("The flag is
 judged whenever it is set", above). (Until 0.88.2 the text did not say
 whether this demotion was by position or from the start.)
+
+(0.90.4, owner decision 2026-11-12) **Strict F1 for links applied at
+`hs.fin`.** The links of a rekey or reconnect `hs.init` that Q applies
+at its verified `hs.fin` (Table B's Reached row) also run Strict F1,
+with x the position of the `hs.fin` and E:
+- for a rekey, the epoch the `hs.init` traveled under (session mode,
+  §6.2), which Q records with its answer;
+- for a reconnect, the epoch its `ctx` named (§6.6 "Accepting `ctx`"),
+  as "The links of a refused reconnect" (§6.6) already takes it; at
+  `hs.fin`, `sig_I` has authenticated it.
+
+P sent the `hs.init` under E, or named E, while it already held the
+link, so the reasoning above holds. An epoch an old copy set up with Q
+and established before x is not reached by "Epochs after an `ik` link".
+Such an epoch may be established between Q's `hs.resp` and that
+`hs.fin`. Where the `hs.init` named Q's confirmed epoch while it was not
+current (§6.3.1 rule E), it may also come before the `hs.init`. If P's
+`identity.rotate` comes later, it finds its links already followed
+(Table A and Table B: ignore). Without this rule, Q kept accepting the
+copy's messages under that epoch, against invariant I3's last clause.
+In the rule E case, Strict F1 runs first, and rule E then destroys the
+epochs it demoted, in the same write. A message under such an epoch is
+judged as a destroyed epoch's (rule E's `ts` rule) before it is judged
+as a demoted one's.
+
+The epoch the `hs.fin` establishes is recorded only after its links are
+applied, so it is never among the epochs judged. If one of the epochs
+judged has its received flag set, Q suspends and the `hs.fin`'s epoch is
+not established, as for any suspension while those links are applied
+(a reconnect's carried tokens for it are dropped). Otherwise they are
+demoted and audited as above, but Q starts no reconnect naming E: the
+`hs.fin` establishes the next epoch.
+
+Honest sequences can lead here too, as with an `identity.rotate` under
+E. For example, P's rekey `hs.init` carrying the link crosses P's
+earlier rekey, which P abandoned at its rotation while it was pending:
+that earlier rekey's `hs.fin` may still reach Q and establish its epoch,
+signed by the old `ik`, before the later rekey's `hs.fin`. Strict F1
+then demotes that epoch with its flag clear: an audit entry
+(`connection.fork_suspected`, `ref` = `epoch`) and no feed item or
+suspension. P never activated it, which is what the audit entry records.
+
+A reconnect's named epoch has always been recorded with Q's answer. A
+rekey's carrying epoch is recorded from this version on. A rekey answer
+recorded before this version, without it, runs no Strict F1 at its
+`hs.fin`.
+
+Not at an `hs.resp`. The links in P's `hs.resp` reach Q while Q's own
+handshake is open. While that handshake is open, Q establishes no other
+epoch with P except through a verified `hs.fin`, which ends Q's
+handshake ("a verified `hs.fin` comes first", §6.5). Q starts no rekey
+while it holds a pending epoch (§6.5), and it abandons its pending epoch
+when it starts a reconnect (§6.3.1 Initiator). So at the `hs.resp`, the
+epoch Q's `hs.init` traveled under or named is still Q's current epoch,
+or (a reconnect after a demotion, which names an epoch older than the
+current one) every epoch after it is already demoted, and Strict F1
+would do nothing. It could not take that epoch as E anyway: Q chose it,
+not P. An epoch an old copy sets up after that `hs.resp` is established
+after x, so "Epochs after an `ik` link" covers it.
 
 **The reconnect bound.** Every reconnect Q starts with P (after a
 demotion, by strict F1, after an abandoned pending epoch, §6.3.1, or for
@@ -9625,11 +9709,11 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-K4 | §3.4.1 Epochs after an `ik` link | r29_oldcopy_test.go:187; r29_round6_test.go:306; r29_k4_test.go:9; r29_review4_test.go:183 |
 | R29-K5 | §3.4.1 After a demotion of the current epoch | r29_oldcopy_test.go:327, :399, :418, :443; r29_review_test.go:65; r29_round6_test.go:90, :124, :376, :391; r29_review4_test.go:332, :473, :515; r29_review4_test.go:628 (the reconnect's hs.fin while demoted) |
 | R29-K6 | §3.4.1 The reconnect bound; §6.6 | r29_oldcopy_test.go:527, :581, :606; r29_rr2_test.go:61, :78; r29_round6_test.go:323, :342; r29_bound_test.go:15, :48, :69; r29_review4_test.go:424 |
-| R29-K7 (every later epoch signed by the old `ik`; names E) | §3.4.1 Strict F1 | r29_oldcopy_test.go:153, :216; r29_rr2_test.go:37; r29_strictf1_test.go:37, :55; r29_review4_test.go:319; r29_flag_test.go:87 |
+| R29-K7 (every later epoch signed by the old `ik`; names E) | §3.4.1 Strict F1; (0.90.4) Strict F1 for links applied at `hs.fin` | r29_oldcopy_test.go:154, :217; r29_rr2_test.go:37; r29_strictf1_test.go:37, :55; r29_review4_test.go:319; r29_flag_test.go:87; r29_i3copyinit_test.go:120, :192 (a rekey's `hs.fin`; an answer recorded without E); r29_i3link_test.go:82, :158 (a reconnect's `hs.fin`, no reconnect started; an answer without a named epoch), :238, :270 (not at an `hs.resp`); r29_i3link2_test.go:88 (a rekey naming the confirmed epoch: Strict F1, then rule E), :163 (a restore reconnect with a link) |
 | R29-K8 | §3.4.1 Rule C, acceptFrom | r29_review_test.go:209; r29_round6_test.go:196; r29_oldcopy_test.go:278; r29_review4_test.go:446 |
 | R29-K9 ((0.87.1) finding C) | §3.4.1 Epochs abandoned while pending, at P's `identity.rotate` | r29_k9_test.go:47, :63, :80, :96, :129; r29_round6_test.go:242 (the K2 case) |
 | R29-F1 | §3.4.1 Fork by `ctx` | r29_oldcopy_test.go:153, :278; r29_review4_test.go:27, :77; r29_round6_test.go:437 |
-| R29-F3 | §6.3.1 The received flag; §3.4.1 Epochs after an `ik` link, Strict F1 | r29_flag_test.go:23, :51, :87 |
+| R29-F3 | §6.3.1 The received flag; §3.4.1 Epochs after an `ik` link, Strict F1 | r29_flag_test.go:23, :51, :87; r29_i3copyinit_test.go:177 (flag set, at a rekey's `hs.fin`); r29_i3link2_test.go:22 (flag set, at a reconnect's `hs.fin`) |
 | R29-D1 | §6.3.1 Devices and agents; §6.7 | r29_rules_test.go:174; r29_gapf_test.go:231, :262 (gap F pinned) |
 | R29-D2 | §6.3.1 Devices and agents; §15 item 51 | V/client/rotate086_test.go:18, :71; V/client/persist_test.go:485 |
 | R29-D3 | §6.3.1 Devices and agents; §6.7; §10.9 | r29_device_test.go:18 |
