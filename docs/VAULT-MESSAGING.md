@@ -35,8 +35,9 @@ changelog:
     (Q records it with its answer), or the epoch the reconnect named, as
     a refused reconnect's links already did. x is the `hs.fin`. As
     before, Strict F1 applies only when Q's current epoch is later than
-    E and signed by the link's `old_ik`, and judges only Q's current and
-    confirmed epochs; pending, abandoned and destroyed epochs stay with
+    E and signed by the link's `old_ik`, and judges the later epochs
+    signed by that key or an ancestor; pending, abandoned and destroyed
+    epochs stay with
     "Pending epochs at a link", R29-K9 and the Residuals. Before, these
     links ran only "Epochs after an `ik` link". An old copy of P could
     set up an epoch with Q, signed by the link's `old_ik` and
@@ -5411,8 +5412,10 @@ with x the position of the `hs.fin` and E:
 P sent the `hs.init` under E, or named E, while it already held the
 link, so the reasoning above holds. As above, the rule applies only when
 Q's current epoch is later than E and signed by the link's `old_ik`, and
-it judges only Q's current and confirmed epochs of P. Q's pending epoch,
-the epochs Q abandoned while pending and those rule E destroyed are left
+it judges the epochs of P after E whose P-side signer is the link's
+`old_ik` or an ancestor, as above, other than pending, abandoned or
+destroyed ones. Q's pending epoch, the epochs Q abandoned while pending
+and those rule E destroyed are left
 to "Pending epochs at a link", R29-K9 ("Epochs abandoned while pending,
 at P's `identity.rotate`", below) and the Residuals ("A copy acting as
 initiator is not visible"; the window "until P's `identity.rotate`
