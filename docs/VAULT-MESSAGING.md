@@ -119,27 +119,6 @@ changelog:
       fork evidence (fail closed, undetected); a deposit on a revoked
       reconnect token collected after its earlier key was pruned is
       refused `foreign_sender` (a silent loss of liveness).
-    - The identity-link gate, as built: from an earlier key after its
-      cut-off, the identity links of every message RK7 or RK8 passes,
-      and of any reconnect `hs.init`, are judged as Table A's
-      `identity.rotate` column (all already followed: nothing applied;
-      otherwise `superseded_relay`), before the `ctx` is classified, so
-      §6.6 "The links of a refused reconnect" never runs for such a
-      sender. An RK8 `hs.init` whose identity links would move P's `ik`
-      is refused there, no answer kept. Once an `hs.resp`'s `sig_R`
-      verifies, an RK8 refusal ends Q's own handshake whatever the
-      sender's row (tokens revoked, the reconnect restarted under RK6);
-      before `sig_R` an earlier-after answer is kept. A reconnect
-      `hs.init`'s fork signs come after the `superseded_relay` refusal;
-      a rekey `hs.init`'s restore-watch check comes before it.
-    - Readings of this release, to be confirmed: an RK8 `hs.init` with a
-      failing `reconnect_token` is refused `token_unusable`; at an RK8
-      follow the held tokens for the passed mailbox no longer count and
-      deposits wait for the carried ones; for RK7, the message that
-      establishes an epoch counts as accepted under it, the message at a
-      cut-off counts as before it, and only messages nothing refused are
-      recorded, none at an `hs.resp`; RK7's fork-evidence pass also
-      skips the closure.
   - 0.90.4: 2026-11-12, **erratum to §3.4.1 Strict F1: links applied at
     `hs.fin`** (owner decision 2026-11-12). The links that a rekey or
     reconnect `hs.init` carries, applied at its verified `hs.fin`, now
@@ -5390,17 +5369,13 @@ epoch's fork evidence is judged (a destroyed epoch's `ts` rule, an epoch
 R29-K9 ended, a demoted epoch's received flag, and for an `hs.fin` H5's
 fork-evidence answer), so such a message is refused, not taken as
 evidence; §6.6 "Fork detection" (a line a restore replaced) is judged
-before it for a message under a session epoch, a rekey `hs.init`
-included. A reconnect `hs.init` opens under no session epoch: its own
-fork signs (§6.6 "Fork detection", "Fork by `ctx`", judged by its `ctx`)
-come only after this refusal and the identity-link gate below. A
-`relay.token.issued` after its cut-off passes the epoch's checks that
-every message passing steps 1–4 meets (§6.3.1: a destroyed or demoted
-epoch's refusals and evidence, the received flag, a confirmation) and
-then gives its tokens only, by rule T: no `features`, no S5 resend, no
-dedupe entry and no answer. An `identity.rotate` after its cut-off whose
-links are all already followed likewise passes the epoch's checks, and
-then only R29-K9 is judged.
+before it. A `relay.token.issued` after its cut-off passes the epoch's
+checks that every message passing steps 1–4 meets (§6.3.1: a destroyed
+or demoted epoch's refusals and evidence, the received flag, a
+confirmation) and then gives its tokens only, by rule T: no `features`,
+no S5 resend, no dedupe entry and no answer. An `identity.rotate` after
+its cut-off whose links are all already followed likewise passes the
+epoch's checks, and then only R29-K9 is judged.
 
 (0.90.6) A `relay.address.update` from an earlier key after its cut-off
 has its identity links (`rotations`, §3.4.2 RK5) judged as this row
@@ -5416,17 +5391,6 @@ If applying the update's identity links makes Q suspend P (R29-K9, a
 received flag, a conflict), or ends the epoch the update travels under,
 Q follows no relay link, keeps no token and sends no answer; the
 suspension stands.
-
-(0.90.6) **The identity-link gate.** The same judgement holds, as built,
-for the identity links of every message from an earlier key after its
-cut-off that Q does not refuse first: an `hs.confirm` or `hs.fin` RK7
-passes, an `hs.init` or `hs.resp` RK8 passes (§3.4.2), and any reconnect
-`hs.init`. They are judged as this row's `identity.rotate` column: if
-every one is already followed, nothing is applied (R29-K9 is judged
-where the message is an `identity.rotate` or an update) and the message
-goes on; otherwise it is refused (`superseded_relay`) with nothing
-applied. The gate comes before the reconnect's `ctx` is classified, so
-§6.6 "The links of a refused reconnect" never runs for such a sender.
 
 **Table B, identity key** (step 5). Every message that carries an `ik`
 carries its links (S8), so the `ik`
@@ -7053,13 +7017,12 @@ refusing them:
 - an **`hs.confirm`** under an epoch that a handshake signed by Q's
   current `ik` for P established;
 - an **`hs.fin` for an answer Q has open**, when its `sig_I` verifies
-  under the `ik` Q's answer pinned, and that `ik` is Q's current `ik`
-  for P. Its epoch is the one that `hs.fin` establishes. (0.90.6) An
-  answer Q keeps only as fork evidence (H5 "Exempt") passes too,
-  whatever `ik` it pinned and whether or not its pass is closed, so that
-  its `hs.fin` is judged as fork evidence (§3.4.1 "Fork by ctx") and
-  suspends; it never establishes an epoch (evidence first, as rule C; a
-  reading of this release, to be confirmed).
+  under the `ik` Q's answer pinned, and that `ik` is Q's current `ik` for
+  P. Its epoch is the one that `hs.fin` establishes. (0.90.6) An answer
+  Q keeps only as fork evidence (H5 "Exempt") passes too, whatever `ik`
+  it pinned, so that its `hs.fin` is judged as fork evidence (§3.4.1
+  "Fork by ctx") and suspends; it never establishes an epoch (evidence
+  first, as rule C; a reading of this release, to be confirmed).
 
 **When the pass closes.** Each pass closes per epoch: once Q has accepted,
 under that epoch or a later one, a message from a relay key of P's later
@@ -7083,13 +7046,6 @@ than the message's `sender`.
   never undone, even if that epoch is later destroyed, demoted or ended.
   The records are kept for as long as Q keeps the earlier key as
   "earlier" (§3.4.1 "Relay-key states").
-- (0.90.6) **What is recorded** (as built; a reading of this release, to
-  be confirmed): a message under an epoch, once its handler is done and
-  only if nothing refused it; the message that establishes an epoch (an
-  `hs.fin`) counts as accepted under it; nothing is recorded at an
-  `hs.resp`, since the epoch it establishes is pending, and the message
-  that confirms it is recorded when accepted. The message at a cut-off
-  (an RK8 `hs.fin` or `hs.resp`) counts as before it.
 
 Per epoch, not per pair, is needed for liveness: a later key accepted
 under one epoch says nothing about a handshake still open under another.
@@ -7128,15 +7084,6 @@ device's relay key.
   Table A's preamble and §6.3's `sender` check give way to this. Without
   such links, a reconnect `hs.init` from an earlier key after its cut-off
   stays refused (`superseded_relay`).
-
-  (0.90.6) An RK8 `hs.init` from an earlier key after its cut-off whose
-  identity links are not all already followed (they would move P's `ik`)
-  is refused `superseded_relay` at the `hs.init` by the identity-link
-  gate (§3.4.1 Table A), and no answer is kept; its `hs.fin` would be
-  refused likewise. An RK8 `hs.init` whose `reconnect_token` fails rule
-  T is refused `token_unusable`, as its `token` would be (as built; a
-  reading of this release, to be confirmed); an update ignores a failing
-  `reconnect_token` (rule U).
 - **When Q follows.** Q follows under rule U's checks and RK5's `ik`
   requirement. For an `hs.init`, that is in the write that establishes
   the reconnect at its verified `hs.fin`; that `hs.fin` is the cut-off,
@@ -7154,18 +7101,6 @@ device's relay key.
     Q's current key for P), the follow changes nothing: the links are
     skipped as rule U skips them, the handshake goes on, and the tokens
     are taken by rule T as for any reconnect.
-  - (0.90.6) Once an `hs.resp`'s `sig_R` verifies, an RK8 refusal (rule
-    U's checks, rule T, RK5's `ik` requirement, an unlinked chain or a
-    relay fork) ends Q's own handshake whatever the sender's relay-key
-    row: its tokens are revoked, and the reconnect restarts under RK6
-    and "The reconnect bound". Before `sig_R` (at the parse, or rule C)
-    an answer from an earlier key after its cut-off is refused with its
-    handshake kept, as Table A says.
-  - (0.90.6) At an RK8 follow, the held tokens for the passed mailbox no
-    longer count: the carried tokens for the new one are adopted at the
-    epoch's confirmation, and until then deposits on held tokens wait
-    (§6.3.1 "No reconnect while carried tokens wait") (as built; a
-    reading of this release, to be confirmed).
 - **At P's second write,** P abandons its open reconnects with Q that
   announced K and have sent no `hs.fin`. It starts them again under this
   rule.
