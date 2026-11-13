@@ -5504,7 +5504,8 @@ covers it.
 demotion, by strict F1, after an abandoned pending epoch, §6.3.1, or for
 any other reason, §6.6) is bounded the same way. A try fails only when
 its handshake expires unanswered; its tokens are revoked (§6.3.1). A
-refusal is silent: (0.88.2) a refused try counts only if it then
+refusal is silent, except as (0.90.4) below says: (0.88.2) a refused
+try counts only if it then
 expires unanswered, and one abandoned before that (for example when the
 peer's `hs.fin` is established, §6.6) is not counted. The connection becomes `stale`,
 and Q audits `connection.stale` with its feed item (§10.9), at the third
@@ -6919,7 +6920,8 @@ device's relay key.
   `stale` as S1 does.
 - **Other refusals.** Any other refusal of a reconnect `hs.init` stays
   silent, as "The reconnect bound" says, and the next try comes at the
-  try's expiry. Reconnects with no rotation in play do not change.
+  try's expiry, except `token_revoked` and `token_invalid` on the held
+  reconnect token (0.90.4, "The reconnect bound"). Reconnects with no rotation in play do not change.
 - **An update Q refuses has none of its links followed** and none of its
   tokens kept, whatever the reason for the refusal (owner decision
   2026-11-12: an old copy's update under a demoted epoch would otherwise
@@ -11728,11 +11730,21 @@ Any other token is refused, and the held token is kept. One that came in
 `relay.token.issued` is audited `bad_issued_token`; one that came in a
 handshake or in `connection.approved` is refused by that message's own
 check (`hs_init_bad_token`, `reconnect_bad_token`, `hs_resp_bad_token`,
-`bad_connection_approved`). The relay refuses a deposit under a token
+`bad_connection_approved`), except a token carried in a rekey's or
+reconnect's `hs.resp`: that token is not carried, the held token is
+kept, and the `hs.resp` is not refused for it (only a first contact's
+`hs.resp` is refused `hs_resp_bad_token`). The checks also cover the
+tokens a device gives its vault at unlock, under the 30-day bound; one
+that fails is ignored without an audit entry. The relay refuses a deposit under a token
 over its bounds (RELAY-PROTOCOL §5.2, §5.3). Without these checks, a
 token with a far `exp` (an old copy holding the peer's relay key can
 mint one) would win every "later `exp`" comparison and pin the held
-token to one the relay refuses.
+token to one the relay refuses. Residual: if the issuer's relay lowers
+its `max_token_lifetime_seconds`, the vault keeps the earlier, longer
+token and the peer's re-mint is `issued_token_not_newer`; the vault's
+next reconnect is then refused `token_invalid`, the token is dropped,
+and the connection ends `stale` (§3.4.1 "The reconnect bound"), which
+is visible and recoverable.
 
 (0.90.4) A reconnect token in `relay.token.issued{kind: "reconnect"}`
 whose `jti` is that of the held reconnect token is ignored, without an
@@ -12397,7 +12409,7 @@ How each error is handled:
 | Error | Handling |
 |---|---|
 | `token_expired` | Refresh the token, or reconnect (§6.6); (0.88.2) not while §6.3.1 "No reconnect while carried tokens wait" holds. |
-| `token_revoked` | Terminal. Stop sending to that mailbox (0.83.0: for a retried open-token `hs.init`, see `token_used`). (0.88.2, owner decision a, GC 01M6SRQ1B7NM0Q00G0CEGHFES8) **Between two vaults**, for a deposit to a connection with a held standing token (for a carried one, below and §6.3.1 "A carried token refused"): the answer ends **that token only**, not the connection. The vault drops the token and never uses it again; the entry waits in the outbox for a valid token. If the vault holds no other valid standing token for the peer, it is in the "no valid standing token" case: a pending rekey is abandoned (§6.3.1), and the vault reconnects (§6.6), bounded by §3.4.1 "The reconnect bound"; a reconnect's own `hs.init` answered `token_revoked` is a failed try there. Honest pairs reach this when a peer revokes a token in flight (S5 at its rotation, H5, an abandoned pending epoch), so it is not a sign of an end. It revives no revoked token, and a copy gains nothing by it: the reconnect needs the reconnect token and is authenticated as any other. (0.88.2) A **carried** token (one an `hs.init` or `hs.resp` carried and the vault has not adopted, §6.3.1 "A handshake's tokens are adopted at confirmation") answered `token_revoked` is handled by §6.3.1 "A carried token refused": the refused `hs.resp`, `hs.fin` or `hs.confirm` entry is dropped, the handshake's carried tokens are discarded, and that handshake ends; the refusal alone does not make the "no valid standing token" case. Toward a device's own vault, and S9's relay-key case, as before. (0.90.0) Between two vaults, during S1 toward the peer, a `token_revoked` on a reconnect token issued for an earlier relay key of the vault's is §3.4.2 RK9's: no failed try, no S9, and no "no reconnect token" judgement until RK13's cap. (0.90.4) Between two vaults, a reconnect's own `hs.init` answered `token_revoked` is one failed try at once (§3.4.1 "The reconnect bound") and drops that reconnect token if it is still the held one, recording its `jti` until its `exp` so that it is refused if offered again (§7.1 "The holder's checks"), audited `reconnect_token_revoked`. Holding no reconnect token, the next start finds the connection `stale` by the reconnect bound unless a new reconnect token arrives first. |
+| `token_revoked` | Terminal. Stop sending to that mailbox (0.83.0: for a retried open-token `hs.init`, see `token_used`). (0.88.2, owner decision a, GC 01M6SRQ1B7NM0Q00G0CEGHFES8) **Between two vaults**, for a deposit to a connection with a held standing token (for a carried one, below and §6.3.1 "A carried token refused"): the answer ends **that token only**, not the connection. The vault drops the token and never uses it again; the entry waits in the outbox for a valid token. If the vault holds no other valid standing token for the peer, it is in the "no valid standing token" case: a pending rekey is abandoned (§6.3.1), and the vault reconnects (§6.6), bounded by §3.4.1 "The reconnect bound"; a reconnect's own `hs.init` answered `token_revoked` is a failed try there. Honest pairs reach this when a peer revokes a token in flight (S5 at its rotation, H5, an abandoned pending epoch), so it is not a sign of an end. It revives no revoked token, and a copy gains nothing by it: the reconnect needs the reconnect token and is authenticated as any other. (0.88.2) A **carried** token (one an `hs.init` or `hs.resp` carried and the vault has not adopted, §6.3.1 "A handshake's tokens are adopted at confirmation") answered `token_revoked` is handled by §6.3.1 "A carried token refused": the refused `hs.resp`, `hs.fin` or `hs.confirm` entry is dropped, the handshake's carried tokens are discarded, and that handshake ends; the refusal alone does not make the "no valid standing token" case. Toward a device's own vault, and S9's relay-key case, as before. (0.90.0) Between two vaults, during S1 toward the peer, a `token_revoked` on a reconnect token issued for an earlier relay key of the vault's is §3.4.2 RK9's: no failed try, no S9, and no "no reconnect token" judgement until RK13's cap. (0.90.4) Except in RK9's case, between two vaults, a reconnect's own `hs.init` answered `token_revoked` is one failed try at once (§3.4.1 "The reconnect bound") and drops that reconnect token if it is still the held one, recording its `jti` until its `exp` so that it is refused if offered again (§7.1 "The holder's checks"), audited `reconnect_token_revoked`. Holding no reconnect token, the next start finds the connection `stale` by the reconnect bound unless a new reconnect token arrives first. |
 | `token_invalid` (0.90.4) | Between two vaults, a reconnect's own `hs.init` answered `token_invalid` is one failed try at once (§3.4.1 "The reconnect bound") and drops that reconnect token if it is still the held one, audited `reconnect_token_invalid`; kept, it would stay held until its `exp`, up to a year, since only a token with a later `exp` replaces it (§7.1). Holding no reconnect token, the next start finds the connection `stale` by the reconnect bound unless a new reconnect token arrives first. Any other deposit answered `token_invalid` is refused, as before. |
 | `token_used` | The open token is already spent. Restart first contact; except that (0.83.0) when the client retried its own `hs.init` with that token after a lost or failed answer, `token_used` and `token_revoked` both mean the first attempt may have been delivered: it waits for `hs.resp` until the token's `exp` plus 60 s, and restarts first contact only then. For a pairing or transfer this is at most the link's 10 minutes; a vault's accepted connection request stays `waiting` (§6.4) until then, and its member can decline it. |
 | `mailbox_unknown` | Re-resolve the address, or mark the connection `stale`. (0.88.7) The connection's waiting durable messages end as §8.3 "Not delivered" says (`drop.undelivered_mailbox_unknown`). (0.90.0) A vault that implements §3.4.2 holds a durable deposit to a connection refused `mailbox_unknown` instead, without `stale`, until it follows the peer to a newer mailbox (an update it does not follow keeps the hold), for at most 60 days from the first refusal (§3.4.2 RK14); a handshake message so refused ends as a refused carried token; a reconnect `hs.init` refused so is ended at once (RK10). |
