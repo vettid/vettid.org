@@ -43,8 +43,14 @@ changelog:
       a chain refused for its form or count is, in an update or a
       reconnect alike. A link with a member of the wrong JSON type or form
       is refused `relay_unlinked` as a link, an exception to §5.3 and §10.1
-      for relay link objects only. A duplicate member or invalid JSON
-      stays a malformed body. A new layout MUST use a new label, for the
+      for relay link objects only, and only when the message is otherwise
+      well formed (malformed wins). The refusal is at parse time, before
+      `acceptFrom`: no link of the message is checked or kept. A
+      duplicate member or invalid JSON stays a malformed body. A refusal
+      for count, form, `v`/`suite` or a repeated key keeps no link as
+      seen; a bad signature or a broken chain still lets earlier valid
+      links be seen. A missing `relay_links` is a malformed body in an
+      update, and means no rotation in a reconnect. A new layout MUST use a new label, for the
       relay link and the identity link (§3.4); a link with another `v`
       or `suite` is refused, not reinterpreted, and unknown members are
       ignored.
@@ -5401,35 +5407,50 @@ verifies under another. A link with a missing or different `v` or
 `suite` is refused, not reinterpreted. Members a link does not define
 are ignored (§10.1).
 
-(0.90.3) **A link's form.** Suppose a relay link object has a member of
-the wrong JSON type or form:
-- a wrong type or value for `v` or `suite` (for example `"1"` or `1.0`);
+(0.90.3) **A link's form.** A fault in a link's form is any of these:
+- a link that is not an object, or lacks a member;
+- a wrong type or value for `v` or `suite`, an out-of-range `v` included
+  (for example `"1"`, `1.0` or `2`);
 - base64 that is not canonical or uses the wrong alphabet;
 - a key or a signature of the wrong length.
 
-That link is refused `relay_unlinked`, and its chain with it. This is an
-exception to §5.3's "Known fields MUST have exactly the type and form
-given here" (§10.1), which would otherwise make the whole message
-malformed. It applies to relay link objects only. A fault at the JSON
-level of the body, such as a duplicate member or invalid JSON, still
-makes the whole message a malformed body, refused before any link is
-read.
+A message with a fault in a link's form is refused `relay_unlinked`, and
+the chain with it. This is an exception to §5.3's "Known fields MUST have
+exactly the type and form given here" (§10.1), which would otherwise make
+the whole message malformed, and it applies to relay link objects only.
+
+**Precedence.** The exception applies only when the message is
+otherwise well formed: every other member passes §5.3, and
+`relay_links` is allowed for the message's kind and purpose (§6.2). If
+anything else is malformed, the whole message is a malformed body.
+Malformed wins. A fault at the JSON level of the body, such as a
+duplicate member or invalid JSON, is always a malformed body, refused
+before any link is read.
+
+**When it is refused.** A refusal for a link's form happens when the
+message is parsed, before `acceptFrom` step 1. No link of such a
+message, identity or relay, is checked or kept by rule C.
 
 A chain is refused (`relay_unlinked`) when any of these holds:
 - a link with a missing `v` or `suite`, or any other `v` or `suite`;
 - a link whose `old` equals its `new`;
 - a repeated key: the sequence of the first `old`, then each link's
   `new`, has a key twice (for example A→B→A);
-- fewer than 1 or more than 32 links. A message whose `relay_links`
+- fewer than 1 or more than 32 links. An update whose `relay_links`
   member is missing altogether is a malformed body, refused as a whole,
-  not `relay_unlinked`.
+  not `relay_unlinked`. In a reconnect `hs.init` or `hs.resp`, an absent
+  `relay_links` means no rotation (§6.2).
 
 For rule C, a relay link is **valid** only if its `v` is 1, its `suite`
 is 2, its `old` differs from its `new`, and both signatures verify. A
 link that fails any of these is not kept as seen, even when its
-signatures verify. No link of a chain refused for its form or its count
-is kept as seen, whether the chain came in an update or in a reconnect
-`hs.init` or `hs.resp` (§3.4.2 RK8).
+signatures verify. In an update and in a reconnect `hs.init` or `hs.resp`
+(§3.4.2 RK8) alike:
+- **No link of the chain is kept as seen** when the chain is refused
+  for its count, a link's form, a `v` or `suite`, or a repeated key.
+- **Earlier valid links are still seen** when the chain is refused only
+  for a bad signature or a break in the chain. Those go through rule U's
+  checks, and rule C, as before.
 
 P signs a link in the rotation's first write (§3.4 step 1). Q checks
 that the chain has 1 to 32 links, that each link's `v` is 1 and its
@@ -8464,9 +8485,12 @@ The inner plaintext is a UTF-8 JSON object, followed by padding:
 - Unknown fields are ignored. Known fields MUST have exactly the type and
   form given here; receivers MUST reject anything else. One exception:
   a vote message's `pad` is not checked (§10.19.5, 0.83.6). (0.90.3) A
-  relay link object whose members have the wrong type or form is refused
-  as a link (`relay_unlinked`), not as a malformed message (§3.4.1 rule
-  U, "A link's form").
+  fault in a relay link's form (a link that is not an object or lacks a
+  member, a wrong type or value for `v` or `suite` including an
+  out-of-range `v`, base64 that is not canonical or uses the wrong
+  alphabet, a key or signature of the wrong length) is refused
+  `relay_unlinked`, not as a malformed message, when the message is
+  otherwise well formed (§3.4.1 rule U, "A link's form").
 - Receivers MUST reject an inner plaintext (including its `body`) that
   is not valid UTF-8 (RFC 3629: encoded surrogates such as ED A0 80 are
   invalid), that has duplicate member names at any depth, or that has
@@ -12057,9 +12081,12 @@ an answer to an unknown or expired id is dropped.
 ### 10.1 Common rules and `sync.event`
 
 - Bodies are JSON objects (§5.3). Unknown members are ignored. (0.90.3)
-  A relay link object of the wrong type or form is refused
-  `relay_unlinked`, not as a malformed body (§3.4.1 rule U, "A link's
-  form"). Strings are
+  A fault in a relay link's form (a link that is not an object or lacks
+  a member, a wrong type or value for `v` or `suite` including an
+  out-of-range `v`, base64 that is not canonical or uses the wrong
+  alphabet, a key or signature of the wrong length) is refused
+  `relay_unlinked`, not as a malformed body, when the message is
+  otherwise well formed (§3.4.1 rule U, "A link's form"). Strings are
   at most 4 KiB unless stated. Timestamps in bodies use the inner `ts`
   format; invite and pairing expiries (`exp` in responses) are RFC 3339 in
   whole seconds.
@@ -31527,8 +31554,8 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
                 announced key (announced_b64) the chain is checked against
   valid       : a single link; a chain of links; a chain of 32 links
   invalid     : wrong sig_old; wrong sig_new; signed with the identity label
-                "vettid/vms/2/rotate"; old == new; a repeated key in the
-                chain; a broken chain (an old that is not the previous new);
+                "vettid/vms/2/rotate"; old == new; a repeated key (the
+                sequence of the first old and each new has a key twice); a broken chain (an old that is not the previous new);
                 no links; more than 32 links; a first old that is not the
                 deposit key; a last new that is not the announced key; a
                 missing v or suite; an unknown v; an unknown suite; a link
