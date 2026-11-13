@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.6
+version: 0.90.8
 date: 2026-11-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.8: 2026-11-13, **an unlock's PIN attempt is counted before it
+    is tested** (owner decision a, 2026-11-13): §11.8 "Enclave backoff":
+    the unlock stores the failure count raised by one, in a header write
+    conditional on the header it read, before it derives the DEK from the
+    PIN; a write that fails tests nothing (`retry`); a right PIN resets
+    the count. As the recovery open's attempts already are (§11.14.6), so
+    a host that fails header writes gets no free PIN tests. §3.3.1 points
+    to it.
   - 0.90.6: 2026-11-13, **readings of relay-key rotation's receiving
     side, and older corrections** (erratum):
     - §3.4.1 "Strict F1, a link under an earlier epoch": pending,
@@ -4752,6 +4760,7 @@ DEK = HKDF-SHA-256(ikm = x, salt = pepper, info = "vettid/vms/2/dek" || vault_id
   parameters below `t = 1`, `m = 8 MiB`.
 - A wrong PIN yields a DEK under which the state does not decrypt; that is
   the `bad_pin` outcome (§11.4), counted in the backoff state (§11.8).
+  (0.90.8) The attempt is counted before the PIN is tried (§11.8).
 
 The reference implementation stores vault state and the sealed header as:
 
@@ -22655,7 +22664,23 @@ envelopes.
 - after 3 consecutive failures, the delays are 30 s, 1 min, 5 min, 15 min,
   60 min, then 60 min for every further failure;
 - a successful unlock resets the backoff;
-- failures never wipe the vault.
+- failures never wipe the vault;
+- (0.90.8; owner decision a, 2026-11-13) **every unlock's PIN attempt
+  is counted before it is tested**, as a recovery's attempts are
+  (§11.14.6): once every check §11.4 makes before the PIN has passed
+  (the backoff not running, the rollback floors met), and before the DEK
+  (or, from release R, the `unlock_key`) is derived from the PIN, the
+  enclave stores the header with the failure count raised by one (and
+  `header_seq` + 1), in a write conditional on the header version it
+  read. Only once that write has succeeded is the PIN tested. A write
+  that fails tests nothing: the unlock is answered `retry`, with the
+  `header_seq` last known stored, and is not a PIN failure. So a host
+  that fails or withholds header writes learns nothing of a PIN it is
+  not counted for. A wrong PIN then leaves the raised count (`bad_pin`,
+  with the stored `header_seq`); a right PIN resets the count in the
+  unlock's own header write. If that write fails the unlock is not
+  completed (`retry`), and the raised count stays: one counted failure
+  more than the member made, the safe side.
 
 ### 11.9 Failure handling
 
