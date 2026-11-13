@@ -8,8 +8,10 @@ changelog:
     device collects before it deposits" (owner decision GC #9565 "b").
     §4.6: the connector deposits to its vault only while caught up:
     after a catch-up pass (`wait=0` long-poll collects of every mailbox
-    it collects until a short or empty answer, or one past the pass's
-    start; any `relay.address.update` followed) since its start and
+    it collects until an empty answer, or until an answer holds a
+    message deposited 60 s or more after the HTTP `Date` of the pass's
+    first answer from that mailbox, and only once no batch is
+    unhandled; any `relay.address.update` followed) since its start and
     each restart of its collect loop, with a successful collect less
     than 24 hours old (the longer of Go's monotonic and the wall-clock
     reading); a deposit that finds it not caught up starts a pass at
@@ -17,8 +19,8 @@ changelog:
     the request is not sent and the tool answers `vault_unreachable` with the new
     draft text "Not sent yet". §3.3 says so; new AV12 in §7.1 for the
     reference client (`client.Device`), which `vaultctl` and a desktop
-    share; AV12 also sends a bound lock's relay copy again after a
-    follow, for `vaultctl` and the desktop. No change to pairing,
+    share; AV12 also sends the relay copy of a lock with `unlock_id`
+    again after a follow, for `vaultctl` and the desktop. No change to pairing,
     grants or the protocol.
   - 0.1.11: 2026-11-05, the owner's request in the implementing session
     (after the lead's summary, thread 01M6PJT84B0Z9DK24SPAVDDK71): macOS
@@ -658,17 +660,24 @@ connector deposits to its vault only while **caught up**:
    `wait=0`, of every mailbox it still collects (its current one and an
    old one in its grace after its own relay-key rotation), each batch
    saved before its acks (AV1), any `relay.address.update` followed
-   (VAULT-MESSAGING §3.4.1 rule U) or refused before the pass ends. For
-   each mailbox it ends at an answer with fewer messages than the `max`
-   asked for (an empty one included), or at one holding a message whose
-   `deposited_at` is 60 s or more after the HTTP `Date` of the pass's
-   first answer. The start's collect of "what arrived while it was not
-   running" is this pass. Any deposit that finds the connector not
-   caught up starts a pass at once; a parked loop collect is then
-   cancelled and the pass goes on with `wait=0`, so a pass costs a tool
-   call a round trip or a few, not the loop's 25 s park.
-2. **A recent collect**: its latest successful collect ended less than
-   24 hours ago. Go's monotonic clock does not count a suspended
+   (VAULT-MESSAGING §3.4.1 rule U) or refused before the pass ends; an
+   old mailbox's `mailbox_unknown` drops it from the pass. For each
+   mailbox it ends at an **empty** answer, or at one holding a message
+   whose `deposited_at` is 60 s or more after the HTTP `Date` of the
+   pass's first answer from it (so a busy mailbox cannot hold requests
+   back), and only once no collect of the connector holds a batch from
+   it not yet handled. The start's collect of "what arrived while it was
+   not running" is this pass. Any deposit that finds the connector not
+   caught up starts a pass at once, overriding the loop's backoff unless
+   a pass has failed since; one pass runs at a time and later deposits
+   join it; after a failure the next follows the backoff and any `429`'s
+   `retry_after`. A parked loop collect is not canceled: the pass's
+   `wait=0` collects run beside it and its answer is handled like any
+   batch, so a pass costs a tool call a round trip or a few, not the
+   loop's 25 s park.
+2. **A recent collect**: its latest successful collect (a long-poll
+   answer, or a message on a WebSocket session, handled; not a pong)
+   ended less than 24 hours ago. Go's monotonic clock does not count a suspended
    computer on every platform, so the elapsed time is the longer of the
    monotonic and the wall-clock reading.
 
@@ -678,8 +687,8 @@ pass within its 20 s (AG9); if the pass has not ended by then, the
 request is **not sent** and not kept, and the tool answers
 `vault_unreachable` with the "Not sent yet" text (§11). The connector
 never sends without the pass: a request it could send but not collect
-the answer to would be lost either way. A definite failure on its own
-mailbox (`mailbox_unknown`, `token_revoked`) is AG12's path. The
+the answer to would be lost either way. A definite failure on its
+current mailbox (`mailbox_unknown`, `token_revoked`) is AG12's path. The
 connector sends no `vault.lock`, so it has no exception. Until AV12
 lands, `internal/vaultconn` (A2.2) keeps the gate itself.
 
@@ -1240,7 +1249,7 @@ AV7 and AV8 change the enclave and ship in a staging release.
 | AV9 | **Ways to use a secret: settings, catalog, reveal off** (VAULT-MESSAGING 0.42.0 §10.11). **Not started.** `leash.item.set` and `.list`, the settings per agent and item, the unlock window to widen, deletion when the item is no longer included, `sync.event{leash.item.changed}`; `ways`, `programs` and `hosts` in `catalog`; `item.get` only with `reveal` (`way_not_allowed`, counted as refused) and always referred; `approval.pending{flags}`; every existing agent item starts with `["use"]`. (0.1.10, VAULT-MESSAGING 0.85.3) `programs` entries are `{program, sha256?, path?, env}`, no two matching one path: the pin (`sha256` and `path`) recorded by the vault, never the app, when the member approves a run flagged `program_unrecorded` or `program_changed`, and kept or dropped (never set) by `leash.item.set`; `env` names checked by the name rule, adding one widens; the catalog's entries with the pinned `path`, never the hash | §10.11, §10.12, §6.8 | `item.get` hands every included item's value to the agent's app, which may keep it in its history | A3.7 |
 | AV10 | **`item.run`** (§10.11). **Not started.** Checks of `program`, `argv`, `cwd`, `how`, `name` and `env`; `programs` binding (`program_not_allowed`); referral when `each`, unbound, or a shell or interpreter; `flags` (`shell`, `inline_code`, `unbound_program`); (0.1.10, VAULT-MESSAGING 0.85.3) `sha256` checked against the matched entry, a missing pin, or a different hash or path, referred with `program_unrecorded` or `program_changed` (with `previous_sha256` and `previous_path`) and recorded on approval; a run whose settings changed while it waited decided again; `env` names only from the matched entry's `env`, none for an unbound item (`env_not_allowed`, counted as refused); the code-loading names refused; the windows and `uses` counted; `leash.item.run` audited and in the feed. Tests for each refusal, each flag and each referral case | §10.11 | The second way needs the value released to the connector for one approved command | A3.8a, A3.8b |
 | AV11 | **`item.proxy`** (§10.11). **Not started.** Always referred; `host` among the item's `hosts`; `seconds` bounded by 3,600 and the access session; a value that is not header-safe refused; `leash.item.proxy` audited and in the feed; tests for each | §10.11 | The third way needs the value released to the connector for one host and a bounded time | A3.9 |
-| AV12 | **Collect before sending** (0.1.12; VAULT-MESSAGING 0.90.5 §9.1). **Not started.** `(*Device).Run` makes a catch-up pass of every mailbox the device still collects (long-poll collects, always `wait=0`, until an answer with fewer messages than `max` or one holding a message deposited 60 s or more after the `Date` of the pass's first answer; any `relay.address.update` followed or refused) at its start, after each loop error and before it opens a WebSocket session (a failed WebSocket connect after a good pass is not a restart). `Send`, `Request`, `Op` and the token and handshake answers wait until the pass has ended and the latest successful collect is less than 24 hours old (the longer of the monotonic and wall-clock readings), or return an error the caller can tell from a refused deposit; **a deposit that finds the device not caught up starts a pass at once** (cancelling a parked loop collect), whatever the loop's backoff. **The lock:** the relay copy of `vault.lock` alone goes at once, with `exp` at most 30 s, and starts a pass; after any follow while a bound lock (`unlock_id`) is unconfirmed, the client sends the relay copy again to the new address with a short `exp` (at most 30 s) and keeps the lock unconfirmed until the vault answers; an unbound lock is not sent again (a late copy could end a later unlock the device cannot see or wait out) and stays unconfirmed until the vault answers. Tests for each trigger, `wait=0` throughout, the start of a pass by a waiting deposit, both ends of a pass, every collected mailbox, a follow during the pass, the 24 hours, the lock going at once and being sent again after a follow (bound) or not (unbound) | §9.1, §3.4.2 residual "Devices have no telling" | A deposit to a vault's old mailbox after the vault's stop is accepted and never read; `vaultctl` and a desktop built on the client need the same rule, the lock included | — (the gate in A2.2 meanwhile) |
+| AV12 | **Collect before sending** (0.1.12; VAULT-MESSAGING 0.90.5 §9.1). **Not started.** `(*Device).Run` makes a catch-up pass of every mailbox the device still collects (long-poll collects, always `wait=0`, until an empty answer, or one holding a message deposited 60 s or more after the `Date` of the pass's first answer from that mailbox, and only once no collect of the device holds an unhandled batch from it; any `relay.address.update` followed or refused; an old mailbox's `mailbox_unknown` drops it) at its start, after each loop error and before it opens a WebSocket session (a failed WebSocket connect after a good pass is not a restart). A parked loop collect is not canceled; its answer is handled like any batch. `Send`, `Request`, `Op`, blob uploads to the vault's mailbox and the token and handshake answers wait until the pass has ended and the latest successful collect (a long-poll answer or a session message, not a pong) is less than 24 hours old (the longer of the monotonic and wall-clock readings), or return an error the caller can tell from a refused deposit; **a deposit that finds the device not caught up starts a pass at once**, overriding the loop's backoff unless a pass has failed since; one pass at a time, later deposits join it, and after a failure the next follows the backoff and any `429`'s `retry_after`. **The lock:** the relay copy of `vault.lock` alone goes at once, with `exp` at most 30 s, and starts a pass; after any follow while a lock with `unlock_id` is unconfirmed, the client sends the relay copy again to the new address with `exp` at most 30 s and keeps the lock unconfirmed until the vault answers; a lock without `unlock_id` is not sent again (a late copy could end a later unlock the device cannot see) and stays unconfirmed until the vault answers. Tests for each trigger, `wait=0` throughout, a parked collect left running and its answer handled, the start of a pass by a waiting deposit and the join of a second, the backoff after a failure, both ends of a pass and the unhandled-batch condition, every collected mailbox, an old mailbox's `mailbox_unknown`, a follow during the pass, the 24 hours, the lock going at once and being sent again after a follow (with `unlock_id`) or not (without) | §9.1, §3.4.2 residual "Devices have no telling" | A deposit to a vault's old mailbox after the vault's stop is accepted and never read; `vaultctl` and a desktop built on the client need the same rule, the lock included | — (the gate in A2.2 meanwhile) |
 
 ### 7.2 vettid-android (ANDROID-PLAN "Devices & agents", owner approval)
 

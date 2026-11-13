@@ -4,7 +4,7 @@ status: draft
 version: 0.1.128
 date: 2026-11-12
 changelog:
-  - 0.1.128: erratum, 2026-11-12 (VAULT-MESSAGING 0.90.5 §9.1 "A device collects before it deposits"; owner decision GC #9565 "b"). New §4 "Collect before sending to the vault": the app deposits to its vault only while caught up: after a catch-up pass of every mailbox it collects (`wait=0` long-poll collects until a short or empty answer, or one past the pass's start; any `relay.address.update` followed) since its process start, its return to the foreground (not needed while the on-phone service's WebSocket had a message or pong in the last 60 s) and each restart of its collector, and with a successful collect less than 24 hours old (real time, `SystemClock.elapsedRealtime`). A deposit that finds the app not caught up starts a pass at once; until it ends every deposit waits, shown per message as "Waiting for your vault" (NEW), and then goes to the followed address. The relay copy of `vault.lock` alone goes at once (its member-API copy carries the lock); after any follow while a bound lock is unconfirmed, the relay copy is sent again to the new address (`exp` at most 30 s). A pass that cannot complete holds the deposits and, after the second failed pass or 10 s, shows the notice "Waiting for your vault" (NEW, for wording approval). The on-phone service makes the pass by long poll before each WebSocket connect. §4 "Locking the vault", "While pending": a `relay.address.update` is followed while a lock is pending; its `relay.token.issued` waits until the lock ends, as GC #9050 says. Closes VAULT-MESSAGING §3.4.2's residual "Devices have no telling" for the app, except the cases it lists.
+  - 0.1.128: erratum, 2026-11-12 (VAULT-MESSAGING 0.90.5 §9.1 "A device collects before it deposits"; owner decision GC #9565 "b"). New §4 "Collect before sending to the vault": the app deposits to its vault only while caught up: after a catch-up pass of every mailbox it collects (`wait=0` long-poll collects until an empty answer, or until an answer holds a message deposited 60 s or more after the HTTP `Date` of the pass's first answer from that mailbox; ending only once no collector or socket holds an unhandled batch; any `relay.address.update` followed; a parked collect never canceled) since its process start, its return to the foreground (not needed while the on-phone service's WebSocket had a message or pong in the last 60 s with nothing unacked by frame) and each restart of its collector, and with a successful collect (a long-poll answer or a socket message, not a pong) less than 24 hours old (real time, `SystemClock.elapsedRealtime`). A deposit that finds the app not caught up starts a pass at once, one at a time, and after a failed pass on the backoff; an old mailbox's `mailbox_unknown` drops it from the pass. Until the pass ends every deposit, blob uploads included, waits, shown per message as "Waiting for your vault" (NEW), and then goes to the followed address; a request past its 30 s timeout is dropped and shown as not sent. The relay copy of `vault.lock` alone goes at once (its member-API copy carries the lock); after any follow while a lock with `unlock_id` is unconfirmed, the relay copy is sent again to the new address (`exp` at most 30 s). A pass that cannot complete holds the deposits and, after the second failed pass or 10 s, shows the notice "Waiting for your vault" (NEW, for wording approval). The on-phone service makes the pass by long poll before each WebSocket connect. §4 "Locking the vault", "While pending": the pass handles and acks without taking messages into the app; a `relay.address.update` is followed; its `relay.token.issued` waits until the lock ends, as GC #9050 says. Closes VAULT-MESSAGING §3.4.2's residual "Devices have no telling" for the app, except the cases it lists.
   - 0.1.127: 2026-11-12 (VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4 "Relay-key rotation texts". The texts, owner-approved 2026-11-12, are: the held state, per message, of messages to a connection whose vault moved (`relay_held`); `connection.stale` with `reason: "relay_moved"`; S9's text for `connection.fork_suspected` (`ref` = `relay_revoked`); `message.not_delivered` at the hold's 60-day limit; and `message.delivery_unconfirmed` reused at the telling's limit (VAULT-MESSAGING §3.4.2 RK9, RK14). None of them shows before a vault release that rotates relay keys.
   - 0.1.126: erratum, 2026-11-12 (owner decision a, GC #9050). §4 "Locking the vault", "While pending": besides the lock and a pending `call.end`, the phone's `hs.resp` to a rekey the vault started goes while a lock is pending (while the vault's rekey awaits it, the vault starts no other rekey with this phone for up to 16 days); everything else the phone would send waits until the lock ends; the session's own handshake and token messages are still processed, the rekey's `hs.fin` included. Android already sends the `hs.resp` while a lock is pending; holding what else it sends is GC #9027.
   - 0.1.125: erratum, 2026-11-11 (owner decision a, GC #8641; as built in vettid-android #353). §4 "Attestation in detail": the reason after "Every check passed, but this phone refused the release:" is one of four texts of its own (not active for an enrollment, older, another instance, a time scale this build does not accept), never the unlock's error text, which contradicted "every check passed"; another instance and the time scale are refusals after line 9 as built; a removed release is the host's 410, not a refusal of the phone's; line 9's cell no longer reads as if a release not active for an enrollment failed it; while the route waits for a move, a pass still naming the release moved from is not recorded, so the screen keeps the last record, and a failure or refusal meanwhile is recorded. Four new texts.
@@ -2827,8 +2827,8 @@ as drafts (VAULT-LOCK L16) and are final with #127 merged.*
   followed (it is the session's own message); its `relay.token.issued`
   waits until the lock ends, like the other answers above. The relay
   copy of `vault.lock` is not held for the pass, and after any follow
-  while a bound lock is unconfirmed it is sent again to the new address
-  (part 2); the pending `call.end` and the `hs.resp` wait for the pass,
+  while a lock with `unlock_id` is unconfirmed it is sent again to the
+  new address (part 2); the pending `call.end` and the `hs.resp` wait for the pass,
   like every other deposit.
 - **Retries:** after 1, 2, 5, 10 s, four times 30 s, then every 60 s,
   through the member API, within the route's limit, while the app's
@@ -7292,13 +7292,16 @@ sign (VAULT-MESSAGING §3.4.2 residual "Devices have no telling"). So the
 app collects first. §9.1 governs; this section is how the app does it.*
 
 - **The rule.** Every deposit to the vault (the outbox's entries,
-  requests and their retries, events such as `device.features`, the
-  calls' `call.answer`, `call.ice`, `call.keepalive` and `call.end`, and
-  what processing a message produces: an `hs.resp`,
-  `relay.token.issued`, a token renewal) goes only while the app is
-  **caught up**. Until then it waits, in order (an outbox entry stays in
-  the outbox), never shown as sent, and goes, once caught up, to the
-  vault's address the app holds then.
+  requests and their retries, a photo's blob upload to the vault's
+  mailbox, events such as `device.features`, the calls' `call.answer`,
+  `call.ice`, `call.keepalive` and `call.end`, and what processing a
+  message produces: an `hs.resp`, `relay.token.issued`, a token renewal)
+  goes only while the app is **caught up**. Until then it waits, in
+  order (an outbox entry stays in the outbox), never shown as sent, and
+  goes, once caught up, to the vault's address the app holds then; a
+  blob and its message go to the same address. An interactive request
+  whose 30 s timeout passes while it waits is dropped unsent and shown
+  as not sent, never sent late.
 - **Caught up** needs both:
   1. **A catch-up pass** since the latest of: the process start (a
      launch, a wake, `PendingLockJob`, the on-phone service), the
@@ -7311,48 +7314,58 @@ app collects first. §9.1 governs; this section is how the app does it.*
        (its current one, and an old one still in its grace after the
        phone's own relay-key rotation) by long poll
        (`GET /v1/mailbox`), always with **`wait=0`**, each batch handled
-       as usual (persist, then ack). For each mailbox it ends at an
-       answer with fewer messages than the `max` asked for (an empty one
-       included), or at an answer holding a message whose
-       `deposited_at` is 60 s or more after the HTTP `Date` of the
-       pass's first answer from that mailbox.
+       as usual (persist, then ack). A `mailbox_unknown` or a refused
+       key on an old mailbox ends the phone's collects of it, and the
+       pass goes on without it.
+     - For each mailbox it ends at an **empty** answer, or at an answer
+       holding a message whose `deposited_at` is 60 s or more after the
+       HTTP `Date` of the pass's first answer from that mailbox (so a
+       busy mailbox cannot hold deposits back), and in either case only
+       once no collector or socket of the app holds a batch from that
+       mailbox not yet handled.
      - A `relay.address.update` it collects is followed (VAULT-MESSAGING
        §3.4.1 rule U) or refused before the pass ends.
      - **Any deposit that finds the app not caught up starts a pass at
-       once**, in the foreground or the background, whatever the
-       collector's schedule or reconnect backoff. If a collect of the
-       loop is parked then, it is cancelled and the pass goes on with
-       `wait=0`.
+       once**, in the foreground or the background, overriding the
+       collector's idle schedule or reconnect backoff as long as no pass
+       has failed since the trigger. One pass at a time: waiting
+       deposits and their retries join it. After a failed pass the next
+       follows the collector's backoff, never before a `429`'s
+       `retry_after`.
+     - A loop collect that is parked is **not canceled**: the pass's
+       `wait=0` collects run beside it, and its answer, whenever it
+       comes, is handled like any batch.
      - The collects the app makes anyway at a start and a wake count
        toward the pass when they use `wait=0` or bring messages.
-     - The WebSocket gives no short answer, so the pass is made by long
+     - The WebSocket gives no empty answer, so the pass is made by long
        poll before the socket opens (a few hundred milliseconds, one
        request when nothing waits).
      - **A return to the foreground needs no pass** while the on-phone
-       service's WebSocket, opened after the last pass, is open and has
-       delivered a message or a pong within the last 60 s, with every
-       message it delivered before that handled and acked. Otherwise
-       the app pings once and takes the pong, or makes the pass.
+       service's WebSocket, opened after the last pass, is open, has
+       delivered a message or a pong within the last 60 s, and has no
+       message it delivered not yet acked by frame (an ack by `DELETE`
+       keeps the window full). Otherwise the app pings once and takes
+       the pong, or makes the pass; no pong in time means a pass.
   2. **A recent collect**: the latest successful collect ended less than
-     24 hours ago (a long poll's answer, handled, or a message or a pong
-     received on the open WebSocket once every message the socket
-     delivered before it is handled and acked; a pong while the
-     socket's window is full does not count). Measured with
+     24 hours ago: a long poll's answer, handled, or a message delivered
+     on the open WebSocket, handled. A pong does not count, so a quiet
+     socket means one `wait=0` long poll a day. Measured with
      `SystemClock.elapsedRealtime()` (counts deep sleep), in real time:
      not divided by the staging `time_scale` (§4 "Staging time scale").
 - **The lock never waits.** The relay copy of `vault.lock` goes at once,
   without a pass, and starts one if the app is not caught up: the
   member-API copy (`POST /api/vault/lock`) reaches the vault without the
   relay, and the lock stays pending until confirmed as §4 "Locking the
-  vault" says. After any follow while a bound lock (part 2) is
-  unconfirmed, the relay copy is sent again to the new address, with
-  `exp` at most 30 s; part 1's single relay lock is not repeated.
+  vault" says. After any follow while a lock with `unlock_id` (part 2)
+  is unconfirmed, the relay copy is sent again to the new address, with
+  `exp` at most 30 s; a lock without `unlock_id` (part 1, or a lost
+  value) is not sent again.
 - **Calls.** A phone woken for a `call.offer` makes its pass with the
   wake's collects. The relay returns the oldest messages first, so the
   offer comes after any backlog, and answering waits until the pass
-  ends: no further collect when the batch that held the offer was
-  short, one more `wait=0` collect when it was full, and more only while
-  later deposits keep the batches full (at most until the 60 s bound).
+  ends: one more `wait=0` collect after the batch that held the offer,
+  and more only while later deposits keep the answers non-empty (at
+  most until the 60 s bound).
   A call in progress keeps the collector open, so `call.ice`,
   `call.keepalive` and `call.end` normally go at once; after a reconnect
   they wait for one pass. Accepted (VAULT-MESSAGING §9.1): a fault that
@@ -7371,7 +7384,7 @@ app collects first. §9.1 governs; this section is how the app does it.*
   a `5xx`, a `429` and its `retry_after`), it is retried on the
   collector's backoff, and every deposit keeps waiting, shown as above:
   the app never sends without the pass. A definite failure on the
-  phone's own mailbox (`mailbox_unknown`, a refused signature or token)
+  phone's current mailbox (`mailbox_unknown`, a refused signature or token)
   takes the existing path for a phone that must be paired again
   (VAULT-MESSAGING §6.6 "Limits"), not this notice.
 - **Cost.** One `wait=0` collect before the first deposit after a start,
@@ -7384,17 +7397,23 @@ app collects first. §9.1 governs; this section is how the app does it.*
   collect, the socket's last message or pong); the relay lock's path
   bypasses it and nothing else does.
 - **Tests.** A deposit after a start, a foreground and a reconnect waits
-  for the pass; a foreground with the socket live within 60 s needs
-  none; the pass's collects all use `wait=0`, and a parked loop collect
-  is cancelled when a deposit starts waiting; a deposit in the
-  background more than 24 hours (elapsed realtime) after the last
-  collect starts a pass at once and goes when it ends; the pass ends at
-  a short answer and at one past its start by 60 s, for every mailbox
-  the phone collects; an update in the pass is followed and the waiting
+  for the pass; a foreground with the socket live within 60 s and
+  nothing unacked by frame needs none; the pass's collects all use
+  `wait=0`, and a parked loop collect is left running and its answer
+  handled; the pass does not end while a batch is unhandled; a deposit
+  in the background more than 24 hours (elapsed realtime) after the
+  last collect starts a pass at once and goes when it ends; a second
+  deposit joins the running pass; after a failed pass the next waits
+  for the backoff and a `429`'s `retry_after`; the pass ends at an
+  empty answer and at one past its start by 60 s, for every mailbox
+  the phone collects, and an old mailbox's `mailbox_unknown` drops it
+  from the pass; a blob upload waits with its message and goes to the
+  same address; a request past its 30 s timeout is dropped and shown
+  as not sent; an update in the pass is followed and the waiting
   deposits go to the new address, in order; a failed pass holds
   deposits, shows each as waiting and the notice after the second
   failure or 10 s, retries and then sends; the relay lock goes at once
-  with the gate closed, and with a bound lock is sent again after a
+  with the gate closed, and with `unlock_id` is sent again after a
   follow, `exp` at most 30 s; `call.answer` after a wake waits for
   exactly the wake's pass; during a pending lock the pass acks without
   taking messages into the app, and `relay.token.issued` for a follow
