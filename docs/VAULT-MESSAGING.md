@@ -16093,7 +16093,8 @@ The **profile object** holds the extras' display name and photo. Sent by
   list of its `device.features`. A receiver counts it from any message
   that authenticates as that peer and passes `acceptFrom` steps 1–4
   (§3.4.1), even one in a handshake it then abandons, and takes it as
-  that peer's current list, as if it had arrived in `profile.update` or
+  that peer's current list (except a service's `vote` and
+  `approval_document`, below), as if it had arrived in `profile.update` or
   `device.features` (a name is only ever added, so an older list in a
   late message removes nothing). (0.87.0) §6.3.1 "An app from before
   release 29" judges a device's `hs_confirm` from these lists. The set it last
@@ -16126,8 +16127,10 @@ The **profile object** holds the extras' display name and photo. Sent by
     each service connection, and sends an update with the next `version`
     (trigger 5 above) at the first unlock under an image whose value
     differs, retried with the connection's other messages (§8.6). A
-    service sends an update with the next `version` to every connection
-    when its value changes.
+    service does the same: it keeps the value it last sent to each
+    connection, and sends an update with that connection's next
+    `version` at its first start under a release whose value differs,
+    retried with the connection's other messages.
 - **`vote` and `approval_document` are read from `profile.update` only**
   (0.90.10). A service judges them from the last `profile.update` it
   applied, never from the inner `features` of other messages (which
