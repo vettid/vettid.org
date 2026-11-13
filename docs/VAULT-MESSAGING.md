@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.8
+version: 0.90.10
 date: 2026-11-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,13 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.10: 2026-11-13, **`contract` in `profile.update` on service
+    connections** (owner decision 2026-11-13, VAULT-SERVICE-INDEPENDENCE
+    R2): §10.8: the major.minor of VAULT-SERVICE-CONTRACT the sender
+    implements, sent by a member vault to a service connection and by a
+    service; informational, never selecting behavior or relaxing a check;
+    a change of it sends `profile.update`. (Numbered after 0.90.9,
+    vettid.org #594; whichever merges later renumbers.)
   - 0.90.8: 2026-11-13, **an unlock's PIN attempt is counted before it
     is tested** (owner decision a, 2026-11-13): §11.8 "Enclave backoff":
     the unlock only (the PIN checks in a running vault are unchanged);
@@ -15954,7 +15961,7 @@ The **profile object** holds the extras' display name and photo. Sent by
 |---|---|---|
 | `profile.get` | `{}` | `{version, name?, photo?, first_name, last_name, ik}` |
 | `profile.set` | `{version, name?, photo?}` | `{version}` |
-| `profile.update` (V↔V) | — | `{version, first_name, last_name, ik, name?, photo?, items: [{item_id, name, category, fields: [{field_id, label, kind, value}]}], features?}` (`features`, 0.81.0, only to a service connection; (0.85.4) `["relay_follow"]` to any connection, §10.8) |
+| `profile.update` (V↔V) | — | `{version, first_name, last_name, ik, name?, photo?, items: [{item_id, name, category, fields: [{field_id, label, kind, value}]}], features?, contract?}` (`features`, 0.81.0, only to a service connection; (0.85.4) `["relay_follow"]` to any connection, §10.8; `contract`, 0.90.10, only on a service connection, §10.8) |
 
 - `name`, the display name, is optional: at most 128 bytes, absent when
   the member has none (the default). `photo` is base64 of a JPEG or PNG
@@ -16013,7 +16020,10 @@ The **profile object** holds the extras' display name and photo. Sent by
   4. (0.81.0) the **features advertised to a connection** change
      (below; to a service: its features; (0.85.4) to any connection:
      `relay_follow` and (0.86.0) `hs_confirm`): only the connections whose advertised set changes
-     get an update, and `version` still counts the change.
+     get an update, and `version` still counts the change;
+  5. (0.90.10) the **contract version** a vault implements changes
+     (below): every service connection gets an update with the next
+     `version`.
 - **After an `ik` rotation** the vault sends each peer the new
   `profile.update`, carrying the new `ik`, only after it has sent that
   peer the `identity.rotate` statement and the epoch it established with
@@ -16087,6 +16097,19 @@ The **profile object** holds the extras' display name and photo. Sent by
   advertised to each connection is vault state. It does not
   depend on the vault being unlocked when the service chooses its
   roster, because the service keeps the last statement.
+- **`contract`** (0.90.10; owner decision 2026-11-13,
+  VAULT-SERVICE-INDEPENDENCE R2). On a connection whose `peer_kind` is
+  `"service"`, a member vault sends, and a service sends in its own
+  `profile.update`, the **major.minor** of VAULT-SERVICE-CONTRACT it
+  implements: a string of two decimal numbers of 1 to 4 digits each,
+  joined by `.` (for example `"1.0"`). A person connection is never sent
+  it. It is **informational**: it serves the support notices of
+  VAULT-SERVICE-CONTRACT §4 only, never selects behavior, and never
+  relaxes a check (VAULT-SERVICE-CONTRACT §5.2). A receiver keeps the
+  last value from each connection; one that does not read is ignored as
+  if absent; a receiver that does not know the member ignores it
+  (§10.1). The vault sends it in the update of (a) and (b) above and in
+  the update of trigger 5 when it changes.
 - **Receiving.** A receiver parses `profile.update` strictly (the field
   rules of §10.7; `first_name` and `last_name` strings of 1–160 bytes
   without control characters (C0, DEL, C1, U+2028, U+2029; DEL since
