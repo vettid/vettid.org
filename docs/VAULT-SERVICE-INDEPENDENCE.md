@@ -185,11 +185,14 @@ Each row says what binds the two sides and where it is written.
 
 ### 4.1 The work in flight
 
-- **Release 30.** **Unverified:** there is no "release 30" text in
-  vettid.org docs, and I did not find its scope. If it is a vault
-  release that changes anything the service reads, it follows R1 and R3.
-  If it ends connections or changes a rule both sides run, it needs a
-  feature name first, or an owner go as a flag day.
+- **Vault staging release 30** (the next vault release; it waits for
+  vettid-vault #251, owner 2026-11-13). Its service-facing content is
+  vettid-vault #223 (H1), whose hold is already met on staging (the
+  service there runs `bc82fa2`, which has sv #137). Relay-key rotation
+  (#246–#249, #252) ships switched off, and the service does not
+  advertise `relay_follow` (W6), so nothing in 30 needs a service
+  change. It ships as planned; cards 2 and 3 below replace H1's hold
+  for later releases.
 - **Service-vault release-29 deploy** (the four changes, then the
   deploy). This is the last planned flag day. It stays as designed
   (C1 to C3), because members already re-enrolled and R3 applies to
@@ -312,4 +315,4 @@ Each is small and independent.
   - (b) Reviewer judgment only.
   - *Recommendation: (a).*
 - **Q8. Apps.** **Unverified** whether apps are a party to this interface (`device.features` feeds `approval_document`). Check before the contract is final.
-- Not checked: production tags and manifest, release 30's scope, the votes site's per-version list files (W4), Go's rules for R5's layout.
+- Not checked: production tags and manifest, the votes site's per-version list files (W4), Go's rules for R5's layout.
