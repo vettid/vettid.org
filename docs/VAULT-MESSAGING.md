@@ -5516,7 +5516,7 @@ the whole message malformed, and it applies to relay link objects only.
 message's other rules: §6.2 for a reconnect, and §10.2's body table for
 the update. For a reconnect that includes:
 - `hs.resp`'s `relay` pairing (`relay` present exactly when
-  `relay_links` is, and matching its last `new`);
+  `relay_links` is);
 - `sas_commit`, `sas_nonce` and `unlock_secret` by purpose;
 - `eph` differing from `from.kem`;
 - `relay_links` allowed for the message's kind and purpose.
@@ -5552,7 +5552,8 @@ lists:
 - **No link of the chain is kept as seen** when the chain is refused
   for its count, a link's form, a `v` or `suite`, a repeated key, a link
   whose `old` equals its `new`, or an end mismatch (the first `old` is not
-  the deposit key, or the last `new` is not the announced key).
+  the deposit key, or the last `new` is not the announced key; in an
+  update, the `sender` and `relay.pk`).
 - **Earlier valid links are still seen** when the chain is refused only
   for a bad signature or a break in the chain. Those go through rule U's
   checks, and rule C, as before.
@@ -9114,7 +9115,8 @@ Field rules:
   announced key is `from.relay.pk`.
   An `hs.resp` that carries `relay_links` MUST carry `relay`, the
   announced address, and `relay` MUST be absent otherwise. `relay.pk`
-  MUST equal the last link's `new`, `relay.mailbox` MUST be the mailbox
+  MUST equal the last link's `new` (the chain's end: `relay_unlinked`,
+  §3.4.1 rule U "Precedence"), `relay.mailbox` MUST be the mailbox
   id derived from `relay.pk`, and `relay.url` follows the rules for
   `from.relay.url` (below). Both fields are absent for every other
   purpose. The tokens stay required in a reconnect (below); with
@@ -31941,7 +31943,10 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
                 the URL alphabet; a 31-byte key.
                 malformed body: a duplicate member, refused before any
                 link is read
-  each invalid case is refused relay_unlinked. Each form case records its
+  each invalid case is refused relay_unlinked. A missing v or suite, an
+  unknown v and an unknown suite are faults in a link's form (rule U
+  "Precedence"), kept in the invalid list because their links still
+  parse as JSON. Each form case records its
   class in a "refusal" field, and carries its links as the exact array
   text in "relay_links_json", since those forms cannot survive as parsed
   JSON. The file is added with the vault's implementation of 0.90.3
