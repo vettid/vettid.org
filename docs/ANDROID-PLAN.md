@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.127
-date: 2026-11-12
+version: 0.1.129
+date: 2026-11-13
 changelog:
+  - 0.1.129: erratum, 2026-11-13 (owner decision a, 2026-11-13; as built in vettid-android #307; the decision holds for vettid-ios too). §4 "Transfer (new phone)": the settlement window's end moves out for a cut collect or a process freeze, within a cap, as built; a cut noticed just before the window starts is not counted, and the owner chose to leave that as it is.
   - 0.1.127: 2026-11-12 (VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4 "Relay-key rotation texts". The texts, owner-approved 2026-11-12, are: the held state, per message, of messages to a connection whose vault moved (`relay_held`); `connection.stale` with `reason: "relay_moved"`; S9's text for `connection.fork_suspected` (`ref` = `relay_revoked`); `message.not_delivered` at the hold's 60-day limit; and `message.delivery_unconfirmed` reused at the telling's limit (VAULT-MESSAGING §3.4.2 RK9, RK14). None of them shows before a vault release that rotates relay keys.
   - 0.1.126: erratum, 2026-11-12 (owner decision a, GC #9050). §4 "Locking the vault", "While pending": besides the lock and a pending `call.end`, the phone's `hs.resp` to a rekey the vault started goes while a lock is pending (while the vault's rekey awaits it, the vault starts no other rekey with this phone for up to 16 days); everything else the phone would send waits until the lock ends; the session's own handshake and token messages are still processed, the rekey's `hs.fin` included. Android already sends the `hs.resp` while a lock is pending; holding what else it sends is GC #9027.
   - 0.1.125: erratum, 2026-11-11 (owner decision a, GC #8641; as built in vettid-android #353). §4 "Attestation in detail": the reason after "Every check passed, but this phone refused the release:" is one of four texts of its own (not active for an enrollment, older, another instance, a time scale this build does not accept), never the unlock's error text, which contradicted "every check passed"; another instance and the time scale are refusals after line 9 as built; a removed release is the host's 410, not a refusal of the phone's; line 9's cell no longer reads as if a release not active for an enrollment failed it; while the route waits for a move, a pass still naming the release moved from is not recorded, so the screen keeps the last record, and a failure or refusal meanwhile is recorded. Four new texts.
@@ -3911,7 +3912,23 @@ both sections above (`pin.change`, `credential.password.change`,
   hides the comparison code during the window and says it is checking
   whether the old phone approved in time (NEW text, for the owner). A
   session that ends during the window (`mailbox_unknown`, sign-out or
-  wipe) is reported as ended, not as dropped. A paired transfer completes at any later start, whatever its
+  wipe) is reported as ended, not as dropped. (0.1.129, as built in
+  vettid-android #307.) **A cut or a freeze moves the
+  window's end out.** A collect that may have been handed the
+  `device.paired` when it was cut (a request of the app's abandoned or
+  failed with anything but a relay status, or the collector's request
+  cut or lost) or across a freeze of the process (a gap of more than
+  10 s in a 1 s heartbeat that runs with the window) may hold it under a
+  lease of one visibility timeout V. The end then moves to the later of
+  the end and that lease's end + 15 s, never past the window's first
+  end + V + 35 s. A lease starts at its request's send + the request's
+  long-poll wait, and for a cut not before the cut was noticed. Only cuts
+  noticed since the window began count: a cut noticed just before it
+  starts can leave a lease that ends up to about 10 s past the window's
+  first end, and only when the app is back within about 40 s of that
+  poll. The owner chose to leave that as it is (decision a, 2026-11-13):
+  the collector's round the window waits for and the window's last
+  collect cover it in practice. A paired transfer completes at any later start, whatever its
   age. Tests: a `device.paired` at 10 minutes 30 seconds is accepted;
   nothing is dropped before 11 minutes; at the deadline a waiting
   `device.paired` is applied; a `device.paired` leased to a killed
