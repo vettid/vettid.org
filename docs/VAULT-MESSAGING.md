@@ -31,9 +31,12 @@ changelog:
   - 0.90.10: 2026-11-13, **`contract` in `profile.update` on service
     connections** (owner decision 2026-11-13, VAULT-SERVICE-INDEPENDENCE
     R2): §10.8: the major.minor of VAULT-SERVICE-CONTRACT the sender
-    implements, sent by a member vault to a service connection and by a
-    service; informational, never selecting behavior or relaxing a check;
-    a change of it sends `profile.update`. (Numbered after 0.90.9,
+    implements, in every `profile.update` a member vault sends to a
+    service connection and every one a service sends; informational,
+    never selecting behavior or relaxing a check; its form, how a bad or
+    absent value is read, and when a change of it is sent, on both
+    sides. A service reads `vote` and `approval_document` from
+    `profile.update` only. (Numbered after 0.90.9,
     vettid.org #594; whichever merges later renumbers.)
   - 0.90.8: 2026-11-13, **an unlock's PIN attempt is counted before it
     is tested** (owner decision a, 2026-11-13): §11.8 "Enclave backoff":
@@ -16021,9 +16024,9 @@ The **profile object** holds the extras' display name and photo. Sent by
      (below; to a service: its features; (0.85.4) to any connection:
      `relay_follow` and (0.86.0) `hs_confirm`): only the connections whose advertised set changes
      get an update, and `version` still counts the change;
-  5. (0.90.10) the **contract version** a vault implements changes
-     (below): every service connection gets an update with the next
-     `version`.
+  5. (0.90.10) the **contract version** a vault implements differs
+     from the one it last sent to a service connection (below): that
+     connection gets an update with the next `version`.
 - **After an `ik` rotation** the vault sends each peer the new
   `profile.update`, carrying the new `ik`, only after it has sent that
   peer the `identity.rotate` statement and the epoch it established with
@@ -16098,18 +16101,38 @@ The **profile object** holds the extras' display name and photo. Sent by
   depend on the vault being unlocked when the service chooses its
   roster, because the service keeps the last statement.
 - **`contract`** (0.90.10; owner decision 2026-11-13,
-  VAULT-SERVICE-INDEPENDENCE R2). On a connection whose `peer_kind` is
-  `"service"`, a member vault sends, and a service sends in its own
-  `profile.update`, the **major.minor** of VAULT-SERVICE-CONTRACT it
-  implements: a string of two decimal numbers of 1 to 4 digits each,
-  joined by `.` (for example `"1.0"`). A person connection is never sent
-  it. It is **informational**: it serves the support notices of
-  VAULT-SERVICE-CONTRACT §4 only, never selects behavior, and never
-  relaxes a check (VAULT-SERVICE-CONTRACT §5.2). A receiver keeps the
-  last value from each connection; one that does not read is ignored as
-  if absent; a receiver that does not know the member ignores it
-  (§10.1). The vault sends it in the update of (a) and (b) above and in
-  the update of trigger 5 when it changes.
+  VAULT-SERVICE-INDEPENDENCE R2). Every `profile.update` a member vault
+  sends to a connection whose `peer_kind` is `"service"`, and every
+  `profile.update` a service sends, carries `contract`: the
+  **major.minor** of VAULT-SERVICE-CONTRACT the sender implements, two
+  decimal numbers without leading zeros (`0|[1-9][0-9]{0,3}`) joined by
+  `.` (for example `"1.0"`), compared number by number (`"1.10"` is
+  later than `"1.9"`). It is a constant of the sender's image or release
+  (for a vault, measured with the image like §11.10.9's list; never the
+  channel file). A person connection is never sent it, and a vault
+  ignores it from one.
+  - **It is informational:** it serves VAULT-SERVICE-CONTRACT §4 only,
+    never selects behavior, and never relaxes a check
+    (VAULT-SERVICE-CONTRACT §5.2).
+  - **Receiving.** A value that is not of that form is ignored as if
+    absent: the update itself is kept (it is not `drop.profile_malformed`
+    and fails no strict parse). The receiver keeps the value of the
+    update it applies (step 4 below); an update it ignores or drops
+    changes nothing; an applied update without `contract` clears the
+    kept value (the peer may have rolled back). A receiver that does not
+    know the member ignores it (§10.1). An absent value means a peer
+    before contract 1.0.
+  - **Sending.** The vault keeps, as state, the value it last sent to
+    each service connection, and sends an update with the next `version`
+    (trigger 5 above) at the first unlock under an image whose value
+    differs, retried with the connection's other messages (§8.6). A
+    service sends an update with the next `version` to every connection
+    when its value changes.
+- **`vote` and `approval_document` are read from `profile.update` only**
+  (0.90.10). A service judges them from the last `profile.update` it
+  applied, never from the inner `features` of other messages (which
+  only ever add, "On every message" above), so a late message cannot
+  re-add a name a later update left out (VAULT-SERVICE-CONTRACT §5.3).
 - **Receiving.** A receiver parses `profile.update` strictly (the field
   rules of §10.7; `first_name` and `last_name` strings of 1–160 bytes
   without control characters (C0, DEL, C1, U+2028, U+2029; DEL since
