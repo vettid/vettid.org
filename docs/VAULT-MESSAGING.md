@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.3
+version: 0.90.4
 date: 2026-11-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,65 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.4: 2026-11-12, **erratum to §3.4.1 Strict F1: links applied at
+    `hs.fin`** (owner decision 2026-11-12). The links that a rekey or
+    reconnect `hs.init` carries, applied at its verified `hs.fin`, now
+    run Strict F1. E is the epoch the rekey's `hs.init` traveled under
+    (Q records it with its answer), or the epoch the reconnect named, as
+    a refused reconnect's links already did. x is the `hs.fin`. As
+    before, Strict F1 applies only when Q's current epoch is later than
+    E and signed by the link's `old_ik`, and judges the later epochs
+    signed by that key or an ancestor; pending, abandoned and destroyed
+    epochs stay with
+    "Pending epochs at a link", R29-K9 and the Residuals. Before, these
+    links ran only "Epochs after an `ik` link". An old copy of P could
+    set up an epoch with Q, signed by the link's `old_ik` and
+    established between Q's `hs.resp` and P's `hs.fin`. That epoch was
+    not demoted, and P's later `identity.rotate` was ignored as already
+    followed. Q went on accepting the copy's messages under the epoch,
+    against invariant I3's last clause. Now the epoch is demoted, with
+    no reconnect started, or Q suspends if its received flag is set. For
+    a rekey naming the confirmed epoch while it was not current, a
+    copy's epoch from before the `hs.init` is also demoted, then
+    destroyed; rule E already made its later messages fork evidence, so
+    that case was not part of the gap, and §6.3.1 rule E now points to
+    the order. A restore reconnect with a link suspends no honest pair:
+    a restored side issues no new `identity.rotate` until its reconnects
+    are settled (§6.6). A rekey answer recorded before this version
+    (without its carrying epoch) runs no Strict F1; it lives at most `L`
+    (16 days), so the gap stays open at most that long after the
+    upgrade. A reconnect's named epoch was always recorded. The links of
+    an `hs.resp` are unchanged: the epoch Q's own `hs.init` used is
+    still current there, or every epoch after it is already demoted or
+    abandoned while pending, so Strict F1 would do nothing. The
+    Residuals name the path left open: Q's own rekey answered by the
+    copy and abandoned while pending at P's later rekey, whose `hs.fin`
+    carries the link; only R29-K9 judges that epoch, at P's
+    `identity.rotate`, as K9 at the `hs.fin` would suspend honest pairs.
+    "A copy acting as initiator is not visible" and "Two old-copy cases"
+    are updated for the new path. Table B (Reached), the R29-K9
+    paragraph and §6.3.2 (R29-K7 and its label, R29-F3; test locations
+    of R29-K7, R29-K8 and R29-F1 corrected) are updated.
+    Also **holder rules for issued tokens** (§7.1 "The holder's
+    checks"): a vault keeps a token a peer gives it only if its
+    signature and claims check, its `exp − iat` is within §7.1's bound
+    for reconnect tokens (365 days) for a reconnect token and 30 days for
+    every other kind (on
+    the vault's own relay, also its `max_token_lifetime_seconds` as read
+    at registration), its `exp` is later than its `iat`, its `iat` is at
+    most 5 minutes ahead of the vault's clock, and its `jti` is not
+    recorded as revoked; any other is refused (`bad_issued_token` for
+    `relay.token.issued`, each message's own refusal elsewhere) and the
+    held token is kept. A reconnect token in `relay.token.issued` with
+    the held one's `jti` is ignored; otherwise it replaces the held one
+    only if its `exp` is later (`issued_token_not_newer`), as for
+    carried tokens (§6.3.1). A reconnect's own `hs.init` refused
+    `token_invalid` is one failed try at once and drops that reconnect
+    token if it is still held (`reconnect_token_invalid`), beside
+    `token_revoked`, which now also drops it and records its `jti` until
+    its `exp` (`reconnect_token_revoked`); with no reconnect token, the
+    next start finds the connection `stale` unless a new one arrives
+    first (§3.4.1 "The reconnect bound", §8.6).
   - 0.90.3: 2026-11-12, **the relay-key rotation wire format**
     (erratum):
     - A relay link is `{v, suite, old, new, sig_old, sig_new}`, as the
@@ -5210,7 +5269,7 @@ the `hs.init`'s links are applied (§6.6).
 | `ik` | `identity.rotate` | `hs.init` (rekey, reconnect) | `hs.resp` to Q's handshake | `hs.fin` to Q's answer |
 |---|---|---|---|---|
 | Current | follow, then H5; refuse (`ik_rollback`) if a `new_ik` is an ancestor or rejected | answer | accept, then H5 if links were appended | accept (establish) |
-| Reached | — | answer | accept, links appended after `sig_R` verifies, then H5 | accept, links applied, then H5 |
+| Reached | — | answer | accept, links appended after `sig_R` verifies, then H5 | accept, links applied (with Strict F1, E the epoch the `hs.init` traveled under or named), then H5 |
 | Ancestor | every link already followed: ignore ((0.87.1) R29-K9 is still judged) | refuse (`ancestor_ik`; a reconnect also `reconnect_refused`, §6.6) | abort (`ancestor_ik`) | after `sig_I` verifies: a fork-evidence answer suspends (H5); else refuse (`ancestor_ik`). An `hs.fin` for an answer Q dropped does not reach this table (below) |
 | Rejected | refuse (`rejected_ik`) | refuse (`rejected_ik`) | abort (`rejected_ik`) | refuse (`rejected_ik`) |
 | Unknown | refuse (`unknown_ik`) | refuse (`unknown_ik`) | abort (`unknown_ik`) | — |
@@ -5265,7 +5324,10 @@ demotion, below) it holds the `identity.rotate` and seals it under the
 next epoch that becomes current, which is later at Q, so the argument
 below still holds. An `hs.resp` names Q's epoch, which can be
 older than P's current one, and links applied at an `hs.fin` travel under
-the new epoch, so neither is used. When Q follows or ignores an `identity.rotate`
+the new epoch, so neither is used. (0.90.4) Strict F1 still runs at
+that `hs.fin`, with E the epoch the `hs.init` traveled under or named
+("Strict F1 for links applied at `hs.fin`").
+When Q follows or ignores an `identity.rotate`
 from P under an epoch E, including one whose links are all already followed
 (Table B's Ancestor "ignore" and Table A's "Earlier, after its cut-off"
 "ignore": the judgement below is still made), then, in the write that
@@ -5357,11 +5419,93 @@ accepted and judged: if it would set the flag, Q suspends ("The flag is
 judged whenever it is set", above). (Until 0.88.2 the text did not say
 whether this demotion was by position or from the start.)
 
+(0.90.4, owner decision 2026-11-12) **Strict F1 for links applied at
+`hs.fin`.** The links of a rekey or reconnect `hs.init` that Q applies
+at its verified `hs.fin` (Table B's Reached row) also run Strict F1,
+with x the position of the `hs.fin` and E:
+- for a rekey, the epoch the `hs.init` traveled under (session mode,
+  §6.2), which Q records with its answer;
+- for a reconnect, the epoch its `ctx` named (§6.6 "Accepting `ctx`"),
+  as "The links of a refused reconnect" (§6.6) already takes it; at
+  `hs.fin`, `sig_I` has authenticated it.
+
+P sent the `hs.init` under E, or named E, while it already held the
+link, so the reasoning above holds. As above, the rule applies only when
+Q's current epoch is later than E and signed by the link's `old_ik`, and
+it judges the epochs of P after E whose P-side signer is the link's
+`old_ik` or an ancestor, as above, other than pending, abandoned or
+destroyed ones. Q's pending epoch, the epochs Q abandoned while pending
+and those rule E destroyed are left
+to "Pending epochs at a link", R29-K9 ("Epochs abandoned while pending,
+at P's `identity.rotate`", below) and the Residuals ("A copy acting as
+initiator is not visible"; the window "until P's `identity.rotate`
+arrives").
+
+An epoch an old copy set up with Q between Q's `hs.resp` and that
+`hs.fin` is established before x, so "Epochs after an `ik` link" does
+not reach it, and if P's `identity.rotate` comes later, it finds its
+links already followed (Table A and Table B: ignore). Without this rule,
+Q kept accepting the copy's messages under that epoch, against invariant
+I3's last clause. Where the `hs.init` named Q's confirmed epoch while it
+was not current (§6.3.1 rule E), a copy's epoch may also come before the
+`hs.init`. It is then also demoted, then destroyed: Strict F1 runs
+first, and rule E then destroys the epochs it demoted, in the same
+write. Rule E already made the copy's later messages under such an epoch
+fork evidence, so that case was not part of the gap. A message under
+such an epoch is judged as a destroyed epoch's (rule E's `ts` rule)
+before it is judged as a demoted one's.
+
+The epoch the `hs.fin` establishes is recorded only after its links are
+applied, so it is never among the epochs judged. If one of the epochs
+judged has its received flag set, Q suspends and the `hs.fin`'s epoch is
+not established, as for any suspension while those links are applied
+(a reconnect's carried tokens for it are dropped). Otherwise they are
+demoted and audited as above, but Q starts no reconnect naming E: the
+`hs.fin` establishes the next epoch.
+
+Honest sequences can lead here too, as with an `identity.rotate` under
+E. For example, P's rekey `hs.init` carrying the link crosses P's
+earlier rekey, which P abandoned at its rotation while it was pending:
+that earlier rekey's `hs.fin` may still reach Q and establish its epoch,
+signed by the old `ik`, before the later rekey's `hs.fin`. Strict F1
+then demotes that epoch with its flag clear: an audit entry
+(`connection.fork_suspected`, `ref` = `epoch`) and no feed item or
+suspension. P never activated it, which is what the audit entry records.
+
+A restore reconnect (§6.6 "After a restore", naming an epoch older than
+Q's current one) that carries a link does not suspend an honest pair. A
+restore taken before the restored side's own rotation is refused, and a
+restored side MUST NOT issue a new `identity.rotate` until its
+reconnects are settled (§6.6). So P already held the link when the named
+epoch E was its own, every later epoch P set up was signed by the link's
+new `ik`, and only a copy's epoch is signed by its `old_ik`.
+
+A reconnect's named epoch has always been recorded with Q's answer. A
+rekey's carrying epoch is recorded from this version on. A rekey answer
+recorded before this version, without it, runs no Strict F1 at its
+`hs.fin`. Such an answer lives at most `L` (16 days from its `hs.resp`,
+§6.5), so this gap stays open at most `L` after the upgrade.
+
+Not at an `hs.resp`. The links in P's `hs.resp` reach Q while Q's own
+handshake is open. While that handshake is open, Q establishes no other
+epoch with P except through a verified `hs.fin`, which ends Q's
+handshake ("a verified `hs.fin` comes first", §6.5). Q starts no rekey
+while it holds a pending epoch (§6.5), and it abandons its pending epoch
+when it starts a reconnect (§6.3.1 Initiator). So at the `hs.resp`, the
+epoch Q's `hs.init` traveled under or named is still Q's current epoch,
+or (a reconnect after a demotion, which names an epoch older than the
+current one) every epoch after it is already demoted, or abandoned while
+pending (R29-K9), and Strict F1 would do nothing. It could not take that
+epoch as E anyway: Q chose it, not P. An epoch an old copy sets up after
+that `hs.resp` is established after x, so "Epochs after an `ik` link"
+covers it.
+
 **The reconnect bound.** Every reconnect Q starts with P (after a
 demotion, by strict F1, after an abandoned pending epoch, §6.3.1, or for
 any other reason, §6.6) is bounded the same way. A try fails only when
 its handshake expires unanswered; its tokens are revoked (§6.3.1). A
-refusal is silent: (0.88.2) a refused try counts only if it then
+refusal is silent, except as (0.90.4) below says: (0.88.2) a refused
+try counts only if it then
 expires unanswered, and one abandoned before that (for example when the
 peer's `hs.fin` is established, §6.6) is not counted. The connection becomes `stale`,
 and Q audits `connection.stale` with its feed item (§10.9), at the third
@@ -5370,8 +5514,14 @@ try that fails for the same named epoch, when a relay refuses a try's
 Q cannot start a try because it holds no reconnect token for P, or when a
 try's pending epoch reaches `B` (§6.3.1: it has waited 32 days). (0.88.2)
 "No reconnect token" is not judged while §6.3.1 "No reconnect while
-carried tokens wait" holds. (0.90.0) With relay-key rotation between two
-vaults (§3.4.2), three exceptions apply:
+carried tokens wait" holds. (0.90.4) A try whose `hs.init` the relay
+refuses `token_revoked` or `token_invalid` fails at once, and Q drops
+that reconnect token if it is still the held one (`token_revoked` also
+records its `jti` until its `exp`), audited `reconnect_token_revoked` or
+`reconnect_token_invalid` (§8.6). Holding no reconnect token, Q's next
+start finds the connection `stale` ("no reconnect token", above) unless
+a new reconnect token from P arrives first. (0.90.0) With relay-key
+rotation between two vaults (§3.4.2), three exceptions apply:
 - a definite refusal of a try's `hs.init` that is tied to rotation (in
   S1, `mailbox_unknown`, or a reconnect token revoked for an earlier key)
   ends the try at once and counts as a failed one, except as the next
@@ -5811,6 +5961,14 @@ each recipient Q).
   while S1 holds it), K9 has not yet judged the epoch, so the copy's
   messages under it are still accepted where Table A accepts the
   `sender` (its current key, or an earlier key before its cut-off).
+  (0.90.4) One path stays in this window although the link has arrived,
+  against invariant I3's last clause: Q's own rekey is answered by the
+  copy; Q abandons that epoch while pending when P's later rekey arrives
+  (§6.3.1 "Crossing"); and the link, carried by that rekey, is applied
+  at P's `hs.fin`. "Strict F1 for links applied at `hs.fin`" judges no
+  epoch abandoned while pending, so nothing judges that epoch until P's
+  `identity.rotate` arrives (R29-K9). K9 is not run at the `hs.fin`,
+  because it would suspend honest pairs.
 - (0.89.2) **A copy using an unconfirmed epoch a reconnect passed over.**
   Rule E applies only to a handshake that named `R`'s confirmed epoch
   while it was not current (§6.3.1). A reconnect that names `R`'s current
@@ -5922,11 +6080,20 @@ each recipient Q).
   demotion: "The flag is judged whenever it is set"). The exposure is the one before a rotation is seen (the
   second bullet of these Residuals; §11.14.2): an old copy can make any
   handshake as P.
+  (0.90.4) The link may now also arrive in a rekey or reconnect of P's
+  whose `hs.fin` Q verifies after the copy's epoch ("Strict F1 for links
+  applied at `hs.fin`"): the epoch is demoted the same way, with an
+  audit entry, but no reconnect is started there (that `hs.fin`
+  establishes the next epoch). Where that `hs.init` named Q's confirmed
+  epoch while it was not current, rule E also destroys the copy's epoch,
+  and the copy's later messages under it are fork evidence.
 - (0.88.2) **Two old-copy cases the release 29 search found** (owner
   decision a, GC 01M6SPZ1QXHR5G7DRR96CHW17P), for the post-29 work:
   (1) after a copy of Q forks and R suspends and resolves, R's strict F1
   reconnect can name an epoch Q, the real one, takes as fork evidence,
-  so Q pauses R (visible, a new invitation); (2) a further successor of
+  so Q pauses R (visible, a new invitation; (0.90.4) only the reconnect
+  after a link under an earlier epoch: strict F1 at an `hs.fin` starts
+  none); (2) a further successor of
   P's `ik`, from a copy, that arrives while Q's record is suspended is
   not kept as seen (step 1 checks relay links only), so after the
   resolution Q can be active with a successor it never recorded.
@@ -6139,9 +6306,11 @@ harness's invariants, not the rule IDs `R29-I1`… of §6.3.2:
   it followed away from; Q never establishes an epoch whose handshake
   was signed by anything but its current `ik` for P at that moment; and
   once Q has followed R's `ik` link, Q accepts no message under an epoch
-  the copy set up that was deposited after that link, and P's first
-  rekey or reconnect under the new `ik` finds no such epoch current or
-  suspends.
+  the copy set up that was deposited after that link (except the
+  0.90.4 residual: an epoch Q abandoned while pending, at a link applied
+  at `hs.fin`, judged only by R29-K9 at P's `identity.rotate`), and P's
+  first rekey or reconnect under the new `ik` finds no such epoch current
+  or suspends.
 - **I4, fork.** If two different successors of one `ik` or relay key of
   P each reach Q in messages Q can still open (an epoch it keeps,
   §6.5), in any order and from keys Q knows for P ((0.86.0) its
@@ -6751,7 +6920,8 @@ device's relay key.
   `stale` as S1 does.
 - **Other refusals.** Any other refusal of a reconnect `hs.init` stays
   silent, as "The reconnect bound" says, and the next try comes at the
-  try's expiry. Reconnects with no rotation in play do not change.
+  try's expiry, except `token_revoked` and `token_invalid` on the held
+  reconnect token (0.90.4, "The reconnect bound"). Reconnects with no rotation in play do not change.
 - **An update Q refuses has none of its links followed** and none of its
   tokens kept, whatever the reason for the refusal (owner decision
   2026-11-12: an old copy's update under a demoted epoch would otherwise
@@ -9481,7 +9651,11 @@ under a destroyed epoch, once step 3 has checked its links by rule C
 (§3.4.1), is **fork evidence** if its inner `ts` is later than the one
 recorded: `R` suspends (§6.6 "Fork detection", `ref` = `epoch`, with
 §3.4.1's neutral feed item). One with an earlier `ts` is refused
-(`superseded_epoch`). Rule E's destroyed set does not include an epoch `R`
+(`superseded_epoch`). (0.90.4) When that `hs.init` carried an `ik` link,
+§3.4.1 "Strict F1 for links applied at `hs.fin`" runs first in that
+write and rule E then destroys the epochs it demoted; a message under
+one is judged by the `ts` rule above before it is judged as a demoted
+epoch's. Rule E's destroyed set does not include an epoch `R`
 itself began and abandoned while pending: that one is handled as the
 Initiator paragraph says (processed without confirming it, never fork
 evidence by rule E; (0.87.1) §3.4.1 "Epochs abandoned while pending, at
@@ -9527,7 +9701,8 @@ follows this paragraph on either side as a member vault does.
   then `I` may still abandon the epoch after `hs.fin` (S5, H5, a
   crossing, its own key change) and revoke what its `hs.init` carried. A
   carried token replaces the held token of its kind only if its `exp` is
-  later.
+  later. (0.90.4) So does a reconnect token in `relay.token.issued`,
+  after §7.1's holder's checks.
 - **Discarded, never adopted.** A handshake's carried tokens are
   discarded, and never adopted, when before their adoption its pending
   epoch is abandoned (at `I`); its answer is dropped, expires or is
@@ -9776,11 +9951,11 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-K4 | §3.4.1 Epochs after an `ik` link | r29_oldcopy_test.go:187; r29_round6_test.go:306; r29_k4_test.go:9; r29_review4_test.go:183 |
 | R29-K5 | §3.4.1 After a demotion of the current epoch | r29_oldcopy_test.go:327, :399, :418, :443; r29_review_test.go:65; r29_round6_test.go:90, :124, :376, :391; r29_review4_test.go:332, :473, :515; r29_review4_test.go:628 (the reconnect's hs.fin while demoted) |
 | R29-K6 | §3.4.1 The reconnect bound; §6.6 | r29_oldcopy_test.go:527, :581, :606; r29_rr2_test.go:61, :78; r29_round6_test.go:323, :342; r29_bound_test.go:15, :48, :69; r29_review4_test.go:424 |
-| R29-K7 (every later epoch signed by the old `ik`; names E) | §3.4.1 Strict F1 | r29_oldcopy_test.go:153, :216; r29_rr2_test.go:37; r29_strictf1_test.go:37, :55; r29_review4_test.go:319; r29_flag_test.go:87 |
-| R29-K8 | §3.4.1 Rule C, acceptFrom | r29_review_test.go:209; r29_round6_test.go:196; r29_oldcopy_test.go:278; r29_review4_test.go:446 |
+| R29-K7 (every later epoch signed by the old `ik`; names E, except at an `hs.fin`) | §3.4.1 Strict F1; (0.90.4) Strict F1 for links applied at `hs.fin` | r29_oldcopy_test.go:154, :217; r29_rr2_test.go:37; r29_strictf1_test.go:37, :55; r29_review4_test.go:319; r29_flag_test.go:87; r29_i3copyinit_test.go:120, :192, :212 (a rekey's `hs.fin`; an answer recorded without E; E kept across a restart); r29_i3link_test.go:82, :158 (a reconnect's `hs.fin`, no reconnect started; an answer without a named epoch), :238, :270 (not at an `hs.resp`); r29_i3link2_test.go:88 (a rekey naming the confirmed epoch: Strict F1, then rule E), :163 (a restore reconnect with a link) |
+| R29-K8 | §3.4.1 Rule C, acceptFrom | r29_review_test.go:209; r29_round6_test.go:196; r29_oldcopy_test.go:279; r29_review4_test.go:446 |
 | R29-K9 ((0.87.1) finding C) | §3.4.1 Epochs abandoned while pending, at P's `identity.rotate` | r29_k9_test.go:47, :63, :80, :96, :129; r29_round6_test.go:242 (the K2 case) |
-| R29-F1 | §3.4.1 Fork by `ctx` | r29_oldcopy_test.go:153, :278; r29_review4_test.go:27, :77; r29_round6_test.go:437 |
-| R29-F3 | §6.3.1 The received flag; §3.4.1 Epochs after an `ik` link, Strict F1 | r29_flag_test.go:23, :51, :87 |
+| R29-F1 | §3.4.1 Fork by `ctx` | r29_oldcopy_test.go:154, :279; r29_review4_test.go:27, :77; r29_round6_test.go:437 |
+| R29-F3 | §6.3.1 The received flag; §3.4.1 Epochs after an `ik` link, Strict F1 | r29_flag_test.go:23, :51, :87; r29_i3copyinit_test.go:177 (flag set, at a rekey's `hs.fin`); r29_i3link2_test.go:22 (flag set, at a reconnect's `hs.fin`); r29_i3link_test.go:137 (flag set before a reconnect: its answer ends) |
 | R29-D1 | §6.3.1 Devices and agents; §6.7 | r29_rules_test.go:174; r29_gapf_test.go:231, :262 (gap F pinned) |
 | R29-D2 | §6.3.1 Devices and agents; §15 item 51 | V/client/rotate086_test.go:18, :71; V/client/persist_test.go:485 |
 | R29-D3 | §6.3.1 Devices and agents; §6.7; §10.9 | r29_device_test.go:18 |
@@ -11533,6 +11708,51 @@ policy (§1.2).
 
 Devices never hold tokens for peers, and peers never hold tokens for devices.
 
+(0.90.4) **The holder's checks.** A vault keeps a token a peer gives it
+only if:
+- its signature and claims check (signed by the peer's relay key, `iss`
+  the peer's mailbox, `sub` the vault's relay key, `aud` the relay's
+  URL, a deposit scope);
+- its `exp − iat` is within this table's bound for reconnect tokens
+  (365 days) for a reconnect token, and within 30 days for every other
+  kind (a request token's tighter bound above is not checked by the
+  holder) and, when the peer's relay is the
+  vault's own relay, also within that relay's
+  `max_token_lifetime_seconds` (as read when the vault registered with
+  it: a later raise is seen from its next unlock);
+- its `exp` is later than its `iat`;
+- its `iat` is not later than the vault's clock plus the 5 minutes an
+  inner `ts` may be ahead (§8.4); and
+- its `jti` is not one the vault recorded as revoked (§8.6
+  `token_revoked`).
+
+Any other token is refused, and the held token is kept. One that came in
+`relay.token.issued` is audited `bad_issued_token`; one that came in a
+handshake or in `connection.approved` is refused by that message's own
+check (`hs_init_bad_token`, `reconnect_bad_token`, `hs_resp_bad_token`,
+`bad_connection_approved`), except a token carried in a rekey's or
+reconnect's `hs.resp`: that token is not carried, the held token is
+kept, and the `hs.resp` is not refused for it (only a first contact's
+`hs.resp` is refused `hs_resp_bad_token`). The checks also cover the
+tokens a device gives its vault at unlock, under the 30-day bound; one
+that fails is ignored without an audit entry. The relay refuses a deposit under a token
+over its bounds (RELAY-PROTOCOL §5.2, §5.3). Without these checks, a
+token with a far `exp` (an old copy holding the peer's relay key can
+mint one) would win every "later `exp`" comparison and pin the held
+token to one the relay refuses. Residual: if the issuer's relay lowers
+its `max_token_lifetime_seconds`, the vault keeps the earlier, longer
+token and the peer's re-mint is `issued_token_not_newer`; the vault's
+next reconnect is then refused `token_invalid`, the token is dropped,
+and the connection ends `stale` (§3.4.1 "The reconnect bound"), which
+is visible and recoverable.
+
+(0.90.4) A reconnect token in `relay.token.issued{kind: "reconnect"}`
+whose `jti` is that of the held reconnect token is ignored, without an
+audit entry. Otherwise it replaces the held reconnect token only if its
+`exp` is later (audited `issued_token_not_newer` otherwise), the rule
+§6.3.1 gives carried tokens ("A handshake's tokens are adopted at
+confirmation").
+
 (0.32.0, release A; owner decision of 2026-10-15) **Device tokens are
 marked.** Every standing token the vault mints for its **app** (the
 device of role `app`, §1.1 decision 8: the first row, at pairing or
@@ -12189,7 +12409,8 @@ How each error is handled:
 | Error | Handling |
 |---|---|
 | `token_expired` | Refresh the token, or reconnect (§6.6); (0.88.2) not while §6.3.1 "No reconnect while carried tokens wait" holds. |
-| `token_revoked` | Terminal. Stop sending to that mailbox (0.83.0: for a retried open-token `hs.init`, see `token_used`). (0.88.2, owner decision a, GC 01M6SRQ1B7NM0Q00G0CEGHFES8) **Between two vaults**, for a deposit to a connection with a held standing token (for a carried one, below and §6.3.1 "A carried token refused"): the answer ends **that token only**, not the connection. The vault drops the token and never uses it again; the entry waits in the outbox for a valid token. If the vault holds no other valid standing token for the peer, it is in the "no valid standing token" case: a pending rekey is abandoned (§6.3.1), and the vault reconnects (§6.6), bounded by §3.4.1 "The reconnect bound"; a reconnect's own `hs.init` answered `token_revoked` is a failed try there. Honest pairs reach this when a peer revokes a token in flight (S5 at its rotation, H5, an abandoned pending epoch), so it is not a sign of an end. It revives no revoked token, and a copy gains nothing by it: the reconnect needs the reconnect token and is authenticated as any other. (0.88.2) A **carried** token (one an `hs.init` or `hs.resp` carried and the vault has not adopted, §6.3.1 "A handshake's tokens are adopted at confirmation") answered `token_revoked` is handled by §6.3.1 "A carried token refused": the refused `hs.resp`, `hs.fin` or `hs.confirm` entry is dropped, the handshake's carried tokens are discarded, and that handshake ends; the refusal alone does not make the "no valid standing token" case. Toward a device's own vault, and S9's relay-key case, as before. (0.90.0) Between two vaults, during S1 toward the peer, a `token_revoked` on a reconnect token issued for an earlier relay key of the vault's is §3.4.2 RK9's: no failed try, no S9, and no "no reconnect token" judgement until RK13's cap. |
+| `token_revoked` | Terminal. Stop sending to that mailbox (0.83.0: for a retried open-token `hs.init`, see `token_used`). (0.88.2, owner decision a, GC 01M6SRQ1B7NM0Q00G0CEGHFES8) **Between two vaults**, for a deposit to a connection with a held standing token (for a carried one, below and §6.3.1 "A carried token refused"): the answer ends **that token only**, not the connection. The vault drops the token and never uses it again; the entry waits in the outbox for a valid token. If the vault holds no other valid standing token for the peer, it is in the "no valid standing token" case: a pending rekey is abandoned (§6.3.1), and the vault reconnects (§6.6), bounded by §3.4.1 "The reconnect bound"; a reconnect's own `hs.init` answered `token_revoked` is a failed try there. Honest pairs reach this when a peer revokes a token in flight (S5 at its rotation, H5, an abandoned pending epoch), so it is not a sign of an end. It revives no revoked token, and a copy gains nothing by it: the reconnect needs the reconnect token and is authenticated as any other. (0.88.2) A **carried** token (one an `hs.init` or `hs.resp` carried and the vault has not adopted, §6.3.1 "A handshake's tokens are adopted at confirmation") answered `token_revoked` is handled by §6.3.1 "A carried token refused": the refused `hs.resp`, `hs.fin` or `hs.confirm` entry is dropped, the handshake's carried tokens are discarded, and that handshake ends; the refusal alone does not make the "no valid standing token" case. Toward a device's own vault, and S9's relay-key case, as before. (0.90.0) Between two vaults, during S1 toward the peer, a `token_revoked` on a reconnect token issued for an earlier relay key of the vault's is §3.4.2 RK9's: no failed try, no S9, and no "no reconnect token" judgement until RK13's cap. (0.90.4) Except in RK9's case, between two vaults, a reconnect's own `hs.init` answered `token_revoked` is one failed try at once (§3.4.1 "The reconnect bound") and drops that reconnect token if it is still the held one, recording its `jti` until its `exp` so that it is refused if offered again (§7.1 "The holder's checks"), audited `reconnect_token_revoked`. Holding no reconnect token, the next start finds the connection `stale` by the reconnect bound unless a new reconnect token arrives first. |
+| `token_invalid` (0.90.4) | Between two vaults, a reconnect's own `hs.init` answered `token_invalid` is one failed try at once (§3.4.1 "The reconnect bound") and drops that reconnect token if it is still the held one, audited `reconnect_token_invalid`; kept, it would stay held until its `exp`, up to a year, since only a token with a later `exp` replaces it (§7.1). Holding no reconnect token, the next start finds the connection `stale` by the reconnect bound unless a new reconnect token arrives first. Any other deposit answered `token_invalid` is refused, as before. |
 | `token_used` | The open token is already spent. Restart first contact; except that (0.83.0) when the client retried its own `hs.init` with that token after a lost or failed answer, `token_used` and `token_revoked` both mean the first attempt may have been delivered: it waits for `hs.resp` until the token's `exp` plus 60 s, and restarts first contact only then. For a pairing or transfer this is at most the link's 10 minutes; a vault's accepted connection request stays `waiting` (§6.4) until then, and its member can decline it. |
 | `mailbox_unknown` | Re-resolve the address, or mark the connection `stale`. (0.88.7) The connection's waiting durable messages end as §8.3 "Not delivered" says (`drop.undelivered_mailbox_unknown`). (0.90.0) A vault that implements §3.4.2 holds a durable deposit to a connection refused `mailbox_unknown` instead, without `stale`, until it follows the peer to a newer mailbox (an update it does not follow keeps the hold), for at most 60 days from the first refusal (§3.4.2 RK14); a handshake message so refused ends as a refused carried token; a reconnect `hs.init` refused so is ended at once (RK10). |
 | `quota_exceeded` (0.32.0) | Not retried at once, and handled by what is used up (RELAY-PROTOCOL 0.9.2 §7.1 `quota`): **`token`**: (0.88.6) never sent again under that token (RELAY-PROTOCOL §7.1). A peer vault asks for a fresh token (§7.2) and tries the deposit once more with it; meanwhile the entry waits as for a valid held standing token (§8.4: later deposits to the mailbox under the standing token wait behind it, in order; one with a token of its own and the refresh pass). When it comes due under the same token it asks again: at most once an hour, not while a refresh is still queued, and not before a `too_soon`'s `allowed_after` (taken up to 24 hours and a minute; not in the token's last 3 days, when the issuer grants hourly, §7.2); the hour and `allowed_after` bounds are kept in memory, so a vault that restarts may ask again at once. At most 24 refreshes are open (persisted): at the 25th the first is kept and the next oldest is forgotten. A refresh asked under a token since replaced is not sent. The open refreshes stay pending (the issuer usually grants the first and answers the later ones `too_soon`; the order is not guaranteed): an answer to any of them is taken, also after a restart, until it is answered, its refresh ends unsent (refused, or dropped held), or another standing token is held (with none held, after a revocation, it is still taken); they do not hold the other refreshes (the near-end one, an attachment's), which while the wait lasts are this refresh. When the refresh itself is refused for the token's quota (its messages spent), when a deposit is refused for the token's quota after the token's `exp`, or when an entry still waiting comes due after the `exp`, the vault reconnects at once without sending it again (§6.6; unlike `token_expired`, also while an own rekey is pending: the reconnect abandons it; owner decision a, GC 01M72ND172BCN6HP0G9GH8XSGQ): the issuer's re-mint (§7.2) may come only after the waiting messages are older than §8.4's 16 days. Before the `exp` a vault that holds no valid reconnect token does not reconnect (that would make the connection `stale`, §3.4.1): it goes on asking as above until a fresh token or the `exp`. A refresh refused with no `quota` is not read as spent: it is asked again an hour later. **Residual** (0.88.6): when both sides' standing quotas are spent, the reconnect is held by §6.6 "Between two persons" (an answer of ours awaits the peer's `hs.fin`, which its own spent quota refuses) until a token's `exp`, up to about 30 days, so durable messages can pass §8.4's 16 days; a waiting deposit stays sealed under its epoch and is lost if the peer has dropped that epoch (`unknown_kid`). Both were open (vettid-vault card GC 01M73AGYWZXR81CAS4GCSF6038, with the resend-or-tell rule of GC 01M72T4KN4N89DDXK3TMAATAVT). (0.88.7) The second is closed at a key change, which seals the waiting deposit again under the new epoch (§8.3 "Re-sealed at a key change"). (0.88.10) The first, a wait past 16 days with no key change, is closed by the check at deposit (§8.3 "Not delivered", "At deposit"): a waiting deposit not tried takes a fresh `ts` when it comes due more than 2 days after its `ts`, so the long wait no longer passes §8.4's window (the same holds for a wait across a lock); one that may have reached the relay and is past 16 days is told (`message.delivery_unconfirmed`). What remains is listed in §8.3 "Not delivered", Residuals. **`mailbox` or `mailbox_blobs` or `sender_blobs`**: a fresh token does not help; a deposit waits in the outbox and is retried with backoff, and a blob upload is not retried: the vault waits until the recipient asks for it (§10.5.1 "Delivery to the peer"). A relay that sends no `quota` is read as `token` the first time and as the mailbox after a fresh token; (0.88.6) under that fresh token every later one is read as the mailbox's too, also after a restart. A device does not upload again on its own: it tells the member and retries later. **A device** (0.88.8; §6.3.1 "Devices and agents"; built in vettid-android #345, vettid-ios to follow, card GC #7777): its standing token has no quota (§7.1), §7.2's refresh after `quota_exceeded` is a peer vault's, and §6.6 is between vaults, so it asks for no fresh token and reconnects to nothing; a device token is never spent by its quota, so its `token` case below is for a relay that errs. It reads a `quota_exceeded` with no `quota` as the mailbox's. These rules hold its outbox entries: a request (§8.1), a message sent once and a handshake's `hs.resp` or `hs.fin` are deposited once, outside the outbox, under the held token; they are not held, and a refusal is the caller's to handle (a request's is shown to the member). A `token` one holds that outbox entry and every other outbox entry under that token, the near-end refresh too, until the device holds another standing token (an unlock result, §7.2 "Unlock exchange"; the vault's re-mint, `relay.token.issued`; or a new pairing's `hs.resp` and `device.paired`), so on the app the wait usually ends at the next unlock; no outbox entry is sent under a token known to be spent, and one is re-addressed only to a held token not known to be spent. A `mailbox` one holds the outbox entries to that mailbox, backing off from 1 minute and doubling to 1 hour (kept in memory); any deposit the relay accepts to that mailbox ends the backoff. While the mailbox waits, an outbox entry to it other than `relay.token.refresh` goes only after every earlier one has gone (in order); the refresh passes them (as §8.4), and the backoff holds it as any other. A held entry is not stamped again: one older than §8.4's 16 days when it arrives is dropped by the vault (`stale_or_future`, §8.4). |
