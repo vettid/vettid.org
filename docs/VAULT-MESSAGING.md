@@ -34,6 +34,9 @@ changelog:
       abandoned and destroyed epochs are not among the epochs judged
       (left to "Pending epochs at a link", R29-K9 and the Residuals), as
       release 29 built it and as 0.90.4 says at `hs.fin`.
+    - RK7: an answer Q keeps only as H5 fork evidence passes the
+      cut-off whatever `ik` it pinned, so its `hs.fin` suspends as "Fork
+      by ctx" and establishes nothing (a reading, to be confirmed).
     - Rule C: at most 32 seen links per peer and kind (identity links
       and relay links counted separately).
     - Rule C, own device or agent: the first successor followed or seen
@@ -7015,8 +7018,11 @@ refusing them:
   current `ik` for P established;
 - an **`hs.fin` for an answer Q has open**, when its `sig_I` verifies
   under the `ik` Q's answer pinned, and that `ik` is Q's current `ik` for
-  P. Its epoch is the one that `hs.fin` establishes. (0.90.6) (Whether
-  an answer kept as H5 fork evidence counts: as the vault builds RK7.)
+  P. Its epoch is the one that `hs.fin` establishes. (0.90.6) An answer
+  Q keeps only as fork evidence (H5 "Exempt") passes too, whatever `ik`
+  it pinned, so that its `hs.fin` is judged as fork evidence (§3.4.1
+  "Fork by ctx") and suspends; it never establishes an epoch (evidence
+  first, as rule C; a reading of this release, to be confirmed).
 
 **When the pass closes.** Each pass closes per epoch: once Q has accepted,
 under that epoch or a later one, a message from a relay key of P's later
