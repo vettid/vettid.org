@@ -50,6 +50,48 @@ changelog:
     epoch after it is already demoted, so Strict F1 would do nothing.
     Table B (Reached), the R29-K9 paragraph and §6.3.2 (R29-K7, R29-F3;
     two test locations of R29-K7 corrected) are updated.
+  - 0.90.3: 2026-11-12, **the relay-key rotation wire format**
+    (erratum):
+    - A relay link is `{v, suite, old, new, sig_old, sig_new}`, as the
+      identity link carries `v` and `suite`. As there, the suite is
+      bound through the signed label `vettid/vms/2/relay-rotate`, and `m`
+      is unchanged.
+    - Refused `relay_unlinked`: a missing or other `v` or `suite`, `old`
+      equal to `new`, a repeated key in the sequence of the first `old`
+      and each `new` (for example A→B→A), fewer than 1 or more than 32
+      links, or, in a reconnect, a last `new` that is not the announced
+      key.
+    - A fault in a link's form (a link that is not an object or lacks a
+      member, a wrong type or value for `v` or `suite`, non-canonical or
+      wrong-alphabet base64, a key or signature of the wrong length) is
+      refused `relay_unlinked`, an exception to §5.3 and §10.1 for relay
+      link objects only.
+    - Precedence: a fault in a link's form, the count and a reconnect
+      chain's end are refused `relay_unlinked` at parse time, before
+      `acceptFrom`, and only when the message is otherwise well formed
+      by §5.3 and its other §6.2 or §10.2 rules; malformed wins. A
+      duplicate member or invalid JSON is a malformed body.
+    - Rule C: every refusal keeps no link as seen (count, form, `v` or
+      `suite`, a repeated key, `old` equal to `new`, an end mismatch in an
+      update or a reconnect), except a bad signature or a broken chain,
+      which still let earlier valid links be seen.
+    - A missing `relay_links` is a malformed body in an update, and means
+      no rotation in a reconnect.
+    - A new layout MUST use a new label, for the relay link and the
+      identity link (§3.4); a link with another `v` or `suite` is
+      refused, not reinterpreted, and unknown members are ignored.
+    - §16 gains `relay_rotate.json`: the relay link's valid cases (a
+      32-link chain among them), invalid cases and app-facing form cases.
+      The vault, the service vault, the apps, the desktop and the agent
+      SDK MUST reproduce it before they advertise `relay_follow` or
+      rotate their own relay key.
+    - The update's relay links are named `relay_links`, as in a
+      reconnect (§6.2); it was `links` (§3.4.1 rule U, §10).
+    - An empty `rotations` in an update is read as absent (§3.4.2 RK5).
+    - `relay.mailbox.closed`'s `last_msg_id` is required, `null` when no
+      such id exists, for example when P collected nothing or never
+      processed and flushed the first message it collected (§3.4.2 RK14,
+      §10).
   - 0.90.2: 2026-11-12, **§3.4.2 made precise for the implementation**
     (erratum, with two owner decisions):
     - **New, by owner decision 2026-11-12:** the keep's cap is 2,000
@@ -5004,6 +5046,12 @@ sig_new = Ed25519(new_ik, "vettid/vms/2/rotate" || m)
 ```
 
 - Both signatures MUST verify, and `old_ik` MUST differ from `new_ik`.
+- (0.90.3) `v` and `suite` are not separate bytes of `m`: the suite is
+  bound through the label's `vettid/vms/2/`. A new layout (another `v`
+  or `suite`) MUST use a different label, so that a statement signed
+  under one layout never verifies under another. A statement with a
+  missing or different `v` or `suite` is rejected, as one whose
+  signature fails is, not reinterpreted.
 - A chain is an ordered array of statements. Each link's `old_ik` MUST equal
   the previous link's `new_ik`. A receiver MUST reject chains longer than 32
   links. (0.69.1) A receiver resolves a chain against what it has already
@@ -5483,7 +5531,9 @@ in a message refused at step 1 (a suspended record) are kept as seen too
 (§3.4.2 RK12).
 - **Identity links** (in `identity.rotate`, `hs.init`, `hs.resp`): §3.4
   "One successor per key".
-- **Relay links** (in an update): the connection is suspended as a fork
+- **Relay links** (in an update, or (0.90.3) in a reconnect `hs.init` or
+  `hs.resp` under §3.4.2 RK8; valid as rule U defines it):
+  the connection is suspended as a fork
   (§6.6 "Fork detection", `connection.fork_suspected` with `ref` =
   `relay`). While a relay fork is recorded, `connection.rotation.resolve`
   answers `not_found`, also if an identity conflict is recorded too, and
@@ -5503,11 +5553,13 @@ in a message refused at step 1 (a suspended record) are kept as seen too
   §3.5.5).
 
 **Rule U, a `relay.address.update`.** (0.90.0) It also carries
-`rotations`, P's identity links, applied first (§3.4.2 RK5). It carries `links`: the relay links
+`rotations`, P's identity links, applied first (§3.4.2 RK5). It carries
+`relay_links` ((0.90.3) named `links` before 0.90.3): the relay links
 from P's key for Q (S1) to P's current key, 1 to 32 of them, each
+((0.90.3) with `v` and `suite`, as the identity link of §3.4 has them)
 
 ```json
-{ "old": "<b64>", "new": "<b64>", "sig_old": "<b64>", "sig_new": "<b64>" }
+{ "v": 1, "suite": 2, "old": "<b64>", "new": "<b64>", "sig_old": "<b64>", "sig_new": "<b64>" }
 ```
 
 ```
@@ -5515,10 +5567,89 @@ m       = "vettid/vms/2/relay-rotate" || old (32) || new (32)
 sig_old = Ed25519(old, m)        sig_new = Ed25519(new, m)
 ```
 
+(0.90.3) As in the identity link, `v` and `suite` are not separate bytes
+of `m`: the suite is bound through the label's `vettid/vms/2/` (suite
+2), exactly as `"vettid/vms/2/rotate"` binds it for the identity link,
+and `v` = 1 is this layout. A new layout (another `v` or `suite`) MUST
+use a different label, so that a link signed under one layout never
+verifies under another. A link with a missing or different `v` or
+`suite` is refused, not reinterpreted. Members a link does not define
+are ignored (§10.1).
+
+(0.90.3) **A link's form.** A fault in a link's form is any of these:
+- a link that is not an object, or lacks a member;
+- a wrong type or value for `v` or `suite`, an out-of-range `v` included
+  (for example `"1"`, `1.0` or `2`);
+- base64 that is not canonical or uses the wrong alphabet;
+- a key or a signature of the wrong length.
+
+A message with a fault in a link's form is refused `relay_unlinked`, and
+the chain with it. This is an exception to §5.3's "Known fields MUST have
+exactly the type and form given here" (§10.1), which would otherwise make
+the whole message malformed, and it applies to relay link objects only.
+
+**Precedence.** These parse-time refusals of a chain are
+`relay_unlinked` only when the message is otherwise well formed:
+- a fault in a link's form;
+- the chain's count;
+- in a reconnect `hs.init` or `hs.resp`, the chain's end (the first
+  `old` that is not the deposit key, or the last `new` that is not the
+  announced key).
+
+"Otherwise well formed" means every other member passes §5.3 and the
+message's other rules: §6.2 for a reconnect, and §10.2's body table for
+the update. For a reconnect that includes:
+- `hs.resp`'s `relay` pairing (`relay` present exactly when
+  `relay_links` is);
+- `sas_commit`, `sas_nonce` and `unlock_secret` by purpose;
+- `eph` differing from `from.kem`;
+- `relay_links` allowed for the message's kind and purpose.
+
+If anything else is malformed, the whole message is a malformed body:
+malformed wins. A fault at the JSON level of the body, such as a
+duplicate member or invalid JSON, is always a malformed body, refused
+before any link is read.
+
+**When it is refused.** A refusal for a link's form, the count, or a
+reconnect chain's end happens when the message is parsed, before
+`acceptFrom` step 1. No link of such a message, identity or relay, is
+checked or kept by rule C. An update's end checks (the first `old` is the
+`sender`, the last `new` is `relay.pk`) run after the parse, with rule
+U's other checks. An end mismatch keeps no link as seen there too.
+
+A chain is refused (`relay_unlinked`) when any of these holds:
+- a link with a missing `v` or `suite`, or any other `v` or `suite`;
+- a link whose `old` equals its `new`;
+- a repeated key: the sequence of the first `old`, then each link's
+  `new`, has a key twice (for example A→B→A);
+- fewer than 1 or more than 32 links. An update whose `relay_links`
+  member is missing altogether is a malformed body, refused as a whole,
+  not `relay_unlinked`. In a reconnect `hs.init` or `hs.resp`, an absent
+  `relay_links` means no rotation (§6.2).
+
+For rule C, a relay link is **valid** only if its `v` is 1, its `suite`
+is 2, its `old` differs from its `new`, and both signatures verify. A
+link that fails any of these is not kept as seen, even when its
+signatures verify. In an update and in a reconnect `hs.init` or `hs.resp`
+(§3.4.2 RK8) alike, every refusal of a chain falls in exactly one of two
+lists:
+- **No link of the chain is kept as seen** when the chain is refused
+  for its count, a link's form, a `v` or `suite`, a repeated key, a link
+  whose `old` equals its `new`, or an end mismatch (the first `old` is not
+  the deposit key, or the last `new` is not the announced key; in an
+  update, the `sender` and `relay.pk`).
+- **Earlier valid links are still seen** when the chain is refused only
+  for a bad signature or a break in the chain. Those go through rule U's
+  checks, and rule C, as before.
+
 P signs a link in the rotation's first write (§3.4 step 1). Q checks
-that both signatures verify, that each link's `old` is the previous
-link's `new`, that the first `old` is the `sender` and the last `new` is
-`relay.pk`, and rule C on each link; else refuse (`relay_unlinked`).
+that the chain has 1 to 32 links, that each link's `v` is 1 and its
+`suite` 2 (both present), that its `old` differs from its `new`, that
+the sequence of the first `old` and each `new` has no repeated key, that
+both signatures verify, that each link's `old` is the
+previous link's `new`, that the first `old` is the `sender` and the last
+`new` is `relay.pk`, and rule C on each link; else refuse
+(`relay_unlinked`).
 Then:
 - Leading links Q has already followed are skipped. If all are, the
   update is a duplicate: Q ignores it and sends `relay.token.issued` for
@@ -6503,7 +6634,11 @@ the same bytes (RK5).
 **RK5. The update carries P's identity links (binding L).**
 - **What it carries.** A `relay.address.update` carries `rotations`: P's
   identity links from the signer of the epoch it travels under, up to
-  P's current `ik`, as S8 gives them to `identity.rotate`.
+  P's current `ik`, as S8 gives them to `identity.rotate`. (0.90.3) An
+  empty `rotations` is read as absent: the update carries no identity
+  links, and RK5's `ik` requirement is met only if the update's `ik` is
+  Q's current `ik` for P. This is how RK5's first case already reads an
+  empty chain.
 - **The update's `ik`** is the P-side signer of the epoch it travels
   under (Table B).
 - **Sealed afresh.** Every deposit of an update is sealed afresh under
@@ -6601,7 +6736,8 @@ device's relay key.
 - **When the links travel.** A message carries `relay` (for an `hs.resp`)
   and `relay_links` only when the key it is deposited with is earlier
   than the announced key. `relay_links` are P's signed relay links from
-  the deposit key up to the announced key, in rule U's form, and there
+  the deposit key up to the announced key, in rule U's form
+  (`{v, suite, old, new, sig_old, sig_new}`, §3.4.1 rule U), and there
   are 1 to 32 of them.
 - **What else it carries.** P's identity links in `rotations` (RK5), and
   `token` and `reconnect_token` minted by the announced key's mailbox.
@@ -6612,6 +6748,9 @@ device's relay key.
   P, before or after that key's cut-off, when both hold:
   - its `relay_links` connect its `sender` to the announced key;
   - those links pass rule C.
+
+  (0.90.3) A message whose last `new` is not the announced key, or that
+  fails rule U's form checks, is refused `relay_unlinked`.
 
   The announced key is then Q's current key for P, or one Q follows to
   by those links (below).
@@ -6965,7 +7104,10 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      the anchor with it.
 2. **P sends the telling.** P sends each connection a separate durable
    message, **`relay.mailbox.closed {mailbox, last_msg_id}`**, under its
-   then-current epoch with that connection.
+   then-current epoch with that connection. (0.90.3) `last_msg_id` is
+   required: it is `null` when no such id exists, for example when P
+   collected nothing from that mailbox, or never processed and flushed
+   the first message it collected.
    - It is not on S1's list, so during S1 toward the connection it waits
      for S2.
    - While P has no epoch with the connection, it is held like any
@@ -8788,7 +8930,13 @@ The inner plaintext is a UTF-8 JSON object, followed by padding:
   MUST reject non-canonical base64 and base64 containing CR or LF.
 - Unknown fields are ignored. Known fields MUST have exactly the type and
   form given here; receivers MUST reject anything else. One exception:
-  a vote message's `pad` is not checked (§10.19.5, 0.83.6).
+  a vote message's `pad` is not checked (§10.19.5, 0.83.6). (0.90.3) A
+  fault in a relay link's form (a link that is not an object or lacks a
+  member, a wrong type or value for `v` or `suite` including an
+  out-of-range `v`, base64 that is not canonical or uses the wrong
+  alphabet, a key or signature of the wrong length) is refused
+  `relay_unlinked`, not as a malformed message, when the message is
+  otherwise well formed (§3.4.1 rule U, "A link's form").
 - Receivers MUST reject an inner plaintext (including its `body`) that
   is not valid UTF-8 (RFC 3629: encoded surrogates such as ED A0 80 are
   invalid), that has duplicate member names at any depth, or that has
@@ -9042,14 +9190,17 @@ Field rules:
 - (0.90.0) `relay_links` (§3.4.2 RK8) is allowed only in the `hs.init`
   and `hs.resp` of a reconnect, and only when the key the message is
   deposited with is earlier than the key it announces: the signed relay
-  links, in rule U's form, from the deposit key up to the announced key,
+  links, in rule U's form (`{v, suite, old, new, sig_old, sig_new}`,
+  with rule U's checks), from the deposit key up to the announced key,
   1 to 32 of them. The first link's `old` MUST be the key the message is
   deposited with (its collect `sender`), and the last link's `new` MUST
-  be the announced key. In an `hs.init` the announced key is
-  `from.relay.pk`.
+  be the announced key; (0.90.3) a message whose last `new` is not the
+  announced key is refused `relay_unlinked`. In an `hs.init` the
+  announced key is `from.relay.pk`.
   An `hs.resp` that carries `relay_links` MUST carry `relay`, the
   announced address, and `relay` MUST be absent otherwise. `relay.pk`
-  MUST equal the last link's `new`, `relay.mailbox` MUST be the mailbox
+  MUST equal the last link's `new` (the chain's end: `relay_unlinked`,
+  §3.4.1 rule U "Precedence"), `relay.mailbox` MUST be the mailbox
   id derived from `relay.pk`, and `relay.url` follows the rules for
   `from.relay.url` (below). Both fields are absent for every other
   purpose. The tokens stay required in a reconnect (below); with
@@ -12389,7 +12540,13 @@ an answer to an unknown or expired id is dropped.
 
 ### 10.1 Common rules and `sync.event`
 
-- Bodies are JSON objects (§5.3). Unknown members are ignored. Strings are
+- Bodies are JSON objects (§5.3). Unknown members are ignored. (0.90.3)
+  A fault in a relay link's form (a link that is not an object or lacks
+  a member, a wrong type or value for `v` or `suite` including an
+  out-of-range `v`, base64 that is not canonical or uses the wrong
+  alphabet, a key or signature of the wrong length) is refused
+  `relay_unlinked`, not as a malformed body, when the message is
+  otherwise well formed (§3.4.1 rule U, "A link's form"). Strings are
   at most 4 KiB unless stated. Timestamps in bodies use the inner `ts`
   format; invite and pairing expiries (`exp` in responses) are RFC 3339 in
   whole seconds.
@@ -12670,8 +12827,8 @@ an answer to an unknown or expired id is dropped.
 | `device.features` (D→V) | — | `{features: [name]}` (0.85.4): the receiving-side capabilities the device implements (`relay_follow` and (0.86.0) `hs_confirm`; (0.89.0) from the app also `approval_document`, §10.4 "Approval documents", which is **not** sticky: the vault uses the last list), each `[a-z0-9_]{1,32}`, sorted, unique, at most 32; sent after each epoch it activates, and (0.86.0) the same list in the inner `features` of every message it deposits to its vault (§5.3, §10.8). The vault ignores names it does not know, drops and audits a malformed body (`drop.features_malformed`), and keeps the last list per device in the DEK state, written only when it changes (each of `relay_follow` and `hs_confirm` once seen stays, §3.4.1 "The gate") |
 | `relay.token.refresh` (req) | `{}` | `{kind: "standing", token}` |
 | `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>, rotations?}` ((0.85.0) `rotations`: the links before `rotation`, §3.4.1 S8) |
-| `relay.address.update` | — | `{relay: {url, mailbox, pk}, token, reconnect_token?, links, rotations?}` ((0.85.0) `links`: the signed relay links, §3.4.1 rule U; (0.90.0) `rotations`: P's identity links, §3.4.2 RK5) |
-| `relay.mailbox.closed` (0.90.0, V→V) | — | `{mailbox, last_msg_id}`: `mailbox`, the id of the sender's ended earlier mailbox; `last_msg_id`, (0.90.2) the largest `msg_id` up to which the sender processed and flushed every message the relay gave it from that mailbox, or `null` when there is none. Durable, session mode; not on §3.4.1 S1's list. The receiver acts on it only for a mailbox it knows as an earlier mailbox of the sender's and has followed it away from (§3.4.2 RK14) |
+| `relay.address.update` | — | `{relay: {url, mailbox, pk}, token, reconnect_token?, relay_links, rotations?}` ((0.85.0) `relay_links`, named `links` before 0.90.3: the signed relay links `{v, suite, old, new, sig_old, sig_new}`, §3.4.1 rule U; (0.90.0) `rotations`: P's identity links, §3.4.2 RK5; (0.90.3) an empty `rotations` is read as absent: no identity links) |
+| `relay.mailbox.closed` (0.90.0, V→V) | — | `{mailbox, last_msg_id}`: `mailbox`, the id of the sender's ended earlier mailbox; `last_msg_id`, (0.90.2) the largest `msg_id` up to which the sender processed and flushed every message the relay gave it from that mailbox, or `null` when there is none. (0.90.3) Both members are required: `last_msg_id` is present, `null` when no such id exists (for example, when the sender collected nothing, or never processed and flushed the first message it collected); a message without it is malformed. Durable, session mode; not on §3.4.1 S1's list. The receiver acts on it only for a mailbox it knows as an earlier mailbox of the sender's and has followed it away from (§3.4.2 RK14) |
 
 **Locks (0.29.0, release L; approved by the owner 2026-10-12,
 VAULT-LOCK §3).** A lock from a
@@ -31836,6 +31993,12 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
 - The session vector's inner plaintext is the sealed one with `"seq":1`
   after `ts`.
 - Tokens, ids, PIN and claim ids in the vectors are dummy values.
+- (0.90.3) **`relay_rotate.json`** gates relay-key rotation. The vault,
+  the service vault, the Android and iOS apps, the desktop and the agent
+  SDK MUST each reproduce it, every valid case accepted and every
+  invalid case refused, before it advertises `relay_follow` (§3.4.1 "The
+  gate", §3.4.2 RK0; a device in `device.features`) or rotates its own
+  relay key.
 
 ```
 §3.2 keys                                                       (keys.json)
@@ -31843,6 +32006,34 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
   vault ik pk (b64)           : ypOsFwUYcHHWe4PH/w7+gQjo7EUwV113JoeTM9vavnw=
   vault MLKEM768X25519 seed   : 32 x 0x05   vault ek: 1216 B (keys.json)
   vault static kid (hex)      : 40d6c2c8471844a9
+
+§3.4.1 rule U relay link (0.90.3)                                (relay_rotate.json)
+  keys        : key i is the Ed25519 key of seed 32 x (0xb0 + i), i = 0 … 33
+  label       : "vettid/vms/2/relay-rotate"
+  link        : {v: 1, suite: 2, old, new, sig_old, sig_new}
+  inputs      : each case gives the deposit key (first_b64) and the
+                announced key (announced_b64) the chain is checked against
+  valid       : a single link; a chain of links; a chain of 32 links
+  invalid     : wrong sig_old; wrong sig_new; signed with the identity label
+                "vettid/vms/2/rotate"; old == new; a repeated key (the
+                sequence of the first old and each new has a key twice);
+                a broken chain (an old that is not the previous new);
+                no links; more than 32 links; a first old that is not the
+                deposit key; a last new that is not the announced key; a
+                missing v or suite; an unknown v; an unknown suite; a link
+                with an unknown v whose signatures verify
+  form        : relay_unlinked (a link's form, rule U): v given as "1";
+                v given as 1.0; base64 that is not canonical; base64 in
+                the URL alphabet; a 31-byte key.
+                malformed body: a duplicate member, refused before any
+                link is read
+  each invalid case is refused relay_unlinked. A missing v or suite, an
+  unknown v and an unknown suite are faults in a link's form (rule U
+  "Precedence"), kept in the invalid list because their links still
+  parse as JSON. Each form case records its
+  class in a "refusal" field, and carries its links as the exact array
+  text in "relay_links_json", since those forms cannot survive as parsed
+  JSON. The file is added with the vault's implementation of 0.90.3
 
 §4.3 sealing (HPKE base, suite 2)                               (hpke.json)
   encapsulation randomness    : 64 x 0x07
