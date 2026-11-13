@@ -48,7 +48,8 @@ changelog:
     - RK14 step 3: durable session entries are kept as their inner
       messages, except upkeep that recovers by itself. An entry leaves
       the keep at its receipt, its `exp`, or the connection's removal
-      (§7.4). A per-peer cap is pending owner decision; a small
+      (§7.4). The per-peer cap is 2,000 entries and 8 MiB of inners
+      (owner decision 2026-11-12, "cap, told on drop"; §7.3). A small
       record of the dropped entries stays, and they are told if they
       would have been deposited again. A local `message.delete` does not
       unsend: a kept entry stays, and a deleted message is never told.
@@ -6608,9 +6609,10 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      be sealed again under the current epoch (the send key of the epoch
      it went under may be gone), with its inner `id`, its `msg_id` and
      its `201`'s time. It is kept in the vault's state like the outbox.
-   - (0.90.2) **The cap** (pending owner decision): at most
-     `KEEP_MAX_ENTRIES` entries and `KEEP_MAX_BYTES` bytes of kept inners
-     per peer. Past the cap, the oldest kept entry is dropped. A small
+   - (0.90.2) **The cap** (owner decision 2026-11-12): at most 2,000
+     entries (`keep_entries`) and 8,388,608 bytes (8 MiB, `keep_bytes`)
+     of kept inners per peer (§7.3). These are sizes, not waits, so they
+     are not scaled on staging; STAGING-TIME-SCALE lists only waits. Past the cap, the oldest kept entry is dropped. A small
      record of the dropped entries stays, per mailbox: their count, the
      highest `msg_id` among them, and the first one's inner `id`.
      - If `last_msg_id` in P's `relay.mailbox.closed` is below that
@@ -11078,7 +11080,13 @@ top of that, the vault limits each peer to:
 - (0.32.0, release A) as a sender, 64 fresh uploads and 256
   MiB per rolling 24 hours on its `missing` (`peer_reuploads`), at the
   lowest priority; uploads the relay refuses before reading their body
-  do not count (§10.5.1).
+  do not count (§10.5.1);
+- (0.90.2; owner decision 2026-11-12) as a sender, 2,000 entries
+  (`keep_entries`) and 8,388,608 bytes (8 MiB, `keep_bytes`) of inner
+  messages kept for the telling after a rotation of the peer's relay
+  key. Past either, the oldest is dropped, and a small record of the
+  dropped entries tells them if they were needed (§3.4.2 RK14 step 3).
+  Not scaled on staging.
 
 Excess messages are acked, dropped and audited. (0.32.0) An
 attachment over `peer_attachments` is not dropped silently (over
