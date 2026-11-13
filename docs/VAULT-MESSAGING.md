@@ -6460,7 +6460,7 @@ each recipient Q).
     states"). A deposit the relay took on it before the denylist request
     went through, and that Q collects after the key was pruned, is
     refused (`foreign_sender`): a silent loss of liveness, in practice
-    an RK8 `hs.init`, which P's next try or Q's reconnect replaces.
+    an RK8 `hs.init`.
   - **Rapid rotations.** "Rapid rotations exhaust the reconnect token"
     applies with relay-key rotation too. RK6 and RK8 restart reconnects
     on fresh tokens. The residual's rate is to be measured again with
