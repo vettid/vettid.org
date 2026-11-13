@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.4
-date: 2026-11-12
+version: 0.90.6
+date: 2026-11-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -28,6 +28,97 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.6: 2026-11-13, **readings of relay-key rotation's receiving
+    side, and older corrections** (erratum):
+    - §3.4.1 "Strict F1, a link under an earlier epoch": pending,
+      abandoned and destroyed epochs are not among the epochs judged
+      (left to "Pending epochs at a link", R29-K9 and the Residuals), as
+      release 29 built it and as 0.90.4 says at `hs.fin`.
+    - RK7: an answer Q keeps only as H5 fork evidence passes the
+      cut-off whatever `ik` it pinned, so its `hs.fin` suspends as "Fork
+      by ctx" and establishes nothing (a reading, to be confirmed).
+    - Rule C: at most 32 seen links per peer and kind (identity links
+      and relay links counted separately).
+    - Rule C, own device or agent: the first successor followed or seen
+      stays. A device's relay conflict is audited
+      `connection.fork_suspected` (`device_id`, `ref` = `relay`) and
+      `deposits_ended_relay_conflict` (`ref` = the count of queued
+      deposits ended), both now in §10.9, with `device_id` also in
+      §10.9's feed list for `connection.fork_suspected`; such a device
+      is sent nothing more, so the member sees the feed item on other
+      devices.
+    - "Relay-key states": earlier keys leave from the oldest end only,
+      so a followed relay link lives as long as the oldest earlier key
+      that can still deposit and reaches it.
+    - Table A, "Earlier, after its cut-off": `superseded_relay` is
+      judged before the epoch's fork evidence (rule E's `ts` rule,
+      R29-K9, a demoted epoch's flag, H5); a `relay.token.issued` after
+      its cut-off passes the epoch's checks and then gives its tokens
+      only; an `identity.rotate` after its cut-off with every link
+      followed passes them too, then only R29-K9.
+    - A5: as built, release 29 refuses every `relay.address.update`
+      (`relay_unlinked`), with a §6.3.2 row for its tests. RK5: a failed
+      `ik` requirement is refused with Table B's reason for the update's
+      `ik`. RK14's residual on a leased message now reads "not processed
+      and flushed", as 0.90.2 defines `last_msg_id`. The RK1 row of
+      §6.3.2 lists the r29_rk1 tests, and its old gap is closed.
+    - Table A, "Earlier, after its cut-off", `relay.address.update`:
+      rule U, with its identity links judged as that row's
+      `identity.rotate` column (all already followed: they change
+      nothing, R29-K9 is judged, and rule U goes on, RK5's `ik`
+      requirement included; otherwise `superseded_relay`), since a relay
+      link is the same for every recipient and a copy holding the
+      earlier key could replay a followed one.
+    - RK10 and RK5 together: an update Q refuses has none of its links
+      followed, identity links included, whatever the reason. Rule U's
+      checks that do not depend on the `ik` run first and change
+      nothing; then the identity links are judged (rule C at
+      `acceptFrom` step 3, then Table B; from an earlier key after its
+      cut-off, by Table A's row first) and the `ik` requirement is
+      checked against the `ik` they would lead to, before any is
+      applied. Only an update that is then followed, or a duplicate that
+      passes, has its identity links applied, with R29-K9, in RK8's
+      order. A duplicate is answered at most once an hour per peer
+      (§7.2's refresh clock, devices too; a reading of this release, to
+      be confirmed), and its `token` is not checked.
+    - A residual (pending the owner's decision): an honest P whose
+      answer to the follow was lost, and that then changed its `ik`, has
+      its updates from the earlier key refused (`superseded_relay`)
+      until a token of Q's for its current key reaches it; fail closed,
+      bounded by RK13.
+    - Readings of the receiving side as built: at most 32 earlier relay
+      keys per peer (a follow past it refused, `unexpected`), and rule
+      T's deferral taking a 60-second visibility timeout and counting
+      every kept deferral toward its 8, kept at most 16 days (these
+      limits are readings of this release, to be confirmed); a deferred
+      message past either bound is processed and its token ignored; a
+      follow also revokes the reconnect tokens of handshakes not yet
+      activated and drops the reconnect token held for the passed
+      mailbox; a handshake message sealed before a follow keeps its
+      tokens (RK2 "deposited" read as "sealed") and queued deposits move
+      to the new mailbox, a queued `relay.token.issued` being dropped;
+      any epoch established after a follow ends an owed RK6 restart, and
+      every reconnect after a follow waits (at most 60 days) for a
+      reconnect token of the current mailbox; a revoked reconnect token
+      keeps its earlier key until its revocation has left the outbox, a
+      denied standing token until its `exp`; a failing `reconnect_token`
+      in an update is ignored.
+    - Review: if applying an update's identity links makes Q suspend P
+      (R29-K9, a received flag, a conflict) or ends the epoch it travels
+      under, Q follows no relay link, keeps no token and sends no answer
+      (RK5, RK10, rule U's duplicate, Table A); where every identity
+      link is already followed, R29-K9 is judged before RK5's `ik`
+      requirement (evidence first); RK5's "Links first" rewritten, and
+      its `ik` requirement reads Q's current `ik` as those links would
+      leave it; Table A's as-built note sets RK7's and RK8's passes
+      aside; RK6's bound reads "that wait"; the device bullet says what
+      a member whose only device is the app sees; the update-refusal
+      row's tests are with vettid-vault #246 and #247.
+    - Two residuals: a copy's flag-setting message from an earlier key
+      after its cut-off, under a demoted epoch, is refused, not taken as
+      fork evidence (fail closed, undetected); a deposit on a revoked
+      reconnect token collected after its earlier key was pruned is
+      refused `foreign_sender` (a silent loss of liveness).
   - 0.90.4: 2026-11-12, **erratum to §3.4.1 Strict F1: links applied at
     `hs.fin`** (owner decision 2026-11-12). The links that a rekey or
     reconnect `hs.init` carries, applied at its verified `hs.fin`, now
@@ -5179,7 +5270,13 @@ these rules hold against anyone but the relay and its host (§13.5).
 - **Relay-key states**, for the message's `sender`: **current** (the
   relay key on record); **earlier** (one Q followed P away from, kept with
   its **followed relay link** and its **cut-off**, below, until no token
-  Q issued to it can still deposit); **foreign** (any other, including a
+  Q issued to it can still deposit; (0.90.6) a reconnect token Q revoked
+  counts only until its revocation has left Q's outbox, and a denied
+  standing token until its `exp`; earlier keys leave from the
+  oldest end only, so a followed relay link is kept as long as the
+  oldest earlier key that can still deposit and whose chain reaches it,
+  and rule C still finds a second successor of any key that chain
+  passed); **foreign** (any other, including a
   key P announced that Q has not followed: P deposits nothing with it
   before Q's token for it arrives, S1).
 - **Cut-off.** The position of the `relay.address.update` with which Q
@@ -5215,10 +5312,17 @@ these rules hold against anyone but the relay and its host (§13.5).
 - **defer**: left unacked, unprocessed, so the relay delivers it again;
   only for a token rule T says to defer, for at most two of the relay's
   visibility timeouts (RELAY-PROTOCOL §6.3) after Q first saw it (that
-  time is stored by `msg_id`, so a restart does not reset it), or
-  while another mailbox of Q has not been collected past its
-  `deposited_at`, and for at most 8 messages per peer and reason at
-  once. Otherwise it is refused with the reason given.
+  time is stored by `msg_id`, so a restart does not reset it), or while
+  another mailbox of Q has not been collected past its `deposited_at`,
+  and for at most 8 messages per peer and reason at once. Past either
+  bound it is processed, and rule T ignores its token (0.90.6; "refused"
+  before). (0.90.6) A reading of this release, to be confirmed: Q does
+  not read the relay's `visibility_timeout_seconds` and takes 60 seconds
+  (the value §11.14.10 takes when it is absent), so with a relay whose
+  timeout is longer the deferral ends sooner (fail closed); and every
+  deferral Q keeps for P counts toward the 8, whatever its age, and is
+  kept until its message is processed, at most 16 days, so replays under
+  fresh `msg_id`s cannot grow Q's state (P's resend recovers).
 - **restart**: H5. **suspend**: §3.4. **—** in a table: cannot occur;
   if it does, refuse (`unexpected`).
 
@@ -5257,7 +5361,36 @@ reconnect `hs.init` or `hs.resp` whose `relay_links` connect its
 | Foreign | refuse (`foreign_sender`) | refuse (`foreign_sender`) | refuse (`foreign_sender`) | refuse (`foreign_sender`) | refuse (`foreign_sender`) | refuse (`foreign_sender`), handshake kept |
 | Current | accept | rule U | accept, tokens by rule T | Table B | Table B | Table B |
 | Earlier, before its cut-off | accept | rule U | accept, tokens by rule T | Table B | Table B | Table B |
-| Earlier, after its cut-off | refuse (`superseded_relay`) | rule U | tokens by rule T only | every link already followed: ignore ((0.87.1) R29-K9 is still judged); else refuse (`superseded_relay`) | refuse (`superseded_relay`) | refuse (`superseded_relay`), handshake kept (S2) |
+| Earlier, after its cut-off | refuse (`superseded_relay`) | rule U; (0.90.6) its identity links as this row's `identity.rotate` column | tokens by rule T only | every link already followed: ignore ((0.87.1) R29-K9 is still judged); else refuse (`superseded_relay`) | refuse (`superseded_relay`) | refuse (`superseded_relay`), handshake kept (S2) |
+
+(0.90.6) In the row "Earlier, after its cut-off", as built (RK7's and
+RK8's passes aside): the refusal `superseded_relay` comes before the
+epoch's fork evidence is judged (a destroyed epoch's `ts` rule, an epoch
+R29-K9 ended, a demoted epoch's received flag, and for an `hs.fin` H5's
+fork-evidence answer), so such a message is refused, not taken as
+evidence; §6.6 "Fork detection" (a line a restore replaced) is judged
+before it. A `relay.token.issued` after its cut-off passes the epoch's
+checks that every message passing steps 1–4 meets (§6.3.1: a destroyed
+or demoted epoch's refusals and evidence, the received flag, a
+confirmation) and then gives its tokens only, by rule T: no `features`,
+no S5 resend, no dedupe entry and no answer. An `identity.rotate` after
+its cut-off whose links are all already followed likewise passes the
+epoch's checks, and then only R29-K9 is judged.
+
+(0.90.6) A `relay.address.update` from an earlier key after its cut-off
+has its identity links (`rotations`, §3.4.2 RK5) judged as this row
+judges an `identity.rotate`, on both of rule U's paths (a follow and a
+duplicate): if every one is already followed they change nothing, R29-K9
+is judged (before RK5's `ik` requirement: evidence first, as rule C),
+and rule U goes on (that requirement included); otherwise the update is
+refused (`superseded_relay`) with none of its links applied. A relay
+link is the same for every recipient, so a copy holding the earlier key
+could otherwise replay a followed link with identity links an
+`identity.rotate` from that key could not carry, and move P's `ik` at Q.
+If applying the update's identity links makes Q suspend P (R29-K9, a
+received flag, a conflict), or ends the epoch the update travels under,
+Q follows no relay link, keeps no token and sends no answer; the
+suspension stands.
 
 **Table B, identity key** (step 5). Every message that carries an `ik`
 carries its links (S8), so the `ik`
@@ -5407,14 +5540,18 @@ vault's epochs (§15 item 51).
 epoch E of P, while Q's current epoch is later than E and signed by the
 link's `old_ik`, shows that P never activated the epochs after E signed
 by that key, or that a copy did. Q takes together **every** epoch of P
-after E whose P-side signer is the link's `old_ik` or an ancestor. If
-**any** of them has its received flag set, Q suspends as above. Otherwise
-Q demotes all of them and reconnects naming E, which P accepts as its
-last (§6.6). (So Q never names an epoch P never had.) (0.88.2) The
-demotion is by position, as in "Epochs after an `ik` link": x is the
-position of the message that carries the link; a message under one of
-these epochs deposited after x is refused (`ancestor_ik`), and one
-deposited before x, if Q processes it only after the demotion, is
+after E whose P-side signer is the link's `old_ik` or an ancestor.
+(0.90.6) Pending, abandoned and destroyed epochs are not among them:
+they are left to "Pending epochs at a link", R29-K9 ("Epochs abandoned
+while pending, at P's `identity.rotate`", below) and the Residuals, as
+release 29 has always built it and as 0.90.4 says for links applied at
+`hs.fin`. If **any** of them has its received flag set, Q suspends as
+above. Otherwise Q demotes all of them and reconnects naming E, which P
+accepts as its last (§6.6). (So Q never names an epoch P never had.)
+(0.88.2) The demotion is by position, as in "Epochs after an `ik` link":
+x is the position of the message that carries the link; a message under
+one of these epochs deposited after x is refused (`ancestor_ik`), and
+one deposited before x, if Q processes it only after the demotion, is
 accepted and judged: if it would set the flag, Q suspends ("The flag is
 judged whenever it is set", above). (Until 0.88.2 the text did not say
 whether this demotion was by position or from the start.)
@@ -5584,17 +5721,18 @@ be running from an old copy. The connection is paused. Contact
 <connection name>, then connect again with a new invitation."
 
 **Rule C, one successor per key.** A link whose old key already has a
-followed ((0.86.0) or seen) successor other than its new key is a
-second successor. (0.86.0) Q keeps every valid link that passes
-step 3 as **seen**, followed or not (one in an unfinished handshake's
-`rotations`, or in a message Table A or B then refuses), at most one
-per old key (another is a conflict), except a link dropped at
+followed ((0.86.0) or seen) successor other than its new key is a second
+successor. (0.86.0) Q keeps every valid link that passes step 3 as
+**seen**, followed or not (one in an unfinished handshake's `rotations`,
+or in a message Table A or B then refuses), at most one per old key
+(another is a conflict), except a link dropped at
 `connection.rotation.resolve`. (0.87.0) A rekey's links are recorded as
-seen only once the rekey has passed the checks that do not depend on
-the outcome (it parses, is a rekey, and would be accepted), and Q keeps
-at most 32 seen links per peer. (0.90.0) Relay links that pass rule C
-in a message refused at step 1 (a suspended record) are kept as seen too
-(§3.4.2 RK12).
+seen only once the rekey has passed the checks that do not depend on the
+outcome (it parses, is a rekey, and would be accepted), and Q keeps at
+most 32 seen links per peer ((0.90.6) and kind: identity links and relay
+links are counted separately, 32 of each). (0.90.0) Relay links that
+pass rule C in a message refused at step 1 (a suspended record) are kept
+as seen too (§3.4.2 RK12).
 - **Identity links** (in `identity.rotate`, `hs.init`, `hs.resp`): §3.4
   "One successor per key".
 - **Relay links** (in an update, or (0.90.3) in a reconnect `hs.init` or
@@ -5608,18 +5746,26 @@ in a message refused at step 1 (a suspended record) are kept as seen too
   <connection name> to replace their vault's keys first, then connect
   again with a new invitation." The only exit is a new invitation.
 - **Between a vault and its own device or agent** (nothing suspends):
-  the first successor followed stays and the other is refused
-  (`conflict`). A vault that sees it for a device sends that device
-  nothing more, with a `high` feed item (NEW, for wording approval with
-  the app PRs) asking the member to
-  unlink the device and pair it again (§6.7; for the app, a recovery,
-  §11.11). An app that sees it for its vault shows a lasting warning
-  (NEW, for wording approval with the app PRs) with the action "Replace
-  your vault's keys" (`credential.rotate`,
-  §3.5.5).
+  the first successor followed ((0.90.6) or seen) stays and the other is
+  refused (`conflict`). A vault that sees it for a device sends that
+  device nothing more, with a `high` feed item (NEW, for wording
+  approval with the app PRs) asking the member to unlink the device and
+  pair it again (§6.7; for the app, a recovery, §11.11). (0.90.6) For a
+  relay link, the vault audits `connection.fork_suspected` with
+  `device_id` and `ref` = `relay` (its feed item is the one above), ends
+  that device's queued deposits in the same write and audits
+  `deposits_ended_relay_conflict` once, with `ref` = their count
+  (§10.9). As that device is sent nothing more, the feed item cannot
+  reach it. If it is the app and the member has no other device, that
+  device shows nothing: the feed item is kept on the vault and shown on
+  the member's other devices, if any (pending the app PRs). An app that
+  sees it for its vault shows a lasting warning (NEW, for wording
+  approval with the app PRs) with the action "Replace your vault's keys"
+  (`credential.rotate`, §3.5.5).
 
 **Rule U, a `relay.address.update`.** (0.90.0) It also carries
-`rotations`, P's identity links, applied first (§3.4.2 RK5). It carries
+`rotations`, P's identity links, (0.90.6) judged first and applied only
+with the follow (§3.4.2 RK5, RK10). It carries
 `relay_links` ((0.90.3) named `links` before 0.90.3): the relay links
 from P's key for Q (S1) to P's current key, 1 to 32 of them, each
 ((0.90.3) with `v` and `suite`, as the identity link of §3.4 has them)
@@ -5721,17 +5867,41 @@ Then:
   update is a duplicate: Q ignores it and sends `relay.token.issued` for
   P's current key again (fresh tokens, S3; at most one per update
   received, within §7.2's limits), so a lost answer is replaced at P's
-  next resend.
+  next resend. (0.90.6) Its identity links and RK5's `ik` requirement
+  are judged first, before any link is applied (§3.4.2 RK10): if Table B
+  refuses one or the requirement fails, nothing of it is applied and
+  nothing is answered; otherwise its identity links are applied, with
+  R29-K9 (which runs on a duplicate too; where every identity link is
+  already followed, R29-K9 is judged before the `ik` requirement). If
+  applying them makes Q suspend P (R29-K9, a received flag, a conflict),
+  or ends the epoch the update travels under, Q follows no relay link,
+  keeps no token and sends no answer; the suspension stands. "Within
+  §7.2's limits" is, as a reading of this release to be confirmed, at
+  most one answer an hour per peer, on the clock of §7.2's refresh near
+  a token's end (`relay.token.refresh`), for a device as for a
+  connection, since each answer is a fresh token. Its `token` is not
+  checked by rule T: no token of a duplicate is kept.
 - Otherwise the first link not skipped must start at Q's current relay
   key, and no `new` may be one Q keeps for P, else refuse
-  (`relay_rollback`); and the update's `token` must pass rule T for
-  `relay.pk`'s mailbox, else refuse (`token_unusable`). In one state
+  (`relay_rollback`); (0.90.6) Q keeps at most 32 earlier relay keys per
+  peer (a reading of this release, to be confirmed), so a follow that
+  would keep more is refused (`unexpected`) and changes nothing, and no
+  key Q followed P away from is forgotten while it could still be
+  announced again; and the update's `token` must pass rule T for
+  `relay.pk`'s mailbox, else refuse (`token_unusable`). (0.90.6) A
+  `reconnect_token` that fails rule T (§7.1's holder's checks included)
+  is ignored, no reason to refuse. In one state
   write Q records the links, each passed key with this update's
   position as its cut-off, makes `relay.pk` current and keeps the tokens.
   After that write it sends `relay.token.issued` for it (standing, and
   reconnect for a connection), revokes the reconnect tokens it issued
-  to the passed keys (at the mailbox that issued them, S7) and leaves
-  the standing tokens to expire.
+  to the passed keys (at the mailbox that issued them, S7; (0.90.6)
+  also those its handshakes not yet activated carry, a pending epoch's
+  and its open answers', which P meets as §3.4.2 RK9 says) and leaves
+  the standing tokens to expire. (0.90.6) The reconnect token Q held
+  for the passed mailbox is no longer held: the update's
+  `reconnect_token`, if kept, replaces it; without one, §3.4.2 RK6's
+  wait applies.
 - So an address changes only by a link the current key signed, from
   whichever of P's keys the update came. A handshake does not pin P's
   relay key: an `hs.init`'s `from.relay` only addresses the answer, and
@@ -6255,8 +6425,10 @@ each recipient Q).
     for Y's current mailbox under its key for Y. So X's update resends,
     and with them the lost-token recovery of rule U's duplicate path,
     wait until Y's `relay.token.issued` arrives or RK11's wait ends.
-  - **A message leased but not acked when P ends its collects of K** is
-    above `last_msg_id`, so Q sends it again. P drops it if it processed
+  - **A message leased but not processed and flushed when P ends its
+    collects of K** ((0.90.6) "not acked" before) is above
+    `last_msg_id` (RK14 step 1, as 0.90.2 defines it), so Q sends it
+    again. P drops it if it processed
     it (its dedupe). (0.90.2) P stops collecting K before the relay
     ends it (§3.4.2 RK14 step 1), so nothing reaches P from K after its
     last collect, and what the relay accepts into K after that is above
@@ -6266,6 +6438,32 @@ each recipient Q).
     `mailbox_unknown` by P's ended mailbox. Q then learns P's new address
     only from P's reconnect (RK8), and P starts one only when it has no
     epoch of its own with Q. Otherwise S1 ends the pair `stale` (RK13).
+  - (0.90.6, pending the owner's decision) **An honest P whose answer to
+    the follow was lost, and that then changed its `ik`.** Q followed
+    P's update, but Q's `relay.token.issued` for P's new key never
+    reached P, so P still deposits to Q with the earlier key, after its
+    cut-off. Once P has rotated its `ik` again, its update resends carry
+    an identity link Q has not followed, and Table A refuses them
+    (`superseded_relay`), as it refuses P's `identity.rotate` from that
+    key. This fails closed. P recovers once a token of Q's for its
+    current key reaches it (a `relay.token.issued` of Q's, for example
+    its re-mint near a token's end, §7.2, or Q's reconnect, §3.4.2 RK8):
+    P's next resend then goes from its current key and is judged in
+    Table A's Current row. If none comes, RK13's cap ends the pair
+    `stale`.
+  - (0.90.6) **A copy's flag-setting message from an earlier key after
+    its cut-off.** Under a demoted epoch, such a message is refused
+    (`superseded_relay`) by Table A before the demoted epoch's received
+    flag is judged ("The flag is judged whenever it is set"), so it is
+    not taken as fork evidence. This fails closed, since nothing of it
+    is accepted, but that copy goes undetected.
+  - (0.90.6) **A deposit on a revoked reconnect token after its earlier
+    key is pruned.** A reconnect token Q revoked counts for its earlier
+    key only until its revocation has left Q's outbox ("Relay-key
+    states"). A deposit the relay took on it before the denylist request
+    went through, and that Q collects after the key was pruned, is
+    refused (`foreign_sender`): a silent loss of liveness, in practice
+    an RK8 `hs.init`.
   - **Rapid rotations.** "Rapid rotations exhaust the reconnect token"
     applies with relay-key rotation too. RK6 and RK8 restart reconnects
     on fresh tokens. The residual's rate is to be measured again with
@@ -6397,6 +6595,12 @@ harness. This argument does not replace that check.
   at a transfer, a recovery and a `credential.rotate`. Table A then has
   only its Current and Foreign rows, S1 never holds anything, and rule U
   and the gate never run. The final paragraph covers relay-key rotation.
+  (0.90.6) As built, release 29 refuses every `relay.address.update`,
+  from a connection, a service and each kind of device, whatever its
+  body: acked, dropped and audited `drop.peer_key` with `ref` =
+  `relay_unlinked`, with the peer's address, tokens and denylist left as
+  they are and no token issued in answer. A resend with the same inner
+  `id` is a duplicate (§8.2) and is not audited again.
 
 *Progress measure.* Φ = (λ, δ, ρ), compared in that order:
 - λ is the number of links in either side's chain that the other side
@@ -6694,8 +6898,15 @@ strict F1, works as follows.
 
 **RK2. The `sub` of a token.** Every token Q puts in any message to P
 names as `sub` P's relay key **as Q has it on record** when the message
-is deposited. It never names a key that a message only announces
-(RK8). This is S3 applied to Q.
+is deposited. It never names a key that a message only announces (RK8).
+This is S3 applied to Q. (0.90.6) For a handshake message, "deposited"
+reads as "sealed": one Q sealed before it followed P's relay link keeps
+the tokens it carries, minted for the passed key (S2 does not reseal it;
+its reconnect token is revoked by rule U, which P meets as RK9 says). At
+the follow, Q's queued deposits to P that go on the held standing token
+move to P's new mailbox; a queued `relay.token.issued` is dropped
+instead, as the follow's answer carries fresh tokens for the new key. A
+deposit on a token of its own (a handshake's) keeps its mailbox.
 
 **RK3. The key a carried token is deposited with.** P deposits a message
 on a carried token (§6.3.1) with the relay key that the token's `sub`
@@ -6729,18 +6940,34 @@ the same bytes (RK5).
 - **Sealed afresh.** Every deposit of an update is sealed afresh under
   the epoch current at that deposit, with its links made again: each
   resend, each held update when it goes out, and S2's re-deposit.
-- **Links first.** In the write that processes an update, Q first applies
-  its identity links, as it applies an `identity.rotate`'s: rule C,
-  Table B, H5, the demotion rules and R29-K9. R29-K9 runs on a duplicate
-  update too.
+- **Links first.** Q applies the update's identity links as it applies
+  an `identity.rotate`'s (rule C, Table B, H5, the demotion rules and
+  R29-K9), before its relay links and tokens, in the write that follows
+  the update or, for a duplicate, the write that processes it. (0.90.6)
+  They are applied only to an update that is then followed, or a
+  duplicate that passes: rule U's checks that do not depend on the `ik`
+  and RK5's `ik` requirement below are judged first, before any of them
+  is applied (RK10). Where every identity link is already followed,
+  applying them changes nothing, and R29-K9 is judged before the `ik`
+  requirement (evidence first, as rule C); this holds for an update from
+  an earlier key after its cut-off too (§3.4.1 Table A). If applying
+  them makes Q suspend P (R29-K9, a received flag, a conflict), or ends
+  the epoch the update travels under, Q follows no relay link, keeps no
+  token and sends no answer; the suspension stands.
 - **The `ik` requirement.** Q follows the update's relay links, and keeps
   its tokens by rule U and rule T, only if one of these holds:
-  - after those identity links are applied, the chain from the update's
-    `ik` ends at Q's current `ik` for P;
-  - the update's `ik` is Q's current `ik` for P.
+  - with those identity links taken as followed (0.90.6: they are
+    applied only once the update is to be followed, RK10), the chain
+    from the update's `ik` ends at Q's current `ik` for P as those links
+    would leave it;
+  - the update's `ik` is Q's current `ik` for P as those links would
+    leave it.
 
   Otherwise, or if Table B refuses any of the links, Q follows no relay
-  link from that update and takes none of its tokens.
+  link from that update and takes none of its tokens. (0.90.6) A failed
+  `ik` requirement refuses the update with Table B's reason for the
+  update's `ik`: `ancestor_ik`, `rejected_ik`, or `unknown_ik` for any
+  other.
 - **The honest case.** An honest update carries the links from its
   epoch's signer to P's current `ik`, so it passes.
 - **The guarantee.** No copy taken before the write of the `ik` current
@@ -6762,6 +6989,16 @@ messages (§6.3.1).
 - **No such token yet:** Q starts the reconnect again once it holds one.
   It waits at most until RK13's cap, or, when Q is not itself in S1, 60
   days after the follow.
+- (0.90.6) Any epoch established with P after the follow ends an owed
+  restart (nothing is owed then), unless the current epoch is demoted.
+  The same wait holds for every reconnect Q starts with P after a follow
+  (a restart, after a demotion, by strict F1): it needs a reconnect
+  token for P's current mailbox, so Q neither uses the passed mailbox's
+  token nor judges "no reconnect token" (`stale`) while it waits; the
+  wait ends when such a token is held, after which "The reconnect bound"
+  applies again. Past that wait, without one, the connection becomes
+  `stale` by the reconnect bound (not while §6.3.1 "No reconnect while
+  carried tokens wait" holds).
 - **Not restarted:** the reconnect whose own message made the follow.
   So an RK8 follow needs no carried token here. At an `hs.resp`'s follow,
   that is the reconnect itself. At an `hs.init`'s follow, Q's own open
@@ -6781,7 +7018,11 @@ refusing them:
   current `ik` for P established;
 - an **`hs.fin` for an answer Q has open**, when its `sig_I` verifies
   under the `ik` Q's answer pinned, and that `ik` is Q's current `ik` for
-  P. Its epoch is the one that `hs.fin` establishes.
+  P. Its epoch is the one that `hs.fin` establishes. (0.90.6) An answer
+  Q keeps only as fork evidence (H5 "Exempt") passes too, whatever `ik`
+  it pinned, so that its `hs.fin` is judged as fork evidence (§3.4.1
+  "Fork by ctx") and suspends; it never establishes an epoch (evidence
+  first, as rule C; a reading of this release, to be confirmed).
 
 **When the pass closes.** Each pass closes per epoch: once Q has accepted,
 under that epoch or a later one, a message from a relay key of P's later
@@ -6928,6 +7169,28 @@ device's relay key.
   redirect Q unseen). For example, Q may
   have demoted the epoch it travels under. The residual "A demoted Q
   past P's grace" describes what follows.
+  (0.90.6) So rule U's checks that do not depend on the `ik` run first
+  and change nothing: the chain and its ends, the followed prefix,
+  `relay_rollback`, the cap of earlier keys and rule T on `token`. If
+  any fails, the update is refused with none of its links followed,
+  identity links included; otherwise an old copy holding an earlier key
+  could move P's `ik` at Q through an update it knows will be refused.
+  Then the update's identity links are judged as an `identity.rotate`'s
+  (rule C has run at `acceptFrom` step 3; then Table B), and RK5's `ik`
+  requirement is checked against the `ik` they would lead to, before any
+  of them is applied. If Table B refuses one of them or the requirement
+  fails, the update is refused and none of its links is followed. Only
+  an update that is then followed, or a duplicate that passes, has its
+  identity links applied (RK5 "Links first", with R29-K9), in the write
+  that follows its relay links and keeps its tokens, in RK8's order
+  (identity links, relay links, tokens). An update from an earlier key
+  after its cut-off has its identity links judged by Table A's row
+  (§3.4.1) after those checks and before RK5; where every one is already
+  followed, R29-K9 is judged before RK5's `ik` requirement (evidence
+  first, as rule C). If applying them makes Q suspend P (R29-K9, a
+  received flag, a conflict), or ends the epoch the update travels
+  under, Q follows no relay link, keeps no token and sends no answer;
+  the suspension stands.
 
 **RK11. Waiting on held tokens when both sides rotate** (owner decision
 2026-11-12).
@@ -9963,7 +10226,8 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-T1 ((0.88.2) a handshake's tokens adopted at confirmation; no revocation of a superseded token) | §6.3.1 A handshake's tokens are adopted at confirmation; §6.6; §7.4 | r29_t1_test.go (the sub-rules, each failing without its rule; TestR29T1Seeds); the random-pair harness asserts that no vault adopts a carried token its issuer had already revoked (judgeAdoption) |
 | R29-T2 ((0.88.2) the handshakes a newer one ends) | §6.3.1 Initiator: an abandoned pending epoch's `hs.fin`; I's rekeys end at its reconnect's `hs.resp`; I's open reconnects end at its rekey's confirmation; Responder: a reconnect ends R's rekey answers; (0.88.9) a stale reconnect answer ends at a later message | r29_t1_test.go: TestR29AbandonedPendingDropsItsWaitingFin, TestR29ReconnectRespAbandonsTheOwnRekeys, TestR29StaleReconnectEndsAtTheRekeysConfirmation, TestR29ReconnectDropsTheRekeyAnswers; r29_gapf_test.go: TestR29DeviceAbandonInTheDrainDropsItsFin; r30_staleans_test.go: TestR30StaleReconnectAnswerDroppedByALaterMessage, TestR30StaleAnswerKeptForAMessageUnderTheNamedEpoch, TestR30StaleAnswerKeepsAForkByCtxAnswer, TestR30StaleAnswerNotEndedByAnHsFin, TestR30StaleAnswerEndedByAConfirmOfTheOwnPendingEpoch |
 | R29-T3 ((0.88.2) a rekey `hs.init` answered once; a duplicate `hs.fin` ignored) | §6.5 | r29_t1_test.go: TestR29DuplicateRekeyInitAnsweredOnce, TestR29RedeliveredFinIsIgnored |
-| RK1 ((0.90.0) as built: the reconnect after a demotion, its guard, `rekey_replaced_by_reconnect`, `B` from the queued `hs.fin`, rekey answers holding no reconnect) | §3.4.2 RK1; §6.3.1; §6.5; §6.6 "Between two persons" | r29_oldcopy_test.go: TestR29DemotedHoldsMessagesUntilNewEpoch, TestR29DemotedNoSecondReconnectWhilePending; r29_review4_test.go: TestR29ReconnectNamingKeepsPendingReconnect, TestR29ReconnectNamingPendingBeforeTokenCheck; gap: `rekey_replaced_by_reconnect` and a rekey answer not holding the reconnect, to be listed with the relay-key rotation code |
+| RK1 ((0.90.0) as built: the reconnect after a demotion, its guard, `rekey_replaced_by_reconnect`, `B` from the queued `hs.fin`, rekey answers holding no reconnect) | §3.4.2 RK1; §6.3.1; §6.5; §6.6 "Between two persons" | r29_oldcopy_test.go: TestR29DemotedHoldsMessagesUntilNewEpoch, TestR29DemotedNoSecondReconnectWhilePending; r29_review4_test.go: TestR29ReconnectNamingKeepsPendingReconnect, TestR29ReconnectNamingPendingBeforeTokenCheck; (0.90.6) the gap once noted here (`rekey_replaced_by_reconnect` and a rekey answer not holding the reconnect) is closed: r29_rk1_test.go: TestR29RK1RekeyReplacedByReconnect, TestR29RK1RekeyAnswerHoldsNoReconnect, TestR29RK1BFromTheQueuedFin |
+| (0.90.6) relay.address.update refused until rule U | §3.4.1 rule U, A5; §10.2 | relayupdate_refused_test.go: TestRelayAddressUpdateRefusedFromEveryPeer, TestRelayAddressUpdateResendAuditedOnce, TestRelayAddressUpdateFromOldCopyRedirectsNothing (tests with vettid-vault #246, #247) |
 
 ### 6.4 Connections and invitations
 
@@ -16249,7 +16513,11 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `connection.restored_reconnect` (`connection_id`, `ref` = the named
   epoch's activation time, §6.6) and `connection.fork_suspected`
   (`connection_id`, §6.6; (0.86.0) `ref` = `epoch`, `relay` or
-  `relay_revoked`, §3.4.1);
+  `relay_revoked`, §3.4.1; (0.90.6) for an owner device or agent with
+  two successors of one relay key, `device_id` and `ref` = `relay`,
+  §3.4.1 rule C); (0.90.6) `deposits_ended_relay_conflict`
+  (`device_id`, `ref` = the number of queued deposits to that device
+  ended at its relay conflict, §3.4.1 rule C; audit only);
   `identity.rotated`;
   `credential.created`, `credential.rotated`, `credential.password_changed`,
   `credential.password_failed`, `credential.unlocked`;
@@ -16784,7 +17052,8 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   `urgent`), `identity.rotation_failed` (priority `high`, `ref` =
   `recovery`, or the `transfer_id` after a transfer) and `identity.rotate_conflict` (priority `high`,
   `connection_id`) (§11.14.11), (0.72.0) `connection.fork_suspected`
-  (priority `high`, `connection_id`; §6.6; no feed item for
+  (priority `high`, `connection_id`, or (0.90.6) `device_id` for a
+  device's relay conflict, §3.4.1 rule C; §6.6; no feed item for
   `connection.restored_reconnect`), (0.50.0; needs a vault release)
   `recovery.generation_closed` with `ref` `<generation>/rollback`
   (priority `urgent`; only for the reason `rollback`, §11.14.11),
