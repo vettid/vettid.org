@@ -63,15 +63,16 @@ changelog:
       otherwise `superseded_relay`), since a relay link is the same for
       every recipient and a copy holding the earlier key could replay a
       followed one.
-    - RK10 and RK5 reconciled: rule U's checks that do not depend on the
-      `ik` run first and change nothing, and a refusal there applies no
-      link, identity links included; only then are the identity links
-      applied, the `ik` requirement checked and the relay links followed
-      (RK8's order). A failed `ik` requirement leaves the identity links
-      applied; only relay links and tokens are not taken. A duplicate
-      applies its identity links first, is answered at most once an hour
-      per peer (§7.2's refresh clock, devices too), and its `token` is
-      not checked.
+    - RK10 and RK5 together: an update Q refuses has none of its links
+      followed, identity links included, whatever the reason. Rule U's
+      checks that do not depend on the `ik` run first and change
+      nothing; then the identity links are judged (rule C, Table B) and
+      the `ik` requirement is checked against the `ik` they would lead
+      to, before any is applied. Only an update that is then followed,
+      or a duplicate that passes, has its identity links applied, with
+      R29-K9, in RK8's order. A duplicate is answered at most once an
+      hour per peer (§7.2's refresh clock, devices too), and its `token`
+      is not checked.
     - A residual: an honest P whose answer to the follow was lost, and
       that then changed its `ik`, has its updates from the earlier key
       refused (`superseded_relay`) until a token of Q's for its current
@@ -5828,9 +5829,11 @@ Then:
   update is a duplicate: Q ignores it and sends `relay.token.issued` for
   P's current key again (fresh tokens, S3; at most one per update
   received, within §7.2's limits), so a lost answer is replaced at P's
-  next resend. (0.90.6) Its identity links are applied first (RK5;
-  R29-K9 runs on it too), and if Table B refuses one or the `ik`
-  requirement fails, nothing is answered. "Within §7.2's limits" is at
+  next resend. (0.90.6) Its identity links and RK5's `ik` requirement
+  are judged first, before any link is applied (§3.4.2 RK10): if Table B
+  refuses one or the requirement fails, nothing of it is applied and
+  nothing is answered; otherwise its identity links are applied, with
+  R29-K9 (which runs on a duplicate too). "Within §7.2's limits" is at
   most one answer an hour per peer, on the clock of §7.2's refresh near
   a token's end (`relay.token.refresh`), for a device as for a
   connection, since each answer is a fresh token. Its `token` is not
@@ -6881,7 +6884,9 @@ the same bytes (RK5).
 - **Links first.** In the write that processes an update, Q first applies
   its identity links, as it applies an `identity.rotate`'s: rule C,
   Table B, H5, the demotion rules and R29-K9. R29-K9 runs on a duplicate
-  update too.
+  update too. (0.90.6) They are applied only once the update is to be
+  followed (or, a duplicate, answered): the `ik` requirement below is
+  checked before, against the `ik` they would lead to (RK10).
 - **The `ik` requirement.** Q follows the update's relay links, and keeps
   its tokens by rule U and rule T, only if one of these holds:
   - after those identity links are applied, the chain from the update's
@@ -7093,19 +7098,19 @@ device's relay key.
   (0.90.6) So rule U's checks that do not depend on the `ik` run first
   and change nothing: the chain and its ends, the followed prefix,
   `relay_rollback`, the cap of earlier keys and rule T on `token`. If
-  any fails, the update is refused with none of its links applied,
+  any fails, the update is refused with none of its links followed,
   identity links included; otherwise an old copy holding an earlier key
   could move P's `ik` at Q through an update it knows will be refused.
-  Only then are the identity links applied (RK5, with R29-K9), the `ik`
-  requirement checked and the relay links followed, in RK8's order
-  (identity links, relay links, tokens). A duplicate goes from the
-  followed prefix straight to its identity links (rule U). If Table B
-  refuses one of the identity links, none of them is applied. A failed
-  `ik` requirement comes after the identity links were applied, and they
-  stay applied, as an `identity.rotate`'s would; there, "none of its
-  links followed" means none of its relay links, and no token is kept.
-  An update from an earlier key after its cut-off is judged by Table A
-  first (§3.4.1).
+  Then the update's identity links are judged as an `identity.rotate`'s
+  (rule C, Table B), and RK5's `ik` requirement is checked against the
+  `ik` they would lead to, before any of them is applied. If Table B
+  refuses one of them or the requirement fails, the update is refused
+  and none of its links is followed. Only an update that is then
+  followed, or a duplicate that passes, has its identity links applied
+  (RK5 "Links first", with R29-K9), in the write that follows its relay
+  links and keeps its tokens, in RK8's order (identity links, relay
+  links, tokens). An update from an earlier key after its cut-off is
+  judged by Table A first (§3.4.1).
 
 
 **RK11. Waiting on held tokens when both sides rotate** (owner decision
