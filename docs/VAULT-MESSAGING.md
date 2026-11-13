@@ -46,16 +46,22 @@ changelog:
       that `hs.fin`.
     - RK10: "knows a newer mailbox" means one followed, by rule U or
       RK8. §3.4.1 "The reconnect bound" and RK15 say the same.
-    - RK14 step 1: P's anchor is the start of the first rotate attempt
-      that was not definitively refused, stored with the pending key
-      before that attempt and cleared by a definite refusal (§3.4).
-      Until the second write K stays P's, collected as §3.4 says however
-      long the key is pending or refused; at an unlock with an anchor
-      more than 13 days old, the rotate attempt comes before the first
-      collect of K. A batch already collected at the stop is processed
-      and acked. `last_msg_id` is kept in the state with each batch's
-      flush, and the stop is recorded in the write that queues the
-      telling. After the second write P ends
+    - RK14 step 1: each pending key has its own anchor, the start of
+      its first rotate attempt that was not definitively refused,
+      stored with it before that attempt (at a recovery's open, in the
+      step-2 write) and cleared only when that attempt is refused with
+      the relay's own `400` or `401` answer. At the second write it
+      stays with the key, now old; a vault can hold several old keys,
+      each with its own anchor, stop and telling (§3.4 (a), "When the
+      old key is deleted"). Until the second write K stays P's,
+      collected as §3.4 says however long the key is pending or
+      refused; once the anchor is more than 13 days old, a rotate
+      attempt comes before any collect of K whenever one may be made.
+      A batch already collected at the stop is processed and acked.
+      `last_msg_id` (processed and flushed) is kept in the state with
+      each batch's flush; a stop on `mailbox_unknown` is written at
+      once. The telling is queued no earlier than the second write.
+      After the second write P ends
       its collects of K 13 days after the anchor (the relay's 14-day
       grace less a day of margin), or at once if that has passed; and at
       any time once the relay answers `mailbox_unknown` for K. After P
@@ -64,9 +70,10 @@ changelog:
       done (§3.4 "When the old key is deleted").
     - RK14 step 2: P's dedupe lasts 76 days on P's clock, per
       connection, after the relay's `201` to that connection's latest
-      telling (§8.2, §8.3); the 2 days over Q's 74 cover the offset
-      between P's clock and the relay's. It ends with a telling that
-      ends without ever being accepted.
+      telling (§8.2, §8.3); the 2 days over Q's 74 cover Q's clock
+      against the relay's `deposited_at` and P's rate drift. It ends
+      with a telling no attempt of which may have reached the relay,
+      and otherwise runs from the last attempt that may have.
     - RK14 step 3:
       - kept: every durable entry to the peer except those listed as
         not kept with their recovery: the member's own messages as §8.3
@@ -102,10 +109,15 @@ changelog:
     - Residuals: a vault relay's grace is exactly 14 days and its
       `message_ttl_seconds` at most 14 days (RELAY-PROTOCOL 0.11.1). The
       residual "Dedupe beyond A3" is replaced by step 2's bound. New: "A
-      copy while the key is pending", "A sender that never follows", and
-      a narrower "Clock drift". "Devices have no telling" now states,
-      for an owner decision, that a device's deposits to the old
-      mailbox after the vault stops collecting it are lost silently.
+      copy while the key is pending" (with a copy's earlier rotate and
+      a recovery that ends before its step-2 write), "A sender that
+      never follows", and a narrower "Clock drift". "Devices have no
+      telling" now states, for an owner decision, that a device's
+      deposits to the old mailbox accepted after the vault's last
+      collect before its stop are lost silently, a lock across the stop
+      included.
+    - RK14 step 3: `sync.since` between vaults is not kept; the
+      requester asks again.
       §8.3 case 6 and the `RestampAfter` residual note the 14-day cap
       on a vault relay's `message_ttl_seconds`.
     - §3.4 (a): the collect rules for a vault and for a device are
@@ -4674,8 +4686,9 @@ create-only.
     registration below): for example `400 bad_request` or
     `401 signature_invalid`. It is not retried with backoff: it
     **fails secure** and puts the pending key in the refused state
-    (below). (0.90.2) A definite refusal of the rotate also clears the
-    anchor of §3.4.2 RK14 step 1, in that same write.
+    (below). (0.90.2) A definite refusal of the rotate clears the
+    anchor of §3.4.2 RK14 step 1 in that same write, when RK14 step 1
+    says it does.
   - **Collecting while a key is pending.** The vault keeps collecting
     from the old mailbox with the current key and, once the rotate has
     succeeded, also from the new one with the pending key, so nothing
@@ -4688,8 +4701,10 @@ create-only.
     address (the updates are held), have their deposits to the old
     mailbox refused `mailbox_unknown`. (0.90.0) Between vaults that
     implement §3.4.2, those refused deposits are held, and the accepted
-    ones are told or deposited again (RK14). (0.90.2) RK14 step 1 ends
-    no collect of the old mailbox before the second write.
+    ones are deposited again or told after the telling (RK14), which
+    (0.90.2) is queued no earlier than the second write. RK14 step 1
+    ends no collect of the old mailbox before the second write, except
+    at `mailbox_unknown`.
   - **After the grace.** The old mailbox is gone, so the rotate is
     answered `mailbox_unknown`. The vault then registers the **stored**
     pending key (RELAY-PROTOCOL §6.1). A `200` means an earlier rotate
@@ -4717,7 +4732,9 @@ create-only.
     the vault's address, and on a definite refusal takes a fresh key at
     once, **one time only** per recovery; if the fresh key is refused
     too, it stays in the refused state and the vault generates no further
-    key on its own.
+    key on its own. (0.90.2) Between vaults, the start of that attempt
+    is stored as the key's anchor in the step-2 write when it has none
+    (§3.4.2 RK14 step 1).
     - **A refused rotate** (the old mailbox lives): the open goes on with
       the live mailbox. In place of keeping the refused key with a
       relay-key rotation owed (next item), the recovery's step-2 write
@@ -4827,7 +4844,10 @@ create-only.
     (RELAY-PROTOCOL §6.10 would allow it). A deposit needs the recipient's token for the old `sub`
     and `X-VettID-Key` = the old key (RELAY-PROTOCOL §5.3 steps 2–7); it
     does not need the vault's own old mailbox to exist.
-    (0.90.2) A vault that implements §3.4.2 collects its old mailbox
+    (0.90.2) After rotations close together a vault can hold more than
+    one old relay key at once; each is kept, used and deleted as this
+    item and "When the old key is deleted" say, on its own.
+    A vault that implements §3.4.2 collects its old mailbox
     until §3.4.2 RK14 step 1 ends it: not before its second write, then
     13 days after its anchor (at once if that has passed). That rule
     wins over the relay's grace. A device that rotates its own relay key
@@ -4856,9 +4876,10 @@ create-only.
     followed by a rotation, can rotate before it is delivered). A removed
     phone, or a transfer's new phone, is not a recipient and never acknowledges, so the key is kept
     until that notice is delivered, definitively refused, or its token
-    expires. (0.90.2) Between vaults that implement §3.4.2, the old key
-    is also kept until §3.4.2 RK14 step 1 has ended the collects of its
-    mailbox, recorded `last_msg_id` and queued `relay.mailbox.closed`.
+    expires. (0.90.2) Between vaults that implement §3.4.2, each old key
+    is also kept until §3.4.2 RK14 step 1 has, for that key, ended the
+    collects of its mailbox, recorded `last_msg_id` and queued
+    `relay.mailbox.closed`.
     This is the one place the old key is kept, and it
     replaces "in memory for the rotation's grace period" wherever that
     stood (§11.14.6 step 6, §11.14.10). The notices to removed devices
@@ -5781,12 +5802,16 @@ each recipient Q).
     `message.delivery_unconfirmed`. (0.90.2) Entries deposited to a
     mailbox Q never follows P away from are dropped silently 60 days
     after their `201`: such a mailbox still lives, or P collected it
-    until a day or more before it ended (§3.4.2 RK14 step 1; a vault
-    relay's grace is exactly 14 days, RELAY-PROTOCOL §6.7).
+    until its stop, normally a day or more before it ended (§3.4.2 RK14
+    step 1; a vault relay's grace is exactly 14 days, RELAY-PROTOCOL
+    §6.7). What it accepted after P's last collect is covered by "A
+    sender that never follows".
   - (0.90.2) **A sender that never follows.** What the relay accepts
-    into K after P stops collecting it (at least the last day of the
-    grace, plus the time from P's anchor to the rotate) reaches P only
-    through the telling, and so only if Q follows P away from K. A Q
+    into K after P's last collect of K before its stop reaches P only
+    through the telling, and so only if Q follows P away from K. From
+    the stop to the relay's end of K that is at most the time from P's
+    anchor to the rotate plus a day; a lock of P's across the stop
+    extends it back to P's last collect before the lock. A Q
     that never follows within 60 days of such an entry's `201` drops it
     silently. P has by then ended the connection `stale` on its side
     (RK13's cap), but Q is not told about that entry.
@@ -5810,40 +5835,56 @@ each recipient Q).
     it again before any collect of P's met `mailbox_unknown`. P then
     collects that K as its own. What the copy acks first P never gets,
     and the telling, which counts only what P acked, does not tell it.
-    The order at an unlock (RK14 step 1) makes the rotate attempt first,
-    and a repeated rotate signed by K is answered `200` while a K
-    mailbox lives, since the successor already holds the new key
-    (RELAY-PROTOCOL §6.7 "Repeating a rotation"), so
-    this remains only while the attempt is refused or gets no definite
-    answer. It needs a copy holding K and a pending key unfinished for
-    more than 14 days after a successful rotate; it is the same exposure
-    a copy has to K before any rotation.
+    Once the anchor is old, RK14 step 1 makes a rotate attempt before
+    any collect of K, and a repeated rotate signed by K is answered
+    `200` while a K mailbox lives, since the successor already holds
+    the new key (RELAY-PROTOCOL §6.7 "Repeating a rotation"). So this
+    remains while the attempt is refused or gets no definite answer, or
+    while a `retry_after` runs. It needs a copy holding K and a pending
+    key unfinished for more than 14 days after a successful rotate; it
+    is the same exposure a copy has to K before any rotation.
+    Two more ways the anchor can come after the rotate that started
+    the relay's grace: a copy that holds the pending key can rotate K
+    before P's first attempt, so the grace starts before P's anchor;
+    and a recovery's open that ends before its step-2 write loses the
+    anchor of the attempt it made (RK14 step 1). In both, P can still
+    collect K after the relay ended it, with the exposure above.
   - **Devices have no telling.** A device that rotates its relay key,
     or whose vault does, gets no `relay.mailbox.closed`. (0.90.2) Open,
     for an owner decision: **a device's deposits to its vault's old
-    mailbox after the vault stops collecting it are lost silently.**
-    The vault stops collecting K at its anchor plus 13 days, or at its
-    second write if that is later (RK14 step 1), and the relay accepts
-    into K until 14 days after the successful rotate.
-    - **The window** is at most the time from the anchor to that
-      rotate, plus a day. The anchor is the start of the first attempt not refused, so
-      this is normally about a day. It grows up to the whole 14 days
-      when the attempts got no definite answer for 13 days or more
-      before one succeeded (an unreachable relay, `5xx`, a vault locked
-      between an attempt whose answer was lost and the next).
-    - **Who loses.** Only a device that deposits to K after the stop
-      without having collected its vault's `relay.address.update`: an
-      app, desktop or agent that was offline or not collecting, and
-      flushes to its vault before it collects its own mailbox. A device
-      that is online follows the update within moments of the second
-      write.
+    mailbox that the relay accepts after the vault's last collect of it
+    before its stop are lost silently.** The vault stops collecting K
+    at its anchor plus 13 days, or at its second write if that is later
+    (RK14 step 1), and the relay accepts into K until 14 days after the
+    successful rotate.
+    - **The window** runs from the vault's last collect of K before its
+      stop to the relay's end of K.
+      - From the stop, it is at most the time from the anchor to that
+        rotate, plus a day. The anchor is the start of the first attempt
+        not refused, so this is normally about a day. It grows up to the
+        whole 14 days when the attempts got no definite answer for 13
+        days or more before one succeeded (an unreachable relay, `5xx`,
+        a vault locked between an attempt whose answer was lost and the
+        next).
+      - A lock across the stop extends it back to the lock: once the
+        stop is due, the vault collects nothing from K, even inside the
+        grace. For example, with the second write on day 0, a lock on
+        day 3 and the unlock on day 13.5, the deposits to K from day 3
+        to day 13 of a device that has not yet collected the update are
+        lost.
+    - **Who loses.** Only a device that deposits to K without having
+      collected its vault's `relay.address.update`: an app, desktop or
+      agent that was offline or not collecting, and flushes to its vault
+      before it collects its own mailbox. A device that is online at the
+      second write follows the update within moments.
     - **What the device sees.** A request (§8.1) gets no answer and
       times out, and its application retries go to K too until the
       device follows; it is not told why. An event that is not a
       request (for example `device.features`, `call.answer`,
       `call.end`) is lost with no sign at all.
-    - Deposits accepted before the stop are collected. After the
-      relay's end they are refused `mailbox_unknown`, and the device
+    - Deposits accepted up to the vault's last collect of K are
+      collected. After the relay's end they are refused
+      `mailbox_unknown`, and the device
       follows its vault's update or is paired again. A vault's deposits
       to a device's old mailbox that the device did not collect before
       the relay's grace ended are lost, as before 0.90.0.
@@ -6665,22 +6706,48 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
 
 **The telling.**
 1. **P records what it collected.**
-   - **The anchor.** (0.90.2) P's anchor is the start of the first
-     rotate attempt for the pending key (§3.4 "The order of a relay-key
-     rotation" step 2) that was not definitively refused. It is stored
-     in the DEK state with the pending key, like the `retry_after` time,
-     in a state write just before that attempt is sent, when no anchor
-     is stored: the first write itself only when the attempt is sent
-     right after it in the same run (no `retry_after` running, no lock
-     between), otherwise a write of its own. A crash between that write
-     and the attempt leaves an anchor with no attempt behind it; it only
-     makes P stop earlier. A definite refusal of the rotate
-     (§3.4 "A definite refusal") clears the anchor in the write that
-     records the refused state: it proves no earlier attempt with that
-     key succeeded, since a repeat would have been answered `200`
-     (RELAY-PROTOCOL §6.7 "Repeating a rotation"). So the anchor comes
-     before any successful rotate, and as close to it as the vault can
-     know.
+   - **The anchor.** (0.90.2) Each pending relay key has its own
+     anchor: the start of the first rotate attempt for that key (§3.4
+     "The order of a relay-key rotation" step 2) that was not
+     definitively refused.
+     - **Where it is stored.** In the DEK state with that pending key,
+       like the `retry_after` time, in a state write just before that
+       attempt is sent, when none is stored for this pending key: the
+       first write itself only when the attempt is sent right after it
+       in the same run (no `retry_after` running, no lock between),
+       otherwise a write of its own. A crash between that write and the
+       attempt leaves an anchor with no attempt behind it; it only makes
+       P stop earlier.
+     - **At a recovery's open** (§3.4 "A recovery's inherited key"),
+       which completes an inherited pending key in one attempt before
+       its step-2 write and writes nothing before it: an inherited key
+       that has no anchor gets as its anchor the recorded start of that
+       attempt, stored in the step-2 write. An open that ends before
+       that write loses it; see the residual "A copy while the key is
+       pending".
+     - **When it is cleared.** Only when its own attempt, the one it
+       was stored for, was definitively refused with the relay's own
+       answer to the rotate: `400 bad_request` or `401
+       signature_invalid` with the error body of RELAY-PROTOCOL §7.1.
+       That proves the rotate did not succeed, since a repeat with the
+       same key would have been answered `200` (RELAY-PROTOCOL §6.7
+       "Repeating a rotation"). It is cleared in the write that records
+       the refused state. Any other answer keeps it: a `4xx` without
+       that body (a proxy, a firewall, a misrouted request), `429`, or
+       no definite answer. Once kept past its own attempt, no later
+       refusal clears it, since that first attempt may have succeeded.
+       (A `4xx` without that body still puts the key in the refused
+       state as §3.4 says; only the anchor is kept.)
+     - **At the second write** the anchor stays with that key, now old,
+       as the base of its stop, until step 1 is done for it. The next
+       pending key, even one stored in that same write (§3.4 "A rotation
+       made while a relay key is pending"), starts with none.
+     - **More than one old key.** After rotations close together a vault
+       can hold more than one old relay key at once. Each has its own
+       anchor, stop, `last_msg_id` and telling, and this step applies to
+       each on its own.
+     - So the anchor comes before any successful rotate of its key by
+       this vault, and as close to it as the vault can know.
    - **While the key is pending, K stays P's.** Until the second write,
      K is P's current mailbox (the new one is collected beside it once
      the rotate has succeeded, and until then K is its only one). P
@@ -6688,12 +6755,15 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      and "The refused state" say, however long the key stays pending or
      refused. Nothing below ends those collects before the second
      write, except the relay's `mailbox_unknown` for K.
-   - **The order at an unlock.** When a pending key's anchor is more
-     than 13 days old at an unlock, P makes that unlock's rotate (or
-     registration) attempt before its first collect of K. If it
-     succeeds, the second write stops the collects of K at once (next
-     item), before any. If it is refused or gets no definite answer, P
-     collects K as above.
+   - **The order once the anchor is old.** While a pending key's anchor
+     is more than 13 days old, P makes a rotate (or registration)
+     attempt before any collect of K whenever an attempt may be made: at
+     an unlock, when the relay answers again after an outage, and when a
+     `retry_after` runs out. If it succeeds, the second write stops the
+     collects of K at once (next item), before any. If it is refused or
+     gets no definite answer, P collects K as above. While a
+     `retry_after` is still running, at an unlock or later, no attempt
+     may be made, and P collects K as above until it runs out.
    - **When P stops.** After the second write, P ends its collects of
      K's mailbox 13 days after the anchor, on its own clock: the
      relay's 14-day grace less a day of margin for clock drift. If that
@@ -6706,7 +6776,8 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      never collects K again after that.
    - **Why that is enough.** A relay that serves vaults keeps an old
      mailbox for exactly 14 days after the rotate (RELAY-PROTOCOL §6.7),
-     and the rotate comes after the anchor. So P stops at least a day
+     and the rotate comes after the anchor (except as the residual "A
+     copy while the key is pending" says). So P stops at least a day
      before the relay ends K, unless the second write itself comes
      after that end; the relay has then ended K, and P's collects of K
      meet `mailbox_unknown` (but see the residual "A copy while the key
@@ -6723,26 +6794,36 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      (STAGING-TIME-SCALE N17).
 
    **What P records.** `last_msg_id` for that mailbox: the largest
-   `msg_id` such that P has acked every message the relay gave it from
-   that mailbox, up to and including that id.
+   `msg_id` such that P has processed and flushed every message the
+   relay gave it from that mailbox, up to and including that id.
    - **When it is recorded.** P keeps the value in its state, updated
-     in the flush of each batch from K. The stop, with that value, is
-     recorded in the write that ends this step and queues the telling:
-     the second write itself when P stops at once, otherwise a write of
-     its own at the stop. P collects nothing from K once the stop is
-     due, even before that write, so a crash in between re-derives the
-     same stop and the same value at the next run.
+     in the flush of each batch from K: every message given to it up to
+     that id has been processed and flushed. The stop, with that value,
+     is recorded in a write: the second write itself when P stops at
+     once, a write of its own at the stop otherwise, and at once for a
+     stop on `mailbox_unknown` (a copy could register K again before a
+     crash re-derived it). Once a timed stop is due P collects nothing
+     from K, even before that write, so a crash in between re-derives
+     the same stop and the same value at the next run.
+   - **The telling is queued no earlier than the second write.** A stop
+     after the second write queues it in the write that records the
+     stop. A stop before it (on `mailbox_unknown`) records only the stop
+     and `last_msg_id`; the second write then queues the telling, which
+     goes under S1 and S2 like any telling (step 2). Before the second
+     write K is still P's current mailbox for every peer, so a telling
+     then would be ignored (step 4).
    - Erring low costs nothing, because P drops a copy by its inner `id`
      (§8.2).
    - The relay's ULIDs are in arrival order per mailbox
      (RELAY-PROTOCOL §6.2). See the residual "Arrival order after a
      relay restart".
    - Any entry Q keeps (step 3) that was deposited to K and that P did
-     not ack is above `last_msg_id`, so the telling has it deposited
+     not process is above `last_msg_id`, so the telling has it deposited
      again (steps 3 to 5).
    - **The old key stays until this step is done.** Between vaults, P
      keeps K (§3.4 "When the old key is deleted") until it has ended its
-     collects of K, recorded `last_msg_id`, and queued the telling.
+     collects of K, recorded `last_msg_id`, and queued the telling, and
+     the anchor with it.
 2. **P sends the telling.** P sends each connection a separate durable
    message, **`relay.mailbox.closed {mailbox, last_msg_id}`**, under its
    then-current epoch with that connection.
@@ -6754,9 +6835,12 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      from that mailbox for dedupe (§8.2), per connection, for 76 days in
      real time, on P's own clock, after the relay's `201` to that
      connection's latest `relay.mailbox.closed` for it. If that
-     connection's telling ends without ever being accepted (§8.3 "Not
-     delivered"; a removal deletes it anyway, §7.4), the dedupe for that
-     connection ends with it.
+     connection's telling ends without any attempt of it that may have
+     reached the relay (§8.3 "Not delivered"; a removal deletes it
+     anyway, §7.4), the dedupe for that connection ends with it. If an
+     attempt may have reached the relay (no answer, or a `5xx`, as in
+     §8.3 "Re-sealed at a key change") and none was answered `201`,
+     the 76 days run from the last such attempt.
    - **Q's cutoff makes that enough.** Q deposits an entry again only
      while it is within 60 days of the `deposited_at` of the first
      telling that covered it (step 5), however many rotations follow.
@@ -6767,10 +6851,11 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      most `message_ttl_seconds`, which a relay that serves vaults keeps
      at 14 days or less (RELAY-PROTOCOL §6.1). So P sees it within 74
      days of that first telling, and P's 76 days run from that
-     telling's latest acceptance, which is no earlier. Q's 60 days run
-     on the relay's `deposited_at` and P's 76 days on P's clock from its
-     `201`: the 2 days between 74 and 76 cover the offset between those
-     clocks.
+     telling's latest acceptance, which is no earlier. P measures its
+     76 days on its own clock from its own `201`, so P's offset from the
+     relay cancels. What the 2 days between 74 and 76 cover is Q's clock
+     against the relay's `deposited_at`, which Q's 60-day cutoff
+     compares, and the rate drift of P's clock over 76 days.
 3. **Q keeps its recent deposits.** Q keeps each of its outbox entries
    that the relay accepted (`201`) into a peer vault's mailbox, with that
    `msg_id`, for 60 days after the `201`, the longest a follow can still
@@ -6820,7 +6905,11 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
        denylisted (§7.4), so its next deposit is refused, and after a
        decline there is no connection;
      - ephemeral messages (§8.5), which are never written to the
-       vault's state and are lost when their one deposit fails.
+       vault's state and are lost when their one deposit fails;
+     - `sync.since` between vaults, the request and its answer (their
+       schemas are not yet set), by the requester asking again after
+       its timeout (§8.1); an answer whose request is gone is dropped
+       there.
 
      `vault.held` goes to the member's devices, not to a peer, so it is
      never kept.
@@ -6880,9 +6969,10 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      for M, or 60 days after that follow, in real time.
    - **For a mailbox that never closes** (Q never follows P away from
      it), the keeping ends silently, at the end of each entry's window.
-     Such a mailbox still lives, or P collected it until a day or more
-     before it ended (step 1). What the relay accepted after P stopped
-     is then lost untold: see the residual "A sender that never
+     Such a mailbox still lives, or P collected it until its stop,
+     normally a day or more before it ended (step 1). What the relay
+     accepted after P's last collect before the stop is then lost
+     untold: see the residual "A sender that never
      follows".
 4. **Q acts on the telling only for a pinned mailbox.** Q accepts
    `relay.mailbox.closed` only for a mailbox it knows as an earlier
