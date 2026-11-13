@@ -1,7 +1,7 @@
 ---
 title: VAULT-SERVICE-INDEPENDENCE
 status: draft
-version: 0.2.0
+version: 0.2.1
 date: 2026-11-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), service vault (vettid/service-vault), the vault↔service interface
@@ -13,6 +13,7 @@ related:
   - vettid/service-vault `docs/RELEASE-29.md` (0.9.0) §6, §11, §14; `docs/SERVICE-VAULT.md`; `docs/SOURCE.md`; `go.mod`
   - vettid/vettid-vault `vms/altchan/capabilities.go`, `vault/features086.go`, `compat/live-releases.txt`
 changelog:
+  - 0.2.1: second review round. No new release-to-release sync in R6, S7 and 4.1 (a copy is needed only when roots or site key differ); `contract` named in the downgrade rule and given a send trigger; withdrawable names read from `profile.update` only; R1 retitled and "never a format weaker than the current minimum"; R2 states the deprecated interaction and Q6 decides it; W10 uses the real bundle versions; rotation procedure names `rootwatch` and leaves the site-key change open; table and quote nits.
   - 0.2.0: blind-review revisions (PR #593). Public documents are service-first (R1, R3); 4.2 rewritten honestly and `results_after_close` dropped; downgrade rule, add-only withdrawal and sticky names (R1); contract version on the wire (R2, R4); security fast path in R2; cross-repo CI and `vms` additivity (R4, R5); new couplings S7, S8, W10 (trust-root PRs, Sigstore and site-key rotation, invitation before `features`); corrections to 2.3, W1, 2.6; Q3, Q4, Q5 rewritten.
   - 0.1.0: first draft (2026-11-13). Owner decision of 2026-11-13: member vaults and service vaults ship independently.
 ---
@@ -118,15 +119,14 @@ Each row says what binds the two sides and where it is written.
 | W7 | **Staging time scale.** The vault scales its own waits by `time_scale` on staging. The service has none. N16 sets an approval TTL (`SV_APPROVAL_TTL`, at most 1 h) in the deployment config instead. A release that changes a wait on either side can break the other's test timing. | STAGING-TIME-SCALE N16 |
 | W8 | **Webhooks** carry vault-side reasons (`pre29`, `ended_all`, `key_changed`). The webhook contract is the service's own, but a vault change reaches the application through it. | `RELEASE-29.md` §11; `docs/SERVICE-VAULT.md` |
 | W9 | **Peer kind.** A service is declared only in the invitation bundle (`peer_kind`), fixed at connect time. A vault that lacks it treats the service as a person. | VAULT-MESSAGING §6.4 "Service connections (0.69.0)" |
-
-| W10 | **The invitation and the first message come before any `features`.** The invitation bundle (`vms/invite`) and `peer_kind` (W9) cannot be negotiated: the inviter does not yet know the peer. Whether the bundle has a version field is **unverified**. | `vms/invite`; VAULT-MESSAGING §6.4 |
+| W10 | **The invitation and the first message come before any `features`.** The invitation bundle (`vms/invite`) and `peer_kind` (W9) cannot be negotiated: the inviter does not yet know the peer. The bundle has `BundleVersion = 1` and the QR has `QRVersion = 2`, matched exactly, so an older vault refuses a bump. | `vms/invite`; VAULT-MESSAGING §6.4 |
 | W11 | **Public documents.** Proposals, extensions, results and rows on votes.vettid.org are one signed copy for every member, so a feature cannot choose among members. A stricter vault check of them (as #223) binds the service to the strictest supported vault release. | BALLOT-PROTOCOL §3.3, §8.3; H1 |
 
 ### 2.6 More trust-data couplings
 
 | # | Coupling | Where |
 |---|---|---|
-| S7 | **Every vault release needs a service PR.** With #158 merged, `rootscheck` fails on a missing `release-<n>.json` for a new candidate. Tagging vault release 30 therefore needs a service PR first. | #158 (`internal/vaultroots`) |
+| S7 | **A copy per vault release.** With #158 merged, `rootscheck` compares each `release-<n>.json` with the release tag, so a copy cannot exist before the tag and a new release shows a missing copy. A missing copy is benign: the service's pre-send check skips that set and vaults still verify themselves. | #158 (`internal/vaultroots`) |
 | S8 | **External rotation is a flag day.** `vote_trust_roots` and `vote_site_key` are measured constants. When Sigstore rotates its Rekor log or timestamp authority, or the site key changes, older vault releases cannot verify new bundles (the proposal stays `checking`, `trust_root`). No procedure exists. | §11.10.8; #158 `rootwatch` only detects it |
 
 ### 2.7 Already in place
@@ -136,24 +136,24 @@ Each row says what binds the two sides and where it is written.
 
 ## 3. The rules
 
-### R1. Capability negotiation is the only coupling
+### R1. Capability negotiation for behavior changes
 
-- Every behavior change across the interface is gated on a feature the peer advertises. The old behavior stays while the peer lacks it.
+- Every **negotiable** behavior change across the interface is gated on a feature the peer advertises. The old behavior stays while the peer lacks it. What is not negotiable is below (public documents, the invitation, external rotation).
 - **Public documents are not negotiated (W11).** A change to a public document, and any stricter vault check of what the service signs, is **service-first**: the service ships it and meets the strictest supported vault release, then the vault ships its check. Or it is a planned flag day with an owner go (R3). A feature cannot gate it.
-- **Downgrade rule.** `features` is the peer's own claim. A vault's check of what the service signs is never gated on, or relaxed by, the service's features. Features may only choose formats or opt in to stricter handling. A name never relaxes a check that protects the member.
+- **Downgrade rule.** `features` is the peer's own claim. A vault's check of what the service signs is never gated on, or relaxed by, the service's features. Features may only choose formats (never a format weaker than the current minimum) or opt in to stricter handling. A name never relaxes a check that protects the member. The same holds for `contract` (R2): it is informational, drives support notices only, never selects behavior and never relaxes a check.
 - **Advertising.** Keep today's mechanism: one `features` list (names `[a-z0-9_]{1,32}`) in `profile.update` and in the inner `features`. The **service gets the same duty** and lists what it does. It already lists `hs_confirm`.
 - Each name states in its table row whether it describes the sender's behavior or its ability to receive.
 - **Judged** at the point of use, per connection, from the last list held. A peer that advertised nothing lacks every feature.
-- **Withdrawal** comes only from a `profile.update` with a higher `version`, never from inner lists (add-only, §10.8). `vote` and `approval_document` already work so.
+- **Withdrawal.** Withdrawable names are read from `profile.update` only, never from inner lists (add-only, §10.8), so a late older message cannot re-add a withdrawn name. A higher `version` withdraws one. `vote` and `approval_document` already work so.
 - **Sticky names** (kept once seen, as `hs_confirm`) are only for receive capabilities a service never drops. A service rollback must not drop a sticky name it advertised; if it must, that is an R3 flag day.
 - A registry table in the contract (R4) names each feature, who advertises it, what it gates and the first release of each side that has it.
 
 ### R2. A compatibility window
 
 - Each side supports peers from at least the **current and previous release**.
-- **Vault release:** a release number in the signed manifest (§11.10.1) with status `active`, or a candidate. `deprecated` is move-only (§11.10.1): a deprecated release still unlocks and moves, so it is **not** counted as supported for new work here. (#158 counts it today; this changes S5.) Whether the service must still verify bundles for deprecated releases is Q6.
+- **Vault release:** a release number in the signed manifest (§11.10.1) with status `active`, or a candidate. `deprecated` is move-only (§11.10.1): a deprecated release still unlocks and moves. #158 counts it as supported today (S5). Whether it counts here is Q6. **Interaction:** if the previous release goes `deprecated` when the next goes active, the window is one release, and members on a deprecated release stay connected until they move. R2 leaves the choice to Q6.
 - **Service release:** a semver git tag on service-vault (Q1).
-- **The contract version on the wire.** Today neither side can tell the other's release, so "stop accepting" cannot be enforced by version. Proposal, **recommended:** add `contract` (the contract's major.minor, a string) to `profile.update`, from both sides. Old receivers ignore it (§10.1). The alternative is to define withdrawal through features only (a name stops being accepted); it works but cannot say "the peer is too old".
+- **The contract version on the wire.** Today neither side can tell the other's release, so "stop accepting" cannot be enforced by version. Proposal, **recommended:** add `contract` (the contract's major.minor, a string) to `profile.update`, from both sides (the vault sends it only on service connections). Old receivers ignore it (§10.1). It is informational (R1). `profile.update` goes out when the contract version changes, with the next `version`. The alternative is to define withdrawal through features only (a name stops being accepted); it works but cannot say "the peer is too old".
 - **Withdrawing support is announced:**
   1. The side posts the date and reason in the contract's support table.
   2. The owner gives a signed go.
@@ -173,9 +173,10 @@ Each row says what binds the two sides and where it is written.
 - **Not negotiable, so service-first or a planned flag day with an owner go:**
   - changes to public documents and stricter vault checks of what the service signs (R1);
   - a new signature suite;
-  - rotation of Sigstore roots, the timestamp authority or `vote_site_key` (S8). Procedure (proposal): the owner go; a vault release carries old and new roots together ("earlier roots are kept"); the service switches only after every supported vault release holds the new roots, and the owner accepts that out-of-window releases show `checking` (`trust_root`).
+  - rotation of Sigstore roots, the timestamp authority or `vote_site_key` (S8). Procedure (proposal): the owner go; a vault release carries old and new roots together (earlier roots stay in the list, BALLOT-PROTOCOL §8.5 "Rekor profile"); the service switches only after every supported vault release holds the new roots, and the owner accepts that out-of-window releases show `checking` (`trust_root`). Sigstore sets the timing. `rootwatch` (#158) compares Sigstore's current root daily and is the only source of lead time we have; how early Sigstore announces a change is **unverified**.
+  - **`vote_site_key` is open.** `services.json` has one signature, so a key change cannot be dual-signed, and a vault that pins the old key keeps its last list and ignores a list under the new one (not an error, §10.19.4). Options: never change the key while a supported release pins it (recommended); or an owner-approved flag day. No procedure for a key compromise exists yet.
   - A planned flag day has an owner go, a date and notice to members first.
-- **The invitation (W10).** Until the bundle carries a version, the service **always issues the oldest supported format**, and the vault accepts it. A change to the bundle is a flag day or waits for a version field.
+- **The invitation (W10).** The service **always issues the oldest supported format** (bundle version 1, QR version 2 today), because older vaults refuse a bump. A security fix to the invitation is an R3 flag day.
 - A service rollback must not need "end every connection first" (C3). An older release ignores names it does not know and never writes a marker that newer code needs.
 
 ### R4. A versioned vault↔service contract
@@ -196,8 +197,9 @@ Each row says what binds the two sides and where it is written.
 
 ### R6. Trust data read from the signed release manifests
 
-- No hand copies. For each supported vault release the service gets `vote_trust_roots` and `vote_site_key` from a source verified against the signed manifest, and a differing copy **fails the build**.
-- **Automatic and non-blocking (S7).** A tag for a new vault release opens a bot PR to service-vault with `release-<n>.json`. `rootscheck` is **advisory for a candidate** and **blocking for a release the manifest lists as `active`**. The vault release goes `active` only after the service holds the copy and has deployed (service-first, R1). Tagging a vault release never waits on a service PR.
+- No hand copies. For each supported vault release the service gets `vote_trust_roots` and `vote_site_key` from a source verified against the signed manifest, and a copy that differs from the tag is reported by `rootscheck` (advisory, below).
+- **No release-to-release sync (S7).** When release n's `vote_trust_roots` and `vote_site_key` equal a set the service already holds, **no service step is needed**. Only a release whose roots or site key differ needs the service to hold a copy, and that is S8's external flag day anyway.
+- **A missing copy is benign:** the pre-send check skips that set, and vaults still verify themselves. A bot PR follows the tag, and `rootscheck` stays advisory. Tagging a vault release never waits on a service step.
 - **Today:** the manifest (§11.10.1) holds `release`, `pcr0..2`, `seal_key`, `status`, dates and `notes`. It does **not** hold the channel-file constants. #158's test takes the bytes from the release tag and uses the manifest only to vouch for the release.
 - **Option (a), recommended (Q4):** a hash of each constants file in the manifest entry.
   - The service pins the manifest signing keys on its own.
@@ -214,9 +216,7 @@ Each row says what binds the two sides and where it is written.
   vettid-vault #223 (H1), whose hold is already met on staging (the
   service there runs `bc82fa2`, which has sv #137). Relay-key rotation
   (#246–#249, #252) ships switched off, and the service does not
-  advertise `relay_follow` (W6). **Correction:** with #158 merged, tagging
-  release 30 needs a `release-30.json` service PR (S7). Until R6's
-  automation exists, that PR is a step of the release.
+  advertise `relay_follow` (W6). **Correction:** tagging release 30 needs no service step: its roots are expected to equal the held set (**unverified** until compared). If they differ, S8 applies. The bot PR for `release-30.json` follows the tag (R6).
 - **Service-vault release-29 deploy** (the four changes, then the
   deploy). This is the last planned flag day. It stays as designed
   (C1 to C3), because members already re-enrolled and R3 applies to
@@ -262,7 +262,7 @@ Each is small and independent.
 6. **Vault tags.** Decide the tag scheme (Q3), tag, and move `go.mod` from a commit to a tag. (vettid-vault,
    service-vault)
 7. **Advisory cross-repo vector job** (R4) and the additive-`vms` check (R5). (both)
-8. **R6 bot PR for `release-<n>.json`,** then the manifest hash after Q4. (vettid-vault,
+8. **R6 bot PR for `release-<n>.json` after the tag,** then the manifest hash after Q4. (vettid-vault,
    service-vault)
 9. **Support-withdrawal procedure.** The announcement and owner-go steps
    (R2) as a short section in the contract and the runbook. (vettid.org)
@@ -305,12 +305,11 @@ Each is small and independent.
   - (a) The vault fails the results as now (`failed`, a high-priority `vote.problem`, `limit` at 16 records) with a clear reason from the evidence.
   - (b) The vault warns and accepts. It weakens the check.
   - *Recommendation: (a),* with 4.2's service-first rule so it rarely happens.
-- **Q6. The window's length, and deprecated releases.** The service may also keep verifying for `deprecated` releases (move-only). "Current and previous" is a floor.
-  - (a) Two releases.
-  - (b) Time-based (for example, 90 days) or two releases, whichever is
-    longer.
-  - *Recommendation: (b).* Vault releases may be rare early on, and a
-    count alone could allow a very short window.
+- **Q6. The window's length, and deprecated releases.** If the previous release goes `deprecated` when the next goes active, the window is one release, and members on it stay connected until they move.
+  - (a) Count `deprecated` as supported for the service's checks while members remain on it (the window follows the members).
+  - (b) Two releases or 90 days, whichever is longer, whatever the status.
+  - (c) Active only (a one-release window).
+  - *Recommendation: (b).* Vault releases may be rare early on, and a count alone could allow a very short window.
 - **Q7. Enforcement.** CI fails an interface change with no feature name or contract change?
   - (a) Yes, the vector job plus a checklist item.
   - (b) Reviewer judgment only.
