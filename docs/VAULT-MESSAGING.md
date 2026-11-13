@@ -38,22 +38,26 @@ changelog:
       equal to `new`, a repeated key in the sequence of the first `old`
       and each `new` (for example A→B→A), fewer than 1 or more than 32
       links, or, in a reconnect, a last `new` that is not the announced
-      key. A missing `relay_links` member is a malformed body. Only a
-      link valid in this sense is kept as seen by rule C, and no link of
-      a chain refused for its form or count is, in an update or a
-      reconnect alike. A link with a member of the wrong JSON type or form
-      is refused `relay_unlinked` as a link, an exception to §5.3 and §10.1
-      for relay link objects only, and only when the message is otherwise
-      well formed (malformed wins). The refusal is at parse time, before
-      `acceptFrom`: no link of the message is checked or kept. A
-      duplicate member or invalid JSON stays a malformed body. A refusal
-      for count, form, `v`/`suite` or a repeated key keeps no link as
-      seen; a bad signature or a broken chain still lets earlier valid
-      links be seen. A missing `relay_links` is a malformed body in an
-      update, and means no rotation in a reconnect. A new layout MUST use a new label, for the
-      relay link and the identity link (§3.4); a link with another `v`
-      or `suite` is refused, not reinterpreted, and unknown members are
-      ignored.
+      key.
+    - A fault in a link's form (a link that is not an object or lacks a
+      member, a wrong type or value for `v` or `suite`, non-canonical or
+      wrong-alphabet base64, a key or signature of the wrong length) is
+      refused `relay_unlinked`, an exception to §5.3 and §10.1 for relay
+      link objects only.
+    - Precedence: a fault in a link's form, the count and a reconnect
+      chain's end are refused `relay_unlinked` at parse time, before
+      `acceptFrom`, and only when the message is otherwise well formed
+      by §5.3 and its other §6.2 or §10.2 rules; malformed wins. A
+      duplicate member or invalid JSON is a malformed body.
+    - Rule C: every refusal keeps no link as seen (count, form, `v` or
+      `suite`, a repeated key, `old` equal to `new`, an end mismatch in an
+      update or a reconnect), except a bad signature or a broken chain,
+      which still let earlier valid links be seen.
+    - A missing `relay_links` is a malformed body in an update, and means
+      no rotation in a reconnect.
+    - A new layout MUST use a new label, for the relay link and the
+      identity link (§3.4); a link with another `v` or `suite` is
+      refused, not reinterpreted, and unknown members are ignored.
     - §16 gains `relay_rotate.json`: the relay link's valid cases (a
       32-link chain among them), invalid cases and app-facing form cases.
       The vault, the service vault, the apps, the desktop and the agent
@@ -5419,17 +5423,34 @@ the chain with it. This is an exception to §5.3's "Known fields MUST have
 exactly the type and form given here" (§10.1), which would otherwise make
 the whole message malformed, and it applies to relay link objects only.
 
-**Precedence.** The exception applies only when the message is
-otherwise well formed: every other member passes §5.3, and
-`relay_links` is allowed for the message's kind and purpose (§6.2). If
-anything else is malformed, the whole message is a malformed body.
-Malformed wins. A fault at the JSON level of the body, such as a
+**Precedence.** These parse-time refusals of a chain are
+`relay_unlinked` only when the message is otherwise well formed:
+- a fault in a link's form;
+- the chain's count;
+- in a reconnect `hs.init` or `hs.resp`, the chain's end (the first
+  `old` that is not the deposit key, or the last `new` that is not the
+  announced key).
+
+"Otherwise well formed" means every other member passes §5.3 and the
+message's other rules: §6.2 for a reconnect, and §10.2's body table for
+the update. For a reconnect that includes:
+- `hs.resp`'s `relay` pairing (`relay` present exactly when
+  `relay_links` is, and matching its last `new`);
+- `sas_commit`, `sas_nonce` and `unlock_secret` by purpose;
+- `eph` differing from `from.kem`;
+- `relay_links` allowed for the message's kind and purpose.
+
+If anything else is malformed, the whole message is a malformed body:
+malformed wins. A fault at the JSON level of the body, such as a
 duplicate member or invalid JSON, is always a malformed body, refused
 before any link is read.
 
-**When it is refused.** A refusal for a link's form happens when the
-message is parsed, before `acceptFrom` step 1. No link of such a
-message, identity or relay, is checked or kept by rule C.
+**When it is refused.** A refusal for a link's form, the count, or a
+reconnect chain's end happens when the message is parsed, before
+`acceptFrom` step 1. No link of such a message, identity or relay, is
+checked or kept by rule C. An update's end checks (the first `old` is the
+`sender`, the last `new` is `relay.pk`) run after the parse, with rule
+U's other checks. An end mismatch keeps no link as seen there too.
 
 A chain is refused (`relay_unlinked`) when any of these holds:
 - a link with a missing `v` or `suite`, or any other `v` or `suite`;
@@ -5445,9 +5466,12 @@ For rule C, a relay link is **valid** only if its `v` is 1, its `suite`
 is 2, its `old` differs from its `new`, and both signatures verify. A
 link that fails any of these is not kept as seen, even when its
 signatures verify. In an update and in a reconnect `hs.init` or `hs.resp`
-(§3.4.2 RK8) alike:
+(§3.4.2 RK8) alike, every refusal of a chain falls in exactly one of two
+lists:
 - **No link of the chain is kept as seen** when the chain is refused
-  for its count, a link's form, a `v` or `suite`, or a repeated key.
+  for its count, a link's form, a `v` or `suite`, a repeated key, a link
+  whose `old` equals its `new`, or an end mismatch (the first `old` is not
+  the deposit key, or the last `new` is not the announced key).
 - **Earlier valid links are still seen** when the chain is refused only
   for a bad signature or a break in the chain. Those go through rule U's
   checks, and rule C, as before.
@@ -31549,13 +31573,15 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
 
 §3.4.1 rule U relay link (0.90.3)                                (relay_rotate.json)
   keys        : key i is the Ed25519 key of seed 32 x (0xb0 + i), i = 0 … 33
-  label "vettid/vms/2/relay-rotate"; link {v: 1, suite: 2, old, new, sig_old, sig_new}
+  label       : "vettid/vms/2/relay-rotate"
+  link        : {v: 1, suite: 2, old, new, sig_old, sig_new}
   inputs      : each case gives the deposit key (first_b64) and the
                 announced key (announced_b64) the chain is checked against
   valid       : a single link; a chain of links; a chain of 32 links
   invalid     : wrong sig_old; wrong sig_new; signed with the identity label
                 "vettid/vms/2/rotate"; old == new; a repeated key (the
-                sequence of the first old and each new has a key twice); a broken chain (an old that is not the previous new);
+                sequence of the first old and each new has a key twice);
+                a broken chain (an old that is not the previous new);
                 no links; more than 32 links; a first old that is not the
                 deposit key; a last new that is not the announced key; a
                 missing v or suite; an unknown v; an unknown suite; a link
