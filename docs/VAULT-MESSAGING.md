@@ -35,8 +35,9 @@ changelog:
     failure count raised by one, in a header write conditional on the
     header it read, before it derives the DEK from the PIN; a write that
     fails tests nothing (`retry`); a wrong PIN keeps the count; a right
-    PIN resets it whatever the outcome (an `ok` and `moved` in their own
-    header write, every other outcome in a header-only write); the bound
+    PIN resets it to 0 whatever the outcome (an `ok` and `moved` in their
+    own header write, every other outcome in a header-only write); a
+    count write followed by no test is given back; the bound
     for a member who types the right PIN on a host that fails writes;
     what it does not protect (a host that replays, §13.2). §3.3.1,
     §11.4's diagram, §11.7.1, §11.9, §11.14.1 and §13.2 follow.
@@ -21430,7 +21431,8 @@ one of:
   "header_seq": m, "retry_after": <s>}` — `state_unreadable` (0.88.17):
   the state opened, but the part of a feature others call directly does
   not read (§3.3 "Feature data that does not read"); nothing after the
-  state opens is written, nothing is lost, and an unlock by a release that
+  state opens is written (0.90.8: except §11.8's header-only write that
+  resets the PIN count), nothing is lost, and an unlock by a release that
   reads it opens the vault. It is not a PIN failure. The member must not
   be told to set the vault up again: the app says "Your vault can't be
   opened right now. Nothing in it has been changed. Please try again
@@ -21440,7 +21442,8 @@ one of:
   still `wrong_release`. `state_unsupported` (0.87.1):
   the state opened but lacks `messaging_release` 29 or more (§6.3.1 "No
   upgrade: release 29 starts clean"); nothing after the state opens is
-  written, and the member re-enrols; the app says "This vault was made
+  written (0.90.8: except §11.8's reset of the PIN count), and the
+  member re-enrols; the app says "This vault was made
   by an earlier version of VettID and must be set up again." (wording
   approved by the owner 2026-11-06, GC 01M6RV1QRM1403G0Z8G2W2C6ZS). `signer_refused` (0.27.0):
   the device key's recorded signer is not pinned by this release, or
@@ -22688,23 +22691,31 @@ envelopes.
     availability only (§13.5).
   - A wrong PIN keeps the raised count (`bad_pin`, with the stored
     `header_seq`).
-  - **A right PIN resets the count, whatever the outcome.** An `ok`
-    resets it in the unlock's own header write, and `moved` in the new
-    release's header (§11.10.4). Every other outcome reached with a
-    right PIN (`state_unreadable`, `state_unsupported`, a
-    `state_rollback` found once the state opens, `transfer_incomplete`,
-    a pair superseded by a stored replacement (`device_secret`),
-    `no_backup`, `wrong_release`, a `retry` after the PIN) restores the
-    count the header had before this attempt, in a header-only write
-    conditional on the header the count stored; a header written since
-    is left as it is. These outcomes write nothing else. A successful
-    unlock so writes the header twice (§13.2).
+  - **A right PIN resets the count to 0, whatever the outcome**, the
+    delay cleared with it. An `ok` resets it in the unlock's own header
+    write, and `moved` in the new release's header (§11.10.4). Every
+    other outcome reached with a right PIN (`state_unreadable`,
+    `state_unsupported`, a `state_rollback` found once the state opens,
+    `transfer_incomplete`, a pair superseded by a stored replacement
+    (`device_secret`, reached only once the PIN has opened the current
+    wrap, §11.14.2), `no_backup`, `wrong_release`, a `retry` after the
+    PIN) resets it in a header-only write conditional on the header the
+    count stored; a header written since is left as it is. These outcomes
+    write nothing else, except a header change of their own (`no_backup`
+    before release R removes the recovery and its key, §11.11.5 step 1),
+    which carries the reset. A `retry` after the PIN whose reset write
+    fails carries the count write's `header_seq`. A successful unlock so
+    writes the header twice (§13.2).
+  - **A count write followed by no test.** If nothing is tested after a
+    count write (a state read that fails before the PIN is tried), the
+    count goes back to its value before the attempt, in the same
+    header-only write: no PIN was tested. A failure of that write leaves
+    the raised count, the safe side.
   - **The bound for a member who types the right PIN.** Each `retry`
-    whose restoring write fails, and each count write stored but
+    whose resetting write fails, and each count write stored but
     reported failed, leaves one count: a host that fails writes can so
     push such a member into the backoff (from 3 counts, 30 s first,
-    above). The first restoring or resetting write that succeeds clears
-    it.
+    above). The first resetting write that succeeds sets it back to 0.
   - **What it protects.** A host that fails or withholds the count
     write learns nothing of the PIN. A host that accepts it, sees the
     outcome, then serves the old header again still gets that guess:
@@ -28862,7 +28873,7 @@ client**:
   refuses the count's write gets no PIN result; one that accepts it and
   serves the old header again still does, and needs the member's phone
   as before. A successful unlock writes the header twice: the count,
-  then the unlock's own write, which resets it. An old header and
+  then the unlock's own write, which resets it to 0. An old header and
   the state of its time still open with that time's PIN and phone, or with
   that time's pair through its recovery wrap; with the DEK replaced at
   every change, they open nothing written later, though the long-lived
