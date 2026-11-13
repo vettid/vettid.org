@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.127
+version: 0.1.128
 date: 2026-11-12
 changelog:
+  - 0.1.128: erratum, 2026-11-12 (VAULT-MESSAGING 0.90.5 §9.1 "A device resends after it follows, and collects before it deposits"; owner decisions GC #9565 "b" and GC #9711 "b"). New §4 "Collect before sending to the vault". **The resend** (what makes it correct): the app records each deposit to its vault (sealed bytes, inner `id`, the relay's `Date` as send time) in its encrypted transport state for 14 days, capped at 4,000 entries and 64 MiB; when it follows the vault's `relay.address.update` it deposits again to the new address, same bytes and `id`, every record to a passed mailbox sent at or after the update's `deposited_at` less 2 minutes or with no answer, a blob with its message; not timed-out requests, expired ephemeral messages, an ended call's `call.ice`, `call.ringing` and `call.keepalive`, or the lock; the vault's 16-day dedupe drops what it had. **The catch-up pass** (a speed-up): the app deposits only while caught up, after a pass since its latest trigger (process start, return to the foreground unless the on-phone service's WebSocket had a message or pong in the last 60 s with nothing unacked by frame, collector restart, or the latest successful collect, a long-poll answer or socket message, turning 24 hours old, real time, `SystemClock.elapsedRealtime`). The pass collects every mailbox the phone collects with its own `wait=0` collects until an empty answer, or until an answer holds a message deposited 60 s or more after the HTTP `Date` of the pass's first answer from that mailbox, and ends only once no collector or socket holds an unhandled batch; any update is followed; a parked collect is never canceled. Definite failures are `mailbox_unknown` and `signature_invalid` (an old mailbox drops out; the current one means pairing again); `rate_limited` is retried within the pass. A deposit that finds the app not caught up starts a pass at once, one at a time, after a failure on the backoff. Until the pass ends every deposit, blob uploads included, waits, shown per message as "Waiting for your vault" (NEW); a request past its 30 s timeout is dropped and shown as not sent. The relay copy of `vault.lock` alone goes at once; after any follow while a lock with `unlock_id` is unconfirmed it is sent again to the new address (`exp` at most 30 s). A pass that cannot complete holds the deposits and, after the second failed pass or 10 s, shows the notice "Waiting for your vault" (NEW, for wording approval). The on-phone service makes the pass by long poll before each WebSocket connect. §4 "Locking the vault", "While pending": the pass persists before it acks, what it keeps out of the app is taken in once the lock ends, and an update is followed; its `relay.token.issued` and the resend wait until the lock ends, as GC #9050 says. §5 "What the phone keeps": the deposit record. Closes VAULT-MESSAGING §3.4.2's residual "Devices have no telling" for the app, except the cases it lists.
   - 0.1.127: 2026-11-12 (VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4 "Relay-key rotation texts". The texts, owner-approved 2026-11-12, are: the held state, per message, of messages to a connection whose vault moved (`relay_held`); `connection.stale` with `reason: "relay_moved"`; S9's text for `connection.fork_suspected` (`ref` = `relay_revoked`); `message.not_delivered` at the hold's 60-day limit; and `message.delivery_unconfirmed` reused at the telling's limit (VAULT-MESSAGING §3.4.2 RK9, RK14). None of them shows before a vault release that rotates relay keys.
   - 0.1.126: erratum, 2026-11-12 (owner decision a, GC #9050). §4 "Locking the vault", "While pending": besides the lock and a pending `call.end`, the phone's `hs.resp` to a rekey the vault started goes while a lock is pending (while the vault's rekey awaits it, the vault starts no other rekey with this phone for up to 16 days); everything else the phone would send waits until the lock ends; the session's own handshake and token messages are still processed, the rekey's `hs.fin` included. Android already sends the `hs.resp` while a lock is pending; holding what else it sends is GC #9027.
   - 0.1.125: erratum, 2026-11-11 (owner decision a, GC #8641; as built in vettid-android #353). §4 "Attestation in detail": the reason after "Every check passed, but this phone refused the release:" is one of four texts of its own (not active for an enrollment, older, another instance, a time scale this build does not accept), never the unlock's error text, which contradicted "every check passed"; another instance and the time scale are refusals after line 9 as built; a removed release is the host's 410, not a refusal of the phone's; line 9's cell no longer reads as if a release not active for an enrollment failed it; while the route waits for a move, a pass still naming the release moved from is not recorded, so the screen keeps the last record, and a failure or refusal meanwhile is recorded. Four new texts.
@@ -2100,7 +2101,11 @@ its process runs; nothing keeps it running in the background).
      exemptions from Android 12's background-start limit. Not started
      on a phone without an enrolled vault, or after a wipe.
    - **Connection and backoff.** One connection for the process (the
-     app's screens use the service's collector while it runs). On a
+     app's screens use the service's collector while it runs). (0.1.128)
+     Before each WebSocket connect and reconnect, the collector makes
+     the catch-up pass of §4 "Collect before sending to the vault" by
+     long poll; a connect that fails after a pass that succeeded needs
+     no new pass. On a
      drop: reconnect with exponential backoff and full jitter, 1 s
      doubling to 5 minutes; reset after 5 minutes connected; an
      immediate retry when `ConnectivityManager` reports a validated
@@ -2815,6 +2820,18 @@ as drafts (VAULT-LOCK L16) and are final with #127 merged.*
   epoch current, and what processing them would send waits as above,
   the rekey's `hs.resp` aside. An unlock is allowed
   and, when it succeeds, ends the pending lock.
+  (0.1.128) The catch-up pass of §4 "Collect before sending to the
+  vault" runs while a lock is pending: it persists each batch, then
+  acks it, never acking what it has not persisted; the session's own
+  messages are processed as above, and the rest are taken into the app
+  once the lock ends. A `relay.address.update` from the vault is
+  followed (it is the session's own message); its `relay.token.issued`
+  and the resend after the follow wait until the lock ends, like the
+  other answers above. The relay copy of `vault.lock` is not held for
+  the pass, and after any follow while a lock with `unlock_id` is
+  unconfirmed it is sent again to the new address (part 2); the
+  pending `call.end` and the `hs.resp` wait for the pass, like every
+  other deposit.
 - **Retries:** after 1, 2, 5, 10 s, four times 30 s, then every 60 s,
   through the member API, within the route's limit, while the app's
   process lives. (0.1.75, owner Q4, 2026-10-23) A retry that survives
@@ -7265,6 +7282,190 @@ elsewhere (§4 Notifications).
 When `relay_held` goes, the messages show their usual state again: sent
 once deposited, or "couldn't be delivered" if the vault ended them.
 
+### Collect before sending to the vault (0.1.128)
+
+*VAULT-MESSAGING 0.90.5 §9.1 "A device resends after it follows, and
+collects before it deposits" (owner decisions GC #9565 "b" and GC #9711
+"b"). Why: when the vault moves to a new relay address, it stops
+collecting its old mailbox about 13 days later, and the relay still
+accepts deposits there for about a day after that. A phone that sends
+to the old address in that time loses what it sent with no sign
+(VAULT-MESSAGING §3.4.2 residual "Devices have no telling"). So the app
+sends again what reached the old address once it follows (correct), and
+collects before it sends (fast). §9.1 governs; this section is how the
+app does it.*
+
+**1. The resend.**
+- **The record.** For each deposit to the vault's mailbox (outbox
+  entries, requests, events, handshake and token messages, a photo's
+  blob upload) the app records the mailbox, the send time (the HTTP
+  `Date` of the relay's answer; unknown when no answer came), the
+  envelope bytes or the blob's ciphertext as deposited, the inner `id`,
+  the type and an ephemeral type's `exp`. It lives beside the outbox in
+  the encrypted transport state (§5 "What the phone keeps"), for 14
+  days of real time, capped at 4,000 entries and 64 MiB (the oldest
+  leave first), and a record leaves once it has been sent again.
+- **After a follow** of the vault's `relay.address.update`, the app
+  deposits again to the new address, in their order, the same bytes
+  with the same inner `id`, every record to a mailbox the update passed
+  whose send time is unknown or not earlier than the update's
+  `deposited_at` less 2 minutes; a blob is uploaded again with its
+  message. Not again: a request whose 30 s timeout has passed (it was
+  shown as unanswered), an ephemeral message whose `exp` has passed,
+  `call.ice`, `call.ringing` and `call.keepalive` of an ended call, and
+  `vault.lock` (below). The vault drops what it already had (§8.2
+  dedupe, 16 days), so nothing is processed twice.
+
+**2. The catch-up pass** (a speed-up; the resend makes it correct).
+- **The rule.** Every deposit to the vault (the outbox's entries,
+  requests and their retries, a photo's blob upload to the vault's
+  mailbox, events such as `device.features`, the calls' `call.answer`,
+  `call.ice`, `call.keepalive` and `call.end`, the resend, and what
+  processing a message produces: an `hs.resp`, `relay.token.issued`, a
+  token renewal) goes only while the app is **caught up**. Until then it
+  waits, in order (an outbox entry stays in the outbox), never shown as
+  sent, and goes, once caught up, to the vault's address the app holds
+  then; a blob and its message go to the same address. An interactive
+  request whose 30 s timeout passes while it waits is dropped unsent and
+  shown as not sent, never sent late.
+- **Caught up** needs both:
+  1. **A catch-up pass** since the latest **trigger**: the process start
+     (a launch, a wake, `PendingLockJob`, the on-phone service), the
+     app-wide return to the foreground, the restart of the mailbox
+     collector after it failed or was stopped (a network loss; the
+     service's reconnect, including the one after a locked vault, when
+     the service kept no connection), and the latest successful collect
+     turning 24 hours old. A WebSocket connect that fails after a pass
+     that succeeded is not a restart.
+     - The pass collects **every mailbox the phone still collects**
+       (its current one, and an old one still in its grace after the
+       phone's own relay-key rotation) with its own long-poll collects
+       (`GET /v1/mailbox`), always with **`wait=0`**, each batch
+       persisted, then acked; a batch counts as handled then, and what
+       handling it produces waits behind the gate, so the pass never
+       waits on itself.
+     - For each mailbox it ends at an **empty** answer to one of its own
+       `wait=0` collects, or at an answer to one of them holding a
+       message whose `deposited_at` is 60 s or more after the HTTP
+       `Date` of the pass's first answer from that mailbox (so a busy
+       mailbox cannot hold deposits back), and in either case only once
+       no collector or socket of the app holds a batch from that mailbox
+       not yet handled.
+     - A `relay.address.update` it collects is followed (VAULT-MESSAGING
+       §3.4.1 rule U) or refused before the pass ends.
+     - **Failures.** `mailbox_unknown` and `signature_invalid` are
+       definite: on an old mailbox they end the phone's collects of it
+       and the pass goes on without it; on the current mailbox they take
+       the existing path for a phone that must be paired again
+       (VAULT-MESSAGING §6.6 "Limits"). No network, a timeout, a `5xx`,
+       `timestamp_stale` and `replay_detected` fail the pass;
+       `rate_limited` is retried after its `retry_after` within the same
+       pass. A failed loop collect fails a pass only when it counted
+       toward it.
+     - **Any deposit that finds the app not caught up starts a pass at
+       once**, in the foreground or the background, overriding the
+       collector's idle schedule or reconnect backoff as long as no pass
+       has failed since the trigger. One pass at a time: waiting
+       deposits and their retries join it. After a failed pass the next
+       follows the collector's backoff, never before a `rate_limited`'s
+       `retry_after`.
+     - A loop collect that is parked is **not canceled**: the pass's
+       `wait=0` collects run beside it, and its answer, whenever it
+       comes, is handled like any batch.
+     - The collects the app makes anyway at a start and a wake count
+       toward the pass when they use `wait=0` or bring messages; only
+       the pass's own collects end it.
+     - The WebSocket gives no empty answer, so the pass is made by long
+       poll before the socket opens (a few hundred milliseconds, one
+       request when nothing waits).
+     - **A return to the foreground needs no pass** while the on-phone
+       service's WebSocket, opened after the last pass, is open, has
+       delivered a message or a pong within the last 60 s, and has no
+       message it delivered not yet acked by frame (an ack by `DELETE`
+       keeps the window full). Otherwise the app pings once and takes
+       the pong, or makes the pass; no pong in time means a pass.
+  2. **A recent collect**: the latest successful collect ended less than
+     24 hours ago: a long poll's answer, handled, or a message delivered
+     on the open WebSocket, handled. A pong does not count, so a quiet
+     socket means one `wait=0` long poll a day. Measured with
+     `SystemClock.elapsedRealtime()` (counts deep sleep), in real time:
+     not divided by the staging `time_scale` (§4 "Staging time scale").
+- **The lock never waits.** The relay copy of `vault.lock` goes at once,
+  without a pass, and starts one if the app is not caught up: the
+  member-API copy (`POST /api/vault/lock`) reaches the vault without the
+  relay, and the lock stays pending until confirmed as §4 "Locking the
+  vault" says. It is not part of the resend. After any follow while a
+  lock with `unlock_id` (part 2) is unconfirmed, the relay copy is sent
+  again to the new address, with `exp` at most 30 s; a lock without
+  `unlock_id` (part 1, or a lost value) is not sent again.
+- **Calls.** A phone woken for a `call.offer` makes its pass with the
+  wake's collects. The relay returns the oldest messages first, so the
+  offer comes after any backlog, and answering waits until the pass
+  ends: one more `wait=0` collect after the batch that held the offer,
+  and more only while later deposits keep the answers non-empty (at
+  most until the 60 s bound). A call in progress keeps the collector
+  open, so `call.ice`, `call.keepalive` and `call.end` normally go at
+  once; after a reconnect they wait for one pass. Accepted
+  (VAULT-MESSAGING §9.1): a fault that lets the phone send but not
+  collect for more than 90 s ends the call through the vault's
+  keepalive timeout.
+- **What the member sees** (NEW, for wording approval with the app PR):
+  - **Per message**, while it waits for the pass: "Waiting for your
+    vault" in place of "Sending", never as sent. A request's screen
+    keeps its usual waiting and timeout states. The resend shows
+    nothing: the messages were already shown as sent.
+  - **The notice**, after the second failed pass or once a deposit has
+    waited 10 s: title "Waiting for your vault", body "VettID checks for
+    messages from your vault before it sends anything to it, and can't
+    do that right now. Nothing is sent until it can. It keeps trying."
+    It goes once the app is caught up.
+- **When the pass cannot complete**, it is retried as above, and every
+  deposit keeps waiting, shown as above: the app never sends without the
+  pass.
+- **Cost.** One `wait=0` collect before the first deposit after a start,
+  a foreground without a live socket, or a reconnect, where the app
+  already collects; none at a foreground while the socket is live; no
+  extra wake or timer beyond the pass a waiting deposit starts. A large
+  backlog delays the first deposit by the time it takes to collect it.
+  The record costs at most 64 MiB of encrypted storage, usually far
+  less, and the resend runs only after a vault's move.
+- **Where.** One gate in `:core:vault` in front of every deposit to the
+  vault, fed by `:core:relay`'s collector (pass ended, last successful
+  collect, the socket's last message or pong); the relay lock's path
+  bypasses it and nothing else does. The record and the resend live in
+  `:core:vault` beside the outbox.
+- **Tests.** The resend: after a follow, every recorded deposit to the
+  passed mailbox since the update's `deposited_at` less 2 minutes, or
+  with no answer, goes again to the new address with the same bytes and
+  inner `id`, in order, a blob with its message; nothing before that
+  margin; a request past its 30 s timeout, an expired ephemeral message
+  and an ended call's `call.ice` are not sent again; at the vault (the
+  dev stack), a deposit sent again that had arrived is dropped by the
+  dedupe and one that had not is processed once; records leave at 14
+  days and past the cap. The pass: a deposit after a start, a foreground
+  and a reconnect waits for the pass; a foreground with the socket live
+  within 60 s and nothing unacked by frame needs none; the pass's
+  collects all use `wait=0`, and a parked loop collect is left running
+  and its answer handled; the pass does not end while a batch is
+  unhandled, and does not deadlock on what a batch produces; a deposit
+  in the background more than 24 hours (elapsed realtime) after the
+  last collect starts a pass at once and goes when it ends; a second
+  deposit joins the running pass; `rate_limited` is retried within the
+  pass; after a failed pass the next waits for the backoff; the pass
+  ends at an empty answer and at one past its start by 60 s, for every
+  mailbox the phone collects, and an old mailbox's `mailbox_unknown`
+  drops it from the pass; a blob upload waits with its message and goes
+  to the same address; a request past its 30 s timeout is dropped and
+  shown as not sent; a failed pass holds deposits, shows each as
+  waiting and the notice after the second failure or 10 s, retries and
+  then sends; the relay lock goes at once with the gate closed, and with
+  `unlock_id` is sent again after a follow, `exp` at most 30 s;
+  `call.answer` after a wake waits for exactly the wake's pass; during a
+  pending lock the pass persists before it acks, what it keeps out of
+  the app is shown once the lock ends, and `relay.token.issued` for a
+  follow waits until the lock ends; the WebSocket opens only after the
+  pass.
+
 ## 5. Architecture
 
 Multi-module Gradle, Kotlin, Jetpack Compose + Material3, Hilt, coroutines
@@ -7373,6 +7574,7 @@ What the phone does keep, and why:
 | Device identity seeds (relay, identity, KEM) | SharedPreferences, wrapped (AES-GCM) under the Keystore key vettid.seed_wrap.v1 (TEE) | Ciphertext only; the key is not bound to user authentication (background collection) | Wipe; sign-out; a transfer away | None |
 | Key that encrypts the state files | Android Keystore | Hardware-backed; not bound to user authentication, because collecting from the relay in the background needs it after the first unlock (VAULT-MESSAGING §3.2, §3.5 residual) (0.1.91: the app refuses a key the Keystore does not report in the TEE or StrongBox; being fixed) | Wipe | None |
 | Transport state: session keys, relay token, the sealed credential blob, one-time keys, the outbox | Encrypted state file (AES-GCM) in no-backup storage | The Keystore key above | Wipe; each part when it is used up or replaced | None |
+| (0.1.128) The deposit record: what the phone deposited to its vault in the last 14 days, as sealed bytes, for the resend after a vault's move (§4 "Collect before sending to the vault") | The same encrypted state, no-backup storage | The Keystore key above | Wipe; each record at 14 days, when sent again, or past 4,000 entries or 64 MiB | None |
 | Account ids and flags (user_guid, vault_id, the masked email hint, markers); with location (not built yet), its "Not now" entries {request_id, exp} | Encrypted state file in no-backup storage | The same | Wipe; an entry at its `exp` | None |
 | Owner-check state, the lock record, the canary manifest | Encrypted state file in no-backup storage | The same (0.1.91: the lock record is encrypted as the others are; being fixed) | Wipe (the lock record is rewritten, never deleted otherwise) | None |
 | (0.1.124) The last enclave verification's record: each check's result, the values the attestation screen shows, when it was made | Encrypted state file in no-backup storage | The same | Wipe; replaced at the next verification | None |

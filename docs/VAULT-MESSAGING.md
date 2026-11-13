@@ -1,12 +1,12 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.3
+version: 0.90.5
 date: 2026-11-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
-  - RELAY-PROTOCOL.md (0.11.1)
+  - RELAY-PROTOCOL.md (0.11.2)
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md (0.2.2)
@@ -14,9 +14,9 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md (0.3.0)
   - MEMBER-API.md (2.14.0)
-  - ANDROID-PLAN.md (0.1.127)
-  - IOS-PLAN.md (0.1.71; §9.1 VA1–VA4)
-  - AGENT-PLAN.md (0.1.10; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
+  - ANDROID-PLAN.md (0.1.128)
+  - IOS-PLAN.md (0.1.72; §9.1 VA1–VA4)
+  - AGENT-PLAN.md (0.1.12; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - BALLOT-PROTOCOL.md (0.13.11; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at 8940571, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.11.1, unchanged since)
@@ -28,6 +28,56 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.5: 2026-11-12, **a device resends after it follows, and
+    collects before it deposits** (erratum, by owner decisions GC #9565
+    "b" and GC #9711 "b"; with RELAY-PROTOCOL 0.11.2; 0.90.4 is
+    vettid.org #588). Normative for apps, desktops and agents; no change
+    to the vault or the wire.
+    - New in §9.1. **The resend** (what makes it correct): a device
+      keeps a record of each deposit to its vault's mailbox (sealed
+      bytes, inner `id`, the relay's `Date` as its send time), encrypted
+      at rest like the outbox, for 14 days, capped at 4,000 entries and
+      64 MiB. When it follows its vault's `relay.address.update`, it
+      deposits again to the new address, with the same bytes and inner
+      `id`, every recorded deposit to a passed mailbox sent at or after
+      the update's `deposited_at` less 2 minutes, or with no answer;
+      not timed-out requests, expired ephemeral messages, an ended
+      call's `call.ice`, `call.ringing` and `call.keepalive`, or the
+      lock. The vault's dedupe (§8.2), `ts` window (§8.4) and epoch
+      receive keys (§6.5) all last 16 days, so each is processed once.
+    - **The catch-up pass** (a speed-up; correctness does not depend on
+      it): a device deposits to its vault only while it is caught up,
+      that is, after a pass since its latest trigger (start, return to
+      the foreground, collect-loop restart, or its latest successful
+      collect, a long-poll answer or a message on a session, turning
+      24 hours old). The pass collects every mailbox the device still
+      collects with its own `wait=0` collects until an empty answer, or
+      until an answer holds a message whose `deposited_at` is 60 s or
+      more after the HTTP `Date` of the pass's first answer from that
+      mailbox, and ends only once no collector or session of the device
+      holds an unprocessed batch from it; any update is followed or
+      refused first. A parked collect is not canceled. A deposit that
+      finds the device not caught up starts a pass at once, one at a
+      time, and after a failed pass on the loop's backoff. The definite
+      failures of a collect are `mailbox_unknown` and
+      `signature_invalid`: on an old mailbox they end its collects, on
+      the current one they mean pairing again; the rest is transient,
+      and `rate_limited` is retried within the pass. Until the pass ends
+      every deposit, blob uploads included, waits, shown as waiting; an
+      interactive request whose timeout passes is dropped unsent.
+    - The relay copy of `vault.lock` is the one exception, since a lock
+      never waits on a collect: an app's member-API copy carries the
+      lock, and after any follow while a lock with `unlock_id` is
+      unconfirmed the relay copy is sent again to the new address with
+      `exp` at most 30 s. A desktop's relay lock carries `exp` at most
+      30 s (§8.6 allows 60 s; it points to §9.1).
+    - §3.4 (a) points to §9.1.
+    - §3.4.2 residual "Devices have no telling" is rewritten: the rules
+      are in ANDROID-PLAN 0.1.128, IOS-PLAN 0.1.72, AGENT-PLAN 0.1.12
+      and, for the desktop, which has no plan yet, §9.1 itself. What is
+      still lost silently: a device that never follows, a deposit no
+      longer recorded, what is not deposited again by design, and a
+      device without the rules.
   - 0.90.3: 2026-11-12, **the relay-key rotation wire format**
     (erratum):
     - A relay link is `{v, suite, old, new, sig_old, sig_new}`, as the
@@ -4917,7 +4967,12 @@ create-only.
     wins over the relay's grace. A device that rotates its own relay key
     collects its old mailbox until the relay's grace ends, and its old
     key ends as "When the old key is deleted" says: when its vault has
-    acknowledged, or at S1's 30 days.
+    acknowledged, or at S1's 30 days. (0.90.5) A device that follows its
+    vault's update deposits again what it deposited to the old address
+    since the update, and deposits to its vault only after collecting
+    its own mailboxes (§9.1 "A device resends after it follows, and
+    collects before it deposits"), so that nothing it sends is left in
+    an old mailbox its vault no longer collects.
   - **The signal.** A recipient (each connection's vault, and each of
     the member's own devices and agents) has **acknowledged** the new
     address when the vault has received from it `relay.token.issued` for
@@ -6008,15 +6063,46 @@ each recipient Q).
     or whose vault does, gets no `relay.mailbox.closed`. (0.90.2) The
     owner chose (GC #9565) that a device which has been offline or not
     collecting first collects its own mailbox and processes any
-    `relay.address.update` before it deposits to its vault.
-    ANDROID-PLAN, IOS-PLAN and the desktop and agent texts carry it in
-    an erratum after this one; until then this residual stands: **a
-    device's deposits to its vault's old
+    `relay.address.update` before it deposits to its vault. (0.90.5)
+    The owner then chose (GC #9711, "b") that a device also deposits
+    again, after it follows, what it deposited to the old address since
+    the update. §9.1 "A device resends after it follows, and collects
+    before it deposits" states both for every device, and
+    ANDROID-PLAN 0.1.128, IOS-PLAN 0.1.72 and AGENT-PLAN 0.1.12 carry
+    them (no desktop plan exists yet: §9.1 is the desktop's text). The
+    resend closes the cases the pass alone left open: an update that
+    reached the device's mailbox after its pass, a vault that stopped
+    collecting its old mailbox early (a lock or an outage near its
+    second write), a message leased to another collect, a relay answer
+    wrongly empty (RELAY-PROTOCOL §6.3, whose rule vettid-relay does not
+    yet follow), a lease write that failed, and a lost wake. What is
+    still lost silently, **a device's deposits to its vault's old
     mailbox that the relay accepts after the vault's last collect of it
-    before its stop are lost silently.** The vault stops collecting K
-    at its anchor plus 13 days, or at its second write if that is later
-    (RK14 step 1), and the relay accepts into K until 14 days after the
-    successful rotate.
+    before its stop**, now happens only for:
+    - **A device that never follows**: it never collects again (it is
+      paired again, §6.6 "Limits"), or it refuses the update by rule U
+      (`relay_unlinked`, `relay_rollback`, `token_unusable`: a fault or
+      an attack). The vault resends the update at each unlock while the
+      device's standing token for the old `sub` is valid (§3.4 (b)).
+    - **A deposit no longer recorded** when the device follows: older
+      than 14 days (the relay has by then ended the old mailbox, and its
+      copy of the update expired; the device follows a resent update
+      or is paired again), or dropped past the record's cap.
+    - **What is not deposited again by design**: an interactive request
+      whose timeout passed (already shown as unanswered), an ephemeral
+      message whose `exp` passed or whose call ended, and the relay copy
+      of a lock without `unlock_id` (an app's member-API copy still
+      reaches the vault; a desktop's lock stays unconfirmed, and is
+      shown so).
+    - **A device build without the rules**: the window below applies to
+      it in full.
+    The vault's dedupe is not a limit: every deposit again comes within
+    14 days of the first, inside the 16 days of §8.2 and §8.4.
+
+    Without the rules the window is as follows. The vault stops
+    collecting K at its anchor plus 13 days, or at its second write if
+    that is later (RK14 step 1), and the relay accepts into K until 14
+    days after the successful rotate.
     - **The window** runs from the vault's last collect of K before its
       stop to the relay's end of K.
       - From the stop, it is at most the time from the anchor to that
@@ -6039,7 +6125,9 @@ each recipient Q).
       collected its vault's `relay.address.update`: an app, desktop or
       agent that was offline or not collecting, and flushes to its vault
       before it collects its own mailbox. A device that is online at the
-      second write follows the update within moments.
+      second write follows the update within moments. (0.90.5) A device
+      that follows §9.1 deposits again what reached the old address; it
+      loses only in the cases listed above.
     - **What the device sees.** A request (§8.1) gets no answer and
       times out, and its application retries go to K too until the
       device follows; it is not told why. An event that is not a
@@ -12202,6 +12290,8 @@ the vault as it is now; one delivered later would meet whatever the
 member has done since. With an `unlock_id` a late lock is harmless
 (the vault answers `stale_lock`), so a device MAY send it again while
 its lock is unconfirmed, each time as a new request with a new `exp`.
+(0.90.5) The copy a device sends again after it follows its vault's
+new address carries an `exp` of at most 30 s (§9.1).
 To a vault that announced no `unlock_id` (a release before L) a device
 sends it once, and before its next unlock waits until that request's
 `exp` has passed by the vault's clock as well as it can tell (its own
@@ -12254,6 +12344,200 @@ queued `device.unlinked{replaced}`; fixed by vettid-android #66.)
   `vault.held`, `vault.locking`, the clone alarm and the transfer,
   unlink and transport messages listed there; devices catch up after
   the check.
+- (0.90.5; owner decisions GC #9565 and GC #9711) **A device resends
+  after it follows, and collects before it deposits.** When its vault
+  moves to a new relay address, the vault stops collecting the old
+  mailbox about 13 days after it starts the move, and the relay still
+  accepts deposits there for about a day more (§3.4.2 RK14 step 1). A
+  device's deposit to the old address in that time is accepted and never
+  read. Two rules, for every app, desktop and agent:
+  - **The resend** makes it correct: whatever reached the old address
+    after the vault announced the move is deposited again once the
+    device follows.
+  - **The catch-up pass** makes it fast: the device collects its own
+    mailbox before it deposits, so it usually follows before it would
+    deposit to the old address at all. Correctness does not depend on
+    the pass: a pass can end while the update is unread (a message
+    leased to another collect, a relay answer cached as empty), and the
+    resend covers that.
+
+  **1. The resend.**
+  - **The record.** A device keeps a record of each deposit it makes to
+    its vault's mailbox (blob uploads to it included): the mailbox, the
+    send time, the sealed envelope bytes (or the blob's ciphertext) as
+    deposited, the inner `id`, its type and, for an ephemeral type, its
+    `exp`. The **send time** is the HTTP `Date` of the relay's answer to
+    the deposit (the relay's clock, as `deposited_at` is); a deposit with
+    no answer (a timeout, a lost connection) has an unknown send time.
+    The record is kept like the outbox: encrypted at rest under the
+    same key, in no-backup storage, wiped with it. A record leaves at 14
+    days after its send time (real time, not divided by `time_scale`:
+    the relay's grace and message lifetime it covers are real time), or
+    once it has been deposited again after a follow (below), and the
+    records are capped at 4,000 entries and 64 MiB per device, the
+    oldest leaving first.
+  - **After a follow.** When the device follows its vault's
+    `relay.address.update` (§3.4.1 rule U), it deposits again to the
+    new address every recorded deposit to a mailbox that update passed
+    whose send time is unknown or not earlier than the update's
+    `deposited_at` less **2 minutes** (relay clocks of different
+    processes, the `Date`'s whole seconds, and the vault's last collect
+    just before a stop due at once at its second write). Same bytes, same
+    inner `id`; a blob is uploaded again and its message deposited
+    again, both to the new address. They go after the
+    `relay.token.issued` for the follow, behind the gate (2), in their
+    original order. Not deposited again: an interactive request (§8.1)
+    whose timeout has passed (the member was already shown it got no
+    answer); an ephemeral message (§8.5) whose `exp` has passed, and any
+    `call.ice`, `call.ringing` or `call.keepalive` of a call that has
+    ended; `vault.lock`, which has its own rule (below). A request still
+    within its timeout is deposited again with the same `id`.
+  - **At the vault**, a deposit again is an ordinary deposit: one that
+    already arrived is dropped by the inner-`id` dedupe (§8.2, 16 days)
+    or its cached response is sent again (§8.2, 24 hours); an `hs.resp`
+    for a handshake no longer open is acked and dropped (§6.3.1); a
+    `call.end` for an ended call is ignored (§10.10); a durable message
+    is accepted within §8.4's 16-day `ts` window; and a message sealed
+    under an earlier epoch is still read, since its receive keys are
+    kept 16 days (§6.5). Every deposit again is at most 14 days after
+    its first, inside each of these 16-day windows, so each is processed
+    exactly once. It may arrive after later messages (§8.4).
+
+  **2. The catch-up pass** (a speed-up). A device deposits to its vault
+  only while it is **caught up**, which needs both:
+  1. **A catch-up pass** since its latest **trigger**: its process
+     start, (an app) its return to the foreground, the restart of its
+     collect loop after the loop failed or was stopped, and the moment
+     its latest successful collect turned 24 hours old (2, below). A
+     WebSocket connect that fails after a pass that succeeded is not a
+     restart.
+     - **What it collects.** Every mailbox the device still collects:
+       its current one, and any old one still in its grace after the
+       device's own relay-key rotation (§3.4 (a)), each by the pass's
+       own long-poll collects (RELAY-PROTOCOL §6.3) with **`wait=0`**.
+       A batch counts as processed once it is persisted and acked
+       (§8.3); what processing produces is queued behind this gate, so
+       the pass never waits on its own output.
+     - **When it ends**, for each mailbox: at an **empty** answer to one
+       of the pass's own `wait=0` collects (RELAY-PROTOCOL §6.3), or, so
+       that a mailbox that stays busy cannot hold deposits back, at an
+       answer to one of them holding a message whose `deposited_at` is
+       60 s or more after the HTTP `Date` of the pass's first answer
+       from that mailbox. In either case the pass ends only once no
+       collector or session of the device holds a batch from that
+       mailbox that is not yet processed (any `relay.address.update` in
+       it followed). A parked long poll that has received nothing holds
+       nothing, and so does an open WebSocket session whose delivered
+       messages are all processed.
+     - **A parked collect is not canceled.** The pass's `wait=0`
+       collects run beside a loop collect that is parked, and that
+       collect's answer, whenever it comes, is processed like any batch.
+     - **A `relay.address.update`** the pass collects is followed by
+       §3.4.1 rule U, or refused, before the pass ends; its
+       `relay.token.issued` and the resend (1) are then deposits like
+       any other.
+     - **Failures.** A collect's **definite** failures are
+       `mailbox_unknown` and `signature_invalid` (and `bad_request`, a
+       fault of the device). On an old mailbox one ends the device's
+       collects of it, and the pass goes on without it; on the
+       **current** mailbox it takes the path it takes today (§6.6
+       "Limits": the device is paired again). Everything else is
+       transient: no network, a timeout, a `5xx`, `timestamp_stale`,
+       `replay_detected` (a freshly signed collect can pass) and
+       `rate_limited`. A pass **fails** when one of its own collects
+       fails transiently, other than `rate_limited`, which is retried
+       after its `retry_after` within the same pass. A failed loop
+       collect is not a failed pass, unless it was counted toward one
+       (below).
+     - **Started at once, one at a time.** A deposit that finds the
+       device not caught up starts a pass at once, overriding the loop's
+       idle schedule or reconnect backoff, as long as no pass has failed
+       since the trigger. A device runs one pass at a time; deposits
+       that wait, and their retries, join it and do not each start
+       another. After a failed pass the next is tried on the loop's
+       backoff, never before a `rate_limited`'s `retry_after`.
+     - **Collects that count.** A collect the device makes anyway (at
+       its start, for a wake, §14.2, or in its loop) counts toward the
+       pass when it uses `wait=0`, or answers with messages; it never
+       ends the pass by itself.
+     - **WebSocket.** A session (RELAY-PROTOCOL §6.4) gives no empty
+       answer, so the pass is made by long poll, before a session is
+       opened or opened again. A return to the foreground needs no pass
+       while a session opened after the device's last pass is still
+       open, has delivered a message or a pong (to an RFC 6455 ping)
+       within the last 60 s, and has no message it delivered that is not
+       yet acked by frame (an ack by `DELETE` keeps the session's window
+       full). A device without such a message or pong pings once and
+       takes the pong, or makes the pass; no pong in time means a pass.
+  2. **A recent collect.** Its latest successful collect ended less than
+     **24 hours** ago: an answer to a long poll, processed, or a message
+     delivered on its open WebSocket session, processed. A pong does not
+     count, so a quiet session makes one `wait=0` long poll a day. The
+     24 hours are real time, on a clock that counts time the device was
+     asleep, and are not divided by `time_scale` on staging.
+
+  Until it is caught up, **every deposit to its vault waits**: outbox
+  entries; requests and their application retries (§8.6); blob uploads
+  to the vault's mailbox (`PUT /v1/blob/{vault_mailbox}`, §10.5.1
+  step 1), which go to the same, followed address as their message;
+  events (`device.features`; the calls' `call.answer`, `call.ice`,
+  `call.keepalive` and `call.end`); the resend (1); and what processing
+  a message produces (an `hs.resp`, `relay.token.issued`, a token
+  renewal). Once caught up it deposits them, in their order, to the
+  vault's address it holds then. An interactive request whose timeout
+  (§8.1, 30 s) passes while it waits is dropped unsent and shown as not
+  sent; it is never sent late. While a lock is pending on an app, the
+  pass persists, then acks, each batch as usual, never acking what it
+  has not persisted; what the pending lock keeps out of the app
+  (ANDROID-PLAN §4 "Locking the vault") is taken in once the lock ends.
+
+  **One exception: the lock.** The relay copy of `vault.lock` goes at
+  once, without a pass, because a lock never waits on a collect, and
+  starts a pass if the device is not caught up. It is not resent by
+  (1). Instead, after any follow while the lock is unconfirmed, a device
+  whose lock carries `unlock_id` (§10.2 "Locks") sends the relay copy
+  again to the new address with `exp` at most 30 s (§8.6 allows 60 s;
+  this resend uses 30 s), and keeps the lock unconfirmed until the
+  vault answers. A lock without `unlock_id` is not sent again: a late
+  copy could end a later unlock the device cannot see. An app's lock is
+  not lost meanwhile: its member-API copy (§11.1) does not use the
+  relay, and the app keeps the lock pending until confirmed. A desktop
+  has no member-API copy: its relay lock carries `exp` at most 30 s,
+  and a lock of its that met an old mailbox reaches the vault only by
+  that copy sent again; until the vault answers it stays unconfirmed,
+  and is shown so.
+
+  **A pass that cannot complete** is retried as above; the deposits keep
+  waiting, and **the device shows them as waiting for its vault**, never
+  as sent: each waiting message shows so, and after the second failed
+  pass, or 10 s of waiting, a notice says so (the apps' and agents'
+  texts are in their plans). The device never deposits "blind" after a
+  failed pass. Holding has a cost: a one-way message that the vault
+  could still have collected is delivered later, or not at all if the
+  device never gets through. Holding is still right because it is
+  visible: the member sees the message waiting.
+
+  **Why 24 hours.** The vault normally stops collecting its old mailbox
+  about 13 days after it deposits the update. A device whose last
+  collect is less than a day old has normally followed, or deposits
+  with days to spare; when it has not, the resend covers it. A shorter
+  bound only adds collects to devices that already collect at every
+  start and foreground. The pass at a start, a return to the foreground
+  or a loop restart covers the common case (a device coming back) at the
+  cost of one or a few `wait=0` collects before its first deposit.
+
+  **Calls.** A phone woken for a `call.offer` makes its pass with the
+  wake's collects. Collects return the oldest messages first, so the
+  offer comes after any backlog, and `call.answer` waits until the pass
+  ends: one more `wait=0` collect after the batch that held the offer,
+  and more only while later deposits keep the answers non-empty
+  (bounded by the 60 s rule). A device in a call normally has its loop
+  open and recent, so its `call.ice`, `call.keepalive` and `call.end`
+  go at once; after its loop restarts they wait for one pass. Accepted:
+  a fault that lets the device deposit but not collect for more than
+  90 s ends a direct-media call through the vault's keepalive timeout
+  (§10.10, 90 s without a `call.keepalive`), where a blind send would
+  have kept it.
 
 ### 9.2 Presence ping
 
