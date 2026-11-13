@@ -35,6 +35,11 @@ changelog:
       bound through the signed label `vettid/vms/2/relay-rotate`, and `m`
       is unchanged. A link with another `v` or `suite`, or with `old`
       equal to `new`, is refused (`relay_unlinked`).
+    - A key may not appear twice in a relay link chain (A→B→A, or a
+      first `old` equal to the last `new`): refused `relay_unlinked`.
+    - §16 gains `relay_rotate.json`, the relay link's valid and invalid
+      cases. Every client MUST reproduce it before it rotates or follows
+      a relay key.
     - The update's relay links are named `relay_links`, as in a
       reconnect (§6.2); it was `links` (§3.4.1 rule U, §10).
     - An empty `rotations` in an update is read as absent (§3.4.2 RK5).
@@ -5360,11 +5365,14 @@ sig_old = Ed25519(old, m)        sig_new = Ed25519(new, m)
 of `m`: the suite is bound through the label's `vettid/vms/2/` (suite
 2), exactly as `"vettid/vms/2/rotate"` binds it for the identity link,
 and `v` = 1 is this layout. A link with any other `v` or `suite` is
-refused (`relay_unlinked`), as is a link whose `old` equals its `new`.
+refused (`relay_unlinked`), as is a link whose `old` equals its `new`,
+and a chain in which any key appears twice: A→B→A is refused, and so is
+any chain whose first `old` equals its last `new`.
 
 P signs a link in the rotation's first write (§3.4 step 1). Q checks
 that each link's `v` is 1 and its `suite` 2, that its `old` differs from
-its `new`, that both signatures verify, that each link's `old` is the
+its `new`, that no key appears twice in the chain, that both signatures
+verify, that each link's `old` is the
 previous link's `new`, that the first `old` is the `sender` and the last
 `new` is `relay.pk`, and rule C on each link; else refuse
 (`relay_unlinked`).
@@ -31466,7 +31474,23 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
   (enrollment and unlock), unlock signing string (0.3.0, 12 fields) and
   signature, vault.unlock padded to 12,288 B in a 13,444 B envelope
   (randomness 64 x 0x13) : altchan.json
+
+§3.4.1 rule U relay link (0.90.3)                                (relay_rotate.json)
+  label "vettid/vms/2/relay-rotate"; link {v: 1, suite: 2, old, new, sig_old, sig_new}
+  valid   : a single link; a chain of links
+  invalid : wrong sig_old; wrong sig_new; signed with the identity label
+            "vettid/vms/2/rotate"; old == new; a repeated key in the chain;
+            a broken chain (an old that is not the previous new); more than
+            32 links; a first old that is not the deposit key; a last new
+            that is not the announced key; an unknown v; an unknown suite
+  each invalid case is refused relay_unlinked
 ```
+
+(0.90.3) **`relay_rotate.json`** is required before relay-key rotation,
+whatever this section says about its other files. The Go, Kotlin, Swift
+and Rust clients MUST reproduce it, every valid case accepted and every
+invalid case refused, before they rotate a relay key or follow one
+(§3.4.1 rule U, §3.4.2).
 
 **§11.10 release updates (0.3.0).** These values were computed with Go 1.26
 (ECDSA P-256 with RFC 6979 deterministic nonces). vettid-vault generates
