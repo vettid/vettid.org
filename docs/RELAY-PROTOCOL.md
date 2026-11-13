@@ -409,8 +409,9 @@ a grace period (relay config, default (0.11.0) 14 days, during which both collec
 until 0.11.0 the default was 7 days). (0.11.1) A relay that serves VettID vaults
 MUST set it to exactly 14 days (VAULT-MESSAGING §3.4.2 RK14): once its
 rotation is complete, a vault stops collecting its old mailbox 13 days
-after it began the rotation (before the rotate), at least a day before
-the grace ends, so a longer grace would only lengthen the time the old
+after its anchor (the start of its first rotate attempt with the new key
+that was not definitively refused, so no later than the rotate), at
+least a day before the grace ends, so a longer grace would only lengthen the time the old
 mailbox accepts deposits the vault does not collect. No
 vault release rotates a relay key before the deployed relays' grace is
 14 days.
@@ -1684,8 +1685,9 @@ The push gateway API is specified separately.
 - **0.11.1** — with VAULT-MESSAGING 0.90.2 (erratum). §6.7: a relay
   that serves vaults MUST set the rotation grace to exactly 14 days (it
   said "not below"). Once its rotation is complete, a vault stops
-  collecting its old mailbox 13 days after it began the rotation, at
-  least a day before the grace ends, so a longer grace would only
+  collecting its old mailbox 13 days after its anchor (the start of its
+  first rotate attempt that was not definitively refused), at least a
+  day before the grace ends, so a longer grace would only
   accept more deposits it does not collect. §6.1: such
   a relay MUST NOT set `message_ttl_seconds` above 14 days, which the
   vault's dedupe of re-deposits after a rotation assumes. No wire
