@@ -332,12 +332,23 @@ GET /v1/mailbox?wait=25&max=32       (owner-signed)
   (cap 25), returning early if a deposit arrives; on timeout returns
   `{ "messages": [] }`. If the mailbox is deleted meanwhile (§6.10), the
   parked request ends at once with `404 mailbox_unknown`.
-- (0.11.2) **An empty answer** means that, when it was made, the mailbox
-  held no unexpired message that was not leased. A relay MUST NOT answer
-  empty otherwise: a collect that could not lease any message it would
-  return (a failed write, not a lost race to another collector) fails
-  instead. Devices rely on it to know they have caught up
-  (VAULT-MESSAGING §9.1).
+- (0.11.2) **An empty answer to a `wait=0` collect** means that, when it
+  was made, the mailbox held no unexpired message that was not leased.
+  So a relay:
+  - MUST read its store for every `wait=0` collect, never answering it
+    from a record of mailboxes known to be empty;
+  - MUST, when a collect lost every message it read to other
+    collectors while its read stopped at `max`, read on instead of
+    answering empty, and MUST NOT then record the mailbox as empty;
+  - MUST fail a collect that could not lease any message it would
+    return for a reason other than a lost race (a failed write), not
+    answer it empty.
+
+  Devices end their catch-up pass at such an answer (VAULT-MESSAGING
+  §9.1); their correctness does not depend on it, since they deposit
+  again after they follow their vault's new address. The vettid-relay
+  change for the first two points is pending; until it ships, that
+  resend covers the gap.
 - **Delivery is at-least-once.** A message not acked within its lease reappears
   in later collects. Receivers MUST deduplicate by `msg_id`.
 
@@ -1691,10 +1702,15 @@ The push gateway API is specified separately.
 ## 10. Changelog
 
 - **0.11.2** — with VAULT-MESSAGING 0.90.5 (erratum). §6.3: an empty
-  answer to a collect means no unexpired message was then unleased; a
-  relay never answers empty otherwise. Devices end their catch-up pass
-  before they deposit to their vault at an empty answer. vettid-relay
-  already behaves so. No wire change.
+  answer to a `wait=0` collect means no unexpired message was then
+  unleased. A relay reads its store for every `wait=0` collect (no
+  empty-mailbox cache), reads on instead of answering empty when it
+  lost every candidate to other collectors with its read stopped at
+  `max` (and never records the mailbox empty then), and fails rather
+  than answers empty a collect whose lease writes failed. Devices end
+  their catch-up pass at an empty answer; they deposit again after a
+  follow, so they do not depend on it. The vettid-relay change is
+  pending. No wire change.
 
 - **0.11.1** — with VAULT-MESSAGING 0.90.2 (erratum). §6.7: a relay
   that serves vaults MUST set the rotation grace to exactly 14 days (it
