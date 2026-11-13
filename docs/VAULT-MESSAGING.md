@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.2
+version: 0.90.3
 date: 2026-11-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -28,6 +28,18 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.3: 2026-11-12, **the relay-key rotation wire format**
+    (erratum):
+    - A relay link is `{v, suite, old, new, sig_old, sig_new}`, as the
+      identity link carries `v` and `suite`. As there, the suite is
+      bound through the signed label `vettid/vms/2/relay-rotate`, and `m`
+      is unchanged. A link with another `v` or `suite`, or with `old`
+      equal to `new`, is refused (`relay_unlinked`).
+    - The update's relay links are named `relay_links`, as in a
+      reconnect (§6.2); it was `links` (§3.4.1 rule U, §10).
+    - An empty `rotations` in an update is read as absent (§3.4.2 RK5).
+    - `relay.mailbox.closed`'s `last_msg_id` is required, `null` when
+      nothing was collected (§3.4.2 RK14, §10).
   - 0.90.2: 2026-11-12, **§3.4.2 made precise for the implementation**
     (erratum, with one owner decision):
     - **New, by owner decision 2026-11-12:** the keep's cap is 2,000
@@ -5330,11 +5342,13 @@ in a message refused at step 1 (a suspended record) are kept as seen too
   §3.5.5).
 
 **Rule U, a `relay.address.update`.** (0.90.0) It also carries
-`rotations`, P's identity links, applied first (§3.4.2 RK5). It carries `links`: the relay links
+`rotations`, P's identity links, applied first (§3.4.2 RK5). It carries
+`relay_links` ((0.90.3) named `links` before 0.90.3): the relay links
 from P's key for Q (S1) to P's current key, 1 to 32 of them, each
+((0.90.3) with `v` and `suite`, as the identity link of §3.4 has them)
 
 ```json
-{ "old": "<b64>", "new": "<b64>", "sig_old": "<b64>", "sig_new": "<b64>" }
+{ "v": 1, "suite": 2, "old": "<b64>", "new": "<b64>", "sig_old": "<b64>", "sig_new": "<b64>" }
 ```
 
 ```
@@ -5342,10 +5356,18 @@ m       = "vettid/vms/2/relay-rotate" || old (32) || new (32)
 sig_old = Ed25519(old, m)        sig_new = Ed25519(new, m)
 ```
 
+(0.90.3) As in the identity link, `v` and `suite` are not separate bytes
+of `m`: the suite is bound through the label's `vettid/vms/2/` (suite
+2), exactly as `"vettid/vms/2/rotate"` binds it for the identity link,
+and `v` = 1 is this layout. A link with any other `v` or `suite` is
+refused (`relay_unlinked`), as is a link whose `old` equals its `new`.
+
 P signs a link in the rotation's first write (§3.4 step 1). Q checks
-that both signatures verify, that each link's `old` is the previous
-link's `new`, that the first `old` is the `sender` and the last `new` is
-`relay.pk`, and rule C on each link; else refuse (`relay_unlinked`).
+that each link's `v` is 1 and its `suite` 2, that its `old` differs from
+its `new`, that both signatures verify, that each link's `old` is the
+previous link's `new`, that the first `old` is the `sender` and the last
+`new` is `relay.pk`, and rule C on each link; else refuse
+(`relay_unlinked`).
 Then:
 - Leading links Q has already followed are skipped. If all are, the
   update is a duplicate: Q ignores it and sends `relay.token.issued` for
@@ -6251,7 +6273,10 @@ the same bytes (RK5).
 **RK5. The update carries P's identity links (binding L).**
 - **What it carries.** A `relay.address.update` carries `rotations`: P's
   identity links from the signer of the epoch it travels under, up to
-  P's current `ik`, as S8 gives them to `identity.rotate`.
+  P's current `ik`, as S8 gives them to `identity.rotate`. (0.90.3) An
+  empty `rotations` is read as absent: the update carries no identity
+  links, and RK5's `ik` requirement is met only if the update's `ik` is
+  Q's current `ik` for P.
 - **The update's `ik`** is the P-side signer of the epoch it travels
   under (Table B).
 - **Sealed afresh.** Every deposit of an update is sealed afresh under
@@ -6349,7 +6374,8 @@ device's relay key.
 - **When the links travel.** A message carries `relay` (for an `hs.resp`)
   and `relay_links` only when the key it is deposited with is earlier
   than the announced key. `relay_links` are P's signed relay links from
-  the deposit key up to the announced key, in rule U's form, and there
+  the deposit key up to the announced key, in rule U's form
+  (`{v, suite, old, new, sig_old, sig_new}`, §3.4.1 rule U), and there
   are 1 to 32 of them.
 - **What else it carries.** P's identity links in `rotations` (RK5), and
   `token` and `reconnect_token` minted by the announced key's mailbox.
@@ -6600,7 +6626,8 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      collects of K, recorded `last_msg_id`, and queued the telling.
 2. **P sends the telling.** P sends each connection a separate durable
    message, **`relay.mailbox.closed {mailbox, last_msg_id}`**, under its
-   then-current epoch with that connection.
+   then-current epoch with that connection. (0.90.3) `last_msg_id` is
+   required: it is `null` when P collected nothing from that mailbox.
    - It is not on S1's list, so during S1 toward the connection it waits
      for S2.
    - While P has no epoch with the connection, it is held like any
@@ -8580,7 +8607,8 @@ Field rules:
 - (0.90.0) `relay_links` (§3.4.2 RK8) is allowed only in the `hs.init`
   and `hs.resp` of a reconnect, and only when the key the message is
   deposited with is earlier than the key it announces: the signed relay
-  links, in rule U's form, from the deposit key up to the announced key,
+  links, in rule U's form (`{v, suite, old, new, sig_old, sig_new}`,
+  with rule U's checks), from the deposit key up to the announced key,
   1 to 32 of them. The first link's `old` MUST be the key the message is
   deposited with (its collect `sender`), and the last link's `new` MUST
   be the announced key. In an `hs.init` the announced key is
@@ -12193,8 +12221,8 @@ an answer to an unknown or expired id is dropped.
 | `device.features` (D→V) | — | `{features: [name]}` (0.85.4): the receiving-side capabilities the device implements (`relay_follow` and (0.86.0) `hs_confirm`; (0.89.0) from the app also `approval_document`, §10.4 "Approval documents", which is **not** sticky: the vault uses the last list), each `[a-z0-9_]{1,32}`, sorted, unique, at most 32; sent after each epoch it activates, and (0.86.0) the same list in the inner `features` of every message it deposits to its vault (§5.3, §10.8). The vault ignores names it does not know, drops and audits a malformed body (`drop.features_malformed`), and keeps the last list per device in the DEK state, written only when it changes (each of `relay_follow` and `hs_confirm` once seen stays, §3.4.1 "The gate") |
 | `relay.token.refresh` (req) | `{}` | `{kind: "standing", token}` |
 | `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>, rotations?}` ((0.85.0) `rotations`: the links before `rotation`, §3.4.1 S8) |
-| `relay.address.update` | — | `{relay: {url, mailbox, pk}, token, reconnect_token?, links, rotations?}` ((0.85.0) `links`: the signed relay links, §3.4.1 rule U; (0.90.0) `rotations`: P's identity links, §3.4.2 RK5) |
-| `relay.mailbox.closed` (0.90.0, V→V) | — | `{mailbox, last_msg_id}`: `mailbox`, the id of the sender's ended earlier mailbox; `last_msg_id`, the largest `msg_id` up to which the sender acked every message the relay gave it from that mailbox, or `null` when there is none. Durable, session mode; not on §3.4.1 S1's list. The receiver acts on it only for a mailbox it knows as an earlier mailbox of the sender's and has followed it away from (§3.4.2 RK14) |
+| `relay.address.update` | — | `{relay: {url, mailbox, pk}, token, reconnect_token?, relay_links, rotations?}` ((0.85.0) `relay_links`, named `links` before 0.90.3: the signed relay links `{v, suite, old, new, sig_old, sig_new}`, §3.4.1 rule U; (0.90.0) `rotations`: P's identity links, §3.4.2 RK5; (0.90.3) an empty `rotations` is read as absent: no identity links) |
+| `relay.mailbox.closed` (0.90.0, V→V) | — | `{mailbox, last_msg_id}`: `mailbox`, the id of the sender's ended earlier mailbox; `last_msg_id`, the largest `msg_id` up to which the sender acked every message the relay gave it from that mailbox, or `null` when there is none. (0.90.3) Both members are required: `last_msg_id` is present, `null` when the sender collected nothing; a message without it is malformed. Durable, session mode; not on §3.4.1 S1's list. The receiver acts on it only for a mailbox it knows as an earlier mailbox of the sender's and has followed it away from (§3.4.2 RK14) |
 
 **Locks (0.29.0, release L; approved by the owner 2026-10-12,
 VAULT-LOCK §3).** A lock from a
