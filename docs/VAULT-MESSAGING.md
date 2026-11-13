@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.10
-date: 2026-11-13
+version: 0.90.11
+date: 2026-11-14
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -29,6 +29,16 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.11: 2026-11-14, **a recovery's inherited key that may have been
+    made afresh by a lost run of the open** (erratum, as built in
+    vettid-vault): §3.4 "A recovery's inherited key": an attempt at the
+    open that leaves the key pending (answered that its mailbox exists,
+    or not answered), and not refused, marks it unconfirmed; the open
+    never completes it on an answer that its mailbox exists, and the next
+    attempt completes it only once the wait a mailbox made afresh needs
+    (RELAY-PROTOCOL §6.10) has run from the mark, its tokens minted
+    again; a later answer that made the mailbox afresh still starts that
+    wait.
   - 0.90.10: 2026-11-13, **`contract` in `profile.update` on service
     connections** (owner decision 2026-11-13, VAULT-SERVICE-INDEPENDENCE
     R2): §10.8: the major.minor of VAULT-SERVICE-CONTRACT the sender
@@ -37,8 +47,8 @@ changelog:
     never selecting behavior or relaxing a check; its form, how a bad or
     absent value is read, and when a change of it is sent, on both
     sides. A service reads `vote` and `approval_document` from
-    `profile.update` only. (Numbered after 0.90.9,
-    vettid.org #594; whichever merges later renumbers.)
+    `profile.update` only. (0.90.9 was held for vettid.org #594, which
+    merged later as 0.90.11; 0.90.9 is not used.)
   - 0.90.8: 2026-11-13, **an unlock's PIN attempt is counted before it
     is tested** (owner decision a, 2026-11-13): §11.8 "Enclave backoff":
     the unlock only (the PIN checks in a running vault are unchanged);
@@ -4958,9 +4968,10 @@ create-only.
     if it still lives (a refused rotate), and otherwise (a refused
     registration, past the grace) it receives nothing.
   - **A recovery's inherited key** (0.85.4; owner decisions of
-    2026-11-05, O5b and "rule 2"). A recovery's open completes a relay key
-    left pending by an earlier run in one attempt, before the phone gets
-    the vault's address, and on a definite refusal takes a fresh key at
+    2026-11-05, O5b and "rule 2"). A recovery's open makes one attempt at
+    a relay key left pending by an earlier run (it completes it only as
+    "A lost run of the open" below allows), before the phone gets the
+    vault's address, and on a definite refusal takes a fresh key at
     once, **one time only** per recovery; if the fresh key is refused
     too, it stays in the refused state and the vault generates no further
     key on its own. (0.90.2) Between vaults, the start of that attempt
@@ -4971,6 +4982,28 @@ create-only.
     anchor plus 13 days passed) with its `last_msg_id`, and queues the telling if
     it makes a key current; a stop not yet due follows as after any
     second write (§3.4.2 RK14 step 1).
+    (0.90.11) **A lost run of the open.** An earlier run of this open
+    whose state was not stored (its step-1 or step-2 write failed, or it
+    stopped after its attempt) may have had the key's mailbox made afresh
+    (RELAY-PROTOCOL §6.10), that answer's time lost with it, and nothing
+    stored tells this open from a first one, nor that run's answer from
+    an older stored one. So an attempt that leaves the key pending
+    (answered that the mailbox exists, or not answered), not in the
+    refused state and not answered by this attempt that the mailbox was
+    made afresh, stores the key **unconfirmed**, with the attempt's time,
+    in the step-2 write: the key is not completed before the wait a mailbox
+    made afresh needs before its tokens are accepted (RELAY-PROTOCOL
+    §6.10: the deletion's 90 s, plus clock skew and the tokens'
+    backdating; 241 s as built) has run from that time, at the open, the
+    sooner retries and the recovered phone's unlock alike, and
+    its tokens are minted again when it is. An open never completes the
+    key on an answer that its mailbox exists, whatever time is stored;
+    the next attempt after the wait does. Unlike the time of an answer that made
+    the mailbox afresh, the mark says nothing of a wait already had: such
+    an answer after it starts the wait. A recovery that inherits a
+    pending key so waits once (and a second time when a later
+    registration makes the mailbox afresh); the recovered phone's unlock
+    is answered `retry` meanwhile.
     - **A refused rotate** (the old mailbox lives): the open goes on with
       the live mailbox. In place of keeping the refused key with a
       relay-key rotation owed (next item), the recovery's step-2 write
