@@ -64,9 +64,13 @@ changelog:
       or while a `retry_after` runs. A batch already collected at the
       stop is processed and acked. `last_msg_id` (processed and
       flushed) is kept in the state with each batch's flush; a stop on
-      `mailbox_unknown` is written at once and is final. At a
-      recovery's open the step-2 write records the stop, its
-      `last_msg_id` and the telling. The telling is queued no earlier
+      `mailbox_unknown` (while a key is pending or K is old) is written
+      at once and is final. At a recovery's open the step-2 write
+      records any stop already due (a `mailbox_unknown` met during the
+      open, whether or not a key is made current, or anchor plus 13
+      days passed) with its `last_msg_id`, and queues the telling if it makes
+      a key current. The refused state, after the unlock's attempt,
+      counts as a running `retry_after`. The telling is queued no earlier
       than the second write. After the second write P ends
       its collects of K 13 days after the anchor (the relay's 14-day
       grace less a day of margin), or at once if that has passed; and at
@@ -120,10 +124,11 @@ changelog:
       copy while the key is pending" (with a copy's earlier rotate and
       a recovery that ends before its step-2 write), "A sender that
       never follows", and a narrower "Clock drift". "Devices have no
-      telling" now states, for an owner decision, that a device's
-      deposits to the old mailbox accepted after the vault's last
-      collect before its stop are lost silently, a lock across the stop
-      included. §8.3 case 6 and the `RestampAfter` residual note the
+      telling" states that a device's deposits to the old mailbox
+      accepted after the vault's last collect before its stop are lost
+      silently, a lock across the stop included; the owner chose (GC
+      #9565) that devices collect first, which the app plans and the
+      desktop and agent texts carry in a later erratum. §8.3 case 6 and the `RestampAfter` residual note the
       14-day cap on a vault relay's `message_ttl_seconds`.
     - RK14 step 3: `sync.since` between vaults is not kept; the
       requester asks again. `att.*` is gone from the not-kept list and
@@ -4743,9 +4748,12 @@ create-only.
     too, it stays in the refused state and the vault generates no further
     key on its own. (0.90.2) Between vaults, the start of that attempt
     becomes the current key's anchor in the step-2 write when it has
-    none, and that write also records a stop of the old mailbox's
-    collects, its `last_msg_id` and the telling when it makes a key
-    current (§3.4.2 RK14 step 1).
+    none, unless it was refused with the relay's own `400` or `401`;
+    and the step-2 write records any stop already due (a `mailbox_unknown`
+    met during the open, whether or not a key is made current, or the
+    anchor plus 13 days passed) with its `last_msg_id`, and queues the telling if
+    it makes a key current; a stop not yet due follows as after any
+    second write (§3.4.2 RK14 step 1).
     - **A refused rotate** (the old mailbox lives): the open goes on with
       the live mailbox. In place of keeping the refused key with a
       relay-key rotation owed (next item), the recovery's step-2 write
@@ -5855,7 +5863,8 @@ each recipient Q).
     `200` while a K mailbox lives, since the successor already holds
     the new key (RELAY-PROTOCOL §6.7 "Repeating a rotation"). So this
     remains while the attempt is refused or gets no definite answer, or
-    while a `retry_after` runs. It needs a copy holding K and a pending
+    while no attempt may be made (a `retry_after` runs, or in the
+    refused state after the unlock's attempt). It needs a copy holding K and a pending
     key unfinished for more than 14 days after a successful rotate; it
     is the same exposure a copy has to K before any rotation.
     Two more ways the anchor can come after the rotate that started
@@ -5865,8 +5874,13 @@ each recipient Q).
     anchor of the attempt it made (RK14 step 1). In both, P can still
     collect K after the relay ended it, with the exposure above.
   - **Devices have no telling.** A device that rotates its relay key,
-    or whose vault does, gets no `relay.mailbox.closed`. (0.90.2) Open,
-    for an owner decision: **a device's deposits to its vault's old
+    or whose vault does, gets no `relay.mailbox.closed`. (0.90.2) The
+    owner chose (GC #9565) that a device which has been offline or not
+    collecting first collects its own mailbox and processes any
+    `relay.address.update` before it deposits to its vault.
+    ANDROID-PLAN, IOS-PLAN and the desktop and agent texts carry it in
+    an erratum after this one; until then this residual stands: **a
+    device's deposits to its vault's old
     mailbox that the relay accepts after the vault's last collect of it
     before its stop are lost silently.** The vault stops collecting K
     at its anchor plus 13 days, or at its second write if that is later
@@ -5876,7 +5890,8 @@ each recipient Q).
       stop to the relay's end of K.
       - From the stop, it is at most the time from the anchor to that
         rotate, plus a day. The anchor is the start of the first attempt
-        not refused, so this is normally about a day. It grows up to the
+        not refused with the relay's own `400` or `401`, so this is
+        normally about a day. It grows up to the
         whole 14 days when the attempts got no definite answer for 13
         days or more before one succeeded (an unreachable relay, `5xx`,
         a vault locked between an attempt whose answer was lost and the
@@ -6740,7 +6755,9 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
        which completes an inherited pending key in one attempt before
        its step-2 write and writes nothing before it: when K has no
        anchor, the recorded start of that attempt becomes K's anchor, in
-       the step-2 write. An open that ends before that write loses it;
+       the step-2 write, unless that attempt was refused with the
+       relay's own `400` or `401`. That write also records the stop as
+       "When it is recorded" says. An open that ends before that write loses it;
        see the residual "A copy while the key is pending".
      - **When it is cleared.** Only when the attempt it was stored for
        is refused with the relay's own `400` or `401` as above, in the
@@ -6782,8 +6799,9 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
    - **The order once the anchor is old.** While K's anchor is more
      than 13 days old and a key is pending, P collects K only after a
      rotate (or registration) attempt that got no `200` since its last
-     collect of K, or while a `retry_after` runs (no attempt may then be
-     made). An attempt that succeeds leads to the second write, which
+     collect of K, or while no attempt may be made (a `retry_after`
+     runs, or in the refused state after the unlock's attempt). An
+     attempt that succeeds leads to the second write, which
      stops the collects of K at once (next item), before any.
    - **When P stops.** After the second write, P ends its collects of
      K's mailbox 13 days after the anchor, on its own clock: the
@@ -6791,14 +6809,20 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      time has already passed at the second write, P stops at once, at
      that write, and collects K no more. A batch P has already collected
      from K when it stops is processed and acked as usual; the stop
-     applies from the next collect. P stops earlier, at any time,
-     once the relay answers `mailbox_unknown` for K (to a collect, or to
-     the rotate on the registration path, §3.4 "After the grace"), and
-     never collects K again after that. That stop is final even if the
-     answer was spurious and K still lived before the second write
-     (fail secure): the pending key then completes by the registration
-     path (§3.4 "After the grace"), and the telling covers what K took
-     after P's last collect.
+     applies from the next collect. While a key is pending or K is
+     old, P stops earlier, at any time, once the relay answers
+     `mailbox_unknown` for K (to a collect, or to the rotate on the
+     registration path, §3.4 "After the grace"), and never collects K
+     again after that. (A current key with no key pending is
+     registered again as §12.2 says; this does not apply to it.) That
+     stop is final even if the answer was spurious and K still lived
+     before the second write (fail secure): the pending key then
+     completes by the rotate or the registration path, and the telling
+     covers what K took after P's last collect. In the refused state a
+     spurious stop leaves the vault receiving nothing until an unlock's
+     attempt succeeds or the member replaces the vault's keys ("Replace
+     your vault's keys", §3.4 "What the member sees"), which is also
+     fail secure.
    - **Why that is enough.** A relay that serves vaults keeps an old
      mailbox for exactly 14 days after the rotate (RELAY-PROTOCOL §6.7),
      and the rotate comes after the anchor (except as the residual "A
@@ -6831,9 +6855,11 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      from K, even before that write, so a crash in between re-derives
      the same stop and the same value at the next run. At a recovery's
      open (§3.4 "A recovery's inherited key"), which writes nothing
-     before its step-2 write, that write records the stop, its
-     `last_msg_id` and the telling when it makes a key current; it
-     stands in for both "at once" and the second write.
+     before its step-2 write, the step-2 write records any stop already due (a `mailbox_unknown`
+     met during the open, whether or not a key is made current, or the
+     anchor plus 13 days passed) with its `last_msg_id`, and queues the telling if
+     it makes a key current; a stop not yet due follows as after any
+     second write.
    - **The telling is queued no earlier than the second write.** A stop
      after the second write queues it in the write that records the
      stop. A stop before it (on `mailbox_unknown`) records only the stop
