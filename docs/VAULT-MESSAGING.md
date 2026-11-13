@@ -6305,9 +6305,11 @@ harness's invariants, not the rule IDs `R29-I1`… of §6.3.2:
   it followed away from; Q never establishes an epoch whose handshake
   was signed by anything but its current `ik` for P at that moment; and
   once Q has followed R's `ik` link, Q accepts no message under an epoch
-  the copy set up that was deposited after that link, and P's first
-  rekey or reconnect under the new `ik` finds no such epoch current or
-  suspends.
+  the copy set up that was deposited after that link (except the
+  0.90.4 residual: an epoch Q abandoned while pending, at a link applied
+  at `hs.fin`, judged only by R29-K9 at P's `identity.rotate`), and P's
+  first rekey or reconnect under the new `ik` finds no such epoch current
+  or suspends.
 - **I4, fork.** If two different successors of one `ik` or relay key of
   P each reach Q in messages Q can still open (an epoch it keeps,
   §6.5), in any order and from keys Q knows for P ((0.86.0) its
@@ -9947,11 +9949,11 @@ repository root, `M/` the model `internal/trustmodel/`). R29-F2 (the
 | R29-K4 | §3.4.1 Epochs after an `ik` link | r29_oldcopy_test.go:187; r29_round6_test.go:306; r29_k4_test.go:9; r29_review4_test.go:183 |
 | R29-K5 | §3.4.1 After a demotion of the current epoch | r29_oldcopy_test.go:327, :399, :418, :443; r29_review_test.go:65; r29_round6_test.go:90, :124, :376, :391; r29_review4_test.go:332, :473, :515; r29_review4_test.go:628 (the reconnect's hs.fin while demoted) |
 | R29-K6 | §3.4.1 The reconnect bound; §6.6 | r29_oldcopy_test.go:527, :581, :606; r29_rr2_test.go:61, :78; r29_round6_test.go:323, :342; r29_bound_test.go:15, :48, :69; r29_review4_test.go:424 |
-| R29-K7 (every later epoch signed by the old `ik`; names E, except at an `hs.fin`) | §3.4.1 Strict F1; (0.90.4) Strict F1 for links applied at `hs.fin` | r29_oldcopy_test.go:154, :217; r29_rr2_test.go:37; r29_strictf1_test.go:37, :55; r29_review4_test.go:319; r29_flag_test.go:87; r29_i3copyinit_test.go:120, :192 (a rekey's `hs.fin`; an answer recorded without E); r29_i3link_test.go:82, :158 (a reconnect's `hs.fin`, no reconnect started; an answer without a named epoch), :238, :270 (not at an `hs.resp`); r29_i3link2_test.go:88 (a rekey naming the confirmed epoch: Strict F1, then rule E), :163 (a restore reconnect with a link) |
+| R29-K7 (every later epoch signed by the old `ik`; names E, except at an `hs.fin`) | §3.4.1 Strict F1; (0.90.4) Strict F1 for links applied at `hs.fin` | r29_oldcopy_test.go:154, :217; r29_rr2_test.go:37; r29_strictf1_test.go:37, :55; r29_review4_test.go:319; r29_flag_test.go:87; r29_i3copyinit_test.go:120, :192, :212 (a rekey's `hs.fin`; an answer recorded without E; E kept across a restart); r29_i3link_test.go:82, :158 (a reconnect's `hs.fin`, no reconnect started; an answer without a named epoch), :238, :270 (not at an `hs.resp`); r29_i3link2_test.go:88 (a rekey naming the confirmed epoch: Strict F1, then rule E), :163 (a restore reconnect with a link) |
 | R29-K8 | §3.4.1 Rule C, acceptFrom | r29_review_test.go:209; r29_round6_test.go:196; r29_oldcopy_test.go:279; r29_review4_test.go:446 |
 | R29-K9 ((0.87.1) finding C) | §3.4.1 Epochs abandoned while pending, at P's `identity.rotate` | r29_k9_test.go:47, :63, :80, :96, :129; r29_round6_test.go:242 (the K2 case) |
 | R29-F1 | §3.4.1 Fork by `ctx` | r29_oldcopy_test.go:154, :279; r29_review4_test.go:27, :77; r29_round6_test.go:437 |
-| R29-F3 | §6.3.1 The received flag; §3.4.1 Epochs after an `ik` link, Strict F1 | r29_flag_test.go:23, :51, :87; r29_i3copyinit_test.go:177 (flag set, at a rekey's `hs.fin`); r29_i3link2_test.go:22 (flag set, at a reconnect's `hs.fin`) |
+| R29-F3 | §6.3.1 The received flag; §3.4.1 Epochs after an `ik` link, Strict F1 | r29_flag_test.go:23, :51, :87; r29_i3copyinit_test.go:177 (flag set, at a rekey's `hs.fin`); r29_i3link2_test.go:22 (flag set, at a reconnect's `hs.fin`); r29_i3link_test.go:137 (flag set before a reconnect: its answer ends) |
 | R29-D1 | §6.3.1 Devices and agents; §6.7 | r29_rules_test.go:174; r29_gapf_test.go:231, :262 (gap F pinned) |
 | R29-D2 | §6.3.1 Devices and agents; §15 item 51 | V/client/rotate086_test.go:18, :71; V/client/persist_test.go:485 |
 | R29-D3 | §6.3.1 Devices and agents; §6.7; §10.9 | r29_device_test.go:18 |
