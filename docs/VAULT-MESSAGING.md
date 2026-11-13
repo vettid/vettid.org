@@ -41,7 +41,10 @@ changelog:
       key. A missing `relay_links` member is a malformed body. Only a
       link valid in this sense is kept as seen by rule C, and no link of
       a chain refused for its form or count is, in an update or a
-      reconnect alike. A new layout MUST use a new label, for the
+      reconnect alike. A link with a member of the wrong JSON type or form
+      is refused `relay_unlinked` as a link, an exception to §5.3 and §10.1
+      for relay link objects only. A duplicate member or invalid JSON
+      stays a malformed body. A new layout MUST use a new label, for the
       relay link and the identity link (§3.4); a link with another `v`
       or `suite` is refused, not reinterpreted, and unknown members are
       ignored.
@@ -5398,6 +5401,20 @@ verifies under another. A link with a missing or different `v` or
 `suite` is refused, not reinterpreted. Members a link does not define
 are ignored (§10.1).
 
+(0.90.3) **A link's form.** Suppose a relay link object has a member of
+the wrong JSON type or form:
+- a wrong type or value for `v` or `suite` (for example `"1"` or `1.0`);
+- base64 that is not canonical or uses the wrong alphabet;
+- a key or a signature of the wrong length.
+
+That link is refused `relay_unlinked`, and its chain with it. This is an
+exception to §5.3's "Known fields MUST have exactly the type and form
+given here" (§10.1), which would otherwise make the whole message
+malformed. It applies to relay link objects only. A fault at the JSON
+level of the body, such as a duplicate member or invalid JSON, still
+makes the whole message a malformed body, refused before any link is
+read.
+
 A chain is refused (`relay_unlinked`) when any of these holds:
 - a link with a missing `v` or `suite`, or any other `v` or `suite`;
 - a link whose `old` equals its `new`;
@@ -8446,7 +8463,10 @@ The inner plaintext is a UTF-8 JSON object, followed by padding:
   MUST reject non-canonical base64 and base64 containing CR or LF.
 - Unknown fields are ignored. Known fields MUST have exactly the type and
   form given here; receivers MUST reject anything else. One exception:
-  a vote message's `pad` is not checked (§10.19.5, 0.83.6).
+  a vote message's `pad` is not checked (§10.19.5, 0.83.6). (0.90.3) A
+  relay link object whose members have the wrong type or form is refused
+  as a link (`relay_unlinked`), not as a malformed message (§3.4.1 rule
+  U, "A link's form").
 - Receivers MUST reject an inner plaintext (including its `body`) that
   is not valid UTF-8 (RFC 3629: encoded surrogates such as ED A0 80 are
   invalid), that has duplicate member names at any depth, or that has
@@ -12036,7 +12056,10 @@ an answer to an unknown or expired id is dropped.
 
 ### 10.1 Common rules and `sync.event`
 
-- Bodies are JSON objects (§5.3). Unknown members are ignored. Strings are
+- Bodies are JSON objects (§5.3). Unknown members are ignored. (0.90.3)
+  A relay link object of the wrong type or form is refused
+  `relay_unlinked`, not as a malformed body (§3.4.1 rule U, "A link's
+  form"). Strings are
   at most 4 KiB unless stated. Timestamps in bodies use the inner `ts`
   format; invite and pairing expiries (`exp` in responses) are RFC 3339 in
   whole seconds.
@@ -31510,12 +31533,15 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
                 deposit key; a last new that is not the announced key; a
                 missing v or suite; an unknown v; an unknown suite; a link
                 with an unknown v whose signatures verify
-  form        : v given as "1" or as 1.0; a duplicate member; base64 that
-                is not canonical or uses the URL alphabet; a 31-byte key
-  each invalid case is refused relay_unlinked; each form case is refused,
-  relay_unlinked or, where §10.1's strict parsing refuses the message as
-  a whole, a malformed body (the file says which); the file is added
-  with the vault's implementation of 0.90.3
+  form        : relay_unlinked (a link's form, rule U): v given as "1";
+                v given as 1.0; base64 that is not canonical; base64 in
+                the URL alphabet; a 31-byte key.
+                malformed body: a duplicate member, refused before any
+                link is read
+  each invalid case is refused relay_unlinked. Each form case records its
+  class in a "refusal" field, and carries its links as the exact array
+  text in "relay_links_json", since those forms cannot survive as parsed
+  JSON. The file is added with the vault's implementation of 0.90.3
 
 §4.3 sealing (HPKE base, suite 2)                               (hpke.json)
   encapsulation randomness    : 64 x 0x07
