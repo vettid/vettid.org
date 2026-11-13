@@ -33,15 +33,23 @@ changelog:
     - A relay link is `{v, suite, old, new, sig_old, sig_new}`, as the
       identity link carries `v` and `suite`. As there, the suite is
       bound through the signed label `vettid/vms/2/relay-rotate`, and `m`
-      is unchanged. A later `v` or `suite` MUST use a different label or
-      `m`, for the relay link and the identity link alike (§3.4).
+      is unchanged.
     - Refused `relay_unlinked`: a missing or other `v` or `suite`, `old`
-      equal to `new`, a key appearing twice (for example A→B→A), or fewer
-      than 1 or more than 32 links. Only a link valid in this sense is
-      kept as seen by rule C.
-    - §16 gains `relay_rotate.json`, the relay link's valid and invalid
-      cases. Every client MUST reproduce it before it advertises
-      `relay_follow` or rotates its own relay key.
+      equal to `new`, a repeated key in the sequence of the first `old`
+      and each `new` (for example A→B→A), fewer than 1 or more than 32
+      links, or, in a reconnect, a last `new` that is not the announced
+      key. A missing `relay_links` member is a malformed body. Only a
+      link valid in this sense is kept as seen by rule C, and no link of
+      a chain refused for its form or count is, in an update or a
+      reconnect alike. A new layout MUST use a new label, for the
+      relay link and the identity link (§3.4); a link with another `v`
+      or `suite` is refused, not reinterpreted, and unknown members are
+      ignored.
+    - §16 gains `relay_rotate.json`: the relay link's valid cases (a
+      32-link chain among them), invalid cases and app-facing form cases.
+      The vault, the service vault, the apps, the desktop and the agent
+      SDK MUST reproduce it before they advertise `relay_follow` or
+      rotate their own relay key.
     - The update's relay links are named `relay_links`, as in a
       reconnect (§6.2); it was `links` (§3.4.1 rule U, §10).
     - An empty `rotations` in an update is read as absent (§3.4.2 RK5).
@@ -4923,10 +4931,11 @@ sig_new = Ed25519(new_ik, "vettid/vms/2/rotate" || m)
 
 - Both signatures MUST verify, and `old_ik` MUST differ from `new_ik`.
 - (0.90.3) `v` and `suite` are not separate bytes of `m`: the suite is
-  bound through the label's `vettid/vms/2/`. A later `v` or `suite` MUST
-  use a different label (or a different `m`), so that a statement signed
-  under one layout never verifies under another. A receiver never reads
-  a statement differently because of its `v`.
+  bound through the label's `vettid/vms/2/`. A new layout (another `v`
+  or `suite`) MUST use a different label, so that a statement signed
+  under one layout never verifies under another. A statement with a
+  missing or different `v` or `suite` is rejected, as one whose
+  signature fails is, not reinterpreted.
 - A chain is an ordered array of statements. Each link's `old_ik` MUST equal
   the previous link's `new_ik`. A receiver MUST reject chains longer than 32
   links. (0.69.1) A receiver resolves a chain against what it has already
@@ -5344,7 +5353,8 @@ in a message refused at step 1 (a suspended record) are kept as seen too
 (§3.4.2 RK12).
 - **Identity links** (in `identity.rotate`, `hs.init`, `hs.resp`): §3.4
   "One successor per key".
-- **Relay links** (in an update; (0.90.3) valid as rule U defines it):
+- **Relay links** (in an update, or (0.90.3) in a reconnect `hs.init` or
+  `hs.resp` under §3.4.2 RK8; valid as rule U defines it):
   the connection is suspended as a fork
   (§6.6 "Fork detection", `connection.fork_suspected` with `ref` =
   `relay`). While a relay fork is recorded, `connection.rotation.resolve`
@@ -5382,26 +5392,33 @@ sig_old = Ed25519(old, m)        sig_new = Ed25519(new, m)
 (0.90.3) As in the identity link, `v` and `suite` are not separate bytes
 of `m`: the suite is bound through the label's `vettid/vms/2/` (suite
 2), exactly as `"vettid/vms/2/rotate"` binds it for the identity link,
-and `v` = 1 is this layout. A later `v` or `suite` MUST use a different
-label (or a different `m`), so that a link signed under one layout never
-verifies under another. Q never reads a link differently because of its
-`v`.
+and `v` = 1 is this layout. A new layout (another `v` or `suite`) MUST
+use a different label, so that a link signed under one layout never
+verifies under another. A link with a missing or different `v` or
+`suite` is refused, not reinterpreted. Members a link does not define
+are ignored (§10.1).
 
 A chain is refused (`relay_unlinked`) when any of these holds:
 - a link with a missing `v` or `suite`, or any other `v` or `suite`;
 - a link whose `old` equals its `new`;
-- any key appearing twice in the chain, for example A→B→A;
-- fewer than 1 or more than 32 links.
+- a repeated key: the sequence of the first `old`, then each link's
+  `new`, has a key twice (for example A→B→A);
+- fewer than 1 or more than 32 links. A message whose `relay_links`
+  member is missing altogether is a malformed body, refused as a whole,
+  not `relay_unlinked`.
 
 For rule C, a relay link is **valid** only if its `v` is 1, its `suite`
 is 2, its `old` differs from its `new`, and both signatures verify. A
 link that fails any of these is not kept as seen, even when its
-signatures verify.
+signatures verify. No link of a chain refused for its form or its count
+is kept as seen, whether the chain came in an update or in a reconnect
+`hs.init` or `hs.resp` (§3.4.2 RK8).
 
 P signs a link in the rotation's first write (§3.4 step 1). Q checks
 that the chain has 1 to 32 links, that each link's `v` is 1 and its
-`suite` 2 (both present), that its `old` differs from its `new`, that no
-key appears twice in the chain, that both signatures verify, that each link's `old` is the
+`suite` 2 (both present), that its `old` differs from its `new`, that
+the sequence of the first `old` and each `new` has no repeated key, that
+both signatures verify, that each link's `old` is the
 previous link's `new`, that the first `old` is the `sender` and the last
 `new` is `relay.pk`, and rule C on each link; else refuse
 (`relay_unlinked`).
@@ -6430,6 +6447,9 @@ device's relay key.
   P, before or after that key's cut-off, when both hold:
   - its `relay_links` connect its `sender` to the announced key;
   - those links pass rule C.
+
+  (0.90.3) A message whose last `new` is not the announced key, or that
+  fails rule U's form checks, is refused `relay_unlinked`.
 
   The announced key is then Q's current key for P, or one Q follows to
   by those links (below).
@@ -8684,8 +8704,9 @@ Field rules:
   with rule U's checks), from the deposit key up to the announced key,
   1 to 32 of them. The first link's `old` MUST be the key the message is
   deposited with (its collect `sender`), and the last link's `new` MUST
-  be the announced key. In an `hs.init` the announced key is
-  `from.relay.pk`.
+  be the announced key; (0.90.3) a message whose last `new` is not the
+  announced key is refused `relay_unlinked`. In an `hs.init` the
+  announced key is `from.relay.pk`.
   An `hs.resp` that carries `relay_links` MUST carry `relay`, the
   announced address, and `relay` MUST be absent otherwise. `relay.pk`
   MUST equal the last link's `new`, `relay.mailbox` MUST be the mailbox
@@ -31462,10 +31483,12 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
 - The session vector's inner plaintext is the sealed one with `"seq":1`
   after `ts`.
 - Tokens, ids, PIN and claim ids in the vectors are dummy values.
-- (0.90.3) **`relay_rotate.json`** gates relay-key rotation. Every client
-  MUST reproduce it, every valid case accepted and every invalid case
-  refused, before it advertises `relay_follow` (§3.4.1 "The gate", §3.4.2
-  RK0; a device in `device.features`) or rotates its own relay key.
+- (0.90.3) **`relay_rotate.json`** gates relay-key rotation. The vault,
+  the service vault, the Android and iOS apps, the desktop and the agent
+  SDK MUST each reproduce it, every valid case accepted and every
+  invalid case refused, before it advertises `relay_follow` (§3.4.1 "The
+  gate", §3.4.2 RK0; a device in `device.features`) or rotates its own
+  relay key.
 
 ```
 §3.2 keys                                                       (keys.json)
@@ -31479,17 +31502,20 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
   label "vettid/vms/2/relay-rotate"; link {v: 1, suite: 2, old, new, sig_old, sig_new}
   inputs      : each case gives the deposit key (first_b64) and the
                 announced key (announced_b64) the chain is checked against
-  valid       : a single link; a chain of links
+  valid       : a single link; a chain of links; a chain of 32 links
   invalid     : wrong sig_old; wrong sig_new; signed with the identity label
                 "vettid/vms/2/rotate"; old == new; a repeated key in the
                 chain; a broken chain (an old that is not the previous new);
                 no links; more than 32 links; a first old that is not the
                 deposit key; a last new that is not the announced key; a
                 missing v or suite; an unknown v; an unknown suite; a link
-                with an unknown v whose signatures verify, which is also
-                not kept as seen (rule C)
-  each invalid case is refused relay_unlinked; the file is added with the
-  vault's implementation of 0.90.3
+                with an unknown v whose signatures verify
+  form        : v given as "1" or as 1.0; a duplicate member; base64 that
+                is not canonical or uses the URL alphabet; a 31-byte key
+  each invalid case is refused relay_unlinked; each form case is refused,
+  relay_unlinked or, where §10.1's strict parsing refuses the message as
+  a whole, a malformed body (the file says which); the file is added
+  with the vault's implementation of 0.90.3
 
 §4.3 sealing (HPKE base, suite 2)                               (hpke.json)
   encapsulation randomness    : 64 x 0x07
@@ -31564,7 +31590,6 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
   (enrollment and unlock), unlock signing string (0.3.0, 12 fields) and
   signature, vault.unlock padded to 12,288 B in a 13,444 B envelope
   (randomness 64 x 0x13) : altchan.json
-
 ```
 
 **§11.10 release updates (0.3.0).** These values were computed with Go 1.26
