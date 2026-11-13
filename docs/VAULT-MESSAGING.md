@@ -6,7 +6,7 @@ date: 2026-11-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
-  - RELAY-PROTOCOL.md (0.11.0)
+  - RELAY-PROTOCOL.md (0.11.1)
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md (0.2.2)
@@ -29,34 +29,46 @@ related:
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.90.2: 2026-11-12, **§3.4.2 made precise for the implementation**
-    (erratum):
+    (erratum, with one owner decision):
+    - **New, by owner decision 2026-11-12:** the keep's cap is 2,000
+      entries and 8 MiB of inners per peer, "cap, told on drop" (RK14
+      step 3, §7.3).
     - RK6: a restarted reconnect goes only on a held reconnect token for
-      the new mailbox, never an unadopted carried one (§6.3.1). The
+      the new mailbox, never on an unadopted carried one (§6.3.1). The
       carried token was never needed: an RK8 follow either ends Q's
       reconnect or is made by it.
     - RK7: "later" is establishment order at Q, without pending epochs
-      or epochs abandoned while pending. Positions compare as in
-      "Cut-off", and a closure is never undone. An `hs.fin`'s pass closes only on an epoch
-      established later than that `hs.fin`.
+      or epochs abandoned while pending, except the pass's own epoch. A
+      Q-initiated epoch keeps its `hs.resp`'s position. Positions compare
+      as in "Cut-off". A closure is never undone, and is kept while the
+      key is "earlier". An `hs.fin`'s pass is checked when it is
+      processed, and closes only on an epoch established later than
+      that `hs.fin`.
     - RK10: "knows a newer mailbox" means one followed, by rule U or
-      RK8; §3.4.1 "The reconnect bound" exception list and RK15 say the
-      same.
-    - RK14 step 1: P ends its collects of K 14 days after the rotate,
-      the least grace RELAY-PROTOCOL §6.7 allows, and K's mailbox then
-      leaves the collect set. §3.4 (a) and §3.4.1 "Order of processing"
-      say so.
-    - RK14 step 3: durable session entries are kept as their inner
-      messages, except upkeep that recovers by itself. An entry leaves
-      the keep at its receipt, its `exp`, or the connection's removal
-      (§7.4). The per-peer cap is 2,000 entries and 8 MiB of inners
-      (owner decision 2026-11-12, "cap, told on drop"; §7.3). A small
-      record of the dropped entries stays, and they are told if they
-      would have been deposited again. A local `message.delete` does not
-      unsend: a kept entry stays, and a deleted message is never told.
+      RK8. §3.4.1 "The reconnect bound" and RK15 say the same.
+    - RK14 step 1: P ends its collects of K 14 days after its second
+      write. A K mailbox still live after the relay's end is not P's.
+      K leaves the collect set (§3.4 (a), §3.4.1 "Order of
+      processing"). The old key stays until step 1 is done (§3.4 "When
+      the old key is deleted").
+    - RK14 step 2: P's dedupe lasts 76 days after its telling (§8.2).
+    - RK14 step 3:
+      - the member's messages and the upkeep without a retry of its own
+        are kept as their inner messages;
+      - an entry leaves the keep at a `delivered` or `read` receipt, at
+        its `exp`, or at the connection's removal (§7.4);
+      - past the cap, a small record of the dropped member messages
+        stays and tells them;
+      - the pin and its deadline are real time;
+      - a local delete does not unsend: the kept copy stays and is sent
+        again if needed, with no notice (owner decision 2026-11-12;
+        §8.3).
     - RK14 step 5: an attachment whose blob was in the ended mailbox is
       uploaded again under §10.5.1's conditions for `missing`, or sent
-      without a blob.
-    - RK14 step 6: the time scale of the telling's deadline is stated.
+      without a blob; P's later `missing` is answered as §10.5.1 says.
+    - Residuals: a vault relay's grace is exactly 14 days (RELAY-PROTOCOL
+      0.11.1). The residual "Dedupe beyond A3" is replaced by step 2's
+      bound.
   - 0.90.1: 2026-11-12, **erratum to §3.4.2 RK11's "As built" note.**
     Release 29's demotion retry makes a connection `stale` for "no
     reconnect token" as §6.3.1 specifies: it acts only on a demoted
@@ -4756,10 +4768,13 @@ create-only.
   - **(a) The old relay key stays, for deposits only.** After any
     relay-key rotation the vault keeps the **old relay key in the DEK
     state**, used **only to deposit** to recipients and, (0.84.0) until
-    the relay's grace ends ((0.90.0) between vaults that implement
-    §3.4.2, until §3.4.2 RK14 step 1 ends it; a device keeps the relay's
-    grace), to collect from its own old mailbox (§3.4 step 1: both
-    mailboxes during the grace):
+    the relay's grace ends ((0.90.2) a vault that implements §3.4.2
+    collects until §3.4.2 RK14 step 1 ends it, 14 days after its second
+    write; a device that rotates its own relay key collects until the
+    relay's grace ends, and its old key ends as "When the old key is
+    deleted" says, when its vault has acknowledged or at S1's 30 days),
+    to collect from its own old mailbox (§3.4 step 1: both mailboxes
+    during the grace):
     never otherwise to collect, and never to rotate, delete or mint
     tokens on any mailbox, nor for an owner operation, with two
     exceptions (0.85.0), both only during the grace and only on its own
@@ -4795,7 +4810,10 @@ create-only.
     followed by a rotation, can rotate before it is delivered). A removed
     phone, or a transfer's new phone, is not a recipient and never acknowledges, so the key is kept
     until that notice is delivered, definitively refused, or its token
-    expires. This is the one place the old key is kept, and it
+    expires. (0.90.2) Between vaults that implement §3.4.2, the old key
+    is also kept until §3.4.2 RK14 step 1 has ended the collects of its
+    mailbox, recorded `last_msg_id` and queued `relay.mailbox.closed`.
+    This is the one place the old key is kept, and it
     replaces "in memory for the rotation's grace period" wherever that
     stood (§11.14.6 step 6, §11.14.10). The notices to removed devices
     (`device.unlinked`) and a transfer's owed outcome are deposited with it
@@ -5714,9 +5732,11 @@ each recipient Q).
   - **Deposits the old mailbox took after P's last collect.** The
     telling has them deposited again. Those still pinned 60 days after
     the follow, with no `relay.mailbox.closed`, are told
-    `message.delivery_unconfirmed`. Entries deposited to a mailbox Q
-    never follows P away from are dropped silently 60 days after their
-    `201`: such a mailbox still lives, or the relay kept them.
+    `message.delivery_unconfirmed`. (0.90.2) Entries deposited to a
+    mailbox Q never follows P away from are dropped silently 60 days
+    after their `201`: such a mailbox still lives, or P collected it
+    until it ended, since a vault relay's grace is exactly 14 days
+    (RELAY-PROTOCOL §6.7).
   - **Arrival order after a relay restart** (SQLite store only; the
     deployed relays use the shared (DynamoDB) store, which keeps the
     per-mailbox order). RELAY-PROTOCOL §6.2 guarantees per-mailbox ULID
@@ -5726,8 +5746,13 @@ each recipient Q).
     acked. Q would then compare against `last_msg_id` wrongly and drop an
     entry P never got.
   - **Devices have no telling.** A device that rotates its relay key,
-    or whose vault does, gets no `relay.mailbox.closed`. Its deposits to
-    an ended mailbox are lost, as before 0.90.0.
+    or whose vault does, gets no `relay.mailbox.closed`. (0.90.2) A
+    device's deposits that its vault's old mailbox accepted are collected,
+    since the vault collects it until it ends. After the end they are
+    refused `mailbox_unknown`, and the device follows its vault's update
+    or is paired again. A vault's deposits to a device's old mailbox that
+    the device did not collect before the relay's grace ended are lost,
+    as before 0.90.0.
   - **A deleted peer whose `connection.removed` was lost.** The member
     sees up to 60 days of "Waiting to reach …" before
     `message.not_delivered`. If this side was in its own S1, its stale
@@ -5767,12 +5792,9 @@ each recipient Q).
     wait until Y's `relay.token.issued` arrives or RK11's wait ends.
   - **A message leased but not acked when P ends its collects of K** is
     above `last_msg_id`, so Q sends it again. P drops it if it processed
-    it (its dedupe). It is lost only if the relay gave it to P after P's
-    last collect, which the grace's end rules out.
-  - **Dedupe beyond A3.** A re-deposit that reaches P more than 60 days
-    after P's `relay.mailbox.closed` (a Q locked longer than A3 allows)
-    is no longer recognised, and a message P did process could run
-    twice.
+    it (its dedupe). (0.90.2) It is lost only if the relay gave it to P
+    after P's last collect. The exact 14-day grace rules that out: the
+    relay ends K no later than P's last collect.
   - **A demoted Q past P's grace.** Suppose Q has demoted the epoch P's
     updates travel under, and its own reconnect is refused
     `mailbox_unknown` by P's ended mailbox. Q then learns P's new address
@@ -6297,14 +6319,20 @@ than the message's `sender`.
   Terms, "Epoch signer"). Positions compare as in "Cut-off": in one
   mailbox by `msg_id`, across mailboxes by `deposited_at`. A tie is not
   "later". Pending epochs, and epochs abandoned while pending, are not
-  counted.
+  counted, except the epoch the pass's own message travels under or
+  establishes. For an epoch Q began as initiator, the position is that
+  of the `hs.resp` that established it ("Epochs after an `ik` link"),
+  and it stays that position once confirmed.
 - (0.90.2) **For an `hs.fin`,** its epoch is the one it would establish,
   at the `hs.fin`'s own position. Its pass is closed only by a message
   Q has accepted from a later relay key under an epoch established by a
-  message at a later position than that `hs.fin`. This matters only for
-  an `hs.fin` processed out of order (redelivered or deferred).
+  message at a later position than that `hs.fin`. It is checked when
+  the `hs.fin` is processed. It matters only for an `hs.fin` processed
+  out of order (redelivered or deferred).
 - (0.90.2) **A closure is recorded** per epoch when it happens, and is
   never undone, even if that epoch is later destroyed, demoted or ended.
+  The records are kept for as long as Q keeps the earlier key as
+  "earlier" (§3.4.1 "Relay-key states").
 
 Per epoch, not per pair, is needed for liveness: a later key accepted
 under one epoch says nothing about a handshake still open under another.
@@ -6481,9 +6509,11 @@ S1's clock.
 **RK14. The old mailbox's end** (owner decisions 2026-11-12).
 
 **The grace** is the relay's rotation grace (RELAY-PROTOCOL §6.7,
-default 14 days). A relay that serves vaults MUST NOT set it below 14
-days, and no vault release rotates a relay key before the deployed
-relays' grace is 14 days.
+default 14 days). (0.90.2) A relay that serves vaults MUST set it to
+exactly 14 days, and no vault release rotates a relay key before the
+deployed relays' grace is 14 days. A longer grace would keep accepting
+deposits (`201`) into K after P has stopped collecting it (step 1), and
+those would never be read.
 
 **The hold** applies between two vaults, and replaces §3.4 (b)'s "a
 definite refusal ... ends the resends" for `mailbox_unknown` there.
@@ -6535,32 +6565,39 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
   telling.
 
 **The telling.**
-1. **P records what it collected.** (0.90.2) P ends its collects of K's
-   mailbox 14 days after the rotate on its own clock, or earlier when a
-   collect is answered `mailbox_unknown`. Fourteen days is the least
-   grace RELAY-PROTOCOL §6.7 allows a relay that serves vaults. A relay
-   configured with a longer grace keeps the mailbox longer, but P does
-   not collect it after its 14 days:
-   - K's mailbox then leaves the collect set (§3.4.1 "Order of
-     processing"), as for `mailbox_unknown`, so it never holds back
-     what P processes from K′;
-   - any entry Q keeps (step 3) deposited there later is above
-     `last_msg_id`, and the telling has it deposited again (steps 3 to
-     5);
-   - the 14 days stay real time on staging, like the relay's grace
-     (STAGING-TIME-SCALE S19);
-   - a K mailbox that answers P after that time may also be a copy's
-     re-registration of K, so P never trusts it.
+1. **P records what it collected.**
+   - **When P stops.** (0.90.2) P ends its collects of K's mailbox 14
+     days after its second write, which follows the relay's `200` to the
+     rotate, on its own clock; or earlier, when a collect is answered
+     `mailbox_unknown`.
+   - **The grace is exactly 14 days.** A relay that serves vaults keeps
+     an old mailbox for exactly that long after the rotate
+     (RELAY-PROTOCOL §6.7), so K has ended by the time P stops.
+   - **A K mailbox still live after that time is not P's.** If a collect
+     of K is still answered once 14 days have passed since the rotate's
+     `200` (by P's record), K may have been registered again by a copy.
+     P never trusts it: it processes nothing from it, and ends its
+     collects of K at once.
+   - **K leaves the collect set** (§3.4.1 "Order of processing") once P
+     ends its collects, as for `mailbox_unknown`, so it never holds back
+     what P processes from K′.
+   - **The 14 days stay real time** on staging, like the relay's grace
+     (STAGING-TIME-SCALE N17).
 
-   P then
-   records `last_msg_id` for that mailbox: the largest `msg_id` such that
-   P has acked every message the relay gave it from that mailbox, up to
-   and including that id.
+   **What P records.** `last_msg_id` for that mailbox: the largest
+   `msg_id` such that P has acked every message the relay gave it from
+   that mailbox, up to and including that id.
    - Erring low costs nothing, because P drops a copy by its inner `id`
      (§8.2).
    - The relay's ULIDs are in arrival order per mailbox
-     (RELAY-PROTOCOL §6.2). See the residual "Arrival order after a relay
-     restart".
+     (RELAY-PROTOCOL §6.2). See the residual "Arrival order after a
+     relay restart".
+   - Any entry Q keeps (step 3) that was deposited to K and that P did
+     not ack is above `last_msg_id`, so the telling has it deposited
+     again (steps 3 to 5).
+   - **The old key stays until this step is done.** Between vaults, P
+     keeps K (§3.4 "When the old key is deleted") until it has ended its
+     collects of K, recorded `last_msg_id`, and queued the telling.
 2. **P sends the telling.** P sends each connection a separate durable
    message, **`relay.mailbox.closed {mailbox, last_msg_id}`**, under its
    then-current epoch with that connection.
@@ -6568,10 +6605,13 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      for S2.
    - While P has no epoch with the connection, it is held like any
      durable message.
-   - P keeps the inner `id`s it processed from that mailbox for dedupe
-     (§8.2) until 60 days after it sends `relay.mailbox.closed`: as long
-     as Q's pin can last (step 3), divided by `time_scale` as the pin
-     is.
+   - **Dedupe after the telling.** P keeps the inner `id`s it processed
+     from that mailbox for dedupe (§8.2) for 76 days, in real time,
+     after the relay accepts its `relay.mailbox.closed`. Q re-deposits
+     only while its pin lasts (step 3: 60 days after Q's follow, which
+     comes before that deposit), and a re-deposit waits at the relay at
+     most 14 days. So with 2 days of margin, every re-deposit reaches P
+     while P can still recognise it.
 3. **Q keeps its recent deposits.** Q keeps each of its outbox entries
    that the relay accepted (`201`) into a peer vault's mailbox, with that
    `msg_id`, for 60 days after the `201`, the longest a follow can still
@@ -6579,32 +6619,32 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
    It stays in real time on staging, since it covers the relay's
    handling of the peer's old mailbox.
    - (0.90.2) **Which entries.** Every durable session entry to the
-     peer: the member's own messages, and the upkeep that has no retry
-     of its own (for example `profile.update`, `message.receipt` and
-     `message.attachment.status`). Best-effort and ephemeral messages
-     are not kept. Neither is the upkeep that recovers by itself:
-     - handshake messages (`hs.init`, `hs.resp`, `hs.fin`), by their
-       handshake's expiry and the reconnect that follows;
-     - `hs.confirm`, by "`hs.confirm` again" (§6.3.1);
-     - `relay.token.issued` and `relay.token.refresh`, by the refresh
-       of §7.2 and the reconnect of §6.6;
-     - `identity.rotate`, by S5's resend and the links of RK5;
-     - `relay.address.update`, by §3.4 (b)'s resends.
-   - (0.90.2) **When an entry leaves the keep.** Each of these ends it,
+     peer: the member's own messages as §8.3 "The member's notice"
+     defines them (these include `message.receipt` and
+     `message.attachment.status`, which §8.3 does not count as upkeep),
+     and the upkeep that has no retry of its own (`profile.update`).
+     Best-effort and ephemeral messages are not kept, and neither is the
+     upkeep that recovers by itself:
+     - handshake messages (`hs.init`, `hs.resp`, `hs.fin`) recover by
+       their handshake's expiry and the reconnect that follows;
+     - `hs.confirm` recovers by "`hs.confirm` again" (§6.3.1);
+     - `relay.token.issued` and `relay.token.refresh` recover by the
+       refresh of §7.2 and the reconnect of §6.6;
+     - `identity.rotate` recovers by S5's resend and the links of RK5;
+     - `relay.address.update` recovers by §3.4 (b)'s resends.
+   - (0.90.2) **When an entry leaves the keep.** Any of these ends it
      before its 60 days:
-     - its `delivered` `message.receipt`, when Q receives it;
-     - its `exp` passing. It is dropped as `drop.held_expired`
-       (§3.4.1);
+     - its `delivered` or `read` `message.receipt`, when Q receives it;
+     - its `exp` passing. A pinned entry is then audited
+       `drop.held_expired`. An entry that is not pinned ends silently,
+       because its deposit was accepted and nothing waits on it;
      - the connection's removal or a block (§7.4), which deletes all of
        that connection's kept and pinned entries.
-
-     A local `message.delete` does not unsend (§10.4, "local only"): a
-     kept entry stays, and may be deposited again. Nothing is shown for a
-     deleted message, so the vault leaves a message the member deleted
-     out of the member's notice (§8.3): it is audited only. Step 6 and
-     the cap's record never tell it, and the app shows no notice for it.
-     The app plans need no rule for this, because the notice never
-     reaches them.
+   - **A local delete** does not end a kept entry (owner decision
+     2026-11-12): the entry stays and is deposited again if needed, and
+     the member is not told if it cannot be confirmed (§8.3 "A local
+     delete"). A deleted message's content therefore stays in the vault
+     for up to 60 days after its deposit, or until its pin ends.
    - (0.90.2) **What is kept.** The entry's inner message, so that it can
      be sealed again under the current epoch (the send key of the epoch
      it went under may be gone), with its inner `id`, its `msg_id` and
@@ -6612,22 +6652,27 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
    - (0.90.2) **The cap** (owner decision 2026-11-12): at most 2,000
      entries (`keep_entries`) and 8,388,608 bytes (8 MiB, `keep_bytes`)
      of kept inners per peer (§7.3). These are sizes, not waits, so they
-     are not scaled on staging; STAGING-TIME-SCALE lists only waits. Past the cap, the oldest kept entry is dropped. A small
-     record of the dropped entries stays, per mailbox: their count, the
-     highest `msg_id` among them, and the first one's inner `id`.
-     - If `last_msg_id` in P's `relay.mailbox.closed` is below that
-       highest `msg_id`, the dropped member messages are told
-       `message.delivery_unconfirmed`, with that `count` and `ref`.
-     - If no telling comes by step 6's deadline, they are told the same
-       way.
-     - Dropped upkeep is audited, not told (§8.3 "The member's
-       notice").
+     are not scaled on staging; STAGING-TIME-SCALE lists only waits.
+     Past the cap, the oldest kept entry is dropped, and a small record
+     of the dropped entries stays, per mailbox.
+     - **The record holds** the dropped member messages' count, including
+       ones the member has deleted, the highest `msg_id` among them, and
+       the inner `id` of the first one not deleted (the notice's `ref`).
+     - **Its life.** It is pinned with the mailbox's entries, and ends
+       with the last dropped entry's window, or with the pin.
+     - **When it tells.** If `last_msg_id` in P's `relay.mailbox.closed`
+       is below that highest `msg_id`, the dropped member messages that
+       are not deleted are told `message.delivery_unconfirmed`, with
+       their `count` and that `ref`. If no telling comes by step 6's
+       deadline, they are told the same way. If every one of them is
+       deleted, nothing is told.
+     - Dropped upkeep is audited, not told (§8.3 "The member's notice").
    - **When Q follows P away from a mailbox M,** Q pins the entries it
      still keeps for M. It keeps them until P's `relay.mailbox.closed`
-     for M, or 60 days after that follow (divided by `time_scale`,
-     STAGING-TIME-SCALE S22).
+     for M, or 60 days after that follow, in real time.
    - **For a mailbox that never closes** (Q never follows P away from
      it), the keeping ends silently, at the end of each entry's window.
+     Such a mailbox still lives, or P collected it until it ended.
 4. **Q acts on the telling only for a pinned mailbox.** Q accepts
    `relay.mailbox.closed` only for a mailbox it knows as an earlier
    mailbox of P's and has followed P away from, never for P's current
@@ -6647,17 +6692,23 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
 
      The re-deposited message then carries the new `blob` and
      `expires_at`. Otherwise Q sends the message without `blob` and
-     `expires_at`, and a later `missing` is answered `withdrawn`, as
-     §10.5.1 says.
+     `expires_at`, and P's later `missing` is answered as §10.5.1 says:
+     - with no `peer_reuploads` budget left, it is kept and served when
+       the budget allows (not withdrawn);
+     - after the member deleted the message, or with the blob gone, it
+       is `withdrawn` with reason `deleted`;
+     - with `attachment_reoffers` spent, `withdrawn` with `limit`;
+     - past `missing_window`, `withdrawn` with `expired`;
+     - for an attachment already `delivered` or `refused`, it is
+       ignored.
    - **The cost of a re-upload P did not need.** If P had in fact
      processed the original, its dedupe drops the re-deposit. The fresh
      upload has then cost one of `attachment_reoffers`, and its blob
      stays in P's mailbox until its TTL.
 6. **If no telling comes.** An entry still pinned 60 days after the
-   follow (divided by `time_scale`, STAGING-TIME-SCALE S22, as the pin
-   is), with no `relay.mailbox.closed` for its mailbox, is told as
-   `message.delivery_unconfirmed` (§8.3; its approved text, used for this
-   case by owner decision 2026-11-12).
+   follow (in real time, as the pin is), with no `relay.mailbox.closed`
+   for its mailbox, is told as `message.delivery_unconfirmed` (§8.3; its
+   approved text, used for this case by owner decision 2026-11-12).
 
 **Deposits sent again.** This covers RK14's re-deposits and the held
 deposits re-addressed at a follow.
@@ -11176,9 +11227,9 @@ Both of the following layers are REQUIRED:
    ((0.88.7) a vault keeps them 16 days and 5 minutes: the durable `ts`
    window of §8.4 with its future skew, so that a copy whose `ts` is kept,
    §8.3 "Re-sealed at a key change", is refused for its `ts` before its
-   `id` is forgotten). (0.90.0) The inner `id`s a vault processed from
-   one of its own rotated mailboxes are kept until 60 days after it sends
-   `relay.mailbox.closed` for that mailbox (§3.4.2 RK14, §8.3 "Deposited
+   `id` is forgotten). (0.90.2) The inner `id`s a vault processed from
+   one of its own rotated mailboxes are kept until 76 days after the
+   relay accepts its `relay.mailbox.closed` for that mailbox (§3.4.2 RK14, §8.3 "Deposited
    again after a mailbox ended").
    This layer catches sender retransmissions, which the relay stores under
    different `msg_id`s. Responses are cached for 24 h, so a duplicate request
@@ -11370,6 +11421,19 @@ notices (`connection.removed`, `connection.declined`) are not covered.
 #7806 a) The hook is complete: the re-stamp and the check at deposit
 below, the clean end, and the member's notice.
 
+(0.90.2) **A local delete** (owner decision 2026-11-12, "keep and
+re-send, no notice"). A local `message.delete` does not unsend (§10.4,
+"local only").
+- An entry kept or pinned for the telling (§3.4.2 RK14 step 3) stays,
+  and is deposited again if the telling shows P never got it.
+- If it cannot be confirmed, the member is not told: the vault leaves a
+  message the member deleted out of the member's notice and audits it
+  only, and the app shows nothing for it.
+- So a deleted message's content stays in the vault for up to 60 days
+  after its deposit (the keep's window), or until its pin ends.
+- This covers the keep only. An outbox entry that ends
+  `message.not_delivered` follows the existing rules above.
+
 (0.90.0) **Deposited again after a mailbox ended** (§3.4.2 RK14).
 An entry Q deposits again because P's `relay.mailbox.closed` shows P
 never collected it (`msg_id` greater than `last_msg_id`), and a held
@@ -11377,8 +11441,8 @@ entry re-addressed at a follow after `mailbox_unknown` (the relay never
 stored it), are **not tried**. Each is sealed again under the current
 epoch with the same inner `id`, and MUST take a fresh `ts` and a new
 `seq`; it is judged by "At deposit" below as not tried. P's dedupe by
-inner `id` (§8.2), kept 60 days past its `relay.mailbox.closed`, drops a
-copy of anything P did process. Every other entry deposited again keeps
+inner `id` (§8.2), kept 76 days past the relay's acceptance of its
+`relay.mailbox.closed`, drops a copy of anything P did process. Every other entry deposited again keeps
 its `ts`.
 
 **At deposit.** Before each deposit of a waiting durable message to a
