@@ -70,7 +70,8 @@ changelog:
     Also **holder rules for issued tokens** (§7.1 "The holder's
     checks"): a vault keeps a token a peer gives it only if its
     signature and claims check, its `exp − iat` is within §7.1's bound
-    for its kind (365 days for a reconnect token, 30 for any other; on
+    for reconnect tokens (365 days) for a reconnect token and 30 days for
+    every other kind (on
     the vault's own relay, also its `max_token_lifetime_seconds` as read
     at registration), its `exp` is later than its `iat`, its `iat` is at
     most 5 minutes ahead of the vault's clock, and its `jti` is not
@@ -11708,8 +11709,10 @@ only if:
 - its signature and claims check (signed by the peer's relay key, `iss`
   the peer's mailbox, `sub` the vault's relay key, `aud` the relay's
   URL, a deposit scope);
-- its `exp − iat` is within this table's bound for its kind (a reconnect
-  token 365 days, any other 30 days) and, when the peer's relay is the
+- its `exp − iat` is within this table's bound for reconnect tokens
+  (365 days) for a reconnect token, and within 30 days for every other
+  kind (a request token's tighter bound above is not checked by the
+  holder) and, when the peer's relay is the
   vault's own relay, also within that relay's
   `max_token_lifetime_seconds` (as read when the vault registered with
   it: a later raise is seen from its next unlock);
