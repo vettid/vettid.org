@@ -30,12 +30,16 @@ related:
 changelog:
   - 0.90.8: 2026-11-13, **an unlock's PIN attempt is counted before it
     is tested** (owner decision a, 2026-11-13): §11.8 "Enclave backoff":
-    the unlock stores the failure count raised by one, in a header write
-    conditional on the header it read, before it derives the DEK from the
-    PIN; a write that fails tests nothing (`retry`); a right PIN resets
-    the count. As the recovery open's attempts already are (§11.14.6), so
-    a host that fails header writes gets no free PIN tests. §3.3.1 points
-    to it.
+    the unlock only (the PIN checks in a running vault are unchanged);
+    once the checks before the PIN have passed, the unlock stores the
+    failure count raised by one, in a header write conditional on the
+    header it read, before it derives the DEK from the PIN; a write that
+    fails tests nothing (`retry`); a wrong PIN keeps the count; a right
+    PIN resets it whatever the outcome (an `ok` and `moved` in their own
+    header write, every other outcome in a header-only write); the bound
+    for a member who types the right PIN on a host that fails writes;
+    what it does not protect (a host that replays, §13.2). §3.3.1,
+    §11.4's diagram, §11.7.1, §11.9, §11.14.1 and §13.2 follow.
   - 0.90.6: 2026-11-13, **readings of relay-key rotation's receiving
     side, and older corrections** (erratum):
     - §3.4.1 "Strict F1, a link under an earlier epoch": pending,
@@ -21379,7 +21383,7 @@ App        Member API                   SQS/Parent                 Enclave
  |<--202----|                       |             |  replay check; sealed header;
  |          |                       |             |  vault_id/user_guid; unlock key + sig;
  |          |                       |             |  device attestation sig; signer (§11.7.1); backoff; rollback
- |          |                       |             |  (§13.2); derive DEK; load state
+ |          |                       |             |  (§13.2); count (header write, §11.8); derive DEK; load state
  |          |<--response slot{request_id, envelope}----------------|
  |--GET /api/vault/requests/{id} (1 s poll)-->|                    |
  |<--{status: done, envelope}----------------|   on success: §12.2 start order
@@ -22464,7 +22468,9 @@ already made:
     is fixed by the certificates of the key that enrolled. An unlock
     that ends with no header write (`recovery_pending`, `backoff`, a
     rollback, `manifest`) leaves the key unbound, and the app sends
-    the chain again.
+    the chain again. (0.90.8) From 0.90.8 the next header write of an
+    unlock that reaches the PIN is the write that counts the attempt
+    (§11.8), before the PIN is tested.
   - (0.27.1) **Size.** The unlock request (12,288 bytes padded, §11.4)
     has room for about 8,100 bytes of chain together with a
     `release_update` and `cancel_recovery`, more than enrollment or a
@@ -22665,22 +22671,44 @@ envelopes.
   60 min, then 60 min for every further failure;
 - a successful unlock resets the backoff;
 - failures never wipe the vault;
-- (0.90.8; owner decision a, 2026-11-13) **every unlock's PIN attempt
-  is counted before it is tested**, as a recovery's attempts are
-  (§11.14.6): once every check §11.4 makes before the PIN has passed
-  (the backoff not running, the rollback floors met), and before the DEK
-  (or, from release R, the `unlock_key`) is derived from the PIN, the
-  enclave stores the header with the failure count raised by one (and
-  `header_seq` + 1), in a write conditional on the header version it
-  read. Only once that write has succeeded is the PIN tested. A write
-  that fails tests nothing: the unlock is answered `retry`, with the
-  `header_seq` last known stored, and is not a PIN failure. So a host
-  that fails or withholds header writes learns nothing of a PIN it is
-  not counted for. A wrong PIN then leaves the raised count (`bad_pin`,
-  with the stored `header_seq`); a right PIN resets the count in the
-  unlock's own header write. If that write fails the unlock is not
-  completed (`retry`), and the raised count stays: one counted failure
-  more than the member made, the safe side.
+- (0.90.8; owner decision a, 2026-11-13) **an unlock's PIN attempt is
+  counted before it is tested.** This is the unlock's rule (§11.4) only;
+  the PIN checks in a running vault (§11.14.1) are unchanged. Once every
+  check §11.4 makes before the PIN has passed (among them the backoff
+  not running and `min_header_seq` met), and before the DEK (from
+  release R, the `unlock_key`) is derived from the PIN, the enclave
+  stores the header with the failure count raised by one (`header_seq`
+  + 1; the delay is armed with it once the count reaches 3), in a write
+  conditional on the header version it read. Only once that write has
+  succeeded is the PIN tested.
+  - A count write that fails or conflicts tests nothing: `retry`, with
+    the `header_seq` last known stored, not a PIN failure (§11.9). A
+    count write stored but reported failed leaves the raised count, the
+    safe side. A host that fails every write gets `retry` for ever:
+    availability only (§13.5).
+  - A wrong PIN keeps the raised count (`bad_pin`, with the stored
+    `header_seq`).
+  - **A right PIN resets the count, whatever the outcome.** An `ok`
+    resets it in the unlock's own header write, and `moved` in the new
+    release's header (§11.10.4). Every other outcome reached with a
+    right PIN (`state_unreadable`, `state_unsupported`, a
+    `state_rollback` found once the state opens, `transfer_incomplete`,
+    a pair superseded by a stored replacement (`device_secret`),
+    `no_backup`, `wrong_release`, a `retry` after the PIN) restores the
+    count the header had before this attempt, in a header-only write
+    conditional on the header the count stored; a header written since
+    is left as it is. These outcomes write nothing else. A successful
+    unlock so writes the header twice (§13.2).
+  - **The bound for a member who types the right PIN.** Each `retry`
+    whose restoring write fails, and each count write stored but
+    reported failed, leaves one count: a host that fails writes can so
+    push such a member into the backoff (from 3 counts, 30 s first,
+    above). The first restoring or resetting write that succeeds clears
+    it.
+  - **What it protects.** A host that fails or withholds the count
+    write learns nothing of the PIN. A host that accepts it, sees the
+    outcome, then serves the old header again still gets that guess:
+    the rollback residual of §13.2.
 
 ### 11.9 Failure handling
 
@@ -22690,6 +22718,7 @@ envelopes.
 | Unknown or expired `etk_kid` | The enclave reports `etk_unknown`; the response slot carries `code: "etk_unknown"` and no envelope (§11.5). The app refetches and retries. |
 | Decryption, binding, signature or attestation failure | Random bytes of the result's size, or the uniform sealed result (`attestation`). The API cannot tell which. |
 | Bad PIN, backoff, rollback | The uniform sealed result (§11.4) |
+| The header write that counts an unlock's PIN attempt fails or conflicts (0.90.8) | `retry`, not a PIN failure: the PIN is not tested (§11.8). |
 | The app's signer is not pinned by the release, or was never recorded (0.27.0) | The uniform sealed result, `signer_refused` (§11.7.1). Not counted as a PIN failure; no alarm. |
 | State write conflict | The vault locks (§12.3) and the result says `retry`. |
 | The vault's release is not running | `503 release_starting` with `retry_after`; the app retries (§11.10.5). |
@@ -22927,7 +22956,9 @@ to_pcr0_hex \n to_release \n manifest_serial
     SHA-256(string); the counter MUST increase. With two assertions in one
     unlock (`device_assertion` and the approval), both counters MUST
     exceed the counter stored before the request and differ; the enclave
-    stores the larger.
+    stores the larger. (0.90.8) It is stored with the header write that
+    counts the attempt (§11.8) when the unlock reaches the PIN, else at
+    the unlock's next header write.
 
 **In the unlock request** (§11.4):
 
@@ -25238,7 +25269,8 @@ secret_check = HMAC-SHA-256(key = pepper,
   PIN failure. `secret_check` does not depend on the PIN, so it cannot
   test one; guessing the secret through it means guessing 256 bits.
 - A wrong PIN gives an `unlock_key` under which `dek_wrap` does not
-  open: `bad_pin`, counted in the backoff of §11.8 as before. The
+  open: `bad_pin`, counted in the backoff of §11.8 (0.90.8: before the
+  PIN is tested). The
   everyday parameters stay `t = 3`, `m = 64 MiB`, `p = 1`, so an unlock
   costs what it cost before.
 - **The PIN check in a running vault** (an owner check, §3.6.1 step 5;
@@ -28825,7 +28857,12 @@ client**:
   (0.33.0, release R) From release R a recovery does not use those
   backoffs: its attempts are counted outside everything the host stores
   (§11.14.4). The everyday PIN backoff still does not hold against a host
-  that replays and also holds the member's own phone. An old header and
+  that replays and also holds the member's own phone. (0.90.8) Since an
+  unlock's attempt is counted before it is tested (§11.8), a host that
+  refuses the count's write gets no PIN result; one that accepts it and
+  serves the old header again still does, and needs the member's phone
+  as before. A successful unlock writes the header twice: the count,
+  then the unlock's own write, which resets it. An old header and
   the state of its time still open with that time's PIN and phone, or with
   that time's pair through its recovery wrap; with the DEK replaced at
   every change, they open nothing written later, though the long-lived
