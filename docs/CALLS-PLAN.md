@@ -1,8 +1,8 @@
 ---
 title: CALLS-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1) and 2026-10-12 (§13, D12–D26 as recommended; D23 as (c))
-version: 0.1.9
-date: 2026-11-11
+version: 0.1.10
+date: 2026-11-14
 owner: Al Liebl (Mesmer)
 related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) §2 rules, §2.4 promotion, §5 phase 2
@@ -90,6 +90,10 @@ changelog:
     call to another as its own; added before C2, in which form 2 first
     ships. The vault and app rows say so; the apps' form 2 media vectors
     are VAULT-MESSAGING §16's.
+  - 0.1.10 (2026-11-14): erratum (owner decision 2026-11-14, GC #10461
+    a). New §12.8: the iPhone's guard that the media stack never logs,
+    in place of Android's read-back of its log level, which the iOS
+    build cannot do.
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -752,6 +756,27 @@ the media section of CALLING-SERVICE is §6 there, not §7):
   versioned media suite and where it is carried and signed (§12.3).
 - **ANDROID-PLAN** §4 to §6: the probe (§12.5), the build rule for
   calls code, the universal APK's size, Telecom in C3.
+
+### 12.8 The log guard on iOS
+
+Added in 0.1.10 (owner decision 2026-11-14, GC #10461 a). §12.1 found
+that the library can log key material at INFO or below; on Android the
+app reads the library's log level back and refuses to set call keys
+while logging is on. The iOS build of the media stack (webrtc-sdk
+150.7871.04) can set its log level but not read it back, and setting it
+to any level, `none` included, turns the stack's INFO output to stderr
+on; that output includes ICE usernames and SDP. So, in place of the
+read-back:
+
+- **The iPhone never calls the log-level setter**, nor the stack's
+  tracing, metrics, callback-logger, file-logger, RTC-event-log or
+  AEC-dump APIs.
+- **A source scan and a symbol scan of the Release and Staging
+  archives** refuse all of these, whatever code in the app would call
+  them.
+- **A test on the iOS simulator** captures stderr over a whole loopback
+  call and finds no output from the stack, with a positive control
+  proving that the capture works.
 
 ## 13. Phase C2 (0.1.3; approved by the owner 2026-10-12)
 
