@@ -1,7 +1,7 @@
 ---
 title: VOTE-SITE-KEY-COMPROMISE
 status: draft
-version: 0.3.0
+version: 0.3.1
 date: 2026-11-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), votes.vettid.org (vettid/votes), service vault, release process
@@ -11,6 +11,7 @@ related:
   - BALLOT-PROTOCOL.md §3.3, §8.5 (vettid/service-vault `docs/BALLOT-PROTOCOL.md`; not in this repository)
   - vettid/votes `docs/VOTES-SITE.md` §3, `site/services.go`
 changelog:
+  - 0.3.1: Opus round 3 (MERGE WITH NITS). 7.2 is limited to digest and signature mismatches, so a bundle that verifies with a bad time keeps its final outcome; a site bundle never moves an accepted record back to `checking`; a held list with no recorded key counts as verified under another key; §11.10.1 for the pinned manifest keys.
   - 0.3.0: blind review round 2 (both MERGE WITH NITS once the Mediums were fixed):
     - step 4.4 applies once, to a list verified under another site key, and later releases carry it (Opus, Fable);
     - fix 7.2 covers every bundle the site supplies (proposal, extension, results), says which bundle wins and how its `checking` ends, and keeps the site's bundle as evidence (Opus, Fable);
@@ -144,7 +145,9 @@ starts with these steps:
 4. **Emergency release.** Build a vault release whose release constants
    carry the new `vote_site_key` and the **last good list's hash**
    (proposed constant: `vote_site_restart`). The vault records, with each
-   held list, the site key it verified under. **Once**, when a vault of
+   held list, the site key it verified under; a list held from before
+   this release has no recorded key and counts as verified under another
+   key. **Once**, when a vault of
    this release first finds a held list verified under a key other than
    its pinned `vote_site_key`:
    - it keeps that list only if its hash **equals** `vote_site_restart`.
@@ -189,7 +192,7 @@ has shipped.
 
 **b. A revocation carried in the signed manifest (built in advance).**
 Every unlock verifies the manifest under a pinned manifest key (§11.10.4
-step 1; production pins A and B, staging its own key, §11.10.8). A new optional member, proposed `vote_site_revoked: [{key,
+step 1; production pins A and B, staging its own key, §11.10.1). A new optional member, proposed `vote_site_revoked: [{key,
 replacement, last_good}]`, lets each release that knows it switch at its
 next unlock, with step 4's keep-or-drop rule, without a move.
 - **Cost:** a vault change (parse the member and switch keys) and a spec
@@ -257,9 +260,16 @@ review.
 2. **A site-supplied contradiction is not final.** For every bundle the
    site supplies (a proposal's bundle at `vote.site.sync`, an extension
    learned from the site's entries, and the results bundle the app
-   submits, §10.19.6), a contradiction under a named key gives a new
-   `checking` reason (proposed: `site_contradiction`), not `rejected`,
-   `failed` or an `anchor` refusal.
+   submits, §10.19.6), a **digest or signature** mismatch under a named
+   key gives a new `checking` reason (proposed: `site_contradiction`),
+   not `rejected`, `failed` or an `anchor` refusal. That is all a site can
+   fabricate, by swapping in a real bundle of another document. A bundle
+   that verifies over the right digest but carries a bad time (`t_tsa`
+   past `t_relay` + 300 s, §10.19.4 step 6; results anchored before the
+   close, §10.19.6 step 2) only the anchor key's holder can make, so it
+   keeps its final outcome.
+   - A site bundle never moves an accepted record (`open`, `closed`,
+     `verified`) back into `checking`.
    - A bundle from the service's own message that verifies wins over any
      site bundle.
    - The new reason ends on any later bundle that verifies, so "only
