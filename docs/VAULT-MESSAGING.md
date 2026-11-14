@@ -4950,10 +4950,16 @@ create-only.
     answered `mailbox_unknown`. The vault then registers the **stored**
     pending key (RELAY-PROTOCOL §6.1). A `200` means an earlier rotate
     had made the mailbox, and the vault continues with step 3. A `201`
-    means a fresh mailbox: the second write re-mints **every** held
-    token, with `iat` at that time and never backdated (a fresh mailbox
-    at an id that has a tombstone refuses tokens issued before it,
-    RELAY-PROTOCOL §6.10), and the held updates carry the new tokens. A
+    means a fresh mailbox, which at an id that has a tombstone refuses
+    tokens issued before the deletion plus 90 s (RELAY-PROTOCOL §6.10).
+    (0.90.11) The vault stores the time that answer came with the
+    pending key, in a write of its own, and completes the key only once
+    the wait a mailbox made afresh needs (that 90 s, plus the clock skew
+    RELAY-PROTOCOL §4.1 allows and the tokens' usual backdating; 241 s as
+    built) has run from that time. The second write then re-mints
+    **every** held token, with `iat` at that time (backdated as every
+    token is, which the wait allows for), and the held updates carry the
+    new tokens. A
     definite refusal of the registration (above) puts the pending key
     in the refused state.
   - **The refused state.** After a definite refusal the vault marks the
@@ -4969,8 +4975,8 @@ create-only.
     registration, past the grace) it receives nothing.
   - **A recovery's inherited key** (0.85.4; owner decisions of
     2026-11-05, O5b and "rule 2"). A recovery's open makes one attempt at
-    a relay key left pending by an earlier run (it completes it only as
-    "A lost run of the open" below allows), before the phone gets the
+    a relay key left pending by an earlier run (it never completes it at
+    the open: "A lost run of the open" below), before the phone gets the
     vault's address, and on a definite refusal takes a fresh key at
     once, **one time only** per recovery; if the fresh key is refused
     too, it stays in the refused state and the vault generates no further
@@ -4990,8 +4996,8 @@ create-only.
     an older stored one. So an attempt that leaves the key pending
     (answered that the mailbox exists, or not answered), not in the
     refused state and not answered by this attempt that the mailbox was
-    made afresh, stores the key **unconfirmed**, with the attempt's time,
-    in the step-2 write: the key is not completed before the wait a mailbox
+    made afresh, stores the key **unconfirmed**, with the time the
+    attempt ended, in the step-2 write: the key is not completed before the wait a mailbox
     made afresh needs before its tokens are accepted (RELAY-PROTOCOL
     §6.10: the deletion's 90 s, plus clock skew and the tokens'
     backdating; 241 s as built) has run from that time, at the open, the
@@ -5002,8 +5008,22 @@ create-only.
     the mailbox afresh, the mark says nothing of a wait already had: such
     an answer after it starts the wait. A recovery that inherits a
     pending key so waits once (and a second time when a later
-    registration makes the mailbox afresh); the recovered phone's unlock
-    is answered `retry` meanwhile.
+    registration makes the mailbox afresh). Meanwhile the recovered
+    phone's unlock is answered `retry` when it must make the attempt
+    before its bundle (the current mailbox's collects have ended,
+    §11.14.6 "A lost `ok`"); otherwise its bundle names the current
+    mailbox. A phone not yet paired when the keys are completed (the
+    inherited key, then the next key a recovery's rotation owes) has its
+    first handshake answered under a newer relay key than its bundle
+    names, which it does not take: it then sends its own unlock again,
+    whose bundle names the current address, and pairs (§11.14.6
+    "Pairing"). A release before 0.90.11 ignores the mark: after a
+    downgrade the key is completed at once and its tokens are not minted
+    again (accepted: release moves do not go backwards). Not covered: an
+    unlock that is not a recovery's open (after the recovery was
+    cancelled) within the wait after a lost run of the open, which may
+    complete the key inside it; that needs a failed open, a cancel and an
+    unlock within 241 s, availability only.
     - **A refused rotate** (the old mailbox lives): the open goes on with
       the live mailbox. In place of keeping the refused key with a
       relay-key rotation owed (next item), the recovery's step-2 write
@@ -5035,7 +5055,8 @@ create-only.
     held updates, and records in the same flush that a **relay-key
     rotation is owed** (a mark, as in §11.14.10). The pending key is
     then completed as above, at once if the relay answers, else at the
-    next unlocks. The pending key's second write then also stores the
+    next unlocks (one a recovery's open inherited, only after the wait of
+    "A lost run of the open"). The pending key's second write then also stores the
     **next** relay key as pending, with its new tokens and held updates
     (step 1), in that same write. Storing the next key **meets** the
     relay-key-rotation mark, so that write clears it (safely, as the
@@ -7382,8 +7403,9 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
        own. A crash between that write and the attempt leaves an anchor
        with no attempt behind it; it only makes P stop earlier.
      - **At a recovery's open** (§3.4 "A recovery's inherited key"),
-       which completes an inherited pending key in one attempt before
-       its step-2 write and writes nothing before it: when K has no
+       which makes one attempt at an inherited pending key (never
+       completing it there) before its step-2 write and writes nothing
+       before it: when K has no
        anchor, the recorded start of that attempt becomes K's anchor, in
        the step-2 write, unless that attempt was refused with the
        relay's own `400` or `401`. That write also records the stop as
