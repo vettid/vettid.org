@@ -1,7 +1,7 @@
 ---
 title: VAULT-SERVICE-INDEPENDENCE
 status: draft
-version: 0.2.1
+version: 0.2.2
 date: 2026-11-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), service vault (vettid/service-vault), the vault↔service interface
@@ -13,6 +13,7 @@ related:
   - vettid/service-vault `docs/RELEASE-29.md` (0.9.0) §6, §11, §14; `docs/SERVICE-VAULT.md`; `docs/SOURCE.md`; `go.mod`
   - vettid/vettid-vault `vms/altchan/capabilities.go`, `vault/features086.go`, `compat/live-releases.txt`
 changelog:
+  - 0.2.2: R3, `vote_site_key`: the compromise exception (owner, GC #10325) and the correct outcome for a list under another key (`rejected`, not ignored); VOTE-SITE-KEY-COMPROMISE.md holds the procedure.
   - 0.2.1: second review round. No new release-to-release sync in R6, S7 and 4.1 (a copy is needed only when roots or site key differ); `contract` named in the downgrade rule and given a send trigger; withdrawable names read from `profile.update` only; R1 retitled and "never a format weaker than the current minimum"; R2 states the deprecated interaction and Q6 decides it; W10 uses the real bundle versions; rotation procedure names `rootwatch` and leaves the site-key change open; table and quote nits.
   - 0.2.0: blind-review revisions (PR #593). Public documents are service-first (R1, R3); 4.2 rewritten honestly and `results_after_close` dropped; downgrade rule, add-only withdrawal and sticky names (R1); contract version on the wire (R2, R4); security fast path in R2; cross-repo CI and `vms` additivity (R4, R5); new couplings S7, S8, W10 (trust-root PRs, Sigstore and site-key rotation, invitation before `features`); corrections to 2.3, W1, 2.6; Q3, Q4, Q5 rewritten.
   - 0.1.0: first draft (2026-11-13). Owner decision of 2026-11-13: member vaults and service vaults ship independently.
@@ -174,7 +175,7 @@ Each row says what binds the two sides and where it is written.
   - changes to public documents and stricter vault checks of what the service signs (R1);
   - a new signature suite;
   - rotation of Sigstore roots, the timestamp authority or `vote_site_key` (S8). Procedure (proposal): the owner go; a vault release carries old and new roots together (earlier roots stay in the list, BALLOT-PROTOCOL §8.5 "Rekor profile"); the service switches only after every supported vault release holds the new roots, and the owner accepts that out-of-window releases show `checking` (`trust_root`). Sigstore sets the timing. `rootwatch` (#158) compares Sigstore's current root daily and is the only source of lead time we have; how early Sigstore announces a change is **unverified**.
-  - **`vote_site_key` is open.** `services.json` has one signature, so a key change cannot be dual-signed, and a vault that pins the old key keeps its last list and ignores a list under the new one (not an error, §10.19.4). Options: never change the key while a supported release pins it (recommended); or an owner-approved flag day. No procedure for a key compromise exists yet.
+  - **`vote_site_key`** (0.2.2). `services.json` has one signature, so a key change cannot be dual-signed. A vault that pins the old key keeps its last list and rejects a list under the new one: `rejected`, audited `vote.list_rejected` (§10.19.4). The key never changes while a supported release pins it. **Exception (owner, 2026-11-13, GC #10325):** a suspected or confirmed compromise overrides the rule. On the owner's go it is a flag day: a release with a new key ships at once, the next manifest marks the releases that pin the old key `deprecated` (move-only, no new enrollments; §11.10.1), whatever the support window says, and the site stops serving lists under the old key. The procedure is VOTE-SITE-KEY-COMPROMISE.md.
   - A planned flag day has an owner go, a date and notice to members first.
 - **The invitation (W10).** The service **always issues the oldest supported format** (bundle version 1, QR version 2 today), because older vaults refuse a bump. A security fix to the invitation is an R3 flag day.
 - A service rollback must not need "end every connection first" (C3). An older release ignores names it does not know and never writes a marker that newer code needs.

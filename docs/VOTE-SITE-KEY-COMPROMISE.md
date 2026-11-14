@@ -1,7 +1,7 @@
 ---
 title: VOTE-SITE-KEY-COMPROMISE
-status: draft
-version: 0.3.1
+status: decided
+version: 0.4.0
 date: 2026-11-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), votes.vettid.org (vettid/votes), service vault, release process
@@ -11,6 +11,7 @@ related:
   - BALLOT-PROTOCOL.md §3.3, §8.5 (vettid/service-vault `docs/BALLOT-PROTOCOL.md`; not in this repository)
   - vettid/votes `docs/VOTES-SITE.md` §3, `site/services.go`
 changelog:
+  - 0.4.0: owner decisions (2026-11-13, GC #10325, "recommended"): Q1 yes; Q2 card fixes 7.1 and 7.2; Q3 option a now, b or c decided later; Q4 card the custody check and the list log and monitor. The exception is written into VAULT-SERVICE-INDEPENDENCE R3 (0.2.2).
   - 0.3.1: Opus round 3 (MERGE WITH NITS). 7.2 is limited to digest and signature mismatches, so a bundle that verifies with a bad time keeps its final outcome; a site bundle never moves an accepted record back to `checking`; a held list with no recorded key counts as verified under another key; §11.10.1 for the pinned manifest keys.
   - 0.3.0: blind review round 2 (both MERGE WITH NITS once the Mediums were fixed):
     - step 4.4 applies once, to a list verified under another site key, and later releases carry it (Opus, Fable);
@@ -112,7 +113,7 @@ signature (§10.19.6). Both reviewers confirmed this.
 
 ## 3. The exception to "never change the key"
 
-Proposed text for VAULT-SERVICE-INDEPENDENCE R3 (the paragraph
+Text for VAULT-SERVICE-INDEPENDENCE R3 (adopted in 0.2.2) (the paragraph
 "`vote_site_key` is open"):
 
 > A **suspected or confirmed compromise** of `vote_site_key` overrides the
@@ -284,17 +285,16 @@ review.
    **To check when the erratum is written:** whether a swapped results
    bundle gives `failed` today.
 
-## 8. Questions for the owner
+## 8. Owner decisions (2026-11-13, GC #10325)
 
-- **Q1.** Accept the exception in 3 (a compromise overrides "never change
-  the key")? Recommended: yes.
-- **Q2.** Card fixes 7.1 and 7.2 for the vault (with spec errata)?
-  Recommended: yes.
-- **Q3.** How vaults leave the old key: a now with b or c decided later
-  (recommended), a + b now, or a + c now.
-- **Q4.** Card the custody check and the list log and monitor (6) to the
-  votes repository's owner? Recommended: yes. The response in 4 depends
-  on the log.
+- **Q1, the exception in 3:** yes. Written into VAULT-SERVICE-INDEPENDENCE
+  R3 (0.2.2).
+- **Q2, fixes 7.1 and 7.2:** carded for the vault, with VAULT-MESSAGING
+  errata. Each gets its own blind review.
+- **Q3, how vaults leave the old key:** option a (the emergency release of
+  4) is the procedure now. b or c is decided later.
+- **Q4, custody check and list log and monitor (6):** carded to the votes
+  site's owner.
 
 ## 9. Not covered
 
