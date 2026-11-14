@@ -342,7 +342,8 @@ follow this, rounds it up.
   id the owner registered before, or a `200` after a registration that
   got no answer, must be treated as a possible deletion. Every earlier
   token may be refused, and replacements need `iat` ≥ the deletion time
-  plus 90 s in relay time, rounded up (§6.10). The owner doesn't know
+  plus 90 s in relay time (§6.10; `iat` is in whole seconds, so that
+  is the same as at or after it rounded up). The owner doesn't know
   that time, so it covers it with the freshness window, the skew of
   §4.1 and its own backdating (§5.2): 90 + 90 + 60 s after the answer,
   plus a second for the rounding up (VAULT-MESSAGING's 241 s).
@@ -778,17 +779,20 @@ be replayed as a deletion.
   consumed-token records went with the old mailbox, the relay keeps a
   **tombstone** for the id: its **tokens-not-before** time is the deletion
   time plus the 90-second freshness window (§4.1; it covers an owner clock
-  running ahead of the relay's), (0.12.0) rounded up to the whole second
-  on a relay that reports tombstones (§6.1). Every token with `iat` before it is refused
+  running ahead of the relay's). (0.12.0) On a relay that reports
+  tombstones, it is rounded up to the whole second (§6.1). Every token with `iat` before it is refused
   with `token_revoked` (§5.3 step 6), whatever its `exp`, so no token minted
   before the deletion — and no revocation or one-shot use the deletion
   erased — can become valid again. The tombstone is kept until every such
   token has expired: at least `max(max_token_lifetime_seconds,
   open_token_max_lifetime_seconds)` after the tokens-not-before time (the
-  same bound as denylist entries, §5.5). (0.12.0) A relay that lowers
-  either limit keeps the tombstones it then holds for the earlier, larger
-  limit. A new tombstone for the id (a second deletion) is kept at least
-  as long as the one it replaces would have been. An owner that
+  same bound as denylist entries, §5.5). (0.12.0) A token minted before
+  a relay lowered either limit can live for the earlier, larger one. So
+  until that larger limit's length has passed since the lowering, the
+  relay keeps every tombstone, whether held at the lowering or made
+  after it, for at least the larger limit. A new tombstone for the id
+  (a second deletion) is kept at least as long as the one it replaces
+  would have been. An owner that
   re-registers a deleted key MUST mint new tokens with `iat` at or after
   the tokens-not-before time: at least 90 seconds after the deletion
   (§5.2's backdating never reaches before it). Registering a new key is
@@ -1810,8 +1814,9 @@ The push gateway API is specified separately.
 
   §6.10:
   - each mailbox deleted recursively leaves its own tombstone;
-  - a relay that lowers a token limit keeps its tombstones for the
-    earlier, larger one, and a second deletion's tombstone lasts at
+  - after a relay lowers a token limit, every tombstone, held or new,
+    is kept for the earlier, larger limit until that limit's length has
+    passed since the lowering. A second deletion's tombstone lasts at
     least as long as the one it replaces;
   - the owner's `iat` is at or after the tokens-not-before time (it
     said at least 90 s after the deletion, and that backdating SHOULD
