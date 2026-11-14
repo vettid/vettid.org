@@ -757,6 +757,8 @@ the media section of CALLING-SERVICE is §6 there, not §7):
   versioned media suite and where it is carried and signed (§12.3).
 - **ANDROID-PLAN** §4 to §6: the probe (§12.5), the build rule for
   calls code, the universal APK's size, Telecom in C3.
+- **IOS-PLAN** (0.1.10): the log guard of §12.8, its scans and its
+  test, and the build rule that `Release` links no calls code.
 
 ### 12.8 The log guard on iOS
 
@@ -769,38 +771,44 @@ rule), but the rule stands.
 On Android the app reads the stack's log level back and refuses to set
 call keys while logging is on (`MediaLogGuard`). The iOS build of
 webrtc-sdk 150.7871.04 can set its log level but not read it back.
-Setting it at all, `none` included, turns the stack's output to stderr
-on: measured with the macOS slice of the same release under
-`swift test`, a two-engine call printed about 6,300 lines, with ICE
-credentials, local and remote addresses and ports, SSRCs and session
-ids. No key bytes were seen, but none being there is not proved. So, in
-place of the read-back:
+Setting it turns the stack's output to stderr on. That was measured on
+the macOS slice of the same release under `swift test`, and the iOS
+build is assumed to do the same: with the level set to `none` or
+`error`, a two-engine call printed about 6,300 lines. They carried ICE
+username fragments, connection ids, IP addresses and ports, interface
+names, SSRCs, cnames, stream ids, session ids and STUN transaction ids.
+The lines carry no severity. They look like INFO, but whether VERBOSE
+lines were among them was not checked. Six lines mention keys, with no
+values; no key bytes were seen, but none being there is not proved. So,
+in place of the read-back:
 
 - **The app never calls the log-level setter**, nor the stack's
-  tracing, metrics, callback-logger, file-logger, RTC-event-log or
-  AEC-dump APIs.
+  tracing (the internal tracer and its capture), metrics,
+  callback-logger, file-logger, RTC-event-log or AEC-dump APIs.
 - **A source scan** refuses any source file that names them, so a
   lookup by a literal name (`dlsym`, `NSClassFromString`,
   `NSSelectorFromString`, `perform`) is refused too.
 - **An archive scan** of the `Release` and `Staging` archives reads the
   app executable and every Mach-O file in the bundle except
   `WebRTC.framework` itself. It refuses those names as symbols, defined
-  or imported (the C functions and the logger classes), and as Objective-C
-  method names and selector references (the event-log and AEC-dump
-  methods). In `Release` no calls code ships until calls are promoted
-  (§12.5), and the scan holds that too.
+  or imported (the C functions and the logger classes), and as
+  Objective-C method names and selector references (the event-log and
+  AEC-dump methods).
 - **The limit:** a name assembled at run time from pieces is seen by
-  neither scan. The test below is the check on behavior.
+  neither scan, and a test pins that limit.
 - **A test on the iOS simulator** captures stderr over a whole loopback
-  call and finds nothing from the stack. Its positive control proves
-  that the capture sees a line written to stderr. Whether the setter
-  turns the output on is measured only in a separate macOS test, off by
-  default, since the setting is process-wide and cannot be undone. The
-  test runs on the simulator; the scans are the guarantee for the
-  device build.
-
-The build rule belongs in IOS-PLAN too (an edit left for that document,
-as §12.7 leaves Android's for ANDROID-PLAN).
+  call and finds nothing from the stack. It checks stderr only: a
+  callback logger, file logger, event log or dump started through a
+  name assembled at run time writes elsewhere and is not caught. Its
+  positive control proves that the capture sees a line written to
+  stderr. The setter's effect is measured only in the separate macOS
+  test, off by default, because the setting is process-wide. The test
+  runs on the simulator; the scans are the guarantee for the device
+  build.
+- **`Release`, iOS's production build,** carries no calls code until
+  calls are promoted, as §12.5 asks of Android's production build. The
+  release check refuses an app target that links the calls packages
+  (vettid-ios #269).
 
 ## 13. Phase C2 (0.1.3; approved by the owner 2026-10-12)
 
