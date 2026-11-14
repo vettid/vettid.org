@@ -1,6 +1,6 @@
 # VettID Relay Protocol
 
-**Version:** 0.11.1 (draft)
+**Version:** 0.12.0 (draft)
 **Status:** Pre-implementation draft for review
 
 ## 1. Purpose & design principles
@@ -251,8 +251,14 @@ POST /v1/register                    (signed request; key being registered)
                     "max_claim_bytes": 16384,
                     "claim_ttl_seconds": 604800,
                     "max_blob_bytes": 8388608,
-                    "blob_ttl_seconds": 604800 } }
+                    "blob_ttl_seconds": 604800,
+                    "reports_tombstones": true },
+        "tokens_not_before": "2026-11-14T15:01:30Z" }
 ```
+
+(`tokens_not_before` is present only while the relay holds a tombstone
+for the id, and `reports_tombstones` only if the relay reports them;
+see "Tombstones at registration" below.)
 
 (`max_blob_bytes` and `blob_ttl_seconds` are present only if the relay supports
 blob transfer, §6.8.) (0.9.2) A relay that supports blobs also
@@ -265,6 +271,48 @@ sender key may hold in one mailbox) (§6.8).
 `message_ttl_seconds` above 1209600 (14 days): a vault's re-deposits
 after a rotated mailbox ends must reach it while it still recognizes
 them (VAULT-MESSAGING §3.4.2 RK14 step 2).
+
+**Tombstones at registration (0.12.0).** A relay MAY tell the owner,
+at registration, whether it holds a tombstone for the id (§6.10: a
+deletion, or a removal at the end of a rotation grace, §6.7). A relay
+that does so advertises `"reports_tombstones": true` in `limits`.
+Then both answers, `201` and `200`, carry `"tokens_not_before"`
+while the relay holds a tombstone for the id. Its value is the
+tombstone's tokens-not-before time (§6.10), as an RFC 3339 UTC
+timestamp: the instant that §5.3 step 6 compares `iat` with. While
+the relay holds no tombstone for the id, the field is absent.
+
+- **No answer leaves it out.** A relay that advertises the flag MUST
+  answer from the mailbox state its deposits are checked against, on
+  every server instance: an answer never leaves out a tombstone that
+  §5.3 step 6 applies to the id at that moment.
+- **Without the flag:** a relay that doesn't report tombstones omits
+  both the flag and the field. A flag with any value other than `true`
+  is the same as no flag.
+
+**What the owner may conclude:**
+- **Field present (value T):** every token minted for the id with
+  `iat` before T is refused (`token_revoked`). Tokens with `iat` at or
+  after T are unaffected. Before minting replacements, the owner waits
+  until its own clock reads T, and it mints them with `iat` ≥ T: the
+  backdating of §5.2 MUST NOT reach before T. When the owner's clock
+  already reads T or later, it need not wait. So after a deletion
+  while the owner was offline, the wait is usually none.
+- **Flag set, field absent:** no unexpired token the owner minted for
+  this id is refused for a deletion or a removal. A `201` for an id the
+  owner registered before, with no field, means the relay lost the
+  mailbox without a deletion (relay data loss). The owner's tokens are
+  then not refused, but the mailbox's messages, its denylist (§5.5)
+  and its consumed open-token records (§5.6) may be gone. An owner that
+  relies on its denylist SHOULD deny again what it had denied.
+- **No flag:** the answer says nothing about tombstones. A `201` for an
+  id the owner registered before must be treated as a possible
+  deletion. Every earlier token may be refused, and the owner mints
+  replacements only after the freshness window has passed since the
+  `201` (as before this version).
+
+The answer describes the moment it was given. A deletion afterwards
+shows as `mailbox_unknown` (§6.3, §6.4).
 
 - `X-VettID-Key` MUST equal `pubkey` (proof of possession via the request
   signature).
@@ -699,7 +747,11 @@ be replayed as a deletion.
   (and SHOULD NOT backdate them across it, §5.2). Registering a new key is
   simpler and RECOMMENDED: the tombstone then never matters. A mailbox
   removed at the end of its rotation grace leaves the same tombstone, timed
-  from its removal (§6.7).
+  from its removal (§6.7). (0.12.0) A relay that reports tombstones
+  (§6.1) gives the tokens-not-before time in its registration answers
+  for as long as it keeps the tombstone. So the owner learns from the
+  `201` or `200` itself whether, and from when, its earlier tokens are
+  refused.
 - **Rotation.** Rotating into a deleted key's id (§6.7) is a re-registration:
   the successor starts empty and carries the tombstone's tokens-not-before.
 - **Timing.** Deletion is immediate; nothing waits for the message TTL. Clients
@@ -1683,6 +1735,30 @@ Properties:
 The push gateway API is specified separately.
 
 ## 10. Changelog
+
+- **0.12.0** — the owner decision of 2026-11-14 (with service-vault
+  #167). §6.1: a relay MAY report tombstones at registration. If it
+  does, it advertises `reports_tombstones: true` in `limits`, and both
+  `201` and `200` carry `tokens_not_before` while it holds a tombstone
+  for the id (§6.10, §6.7). The value is the tombstone's
+  tokens-not-before time, the one §5.3 step 6 compares with. §6.1 says
+  what an owner may conclude from each answer:
+  - a present field means tokens with `iat` before it are refused, so
+    the owner mints with `iat` at or after it;
+  - with the flag and no field, nothing is refused. A `201` for a known
+    id then means relay data loss: messages, denylist and consumed
+    open-token records may be gone, and the denylist SHOULD be applied
+    again;
+  - without the flag, the earlier rule stands.
+
+  Why: a service whose registration got no answer couldn't tell a
+  deleted mailbox from a lost answer, so it paused 241 s on every
+  doubt. With the flag, it pauses only for a real tombstone, and only
+  until its clock reaches the time given. Additive (a new optional
+  field and flag). vettid-relay implements it after this version; the
+  service vault uses it after that. Vault relay-key rotation's waits
+  (VAULT-MESSAGING §3.4.2) may use it later; VAULT-MESSAGING doesn't
+  change in this version.
 
 - **0.11.1** — with VAULT-MESSAGING 0.90.2 (erratum). §6.7: a relay
   that serves vaults MUST set the rotation grace to exactly 14 days (it
