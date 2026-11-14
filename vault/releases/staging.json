@@ -1125,12 +1125,12 @@
       }
     },
     {
-      "release": 29,
+      "release": 30,
       "status": "candidate",
-      "pcr0": "552f6b1da9b4bbd3d9c0a825f6e6b5603510caf234c89528a68a9c99c61491b96b1fc63464bb2e436690262d6fb75be5",
+      "pcr0": "6d7a86b534ec5ec2c15b401abd216dc8a432bf5c6f512175d1f0490d288fca39fe99b2123b4d73faba06736feaea4ff2",
       "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
-      "pcr2": "373dafb4426efadaa8f583c3aa85bf4858969a532551f5da289cadd6c40743616940600c03b0f21cbfb2f34c7cb0043f",
-      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/435c40b3-76de-4667-bffe-4e541d591af3",
+      "pcr2": "2c05dd4eccb9dfbb9c7b86eae3a77906b5da9dc3148c01c85ce63e35ec1d2e38242f0c5a16d33322513b22d4ebe5d81e",
+      "seal_key": "",
       "admitted_pcr0s": [
         "2303feb157143c5393fe55e8dd880f0ebc82f982c5f0e2a64e0d1c3b53e306d5c36641544185c1dfed7d7834188864e8",
         "8eebbb1012f55e131ab24a8259d1e714ffc6cc2f9ea090c41e3773702979fd0756134b7035773f8b58ab174f864f5f7d",
@@ -1153,11 +1153,11 @@
         "067f83f975f71b6637417af147b0d14f6481f9cf45a6a2352d51eb2d07c554e7a07f0fc75273de22d25616c680f432af",
         "6fa87c5c02d14e95004769b2475a334a7cb1f23a5e1823ab87e3ffa2bfd6cb25dd01aed0ebdf48723ee400c8c2bcc699"
       ],
-      "notes": "https://staging.vettid.org/security/releases/29/",
+      "notes": "https://staging.vettid.org/security/releases/30/",
       "host": {
-        "tag": "release/staging/29",
-        "source_commit": "a88b7a79d9e8755a37b82305fce34742c844028b",
-        "measurements_sha256": "3fe9fcd67bfa295206d33320ab0d790d6fd4a37e0d03bd2eba495bed4ce6ac3a",
+        "tag": "release/staging/30",
+        "source_commit": "cb672b775a96ac79886529c0e24970bfd89d338b",
+        "measurements_sha256": "4dfa4375ce37fd34f673c91bda5dae8b6684622d74a3c5985921f385ed0915b5",
         "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
         "nitro_cli_version": "1.5.0",
         "base_ami": "ami-04048e843b318bc37",
@@ -1166,31 +1166,29 @@
         "max_instances": 2
       },
       "log": {
-        "summary": "Release 29 starts staging vaults afresh and fixes how your vault and its connections change keys. It also brings release 28's changes, never published.",
+        "summary": "Release 30 starts staging vaults afresh, counts each PIN before checking it, and stops messages being lost silently. It brings releases 28 and 29's changes.",
         "changes": [
-          "Release 29 does not open a vault made by an earlier release. On staging, each test vault is deleted and enrolled again: everything it held is erased, and its phone, desktops and agents are set up again and its connections invited again.",
-          "When your vault and a connection change the keys they use with each other, the new keys now take effect only once the other side confirms them. Before, if one message was lost at that moment, the two sides could end up on different keys and stop reading each other's messages.",
-          "Before, if a connection's identity key changed twice and your vault missed the first change, your vault refused every later key change from that connection. Now each change carries the whole chain of keys, so your vault can follow it.",
-          "If a connection's vault, or yours, may be running from an old copy, your vault now pauses the connection and tells you in more cases, such as messages under keys set up after the connection replaced its identity key. Before, it did so only after a connection's vault was restored.",
+          "Release 30 does not open a vault made by release 27 or earlier. On staging, each test vault is deleted and enrolled again: everything it held is erased, and its phone, desktops and agents are set up again and its connections invited again.",
+          "Each wrong PIN at an unlock is now counted before your vault checks it. Before, a vault that crashed or was stopped between checking a PIN and counting it could let someone try more PINs than the limit allows.",
+          "A message your vault must deliver is no longer dropped because it waited too long, because its connection was paused, or because the connection's keys changed. If one cannot be delivered, your vault tells you which.",
+          "If VettID's relay refuses a message because a connection's token has been used up, your vault now keeps it in order and asks the connection for a fresh token.",
+          "If part of your vault's stored data for one feature cannot be read, that feature now stops and says so. Before, it could carry on as if that data were empty.",
+          "When your vault and a connection change the keys they use with each other, the new keys now take effect only once the other side confirms them. Before, one lost message at that moment could leave the two sides unable to read each other.",
+          "If a connection's identity key changed twice and your vault missed the first change, your vault now follows the whole chain of keys. Before, it refused every later change from that connection.",
+          "If a connection's vault, or yours, may be running from an old copy, your vault now pauses the connection and tells you in more cases than before.",
           "If one of your devices runs a VettID app too old for this release, your vault now tells you to update that app.",
-          "When you move your vault to a new phone, it now also changes the key your credential signs with, and tells your connections the new key when the new phone first unlocks it. Before, a move changed only the key that encrypts your credential.",
-          "So your old phone, even with your PIN, your password and an old copy of your vault's stored data, can no longer sign in your name once your connections have the new key.",
-          "Votes: a vote still open when you move to a new phone is signed again with the new key and sent only after the service has been told that key, so the service does not refuse it.",
-          "Between approving a move on your old phone and the new phone's first unlock, your vault now refuses to approve a sign-in or to grant access to a desktop or agent, and asks you to finish the move first. This usually takes a few minutes.",
-          "After a move, once VettID's relay has taken your old phone's notice that it was replaced, your vault also changes the keys it uses with your devices and connections. If the notice cannot be delivered, this happens at your first unlock 7 days or more after the move.",
-          "Your vault now tries again at each unlock to tell your old phone that it was replaced, until VettID's relay accepts or refuses the notice. Before, it tried once.",
-          "Each time your vault changes these keys, after a move, a recovery or a change of your credential key, it now also replaces the key it uses to wake your phone, and asks your phone to register for notifications again.",
-          "If your vault crashed or restarted just after changing its keys, your devices' connections to it could stay broken across unlocks. Now a session begun under the old keys is ended and started again under the new ones.",
-          "If your vault failed to save a move to a new phone and then locked, it could still send the unsaved removal of your old phone, leaving neither phone able to open your vault. Now what your vault has queued to send waits until the change behind it is saved.",
-          "While your vault has a save it could not finish, a phone move or a change of your PIN or password now answers \"try again\" and uses up nothing, until the save goes through. Before, such a change could leave your old phone, which your vault still had on record, unable to unlock it.",
-          "If your vault finds that another copy of it saved first while it was sending messages, it now stops cleanly. Before, it could crash.",
-          "If a connection request or a reconnection your vault began before a change of its keys is still open when you next unlock or recover your vault, it is now ended: the access it gave the other side is withdrawn, and you are told if a new connection failed.",
-          "Declining a service's approval request no longer stops its approval requests for 7 days or counts toward pausing them, so declining a false one does not block its real ones.",
+          "When you move your vault to a new phone, it now also changes the key your credential signs with and tells your connections. Your old phone, even with your PIN, your password and an old copy of your vault's data, can then no longer sign in your name.",
+          "Between approving a move on your old phone and the new phone's first unlock, your vault refuses sign-ins and new access for desktops and agents, and asks you to finish the move first. A vote still open during a move is signed again with the new key.",
+          "After a move, a recovery (including one started a second time) or a change of your credential key, your vault changes the keys it uses with your devices, connections and phone notifications, and keeps telling your old phone it was replaced until VettID's relay answers.",
+          "Your vault no longer sends anything that depends on a change it could not save, and while such a save is unfinished a phone move or a PIN or password change answers \"try again\" and uses up nothing. Before, this could leave neither phone able to open your vault.",
+          "If your vault crashed or restarted just after changing its keys, or finds another copy of it saved first, it now recovers or stops cleanly. A connection request or reconnection begun before a change of keys and still open is ended, and you are told if a new connection failed.",
+          "Declining a service's approval request no longer stops its approval requests for 7 days or counts toward pausing them. Votes: results are accepted only if recorded at or after the close, and your own receipt is kept apart.",
+          "Calls: when two people call each other at once, one call wins; a call no longer answered ends; calls follow your permissions and limits, and missed calls are listed together. Agents: each grant is checked against what you signed.",
           "Time scale: 1 day = 1 hour (staging)",
-          "Built from vettid-vault commit a88b7a7 (tag release/staging/29) and independently rebuilt on 2026-11-10 with a matching PCR0."
+          "Built from vettid-vault commit cb672b7 (tag release/staging/30) and independently rebuilt on 2026-11-14 with a matching PCR0."
         ],
         "security": "recommended",
-        "security_text": "Release 29 includes the fixes of release 28, which was never published. If a save failed during a move to a new phone and your vault then locked, it could still tell VettID's relay to cut off your old phone, so that neither phone could open your vault. If your vault crashed or restarted just after changing its keys, it could finish setting up your phone's session with a key your phone did not expect, and that session stayed broken. A connection request or reconnection begun before a change of keys and still open after your vault locked could end with the wrong key. And a move did not change the key your credential signs with, so your old phone, with your PIN, your password and an old copy of your vault's stored data, could still sign in your name. Release 29 also pauses a connection in more cases where an old copy may be running. We know of no use of any of these against any vault. Your PIN and credential password were not exposed. Vaults on releases 7 to 27 are affected."
+        "security_text": "Release 30 includes the fixes of releases 28 and 29, never published. It counts each PIN tried at an unlock before checking it: before, a vault stopped at the wrong moment could allow more guesses than the limit. A failed save during a move to a new phone, followed by a lock, could leave neither phone able to open your vault. A crash just after a key change could leave your phone's session broken, and a connection begun before a key change could end with the wrong key. A move did not change the key your credential signs with, so your old phone, with your PIN, your password and an old copy of your vault's data, could still sign in your name. And messages that waited too long, or whose connection's keys changed, could be dropped without telling you. We know of no use of any of these against any vault. Your PIN and credential password were not exposed. Vaults on releases 7 to 27 are affected."
       }
     }
   ]
