@@ -33,8 +33,9 @@ changelog:
     relay key's mailbox afresh** (erratum, as built in vettid-vault):
     §3.4 "The order of a relay-key rotation" step 2: the registration
     after a rotate that succeeded, with no answer, is taken as one that
-    made the mailbox afresh, and the relay's own refusal of it as nothing
-    made (its `retry_after` honored); "After the grace": a `200` with no
+    made the mailbox afresh, and a refusal of it that carried nothing out as nothing
+    made (its `retry_after` honored); "After the grace": a `201` restarts
+    a stored wait, and a `200` with no
     answer time stored is taken as one that may follow a lost `201`; the
     vault stores each attempt before it is made (no
     attempt without it), and a run that finds an attempt stored whose
@@ -4864,9 +4865,9 @@ create-only.
      made afresh: the key waits as "After the grace" below says.
      (0.90.12) A registration there that gets no answer (a transport
      failure, a `5xx`, a call cut short) may have been such a `201` and is
-     taken as one. The relay's own refusal of it (any `4xx`, `429
+     taken as one. A refusal of it that carried nothing out (`429
      rate_limited` with its `retry_after`, `timestamp_stale`,
-     `replay_detected`) carried nothing out: the key stays pending and is
+     `replay_detected`) made nothing: the key stays pending and is
      retried as after no answer, its `retry_after` honored. A definite
      refusal created nothing either, and the key is made current.
   3. On success, a second state write makes the pending key current. The
@@ -4979,9 +4980,9 @@ create-only.
     or registration had made the mailbox. (0.90.12) With no answer time
     stored with the key, it may follow this vault's own `201` whose
     answer was lost, so it is taken as one that made the mailbox afresh
-    and the key waits as after a `201`; a stored wait stands (a `200`
-    cannot be told from a `201` there). Otherwise the vault continues
-    with step 3. A `201`
+    and the key waits as after a `201`; a stored wait stands (there a
+    `200` may only follow a lost `201`), and a `201` received starts the
+    wait again. Otherwise the vault continues with step 3. A `201`
     means a fresh mailbox, which at an id that has a tombstone refuses
     tokens issued before the deletion plus 90 s (RELAY-PROTOCOL §6.10).
     (0.90.11) The vault stores the time that answer came with the
@@ -5000,7 +5001,7 @@ create-only.
     §6.10). So:
     - the registration after a rotate that succeeded is read as step 2
       of "The order of a relay-key rotation" says: no answer is taken as
-      a `201`, the relay's own refusal as nothing made;
+      a `201`, a refusal that carried nothing out as nothing made;
     - before each attempt the vault stores, in a state write of its own
       (with RK14 step 1's anchor when that is due), that an attempt is
       under way, and it makes no attempt if that write fails (the sooner
