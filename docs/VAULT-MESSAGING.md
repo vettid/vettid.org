@@ -4883,7 +4883,10 @@ create-only.
     (with the same `ref`), with its feed item (§10.9), at an unlock
     whose own attempt does not complete it (it fails, gets no answer,
     or is not made because a `retry_after` is still running), **at most
-    once per unlock**; an unlock that completes it audits
+    once per unlock**; one not made because a wait for a mailbox made
+    afresh runs ("After the grace", 0.90.12 "An answer lost"), the
+    refused state's included, is not audited (the relay failed nothing);
+    an unlock that completes it audits
     `identity.rotated` only. A definite refusal (below) is audited at
     once. When a rotation R2 was made while R1's key K1 was pending
     (below), K1's second write audits `identity.rotated` for R1, with
@@ -5002,7 +5005,8 @@ create-only.
     **never generates another relay key on its own**, except at a
     recovery (0.85.4, next item). It makes one
     attempt at each unlock (the rotate, then the registration; no sooner
-    retries), and one that succeeds leaves the state at the second
+    retries), except while a wait for a mailbox made afresh runs (0.90.12,
+    "An answer lost" above), and one that succeeds leaves the state at the second
     write. While the state lasts the vault collects from the old mailbox
     if it still lives (a refused rotate), and otherwise (a refused
     registration, past the grace) it receives nothing.
