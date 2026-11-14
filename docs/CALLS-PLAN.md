@@ -91,9 +91,10 @@ changelog:
     ships. The vault and app rows say so; the apps' form 2 media vectors
     are VAULT-MESSAGING §16's.
   - 0.1.10 (2026-11-14): erratum (owner decision 2026-11-14, GC #10461
-    a). New §12.8: the iPhone's guard that the media stack never logs,
-    in place of Android's read-back of its log level, which the iOS
-    build cannot do.
+    a). New §12.8: how the iPhone app keeps the media stack's logging
+    off (source and archive scans, a simulator test), in place of
+    Android's read-back of its log level, which the iOS build cannot
+    do; what the scans do not catch.
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -759,24 +760,47 @@ the media section of CALLING-SERVICE is §6 there, not §7):
 
 ### 12.8 The log guard on iOS
 
-Added in 0.1.10 (owner decision 2026-11-14, GC #10461 a). §12.1 found
-that the library can log key material at INFO or below; on Android the
-app reads the library's log level back and refuses to set call keys
-while logging is on. The iOS build of the media stack (webrtc-sdk
-150.7871.04) can set its log level but not read it back, and setting it
-to any level, `none` included, turns the stack's INFO output to stderr
-on; that output includes ICE usernames and SDP. So, in place of the
-read-back:
+Added in 0.1.10 (owner decision 2026-11-14, GC #10461 a). This is how
+the iPhone app keeps VAULT-MESSAGING §10.10 rule 1 ("Never enable the
+media stack's logging"). The key lines §12.1 found were in 150.7871.01;
+from 150.7871.04 the key derivations log sizes only, at VERBOSE (that
+rule), but the rule stands.
 
-- **The iPhone never calls the log-level setter**, nor the stack's
+On Android the app reads the stack's log level back and refuses to set
+call keys while logging is on (`MediaLogGuard`). The iOS build of
+webrtc-sdk 150.7871.04 can set its log level but not read it back.
+Setting it at all, `none` included, turns the stack's output to stderr
+on: measured with the macOS slice of the same release under
+`swift test`, a two-engine call printed about 6,300 lines, with ICE
+credentials, local and remote addresses and ports, SSRCs and session
+ids. No key bytes were seen, but none being there is not proved. So, in
+place of the read-back:
+
+- **The app never calls the log-level setter**, nor the stack's
   tracing, metrics, callback-logger, file-logger, RTC-event-log or
   AEC-dump APIs.
-- **A source scan and a symbol scan of the Release and Staging
-  archives** refuse all of these, whatever code in the app would call
-  them.
+- **A source scan** refuses any source file that names them, so a
+  lookup by a literal name (`dlsym`, `NSClassFromString`,
+  `NSSelectorFromString`, `perform`) is refused too.
+- **An archive scan** of the `Release` and `Staging` archives reads the
+  app executable and every Mach-O file in the bundle except
+  `WebRTC.framework` itself. It refuses those names as symbols, defined
+  or imported (the C functions and the logger classes), and as Objective-C
+  method names and selector references (the event-log and AEC-dump
+  methods). In `Release` no calls code ships until calls are promoted
+  (§12.5), and the scan holds that too.
+- **The limit:** a name assembled at run time from pieces is seen by
+  neither scan. The test below is the check on behavior.
 - **A test on the iOS simulator** captures stderr over a whole loopback
-  call and finds no output from the stack, with a positive control
-  proving that the capture works.
+  call and finds nothing from the stack. Its positive control proves
+  that the capture sees a line written to stderr. Whether the setter
+  turns the output on is measured only in a separate macOS test, off by
+  default, since the setting is process-wide and cannot be undone. The
+  test runs on the simulator; the scans are the guarantee for the
+  device build.
+
+The build rule belongs in IOS-PLAN too (an edit left for that document,
+as §12.7 leaves Android's for ANDROID-PLAN).
 
 ## 13. Phase C2 (0.1.3; approved by the owner 2026-10-12)
 
