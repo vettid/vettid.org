@@ -146,7 +146,8 @@ allows it. Long-lived tokens SHOULD carry a small `quota`.
 **Clock skew.** `iat ≤ now` is checked strictly. Issuers SHOULD backdate `iat`
 by up to 60 seconds if their clock may run ahead of the relay's (one-shot open
 tokens by at most half their lifetime). Lifetimes are measured from the
-backdated `iat`.
+backdated `iat`. (0.12.0) After a deletion, backdating never reaches
+before the tombstone's tokens-not-before time (§6.1, §6.10).
 
 ### 5.3 Relay-side validation order
 
@@ -163,7 +164,8 @@ only headers, and the relay SHOULD NOT read the body before them, §7.2):
 5. `iat` ≤ now < `exp` → else `token_expired`
 6. `jti` not in mailbox denylist AND `sub` not in mailbox denylist AND, if
    the mailbox id was deleted before (§6.10), `iat` ≥ its tokens-not-before
-   time → else `token_revoked`; for open tokens (§5.6), `jti` not already
+   time (on a relay that reports tombstones, the whole-second value of
+   §6.1) → else `token_revoked`; for open tokens (§5.6), `jti` not already
    consumed → else `token_used`
 7. Request signature (§4.1) verifies AND `X-VettID-Key` == token `sub`
    (open tokens: the signature alone) → else `signature_invalid`
@@ -283,7 +285,9 @@ timestamp in **whole seconds**. A relay that keeps a finer time rounds
 it **up** to the whole second and compares `iat` with the rounded
 value at §5.3 step 6. So the value reported is exactly the one
 compared, and a token with `iat` equal to it is accepted. While the
-relay holds no tombstone for the id, the field is absent.
+relay holds no tombstone for the id, the field is absent. An owner
+that gets a value with a fractional second, from a relay that doesn't
+follow this, rounds it up.
 
 - **No answer leaves it out.** A relay that advertises the flag MUST
   answer registrations from the mailbox state its deposits are checked
@@ -309,11 +313,16 @@ relay holds no tombstone for the id, the field is absent.
   - it then mints with `iat` = the later of T and the `iat` it would
     use anyway (§5.2). The backdating of §5.2 MUST NOT reach before T.
 
-  This way `iat` is never before T, and never after the relay's clock
-  (the relay checks `iat` ≤ now strictly), whichever way the owner's
-  clock is off within §4.1's window. When the owner's clock already
-  reads T + 90 s or later, it need not wait. So after a deletion while
-  the owner was offline, the wait is usually none.
+  This way `iat` is never before T. The wait also keeps an `iat` of T
+  from being ahead of the relay's clock (the relay checks `iat` ≤ now
+  strictly), whichever way the owner's clock is off within §4.1's
+  window. A later `iat` is like any token's: an owner whose clock runs
+  ahead by more than its backdating gets `token_expired` until the
+  relay's clock reaches it (§5.2). When the owner's clock already reads
+  T + 90 s or later, it need not wait. So after a deletion while the
+  owner was offline, the wait is usually none. An owner that follows
+  the no-flag rule below instead needs nothing more: that rule also
+  gives `iat` ≥ T.
 - **Flag set, field absent:** no unexpired token the owner minted for
   the id is refused because of a deletion or a removal. Other refusals,
   such as the denylist or expiry, still apply.
@@ -326,16 +335,17 @@ relay holds no tombstone for the id, the field is absent.
   messages, quota counters, denylist (§5.5) and consumed open-token
   records (§5.6) may be gone. An owner SHOULD:
   - deny again what it had denied;
-  - deny by `jti` every unexpired one-shot open token it issued, since
-    a used one would otherwise work again.
+  - deny by `jti` the unexpired one-shot open tokens it knows were used
+    (or all of them, if it doesn't track use), since a used one would
+    otherwise work again.
 - **No flag:** the answer says nothing about tombstones. A `201` for an
   id the owner registered before, or a `200` after a registration that
   got no answer, must be treated as a possible deletion. Every earlier
   token may be refused, and replacements need `iat` ≥ the deletion time
-  plus 90 s in relay time (§6.10). The owner doesn't know that time, so
-  it covers it with the freshness window, the skew of §4.1 and its own
-  backdating (§5.2): 90 + 90 + 60 s after the answer, plus a second
-  (VAULT-MESSAGING's 241 s).
+  plus 90 s in relay time, rounded up (§6.10). The owner doesn't know
+  that time, so it covers it with the freshness window, the skew of
+  §4.1 and its own backdating (§5.2): 90 + 90 + 60 s after the answer,
+  plus a second for the rounding up (VAULT-MESSAGING's 241 s).
 
 The answer describes the moment it was given. A later deletion, or a
 removal at the end of a rotation grace, shows as `mailbox_unknown`
@@ -768,17 +778,20 @@ be replayed as a deletion.
   consumed-token records went with the old mailbox, the relay keeps a
   **tombstone** for the id: its **tokens-not-before** time is the deletion
   time plus the 90-second freshness window (§4.1; it covers an owner clock
-  running ahead of the relay's). Every token with `iat` before it is refused
+  running ahead of the relay's), (0.12.0) rounded up to the whole second
+  on a relay that reports tombstones (§6.1). Every token with `iat` before it is refused
   with `token_revoked` (§5.3 step 6), whatever its `exp`, so no token minted
   before the deletion — and no revocation or one-shot use the deletion
   erased — can become valid again. The tombstone is kept until every such
   token has expired: at least `max(max_token_lifetime_seconds,
   open_token_max_lifetime_seconds)` after the tokens-not-before time (the
-  same bound as denylist entries, §5.5). (0.12.0) If the relay has
-  changed those limits during the mailbox's life, the largest in force
-  at any time applies. An owner that re-registers a deleted key MUST
-  mint new tokens with `iat` at least 90 seconds after the deletion, and
-  (0.12.0) MUST NOT backdate them across it (§5.2). Registering a new key is
+  same bound as denylist entries, §5.5). (0.12.0) A relay that lowers
+  either limit keeps the tombstones it then holds for the earlier, larger
+  limit. A new tombstone for the id (a second deletion) is kept at least
+  as long as the one it replaces would have been. An owner that
+  re-registers a deleted key MUST mint new tokens with `iat` at or after
+  the tokens-not-before time: at least 90 seconds after the deletion
+  (§5.2's backdating never reaches before it). Registering a new key is
   simpler and RECOMMENDED: the tombstone then never matters. A mailbox
   removed at the end of its rotation grace leaves the same tombstone, timed
   from its removal (§6.7). (0.12.0) A relay that reports tombstones
@@ -1797,17 +1810,29 @@ The push gateway API is specified separately.
 
   §6.10:
   - each mailbox deleted recursively leaves its own tombstone;
-  - tombstone retention follows the largest token limits in force
-    during the mailbox's life;
-  - backdating across a deletion is now MUST NOT (it was SHOULD NOT);
+  - a relay that lowers a token limit keeps its tombstones for the
+    earlier, larger one, and a second deletion's tombstone lasts at
+    least as long as the one it replaces;
+  - the owner's `iat` is at or after the tokens-not-before time (it
+    said at least 90 s after the deletion, and that backdating SHOULD
+    NOT cross it). This tightens a client rule. VAULT-MESSAGING's 241 s
+    wait already meets it;
   - the rotate answer doesn't report a tombstone, so the owner learns it
     by registering the new key.
+
+  §6.1 also says:
+  - a field without the flag, or one that can't be parsed, counts as
+    neither;
+  - a repeated registration answers the same `mailbox_id` and `limits`;
+  - a later deletion or grace-end removal shows as `mailbox_unknown`.
+
+  §5.2 and §5.3 step 6 point to the new rule.
 
   Why: a service whose registration got no answer couldn't tell a
   deleted mailbox from a lost answer, so it paused 241 s on every
   doubt. With the flag, it pauses only for a real tombstone, and only
-  until its clock reaches the time given. Additive (a new optional
-  field and flag). vettid-relay implements it after this version; the
+  until its clock reaches the time given. On the wire it's additive (a
+  new optional field and flag). vettid-relay implements it after this version; the
   service vault uses it after that. Vault relay-key rotation's waits
   (VAULT-MESSAGING §3.4.2) may use it later; VAULT-MESSAGING doesn't
   change in this version.
