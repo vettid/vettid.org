@@ -278,45 +278,74 @@ deletion, or a removal at the end of a rotation grace, §6.7). A relay
 that does so advertises `"reports_tombstones": true` in `limits`.
 Then both answers, `201` and `200`, carry `"tokens_not_before"`
 while the relay holds a tombstone for the id. Its value is the
-tombstone's tokens-not-before time (§6.10), as an RFC 3339 UTC
-timestamp: the instant that §5.3 step 6 compares `iat` with. While
-the relay holds no tombstone for the id, the field is absent.
+tombstone's tokens-not-before time (§6.10) as an RFC 3339 UTC
+timestamp in **whole seconds**. A relay that keeps a finer time rounds
+it **up** to the whole second and compares `iat` with the rounded
+value at §5.3 step 6. So the value reported is exactly the one
+compared, and a token with `iat` equal to it is accepted. While the
+relay holds no tombstone for the id, the field is absent.
 
 - **No answer leaves it out.** A relay that advertises the flag MUST
-  answer from the mailbox state its deposits are checked against, on
-  every server instance: an answer never leaves out a tombstone that
-  §5.3 step 6 applies to the id at that moment.
+  answer registrations from the mailbox state its deposits are checked
+  against. An answer never leaves out a tombstone the relay holds for
+  the id, and never treats a deleted or removed mailbox as still
+  registered. The allowance in §6.10 for other server instances to
+  answer the deleted key's owner requests briefly does **not** cover
+  registration.
 - **Without the flag:** a relay that doesn't report tombstones omits
   both the flag and the field. A flag with any value other than `true`
-  is the same as no flag.
+  is the same as no flag. An owner treats a field it gets without the
+  flag, or one it cannot parse, as if neither were there.
 
 **What the owner may conclude:**
 - **Field present (value T):** every token minted for the id with
   `iat` before T is refused (`token_revoked`). Tokens with `iat` at or
-  after T are unaffected. Before minting replacements, the owner waits
-  until its own clock reads T, and it mints them with `iat` ≥ T: the
-  backdating of §5.2 MUST NOT reach before T. When the owner's clock
-  already reads T or later, it need not wait. So after a deletion
-  while the owner was offline, the wait is usually none.
-- **Flag set, field absent:** no unexpired token the owner minted for
-  this id is refused for a deletion or a removal. A `201` for an id the
-  owner registered before, with no field, means the relay lost the
-  mailbox without a deletion (relay data loss). The owner's tokens are
-  then not refused, but the mailbox's messages, its denylist (§5.5)
-  and its consumed open-token records (§5.6) may be gone. An owner that
-  relies on its denylist SHOULD deny again what it had denied.
-- **No flag:** the answer says nothing about tombstones. A `201` for an
-  id the owner registered before must be treated as a possible
-  deletion. Every earlier token may be refused, and the owner mints
-  replacements only after the freshness window has passed since the
-  `201` (as before this version).
+  after T are unaffected, so a field in a `200` is normal for as long
+  as the tombstone is kept after a re-registration. The owner compares
+  T with the `iat` of the tokens it relies on; T alone is no alarm. To
+  replace refused tokens:
+  - the owner mints no token for the id until its own clock reads at
+    least T + 90 s (the skew §4.1 allows);
+  - it then mints with `iat` = the later of T and the `iat` it would
+    use anyway (§5.2). The backdating of §5.2 MUST NOT reach before T.
 
-The answer describes the moment it was given. A deletion afterwards
-shows as `mailbox_unknown` (§6.3, §6.4).
+  This way `iat` is never before T, and never after the relay's clock
+  (the relay checks `iat` ≤ now strictly), whichever way the owner's
+  clock is off within §4.1's window. When the owner's clock already
+  reads T + 90 s or later, it need not wait. So after a deletion while
+  the owner was offline, the wait is usually none.
+- **Flag set, field absent:** no unexpired token the owner minted for
+  the id is refused because of a deletion or a removal. Other refusals,
+  such as the denylist or expiry, still apply.
+
+  A `201` with no field, for an id whose earlier registration the
+  owner saw answered (`201` or `200`), means the relay holds no record
+  of that mailbox. The cause is data loss, a rebuilt relay at the same
+  base URL, or a deletion longer ago than tombstones are kept. The
+  owner's unexpired tokens are then not refused, but the mailbox's
+  messages, quota counters, denylist (§5.5) and consumed open-token
+  records (§5.6) may be gone. An owner SHOULD:
+  - deny again what it had denied;
+  - deny by `jti` every unexpired one-shot open token it issued, since
+    a used one would otherwise work again.
+- **No flag:** the answer says nothing about tombstones. A `201` for an
+  id the owner registered before, or a `200` after a registration that
+  got no answer, must be treated as a possible deletion. Every earlier
+  token may be refused, and replacements need `iat` ≥ the deletion time
+  plus 90 s in relay time (§6.10). The owner doesn't know that time, so
+  it covers it with the freshness window, the skew of §4.1 and its own
+  backdating (§5.2): 90 + 90 + 60 s after the answer, plus a second
+  (VAULT-MESSAGING's 241 s).
+
+The answer describes the moment it was given. A later deletion, or a
+removal at the end of a rotation grace, shows as `mailbox_unknown`
+(§6.3, §6.4).
 
 - `X-VettID-Key` MUST equal `pubkey` (proof of possession via the request
   signature).
-- Re-registering an existing pubkey is idempotent → `200` with same body.
+- Re-registering an existing pubkey is idempotent → `200` with the same
+  `mailbox_id` and `limits` (`tokens_not_before` disappears once the
+  tombstone is no longer kept).
 - Registration is open by default. Relay operators MAY require an invite token
   (operator policy; mechanism reserved for a future minor version).
 - Keys are free to make, so a relay SHOULD limit the mailboxes one client
@@ -719,6 +748,8 @@ be replayed as a deletion.
   deposited to it (§6.8) and every claim it created (§6.9). Every mailbox
   rotated into this one and still in its grace period (§6.7) is deleted with
   it (recursively), so tokens issued under an earlier key stop working too.
+  (0.12.0) Each mailbox deleted that way leaves its own tombstone, as
+  below.
 - **Afterwards** the mailbox id behaves as never registered: deposits and blob
   uploads get `mailbox_unknown` (§5.3 step 1), owner routes get
   `mailbox_unknown`, claims it created are `claim_unknown`. A relay MUST
@@ -727,7 +758,8 @@ be replayed as a deletion.
   on the mailbox gets `mailbox_unknown` (§6.3); a WebSocket session is closed
   with 4404 (§6.4). A multi-instance relay MAY let other instances answer
   owner requests of the deleted key briefly (at most a few minutes) as for an
-  empty mailbox.
+  empty mailbox. (0.12.0) That allowance doesn't cover registration on a
+  relay that reports tombstones (§6.1).
 - **Idempotent:** `204` whether or not the mailbox existed — never
   registered, already deleted, or past its rotation grace. Only the key's
   holder can call it, so the answer reveals nothing.
@@ -742,9 +774,11 @@ be replayed as a deletion.
   erased — can become valid again. The tombstone is kept until every such
   token has expired: at least `max(max_token_lifetime_seconds,
   open_token_max_lifetime_seconds)` after the tokens-not-before time (the
-  same bound as denylist entries, §5.5). An owner that re-registers a deleted
-  key MUST mint new tokens with `iat` at least 90 seconds after the deletion
-  (and SHOULD NOT backdate them across it, §5.2). Registering a new key is
+  same bound as denylist entries, §5.5). (0.12.0) If the relay has
+  changed those limits during the mailbox's life, the largest in force
+  at any time applies. An owner that re-registers a deleted key MUST
+  mint new tokens with `iat` at least 90 seconds after the deletion, and
+  (0.12.0) MUST NOT backdate them across it (§5.2). Registering a new key is
   simpler and RECOMMENDED: the tombstone then never matters. A mailbox
   removed at the end of its rotation grace leaves the same tombstone, timed
   from its removal (§6.7). (0.12.0) A relay that reports tombstones
@@ -754,6 +788,9 @@ be replayed as a deletion.
   refused.
 - **Rotation.** Rotating into a deleted key's id (§6.7) is a re-registration:
   the successor starts empty and carries the tombstone's tokens-not-before.
+  (0.12.0) The rotate answer doesn't report it. An owner that needs it
+  registers the new key (`200`, §6.1) on a relay that reports
+  tombstones.
 - **Timing.** Deletion is immediate; nothing waits for the message TTL. Clients
   SHOULD treat a lost response as unknown and repeat the request (it is
   idempotent and retryable on `429`/`5xx`, §7.2).
@@ -1741,15 +1778,30 @@ The push gateway API is specified separately.
   does, it advertises `reports_tombstones: true` in `limits`, and both
   `201` and `200` carry `tokens_not_before` while it holds a tombstone
   for the id (§6.10, §6.7). The value is the tombstone's
-  tokens-not-before time, the one §5.3 step 6 compares with. §6.1 says
-  what an owner may conclude from each answer:
-  - a present field means tokens with `iat` before it are refused, so
-    the owner mints with `iat` at or after it;
-  - with the flag and no field, nothing is refused. A `201` for a known
-    id then means relay data loss: messages, denylist and consumed
-    open-token records may be gone, and the denylist SHOULD be applied
-    again;
-  - without the flag, the earlier rule stands.
+  tokens-not-before time in whole seconds, rounded up, and it's the value
+  §5.3 step 6 compares with. Such a relay answers registrations only
+  from current mailbox state; §6.10's allowance for other instances
+  doesn't cover them. §6.1 says what an owner may conclude from each
+  answer:
+  - **A present field T:** tokens with `iat` before T are refused.
+    Replacements are minted once the owner's clock reads T + 90 s, with
+    `iat` at or after T.
+  - **The flag and no field:** no token is refused for a deletion or a
+    removal. A `201` for an id whose registration the owner saw answered
+    means the relay holds no record of it (data loss, a rebuilt relay, or
+    a tombstone past its retention). The owner SHOULD then deny again
+    what it had denied, and deny by `jti` its unexpired open tokens.
+  - **No flag:** a possible deletion needs `iat` at or after the
+    deletion plus 90 s in relay time, which an owner covers with the
+    241 s VAULT-MESSAGING already uses.
+
+  §6.10:
+  - each mailbox deleted recursively leaves its own tombstone;
+  - tombstone retention follows the largest token limits in force
+    during the mailbox's life;
+  - backdating across a deletion is now MUST NOT (it was SHOULD NOT);
+  - the rotate answer doesn't report a tombstone, so the owner learns it
+    by registering the new key.
 
   Why: a service whose registration got no answer couldn't tell a
   deleted mailbox from a lost answer, so it paused 241 s on every
