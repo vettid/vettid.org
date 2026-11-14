@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.11
+version: 0.90.12
 date: 2026-11-14
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -29,6 +29,19 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.12: 2026-11-14, **a lost answer that may have made a pending
+    relay key's mailbox afresh** (erratum, as built in vettid-vault):
+    §3.4 "The order of a relay-key rotation" step 2: the registration
+    after a rotate that succeeded, with no answer, is taken as one that
+    made the mailbox afresh, and a refusal of it that carried nothing out as nothing
+    made (its `retry_after` honored); "After the grace": a `201` restarts
+    a stored wait, and a `200` with no
+    answer time stored is taken as one that may follow a lost `201`; the
+    vault stores each attempt before it is made (no
+    attempt without it), and a run that finds an attempt stored whose
+    clearing write was lost treats the key as unconfirmed from that run,
+    as "A lost run of the open" does; no attempt is made while a wait
+    for a mailbox made afresh runs, in the refused state too.
   - 0.90.11: 2026-11-14, **a recovery's inherited key that may have been
     made afresh by a lost run of the open** (erratum, as built in
     vettid-vault): §3.4 "A recovery's inherited key": an attempt at the
@@ -287,7 +300,8 @@ changelog:
       P's, collected as §3.4 says however long the key is pending or
       refused; once the anchor is more than 13 days old, P collects K
       only after an attempt that got no `200` since its last collect,
-      or while a `retry_after` runs. A batch already collected at the
+      or while a `retry_after` or a wait for a mailbox made afresh runs.
+      A batch already collected at the
       stop is processed and acked. `last_msg_id` (processed and
       flushed) is kept in the state with each batch's flush; a stop on
       `mailbox_unknown` (while a key is pending or K is old) is written
@@ -4845,7 +4859,17 @@ create-only.
      are **held**. The current relay key stays current.
   2. After that write, the vault calls the relay's rotate
      (`POST /v1/mailbox/rotate`, signed by the current key) with the
-     pending key.
+     pending key. After a rotate that succeeds it registers the pending
+     key (RELAY-PROTOCOL §6.1) for the new mailbox's limits. A `200`
+     created nothing. A `201` means the successor had gone again and was
+     made afresh: the key waits as "After the grace" below says.
+     (0.90.12) A registration there that gets no answer (a transport
+     failure, a `5xx`, a call cut short) may have been such a `201` and is
+     taken as one. A refusal of it that carried nothing out (`429
+     rate_limited` with its `retry_after`, `timestamp_stale`,
+     `replay_detected`) made nothing: the key stays pending and is
+     retried as after no answer, its `retry_after` honored. A definite
+     refusal created nothing either, and the key is made current.
   3. On success, a second state write makes the pending key current. The
      old key becomes deposit-only ("Resending the new address" (a),
      below), and the held updates are sent. The same write re-mints any
@@ -4874,7 +4898,11 @@ create-only.
     (with the same `ref`), with its feed item (§10.9), at an unlock
     whose own attempt does not complete it (it fails, gets no answer,
     or is not made because a `retry_after` is still running), **at most
-    once per unlock**; an unlock that completes it audits
+    once per unlock**; one not made because a wait for a mailbox made
+    afresh runs ("After the grace", 0.90.12 "An answer lost"), the
+    refused state's included, is not audited (the relay failed nothing);
+    a wait restarted by a registration with no answer (step 2) is, as a
+    failure, at most once per unlock; an unlock that completes it audits
     `identity.rotated` only. A definite refusal (below) is audited at
     once. When a rotation R2 was made while R1's key K1 was pending
     (below), K1's second write audits `identity.rotated` for R1, with
@@ -4949,7 +4977,12 @@ create-only.
   - **After the grace.** The old mailbox is gone, so the rotate is
     answered `mailbox_unknown`. The vault then registers the **stored**
     pending key (RELAY-PROTOCOL §6.1). A `200` means an earlier rotate
-    had made the mailbox, and the vault continues with step 3. A `201`
+    or registration had made the mailbox. (0.90.12) With no answer time
+    stored with the key, it may follow this vault's own `201` whose
+    answer was lost, so it is taken as one that made the mailbox afresh
+    and the key waits as after a `201`; a stored wait stands (there a
+    `200` may only follow a lost `201`), and a `201` received starts the
+    wait again. Otherwise the vault continues with step 3. A `201`
     means a fresh mailbox, which at an id that has a tombstone refuses
     tokens issued before the deletion plus 90 s (RELAY-PROTOCOL §6.10).
     (0.90.11) The vault stores the time that answer came with the
@@ -4962,6 +4995,43 @@ create-only.
     new tokens. A
     definite refusal of the registration (above) puts the pending key
     in the refused state.
+    (0.90.12) **An answer lost.** A registration that may have made the
+    mailbox afresh and whose answer is lost would let the key be
+    completed with tokens the mailbox refuses for a while (RELAY-PROTOCOL
+    §6.10). So:
+    - the registration after a rotate that succeeded is read as step 2
+      of "The order of a relay-key rotation" says: no answer is taken as
+      a `201`, a refusal that carried nothing out as nothing made;
+    - before each attempt the vault stores, in a state write of its own
+      (with RK14 step 1's anchor when that is due), that an attempt is
+      under way, and it makes no attempt if that write fails (the sooner
+      retries back off while it fails); the write after the call,
+      answered or not, clears it. A recovery's open stores nothing
+      before its attempt; it clears a stored attempt once its own mark
+      or a `201`'s wait covers it, and keeps it when it leaves the key
+      refused or makes no attempt (a `retry_after` or a wait runs). A
+      run that finds
+      it set (that write was lost to a lock or a restart) knows any
+      answer came before that run: it stores the key **unconfirmed** with
+      that run's time, and the key is completed only as "A lost run of
+      the open" below says, once the wait a mailbox made afresh needs has
+      run from that time, its tokens minted again;
+    - no attempt is made while that wait, or the wait after an answer
+      that made the mailbox afresh, runs, whatever else holds: a key in
+      the refused state makes its one attempt at an unlock after the
+      wait.
+
+    This costs a state write (its state and header puts) before each
+    attempt, one after an attempt that gets no answer, and one when a
+    run marks the key; each that fails costs what any failed write
+    costs. A release before 0.90.12 ignores the stored attempt: after a
+    downgrade only 0.90.11's mark protects the key. Not covered (the
+    relay's own timing, theoretical): with two live instances, or a
+    request the relay carries out after the process died, a `201` can
+    follow the next run's mark; and past the grace with an answer time
+    stored, a second deletion of the pending mailbox and a `201` whose
+    answer is lost leave the stored wait standing. Each needs a deletion
+    of the pending mailbox within about 90 s.
   - **The refused state.** After a definite refusal the vault marks the
     pending key **refused** in the DEK state (a state write of its own,
     with the refusal's code), keeps the key, its tokens and its held
@@ -4969,7 +5039,8 @@ create-only.
     **never generates another relay key on its own**, except at a
     recovery (0.85.4, next item). It makes one
     attempt at each unlock (the rotate, then the registration; no sooner
-    retries), and one that succeeds leaves the state at the second
+    retries), except while a wait for a mailbox made afresh runs (0.90.12,
+    "An answer lost" above), and one that succeeds leaves the state at the second
     write. While the state lasts the vault collects from the old mailbox
     if it still lives (a refused rotate), and otherwise (a refused
     registration, past the grace) it receives nothing.
@@ -7452,7 +7523,9 @@ definite refusal ... ends the resends" for `mailbox_unknown` there.
      than 13 days old and a key is pending, P collects K only after a
      rotate (or registration) attempt that got no `200` since its last
      collect of K, or while no attempt may be made (a `retry_after`
-     runs, or in the refused state after the unlock's attempt). An
+     runs, in the refused state after the unlock's attempt, or (0.90.12)
+     while a wait for a mailbox made afresh runs, §3.4 "After the
+     grace"). An
      attempt that succeeds leads to the second write, which
      stops the collects of K at once (next item), before any.
    - **When P stops.** After the second write, P ends its collects of
