@@ -35,8 +35,9 @@ changelog:
     and that gets no definite answer is taken as one that made the
     mailbox afresh; the vault stores each attempt before it is made (no
     attempt without it), and a run that finds an attempt stored whose
-    answer's write was lost treats the key as unconfirmed from that run,
-    as "A lost run of the open" does.
+    clearing write was lost treats the key as unconfirmed from that run,
+    as "A lost run of the open" does; no attempt is made while a wait
+    for a mailbox made afresh runs, in the refused state too.
   - 0.90.11: 2026-11-14, **a recovery's inherited key that may have been
     made afresh by a lost run of the open** (erratum, as built in
     vettid-vault): §3.4 "A recovery's inherited key": an attempt at the
@@ -4980,13 +4981,20 @@ create-only.
     - before each attempt the vault stores, in a state write of its own
       (with RK14 step 1's anchor when that is due), that an attempt is
       under way, and it makes no attempt if that write fails; the write
-      after the answer clears it. A run that finds it set (the answer's
-      own write was lost to a lock or a restart) knows the answer came
-      before that run: it stores the key **unconfirmed** with that run's
-      time, and the key is completed only as "A lost run of the open"
-      below says, once the wait a mailbox made afresh needs has run from
-      that time, its tokens minted again. This costs one state write per
-      attempt.
+      after the call, answered or not, clears it (a recovery's open
+      clears it once its own mark or wait covers it). A run that finds
+      it set (that write was lost to a lock or a restart) knows any
+      answer came before that run: it stores the key **unconfirmed** with
+      that run's time, and the key is completed only as "A lost run of
+      the open" below says, once the wait a mailbox made afresh needs has
+      run from that time, its tokens minted again;
+    - no attempt is made while that wait, or the wait after an answer
+      that made the mailbox afresh, runs, whatever else holds: a key in
+      the refused state makes its one attempt at an unlock after the
+      wait.
+
+    This costs a state write before each attempt, and one after an
+    attempt that gets no answer.
   - **The refused state.** After a definite refusal the vault marks the
     pending key **refused** in the DEK state (a state write of its own,
     with the refusal's code), keeps the key, its tokens and its held
