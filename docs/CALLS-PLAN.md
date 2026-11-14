@@ -94,7 +94,9 @@ changelog:
     a). New §12.8: how the iPhone app keeps the media stack's logging
     off (source and archive scans, a simulator test), in place of
     Android's read-back of its log level, which the iOS build cannot
-    do; what the scans do not catch.
+    do; what the scans and the test do not catch; `Release` carries
+    no calls code (the release check of vettid-ios #269). §12.7 lists
+    the IOS-PLAN edit.
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
