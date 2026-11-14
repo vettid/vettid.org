@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.11
+version: 0.90.12
 date: 2026-11-14
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -29,6 +29,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.12: 2026-11-14, **a lost answer that may have made a pending
+    relay key's mailbox afresh** (erratum, as built in vettid-vault):
+    §3.4 "After the grace": a registration after a rotate that succeeded
+    and that gets no definite answer is taken as one that made the
+    mailbox afresh; the vault stores each attempt before it is made (no
+    attempt without it), and a run that finds an attempt stored whose
+    answer's write was lost treats the key as unconfirmed from that run,
+    as "A lost run of the open" does.
   - 0.90.11: 2026-11-14, **a recovery's inherited key that may have been
     made afresh by a lost run of the open** (erratum, as built in
     vettid-vault): §3.4 "A recovery's inherited key": an attempt at the
@@ -4962,6 +4970,23 @@ create-only.
     new tokens. A
     definite refusal of the registration (above) puts the pending key
     in the refused state.
+    (0.90.12) **An answer lost.** A registration that may have made the
+    mailbox afresh and whose answer is lost would let the key be
+    completed with tokens the mailbox refuses for a while (RELAY-PROTOCOL
+    §6.10). So:
+    - a registration after a rotate that succeeded (the successor may
+      have gone again) that gets no definite answer is taken as one that
+      made the mailbox afresh; a definite refusal made nothing;
+    - before each attempt the vault stores, in a state write of its own
+      (with RK14 step 1's anchor when that is due), that an attempt is
+      under way, and it makes no attempt if that write fails; the write
+      after the answer clears it. A run that finds it set (the answer's
+      own write was lost to a lock or a restart) knows the answer came
+      before that run: it stores the key **unconfirmed** with that run's
+      time, and the key is completed only as "A lost run of the open"
+      below says, once the wait a mailbox made afresh needs has run from
+      that time, its tokens minted again. This costs one state write per
+      attempt.
   - **The refused state.** After a definite refusal the vault marks the
     pending key **refused** in the DEK state (a state write of its own,
     with the refusal's code), keeps the key, its tokens and its held
