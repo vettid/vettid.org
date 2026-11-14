@@ -786,13 +786,12 @@ be replayed as a deletion.
   erased — can become valid again. The tombstone is kept until every such
   token has expired: at least `max(max_token_lifetime_seconds,
   open_token_max_lifetime_seconds)` after the tokens-not-before time (the
-  same bound as denylist entries, §5.5). (0.12.0) A token minted before
-  a relay lowered either limit can live for the earlier, larger one. So
-  until that larger limit's length has passed since the lowering, the
-  relay keeps every tombstone, whether held at the lowering or made
-  after it, for at least the larger limit. A new tombstone for the id
-  (a second deletion) is kept at least as long as the one it replaces
-  would have been. An owner that
+  same bound as denylist entries, §5.5). (0.12.0) The limits in that
+  bound are the largest the relay has ever advertised. The lifetime cap
+  is only a MAY (§5.2), and owners learn the limits only at
+  registration, so a token minted under an earlier, larger limit can
+  outlive a lowering. A new tombstone for the id (a second deletion) is
+  kept at least as long as the one it replaces would have been. An owner that
   re-registers a deleted key MUST mint new tokens with `iat` at or after
   the tokens-not-before time: at least 90 seconds after the deletion
   (§5.2's backdating never reaches before it). Registering a new key is
@@ -1814,10 +1813,9 @@ The push gateway API is specified separately.
 
   §6.10:
   - each mailbox deleted recursively leaves its own tombstone;
-  - after a relay lowers a token limit, every tombstone, held or new,
-    is kept for the earlier, larger limit until that limit's length has
-    passed since the lowering. A second deletion's tombstone lasts at
-    least as long as the one it replaces;
+  - tombstones are kept for the largest token limits the relay has ever
+    advertised, so a lowered limit can't shorten them. A second
+    deletion's tombstone lasts at least as long as the one it replaces;
   - the owner's `iat` is at or after the tokens-not-before time (it
     said at least 90 s after the deletion, and that backdating SHOULD
     NOT cross it). This tightens a client rule. VAULT-MESSAGING's 241 s
