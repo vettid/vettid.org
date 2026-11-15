@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.131
+version: 0.1.132
 date: 2026-11-15
 changelog:
+  - 0.1.132: erratum, 2026-11-15 (owner decision a, 2026-11-15). Notifications 7 and Notification modes 3: when a hold ends by a passed check, each ask still waiting that expires (a sign-in, a device session, a held approval, a pairing) is notified once; nothing else missed while held is replayed, and an unlock is unchanged. Why: such an ask lives minutes, and one that arrived during the hold went by unseen.
   - 0.1.131: erratum, 2026-11-15 (owner decision a, 2026-11-15; keeps the 2026-10-24 decision). §4 "A vault being deleted", point 5: before `until`, "Your vault was deleted" says from what time **Remove from this phone** will be offered (`until` rounded up to the whole minute, in the phone's own time format; with no known `until` it names no time), instead of naming a removal the screen does not offer yet; from `until`, **Remove from this phone** is offered at once, without waiting for the read at the bound. Point 4: "still finishing" (with Remove) comes on its own timer at `until`, without waiting for a read, for the vault's own word too. Android only: vettid-ios does not build the member API's `410` state yet (IOS-PLAN §4.2 point 5), so the iPhone has no such screen.
   - 0.1.130: erratum, 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). The status line on calls: production release APKs carried no call code until 2026-11-14, when calls went into every build (CALLS-PLAN §12.5, with the run-time gate, incoming calls included).
   - 0.1.129: erratum, 2026-11-13 (owner decision a, 2026-11-13; as built in vettid-android #307; the decision holds for vettid-ios too). §4 "Transfer (new phone)": the settlement window's end moves out for a cut collect or a process freeze, within a cap, as built; a cut noticed just before the window starts is not counted, and the owner chose to leave that as it is.
@@ -1951,7 +1952,17 @@ feed repository and no screen.
    been feed items). The credential alarm's `feed.event`, which does
    arrive while held, opens the alarm path (allowed while held) but is
    not listed. After the check: a full read (2, Open), never replayed
-   events; the bell then counts what arrived.
+   events; the bell then counts what arrived. (0.1.132; owner decision
+   2026-11-15) The one exception: when a hold ends by a passed check
+   with the vault open, each ask still waiting that expires (a sign-in
+   `connection.authenticate.requested`, a device session
+   `device.session.pending`, a held approval `approval.pending`, a
+   pairing `device.pair.pending`) is notified once, as if it had just
+   arrived (public form under the app lock): active in the feed, listed
+   by `pending.list` as read after the hold with its `exp` not passed (a
+   pairing, which `pending.list` does not list, within 10 minutes of its
+   item's `at`). Nothing else is replayed, and an unlock replays
+   nothing.
 8. **The release banner** (0.1.19) **stays separate.** Releases are not
    feed items (§10.9's kinds; the app learns of a release from the
    manifest and `sync.event{vault.release}`, §11.10.6), so the
@@ -2151,7 +2162,9 @@ its process runs; nothing keeps it running in the background).
      same channel, scheduled by `AlarmManager` from the known deadline
      (inexact; no exact-alarm permission). After the check the app
      catches up (§6 Owner check, 4) and normal notifications resume;
-     nothing missed is replayed as notifications, the bell counts it.
+     nothing missed is replayed as notifications, the bell counts it,
+     except each ask still waiting that expires, notified once
+     (Notifications 7, 0.1.132).
 4. **(b) Google push (FCM)** (PUSH-GATEWAY 0.4.2; VAULT-MESSAGING
    0.24.1 §14, 0.1.29, 0.1.30, 0.1.32). Contentless wakes:
    the app's FCM token goes to its vault over the end-to-end session
