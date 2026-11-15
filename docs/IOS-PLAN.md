@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.74
+version: 0.1.75
 date: 2026-11-15
 changelog:
+  - 0.1.75: erratum, 2026-11-15 (ANDROID-PLAN 0.1.131; owner decision a, 2026-11-15). §4.2 point 5: a pointer only, since the iPhone does not build the member API's `410` state yet: when it does, its pre-bound text and the time at which **Remove from this phone** comes are ANDROID-PLAN 0.1.131's, not Android #192's.
   - 0.1.74: 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). §6.6: a live call goes on in the background, with the `audio` mode and the relay collection kept by long poll while the call is live, handling only call traffic and lock signals, stopped when it ends: an exception to "close the socket", marked "(chosen; not in the spec)"; the owner-check note on a call over the covered shell no longer says iOS has no calls; §4 and "Later": CallKit is no longer later, only ringing a closed app by PushKit is. Note, no change to this plan's text: since 2026-11-14 `Release` carries calls code (CALLS-PLAN §12.5), and the log guard is CALLS-PLAN §12.8's.
   - 0.1.73: erratum, 2026-11-13 (ANDROID-PLAN 0.1.129; owner decision a, 2026-11-13). The owner's decision in ANDROID-PLAN §4 "Transfer (new phone)" holds for the iPhone's transfer-in too: a cut noticed just before the settlement window starts is not counted, as on Android, and it is left as it is.
   - 0.1.71: 2026-11-12 (ANDROID-PLAN 0.1.127, VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4.18 "Relay-key rotation texts": the iPhone shows ANDROID-PLAN §4 "Relay-key rotation texts", owner-approved 2026-11-12, in the same places and with the same texts.
@@ -1096,7 +1097,12 @@ answer to this phone's own `vault.delete` counts the same (VAULT-MESSAGING
    point 3. If the event arrives (signal (a)) while a `410` stands, the
    app erases at once as in point 3. A later status that lists the vault
    again (a `200` with the vault) removes the marker and returns to the
-   unlock screen; any other answer keeps the screen.
+   unlock screen; any other answer keeps the screen. (0.1.75) When this
+   state is built, it takes ANDROID-PLAN 0.1.131 §4 "A vault being
+   deleted" point 5 (owner decision 2026-11-15): before `until` the
+   text says from what time Remove is offered, with the owner-approved
+   texts of vettid-android #367, and from `until` Remove comes at once,
+   without waiting for a read.
 
 **What the member can do there.** Nothing that changes the vault or
 this phone's keys: no unlock, no PIN, no update, no daily check, no
