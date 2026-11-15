@@ -1,8 +1,8 @@
 ---
 title: CALLS-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1) and 2026-10-12 (§13, D12–D26 as recommended; D23 as (c))
-version: 0.1.10
-date: 2026-11-14
+version: 0.1.11
+date: 2026-11-15
 owner: Al Liebl (Mesmer)
 related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) §2 rules, §2.4 promotion, §5 phase 2
@@ -97,6 +97,16 @@ changelog:
     do; what the scans and the test do not catch; `Release` carries
     no calls code (the release check of vettid-ios #269). §12.7 lists
     the IOS-PLAN edit.
+  - 0.1.11 (2026-11-15): erratum (owner decisions 2026-11-14). §12.5:
+    calls code is in every build on both apps, `Release` included,
+    replacing the rule that production builds carry none; what a member
+    sees stays gated at run time by the `call.list` probe, for incoming
+    calls too; the lock screen and CallKit say "VettID call", never
+    with whom. §12.8: the iOS guard also refuses the raw-audio taps, and
+    `Release` now carries calls code. New §12.9: on iOS a live call
+    goes on in the background (the `audio` mode, and the relay
+    connection held for the call only), an exception to IOS-PLAN §6.6.
+    §12.4 and §12.7 follow.
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -707,25 +717,58 @@ recipe before C1 ends (open; risk 1 of §10 stays until then).
 Owner decision of 2026-10-12: **no ABI splits.** Every distribution
 ships one APK with all four architectures, as today. With calls
 compiled in, that APK is about 57.6 MB where it was 9.1 MB (§12.1); the
-spike's proposal of per-architecture APKs is not taken. Production
-builds are not affected until promotion (§12.5).
+spike's proposal of per-architecture APKs is not taken. (0.1.11) Since
+2026-11-14 production builds carry calls too (§12.5). A release APK
+carries ARM only (owner decision 2026-11-05): on 2026-11-14 the `full`
+release went from 31.3 to 51.0 MB and the `foss` release from 30.7 to
+50.3 MB; staging keeps every architecture.
 
 ### 12.5 Where calls code is, and how the app knows a vault has calls
 
-- **Calls code is compiled into non-production builds only.**
-  Production release builds carry **no calls code, no media library
-  and none of the calls permissions** (§4 "Permissions") until calls
-  are promoted (§7 "Promotion"; STAGING-DEVELOPMENT-PLAN §2.4). So a
-  production APK does not grow, asks for no microphone, and has nothing
-  to hide. A build check has to hold this, as the spike's own check
-  does for its code (vettid-android #123, `check<Variant>NoCallsSpike`).
+- **(0.1.11) Calls code is in every build, `Release` included**
+  (owner decision 2026-11-14, on both apps: "they will need to be there
+  at some point, let's do it now"). This replaces the rule of 0.1.2
+  that production builds carry no calls code, no media library and
+  none of the calls permissions until promotion. A production APK or
+  app now carries the media library and asks for the microphone; the
+  permission texts are the ones already approved. The build checks
+  require calls code instead of refusing it (Android:
+  `check<Variant>Calls`, with the media stack's native libraries pinned
+  for the build's architectures), and keep refusing what never ships:
+  the call-test build's marker and its test switches in a release, and
+  on iOS the test hooks outside debug builds. Promotion (§7) is still
+  what turns calls on: a production vault release without `calls`
+  answers the probe below `unsupported_type`, so production members see
+  nothing of calls.
+- **(0.1.11) What a member sees is gated at run time by the probe**
+  below (owner decisions 2026-11-14). The call buttons (the connection
+  page's Call, the calls row and the conversation's button) show only
+  once the probe said the vault has calls, or while a call goes on. A
+  vault without calls, or one that has not answered yet, shows none of
+  them: the conversation's button is no longer shown with a "calls not
+  available" notice (replacing the choice of 2026-10-12). **Incoming
+  calls are gated on the same answer:** an offer rings only once the
+  probe said the vault has calls, waiting for that answer at most as
+  long as it waits for an unlock that is completing (10 s); otherwise
+  it is refused, with no `call.ringing`, no call screen and no
+  microphone prompt, and it leaves no missed-call record, as an offer
+  to a locked vault does.
+- **(0.1.11) The lock screen says "VettID call", never with whom**
+  (owner decision 2026-11-14). On iOS, CallKit's caller name is "VettID
+  call" for every call, ringing or going on, and its handle is an opaque
+  value per call, not the connection's id; the name shows only in
+  VettID's own call screen, once the phone is unlocked. This is the
+  Android rule too: what the lock screen shows of a call says that a
+  call is going on, never with whom. Names are bidi-isolated wherever
+  they are shown.
 - **The app cannot read a feature list, because there is none.**
   VAULT-MESSAGING §11.10.8 ("No list in the protocol"): no message
   carries a release's features, and an app learns that a feature is
   absent from `unsupported_type`. A rule of the form "show the call
   button when the vault's release lists `calls`" cannot be built as
   written, and this plan does not ask for one.
-- **Decision for C1: one probe.** A build that has calls code sends one
+- **Decision for C1: one probe.** A build that has calls code (since
+  0.1.11, every build) sends one
   `call.list` after each unlock. An answer means the vault has calls,
   and the call buttons are shown (§6.4). `unsupported_type` means it
   does not: the buttons are hidden for that vault until the next
@@ -760,7 +803,10 @@ the media section of CALLING-SERVICE is §6 there, not §7):
 - **ANDROID-PLAN** §4 to §6: the probe (§12.5), the build rule for
   calls code, the universal APK's size, Telecom in C3.
 - **IOS-PLAN** (0.1.10): the log guard of §12.8, its scans and its
-  test, and the build rule that `Release` links no calls code.
+  test. (0.1.11) The build rule that `Release` links no calls code is
+  withdrawn (§12.5); the exception to IOS-PLAN §6.6 of §12.9.
+- (0.1.11) **ANDROID-PLAN**: calls in every build (§12.5) and the run-time
+  gate, incoming calls included, in place of the probe's build rule.
 
 ### 12.8 The log guard on iOS
 
@@ -807,10 +853,48 @@ in place of the read-back:
   test, off by default, because the setting is process-wide. The test
   runs on the simulator; the scans are the guarantee for the device
   build.
-- **`Release`, iOS's production build,** carries no calls code until
-  calls are promoted, as §12.5 asks of Android's production build. The
-  release check refuses an app target that links the calls packages
+- **(0.1.11) The raw-audio taps** are refused by both scans as well,
+  the iOS counterparts of what Android's guard refuses
+  (`setSamplesReadyCallback`, `setPlaybackSamplesReadyCallback`,
+  `setEnableVolumeLogger`): `addRenderer:` and `RTCAudioRenderer`, an
+  adoption of `RTCAudioCustomProcessingDelegate` (read from the
+  class-name section, which survives stripping), a custom
+  `RTCAudioDevice` outside the tests, and `turnLoggingId`. Each would
+  hand decrypted audio, or a TURN identifier, to code outside the
+  engine's path.
+- **This guard is iOS's in place of Android's read-back**: Android keeps
+  `MediaLogGuard` (the level read back, call keys refused while logging
+  is on); iOS, which cannot read the level back, keeps the setter
+  unused and the scans and test above.
+- **`Release`, iOS's production build,** (0.1.11) carries calls code
+  since 2026-11-14 (§12.5), so the scans above are what keep it safe
+  there: the release check runs them on the `Release` archive. Until
+  0.1.11 it refused an app target that linked the calls packages
   (vettid-ios #269).
+
+### 12.9 iOS: a live call in the background (0.1.11)
+
+Owner decisions of 2026-11-14. A live call goes on when the member
+leaves VettID (the home screen, another app, the iPhone locking), as on
+Android, where the call's foreground service keeps it.
+
+- **The `audio` background mode** (`UIBackgroundModes`), which keeps the
+  app running only while a call's audio is active. iOS shows its call
+  indicator, and CallKit's own call screen brings the member back. With
+  no call live, VettID is suspended as before. **Not** the `voip` mode:
+  that is for ringing a closed app, with PushKit, later.
+- **The relay connection is kept only while a call is live in the
+  background**, for that call's traffic only, and closed as soon as the
+  call ends if the app is still in the background. Without it the other
+  side's hang-up would not be received, a hang-up from the lock screen
+  or a headset would not be sent, and the call would end only when its
+  media failed. Nothing else stays connected: no new incoming call is
+  shown from the background, and votes and the owner check stay paused
+  as before.
+- This is an exception to IOS-PLAN §6.6, which closes the socket when
+  the app leaves the screen; IOS-PLAN marks it "(chosen; not in the
+  spec)". It goes into the App Store review notes with the microphone
+  and CallKit.
 
 ## 13. Phase C2 (0.1.3; approved by the owner 2026-10-12)
 
