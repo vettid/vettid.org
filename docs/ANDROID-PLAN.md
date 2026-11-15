@@ -4,7 +4,7 @@ status: draft
 version: 0.1.132
 date: 2026-11-15
 changelog:
-  - 0.1.132: erratum, 2026-11-15 (owner decision a, 2026-11-15). Notifications 7 and Notification modes 3: when a hold ends by a passed check, each ask still waiting that expires (a sign-in, a device session, a held approval, a pairing) is notified once; nothing else missed while held is replayed, and an unlock is unchanged. Why: such an ask lives minutes, and one that arrived during the hold went by unseen.
+  - 0.1.132: erratum, 2026-11-15 (owner decisions a, 2026-11-15, the second on the scope). Notifications 7 and 11, Notification modes 3 and 11, Approvals indicator 12: when a passed check ends the held or due state in an open session, each ask still waiting of exactly three kinds (`connection.authenticate.requested`, `device.session.pending`, `approval.pending`) is notified once; nothing else missed while held or due is replayed, pairings are left out, and an unlock (one that also passes the check included) replays nothing. Why: an ask that came while the vault was held or due went by unseen even after the check passed.
   - 0.1.131: erratum, 2026-11-15 (owner decision a, 2026-11-15; keeps the 2026-10-24 decision). §4 "A vault being deleted", point 5: before `until`, "Your vault was deleted" says from what time **Remove from this phone** will be offered (`until` rounded up to the whole minute, in the phone's own time format; with no known `until` it names no time), instead of naming a removal the screen does not offer yet; from `until`, **Remove from this phone** is offered at once, without waiting for the read at the bound. Point 4: "still finishing" (with Remove) comes on its own timer at `until`, without waiting for a read, for the vault's own word too. Android only: vettid-ios does not build the member API's `410` state yet (IOS-PLAN §4.2 point 5), so the iPhone has no such screen.
   - 0.1.130: erratum, 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). The status line on calls: production release APKs carried no call code until 2026-11-14, when calls went into every build (CALLS-PLAN §12.5, with the run-time gate, incoming calls included).
   - 0.1.129: erratum, 2026-11-13 (owner decision a, 2026-11-13; as built in vettid-android #307; the decision holds for vettid-ios too). §4 "Transfer (new phone)": the settlement window's end moves out for a cut collect or a process freeze, within a cap, as built; a cut noticed just before the window starts is not counted, and the owner chose to leave that as it is.
@@ -1952,17 +1952,34 @@ feed repository and no screen.
    been feed items). The credential alarm's `feed.event`, which does
    arrive while held, opens the alarm path (allowed while held) but is
    not listed. After the check: a full read (2, Open), never replayed
-   events; the bell then counts what arrived. (0.1.132; owner decision
-   2026-11-15) The one exception: when a hold ends by a passed check
-   with the vault open, each ask still waiting that expires (a sign-in
-   `connection.authenticate.requested`, a device session
-   `device.session.pending`, a held approval `approval.pending`, a
-   pairing `device.pair.pending`) is notified once, as if it had just
-   arrived (public form under the app lock): active in the feed, listed
-   by `pending.list` as read after the hold with its `exp` not passed (a
-   pairing, which `pending.list` does not list, within 10 minutes of its
-   item's `at`). Nothing else is replayed, and an unlock replays
-   nothing.
+   events; the bell then counts what arrived. (0.1.132; owner decisions
+   of 2026-11-15) **The one exception, waiting asks.** When a passed
+   check ends the held or due state in the same open session (the vault
+   was open when it began and was not locked since; an unlock, also one
+   that passes the check in the same step, replays nothing), each ask
+   still waiting of exactly these kinds and no other is notified once:
+   `connection.authenticate.requested` (of any purpose: sign-in,
+   approval, none), `device.session.pending` and `approval.pending`.
+   "Still waiting" means active in the feed (not read, archived or
+   deleted: an item read in Notifications but not decided is left out)
+   and listed in the `pending.list` answer read after the check with
+   its `exp` not passed. Only the first `pending.list` read after the
+   check that succeeds counts; if it fails, or the vault answers
+   `unsupported_type`, nothing is replayed, and nothing is replayed
+   after a restart (memory only). "Once" means once per passed check,
+   one notification per item under its `item_id`, as a new arrival:
+   every item notification was removed when the hold or due state
+   began, so none is still posted, and it alerts with its channel's
+   sound, in the public version on the phone's lock screen as for every
+   notification (Notification modes, Content). An ask that arrived as a
+   live event during those reads is not notified a second time. The
+   approvals indicator and its snackbar (Approvals indicator 7) are
+   unchanged. **Pairings are left out** (`device.pair.pending`): while
+   the vault does not list them in `pending.list` (VAULT-MESSAGING
+   §10.4.2) and deciding one does not mark its feed item, the phone
+   cannot tell one still waiting from one already done, and a pairing
+   this phone started is ended by the hold; once the vault lists them,
+   a listed pairing with its `exp` not passed can join.
 8. **The release banner** (0.1.19) **stays separate.** Releases are not
    feed items (§10.9's kinds; the app learns of a release from the
    manifest and `sync.event{vault.release}`, §11.10.6), so the
@@ -1991,7 +2008,12 @@ feed repository and no screen.
       a batch's `count` update keeps the status; the own `feed.update`
       applied from the response; retention; clear on lock, held, due and
       wipe; the unread count; Mark all as read with an error midway;
-      viewed items marked read except urgent ones (0.1.26).
+      viewed items marked read except urgent ones (0.1.26); (0.1.132)
+      the waiting-asks replay: each of the three kinds still waiting
+      notified once after a passed check, and not an expired, decided,
+      read, archived or unlisted one, a pairing, another kind, one that
+      already arrived during the reads, nor anything at an unlock, after
+      a lock during the hold, or without a `pending.list` read.
     - Unit (ViewModel, 0.1.26): viewing marks the unread non-urgent
       items read, urgent ones kept; arrivals in view marked, not while
       paused; the dots and the Unread chip kept until leaving; an item
@@ -2163,8 +2185,9 @@ its process runs; nothing keeps it running in the background).
      (inexact; no exact-alarm permission). After the check the app
      catches up (§6 Owner check, 4) and normal notifications resume;
      nothing missed is replayed as notifications, the bell counts it,
-     except each ask still waiting that expires, notified once
-     (Notifications 7, 0.1.132).
+     except each ask still waiting of the three kinds of
+     Notifications 7 (0.1.132), notified once when a passed check ends
+     the held or due state in an open session.
 4. **(b) Google push (FCM)** (PUSH-GATEWAY 0.4.2; VAULT-MESSAGING
    0.24.1 §14, 0.1.29, 0.1.30, 0.1.32). Contentless wakes:
    the app's FCM token goes to its vault over the end-to-end session
@@ -2540,7 +2563,9 @@ its process runs; nothing keeps it running in the background).
       kind and unknown kinds; batch updates in place and cancel on
       read, archive, delete and from other devices; Content per
       preview choice (no text with Names, nothing with Nothing; never
-      an email or value); cancel on lock, hold, wipe and unlink; the
+      an email or value); cancel on lock, hold, wipe and unlink; (0.1.132)
+      a replayed ask posted as a new arrival, in the public version
+      under the app lock's cover; the
       backoff schedule with a fake clock and network; the FCM provider
       "not available yet" without configuration and without Play
       services.
@@ -2775,7 +2800,8 @@ gets its own indicator, apart from the bell.
     and no-purpose challenges, session requests and `approval.pending`, the
     neutral treatment for signin only; the order; the
     indicator hidden when held, due, locked, on Approvals and on every
-    request screen; one snackbar per entry; the announcement for the
+    request screen; one snackbar per entry, unchanged by the
+    waiting-asks replay (0.1.132); the announcement for the
     soonest entry only and once per threshold. UI: the pill and row in
     both themes; at the largest font scale and narrow widths the clock
     badge and no pill; a detail screen with actions keeps them out of
