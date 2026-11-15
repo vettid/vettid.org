@@ -2494,8 +2494,8 @@ leaving the screen.
   iOS a return from the background also ends the deferral, so the
   check opens over a screen holding input once the member comes back
   to the app; on Android only leaving the screen or the 5 minutes do.
-  iOS has no calls yet; when it does, a call keeps only the call's own
-  UI up over the covered shell (the call note of vettid-ios #206).
+  (0.1.74) A call keeps only the call's own UI up over the covered
+  shell (the call note of vettid-ios #206).
 - **Unlock and check in** (0.1.47; owner decision 2026-10-28,
   VAULT-MESSAGING 0.71.0 §3.6.5 "Ask only for what is used"): as
   ANDROID-PLAN §6 owner check item 6, with the same approved texts

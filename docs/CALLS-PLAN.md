@@ -103,8 +103,7 @@ changelog:
     sees stays gated at run time by the `call.list` probe, for incoming
     calls too; the lock screen and CallKit say "VettID call", never
     with whom. §12.8: the iOS guard also refuses the raw-audio taps and
-    `turnLoggingId`, and
-    `Release` now carries calls code. New §12.9: on iOS a live call
+    `turnLoggingId`, and `Release` now carries calls code. New §12.9: on iOS a live call
     goes on in the background (the `audio` mode, and the relay
     connection held for the call only), an exception to IOS-PLAN §6.6.
     §12.4 and §12.7 follow.
@@ -468,9 +467,9 @@ from a push wake.
 
 | Screen or surface | States | Texts to specify later |
 |---|---|---|
-| Call buttons on a connection and in a conversation | enabled; disabled (vault locked, calls off for this connection, no microphone permission); 0.1.2: **absent** in a build without calls code, and hidden for a vault that answers `call.list` with `unsupported_type` (§12.5); (0.1.11) every build has calls code, and the buttons are hidden until the probe has said the vault has calls (§12.5) | reasons for each disabled state |
+| Call buttons on a connection and in a conversation | enabled; disabled (vault locked, calls off for this connection, no microphone permission); 0.1.2 (until 0.1.11): **absent** in a build without calls code, and hidden for a vault that answers `call.list` with `unsupported_type` (§12.5); (0.1.11) every build has calls code, and the buttons are hidden until the probe has said the vault has calls (§12.5) | reasons for each disabled state |
 | Outgoing call | calling; ringing; connecting; declined; busy; no answer; failed | one line per ending |
-| Incoming call (full screen and notification) | ringing; answered on another device | "<First Last> is calling", Answer, Decline |
+| Incoming call (full screen and notification) | ringing; answered on another device | "<First Last> is calling" (0.1.11: in VettID's own screen, once the phone is unlocked; the lock screen and CallKit say "VettID call", §12.5), Answer, Decline |
 | In call | audio; video; reconnecting; relayed or direct indicator; muted; speaker, Bluetooth | the encryption line; "Reconnecting…" |
 | Permission prompts | microphone, camera, Bluetooth, full-screen intent | why each is asked |
 | Call history (in the conversation; a list later) | outgoing, incoming, missed, with duration | — |
@@ -720,7 +719,8 @@ never one per architecture; the spike's proposal of per-architecture
 APKs is not taken. With calls compiled in, an APK with all four
 architectures is about 57.6 MB where it was 9.1 MB (§12.1). (0.1.11)
 Staging and debug builds carry all four architectures; a release
-carries ARM only (owner decision 2026-11-05). Since 2026-11-14 a
+carries ARM only (owner decision 2026-11-05, recorded in vettid-android's
+build rules, not in ANDROID-PLAN). Since 2026-11-14 a
 release carries calls too (§12.5): on 2026-11-14 the `full` release
 went from 31.3 to 51.0 MB and the `foss` release from 30.7 to 50.3 MB.
 
@@ -746,7 +746,7 @@ went from 31.3 to 51.0 MB and the `foss` release from 30.7 to 50.3 MB.
   below (owner decisions 2026-11-14). The call buttons (the connection
   page's Call, the calls row and the conversation's button) show only
   once the probe has said the vault has calls (on Android `READY`, or
-  `IN_CALL` while a call goes on). A
+  `IN_CALL` while a call goes on; on iOS `ready`). A
   vault without calls, or one that has not answered yet, shows none of
   them: the conversation's button is no longer shown with a "calls not
   available" notice (replacing the choice of 2026-10-12). **Incoming
@@ -754,17 +754,26 @@ went from 31.3 to 51.0 MB and the `foss` release from 30.7 to 50.3 MB.
   probe said the vault has calls, waiting for that answer within the
   same 10 s it gives an unlock that is completing (during a live call it
   does not wait: the probe has answered); otherwise it is refused, with
-  no `call.ringing`, no call screen and no microphone prompt, and it
-  leaves no missed-call record on this phone, as an offer to a locked
-  vault does (from C2 the vault records the missed call, §6.1 V2).
+  no `call.ringing`, no call screen, no CallKit report (iOS) and no
+  microphone prompt, and it leaves no missed-call record on this phone,
+  as an offer to a locked vault does (from C2 the vault records the
+  missed call, §6.1 V2).
+- **(0.1.11) Answering needs the microphone.** Every answer goes
+  through the microphone permission first. On iOS a refused Accept,
+  then Decline, ends the call as missed with nothing sent; on Android a
+  refused permission leaves the call ringing, with nothing answered or
+  sent, and the member may Answer again or Decline, or let it ring out.
 - **(0.1.11) The lock screen says "VettID call", never with whom**
   (owner decision 2026-11-14). On iOS, CallKit's caller name is "VettID
   call" for every call, ringing or going on, and its handle is an opaque
   value per call, not the connection's id; the name shows only in
-  VettID's own call screen, once the phone is unlocked. This is the
-  Android rule too: what the lock screen shows of a call says that a
-  call is going on, never with whom. Names are bidi-isolated wherever
-  they are shown.
+  VettID's own call screen, once the phone is unlocked. Android's rule
+  is its call notification's public version, the one the lock screen
+  shows when the member hides sensitive content: it says that a call is
+  going on, never with whom. A member who lets the lock screen show all
+  notification content sees the name there (the notification is
+  `VISIBILITY_PRIVATE`). Names are bidi-isolated wherever they are
+  shown.
 - **The app cannot read a feature list, because there is none.**
   VAULT-MESSAGING §11.10.8 ("No list in the protocol"): no message
   carries a release's features, and an app learns that a feature is
@@ -861,11 +870,14 @@ in place of the read-back:
   the iOS counterparts of what Android's guard refuses
   (`setSamplesReadyCallback`, `setPlaybackSamplesReadyCallback`,
   `setEnableVolumeLogger`): `addRenderer:` and `RTCAudioRenderer`, an
-  adoption of `RTCAudioCustomProcessingDelegate` (read from the
-  class-name section, which survives stripping) and a custom
+  adoption of `RTCAudioCustomProcessingDelegate` and a custom
   `RTCAudioDevice` outside the tests, each of which would hand decrypted
-  audio to code outside the engine's path; and `turnLoggingId`, which
-  would label the TURN traffic with an identifier.
+  audio to code outside the engine's path; and `turnLoggingId` (and
+  `TurnLoggingId`), which would label the TURN traffic with an
+  identifier. Limits: in the archive an adoption is found only by the
+  protocol's name in the class-name section (`__objc_classname`, which
+  survives stripping); "outside the tests" is the source scan's rule
+  only.
 - **This guard is iOS's in place of Android's read-back**: Android keeps
   `MediaLogGuard` (the level read back, call keys refused while logging
   is on); iOS, which cannot read the level back, keeps the setter
