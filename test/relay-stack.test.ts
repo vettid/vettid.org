@@ -70,6 +70,11 @@ describe('service (stateless)', () => {
       RELAY_CLAIM_TTL: '168h',
     });
     expect(envs.RELAY_DB_PATH).toBeUndefined();
+    // A relay that serves vaults keeps its defaults (RELAY-PROTOCOL 0.11.1 §6.7, §6.1): a 14-day rotation grace, a
+    // message TTL of at most 14 days, and the start-up check that refuses anything else (vettid-relay #25).
+    expect(envs.RELAY_ROTATION_GRACE).toBeUndefined();
+    expect(envs.RELAY_MESSAGE_TTL).toBeUndefined();
+    expect(envs.RELAY_SERVES_VAULTS).toBeUndefined();
     // Data refs come from SSM (no CloudFormation imports).
     expect(JSON.stringify(t.toJSON())).toContain('/vettid-org/prod/relay/table-name');
     expect(JSON.stringify(t.toJSON())).not.toContain('Fn::ImportValue');
