@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.73
-date: 2026-11-13
+version: 0.1.74
+date: 2026-11-15
 changelog:
+  - 0.1.74: 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). §6.6: a live call goes on in the background, with the `audio` mode and the relay collection kept by long poll while the call is live, handling only call traffic and lock signals, stopped when it ends: an exception to "close the socket", marked "(chosen; not in the spec)"; the owner-check note on a call over the covered shell no longer says iOS has no calls; §4 and "Later": CallKit is no longer later, only ringing a closed app by PushKit is. Note, no change to this plan's text: since 2026-11-14 `Release` carries calls code (CALLS-PLAN §12.5), and the log guard is CALLS-PLAN §12.8's.
   - 0.1.73: erratum, 2026-11-13 (ANDROID-PLAN 0.1.129; owner decision a, 2026-11-13). The owner's decision in ANDROID-PLAN §4 "Transfer (new phone)" holds for the iPhone's transfer-in too: a cut noticed just before the settlement window starts is not counted, as on Android, and it is left as it is.
   - 0.1.71: 2026-11-12 (ANDROID-PLAN 0.1.127, VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4.18 "Relay-key rotation texts": the iPhone shows ANDROID-PLAN §4 "Relay-key rotation texts", owner-approved 2026-11-12, in the same places and with the same texts.
   - 0.1.70: erratum, 2026-11-12 (ANDROID-PLAN 0.1.126; owner decision a, GC #9050). The iPhone follows ANDROID-PLAN §4 "Locking the vault", "While pending": besides the lock and a pending `call.end`, the phone's `hs.resp` to a rekey the vault started goes while a lock is pending; everything else it would send waits until the lock ends; the rekey's `hs.fin` is still processed. Built in GC #8918's work.
@@ -760,7 +761,7 @@ Only these differ on iOS:
 | History export | "Save to Files" (`UIDocumentPickerViewController(forExporting:asCopy: true)`; 0.1.66, from the app version with vettid-ios #241, in review: the file's handling is §6.9's row) in place of "Save to…". (0.1.63; from the app version with vettid-ios #209, in review) `bad_request` is the request's own fault and shows the vault's code; only `unsupported_type` says the vault release is too old. Android maps `bad_request` to "old vault" today and is to follow (ANDROID-PLAN 0.1.120). |
 | Transfer to a new phone (this phone the old one) | (0.1.63; from the app version with vettid-ios #209, in review) When the wait for the new phone fails (not the code's own end), the app rejects the transfer (`device.transfer.reject`), so its code cannot be used, and returns to the start with the failure said. Android shows the "expired" screen. |
 | Unlock, a refused update | (0.1.63; from the app version with vettid-ios #209, in review) The reason is said in words, with the refused release's own number, for the codes the app has a sentence for (`ios_unlock_update_refused_why`, a draft for the owner); any other code gets Android's `unlock_update_refused` with the code filtered, never raw. Android shows the code. |
-| Calls (later) | CallKit, and PushKit to ring (needs APNs). (0.1.67) After a glare (VAULT-MESSAGING 0.88.14 §10.10), the iPhone that answers the winning call without asking answers with never more than its own lost call's media (video only when both are video; otherwise the video section is rejected, `port 0`), and accepts an answer without video to a video call it placed, showing it as audio; turning video on later is `call.update` (V7). As ANDROID-PLAN 0.1.123 says: an audio call never turns the camera on by itself. |
+| Calls | (0.1.74) CallKit is built (CALLS-PLAN §12.9); ringing a closed app by PushKit (needs APNs) is later. (0.1.67) After a glare (VAULT-MESSAGING 0.88.14 §10.10), the iPhone that answers the winning call without asking answers with never more than its own lost call's media (video only when both are video; otherwise the video section is rejected, `port 0`), and accepts an answer without video to a video call it placed, showing it as audio; turning video on later is `call.update` (V7). As ANDROID-PLAN 0.1.123 says: an audio call never turns the camera on by itself. |
 
 ### 4.1 Event titles (0.1.11)
 
@@ -2439,6 +2440,28 @@ leaving the screen.
   (persist then ack, §8.3; a lock request; an outbox send), then close
   the socket. Nothing assumes it ran longer; remove every feed item
   notification (§6.7).
+- **A live call on leaving** (0.1.74; chosen; not in the spec; owner
+  decisions 2026-11-14; CALLS-PLAN §12.9): the call goes on, as on
+  Android. The `audio` background mode keeps the app running only while
+  a call's audio is active (not the `voip` mode, which is for ringing a
+  closed app, later). While a call is live (any phase from starting to
+  active, a ringing incoming call included) the relay collection goes
+  on in the background by long poll (the WebSocket is cut at the
+  switch; its leased frames come back after their lease, up to 60 s),
+  and it is stopped as soon as the call ends if the app is still in the
+  background. While held, only the call's messages (`call.offer`,
+  `call.answer`, `call.ringing`, `call.end`, `call.ice`) and lock
+  signals (`vault.locking`, `device.unlinked`, `vault.held`) are
+  handled, with what the device layer handles by itself and an event a
+  device step is waiting for. Every other event waits for the
+  foreground: left unacked and redelivered after its lease
+  (`credential.alarm`, `sync.event` and `connection.authenticate.*`
+  always; up to 32 others), and past 32 acked and kept in memory for
+  replay (CALLS-PLAN §12.9 has the details).
+  The app lock's background time is unchanged by a held call.
+  With no call live, the rule above applies unchanged. The
+  lock screen and CallKit say "VettID call", never with whom
+  (CALLS-PLAN §12.5).
 - **Lock and app lock**: the app-lock timeout counts from the moment
   the scene went to the background, read on return; the vault's own
   locks (VAULT-LOCK, owner check) are the vault's and need nothing from
@@ -2480,8 +2503,8 @@ leaving the screen.
   iOS a return from the background also ends the deferral, so the
   check opens over a screen holding input once the member comes back
   to the app; on Android only leaving the screen or the 5 minutes do.
-  iOS has no calls yet; when it does, a call keeps only the call's own
-  UI up over the covered shell (the call note of vettid-ios #206).
+  (0.1.74) A call keeps only the call's own UI up over the covered
+  shell (the call note of vettid-ios #206).
 - **Unlock and check in** (0.1.47; owner decision 2026-10-28,
   VAULT-MESSAGING 0.71.0 §3.6.5 "Ask only for what is used"): as
   ANDROID-PLAN §6 owner check item 6, with the same approved texts
@@ -2511,7 +2534,8 @@ leaving the screen.
   (S8, 0.1.7). Staging builds show the scaled times and "Staging: 1 day =
   1 hour"; a production build refuses any value other than 1 and sends
   nothing.
-- **Calls, presence, location**: not before push; their phases say how.
+- **Ringing a closed app (calls), presence, location**: not before push;
+  their phases say how. (0.1.74) A live call is the bullet above.
 
 ### 6.7 Push: not before APNs
 
@@ -2806,9 +2830,9 @@ locks.
 ### Later — following Android
 
 In the order STAGING-DEVELOPMENT-PLAN §5 gives them, each when its
-Android counterpart is done: **calls** (CALLS-PLAN; CallKit, ringing
-by PushKit, which needs APNs; the media stack and frame encryption of
-CALLS-PLAN §12; `calls.json`), **devices and agents** (§6.8, §10.11;
+Android counterpart is done: **ringing a closed app for calls**
+(by PushKit, which needs APNs; 0.1.74: the rest of calls is built,
+CALLS-PLAN §12), **devices and agents** (§6.8, §10.11;
 `leash.json`), **wallet** (§10.18), **location** (§10.16; ANDROID-PLAN
 §6 location notes), **presence** (§10.17). (0.1.63) They follow
 ANDROID-PLAN 0.1.120 §4: presence's "last seen" wording and card text

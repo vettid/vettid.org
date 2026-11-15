@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.129
-date: 2026-11-13
+version: 0.1.130
+date: 2026-11-15
 changelog:
+  - 0.1.130: erratum, 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). The status line on calls: production release APKs carried no call code until 2026-11-14, when calls went into every build (CALLS-PLAN §12.5, with the run-time gate, incoming calls included).
   - 0.1.129: erratum, 2026-11-13 (owner decision a, 2026-11-13; as built in vettid-android #307; the decision holds for vettid-ios too). §4 "Transfer (new phone)": the settlement window's end moves out for a cut collect or a process freeze, within a cap, as built; a cut noticed just before the window starts is not counted, and the owner chose to leave that as it is.
   - 0.1.127: 2026-11-12 (VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4 "Relay-key rotation texts". The texts, owner-approved 2026-11-12, are: the held state, per message, of messages to a connection whose vault moved (`relay_held`); `connection.stale` with `reason: "relay_moved"`; S9's text for `connection.fork_suspected` (`ref` = `relay_revoked`); `message.not_delivered` at the hold's 60-day limit; and `message.delivery_unconfirmed` reused at the telling's limit (VAULT-MESSAGING §3.4.2 RK9, RK14). None of them shows before a vault release that rotates relay keys.
   - 0.1.126: erratum, 2026-11-12 (owner decision a, GC #9050). §4 "Locking the vault", "While pending": besides the lock and a pending `call.end`, the phone's `hs.resp` to a rekey the vault started goes while a lock is pending (while the vault's rekey awaits it, the vault starts no other rekey with this phone for up to 16 days); everything else the phone would send waits until the lock ends; the session's own handshake and token messages are still processed, the rekey's `hs.fin` included. Android already sends the `hs.resp` while a lock is pending; holding what else it sends is GC #9027.
@@ -7453,7 +7454,8 @@ after v1: **calls** C1 is built (#124 to #126, #175, #178 and #128, the
 call screens, merged 2026-10-27; #128 leaves out "Unlock your vault to
 call" and shows the conversation line "Call, 4 min 12 s" without
 "(connection lost)", which the vault's call history cannot tell;
-production release APKs still carry no call code); **release R**
+production release APKs carried no call code until 2026-11-14, when
+calls went into every build, CALLS-PLAN 0.1.11 §12.5); **release R**
 (recovery and unlock) is built (#134 to #143); the **staging time
 scale** (#145, #146, #153, #154), **photo attachments** (#131 to #133)
 and the **notification sounds** (#180) are built; **devices and agents**
