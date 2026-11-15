@@ -4,7 +4,7 @@ status: approved (owner, 2026-10-17)
 version: 0.1.76
 date: 2026-11-15
 changelog:
-  - 0.1.76: erratum, 2026-11-15 (ANDROID-PLAN 0.1.132; owner decisions a, 2026-11-15). §6.7 "Local notifications for feed items before phase P": the one exception to "never a full read" is ANDROID-PLAN's: when a passed check ends the held or due state in an open session, each ask still waiting of its three kinds is notified once (pairings left out; nothing at an unlock); before phase P this is a banner while VettID is in front.
+  - 0.1.76: erratum, 2026-11-15 (ANDROID-PLAN 0.1.132; owner decisions a, 2026-11-15). §6.7 "Local notifications for feed items before phase P": the one exception to "never a full read" is ANDROID-PLAN's: when a passed check, not an unlock's own, ends the held or due state, each ask still waiting of its three kinds is notified once (pairings left out; nothing at an unlock); before phase P this is a banner while VettID is in front.
   - 0.1.75: erratum, 2026-11-15 (ANDROID-PLAN 0.1.131; owner decision a, 2026-11-15). §4.2 point 5: a pointer only, since the iPhone does not build the member API's `410` state yet: when it does, its pre-bound text and the time at which **Remove from this phone** comes are ANDROID-PLAN 0.1.131's, not Android #192's. Point 4 is unchanged: on Android 0.1.131 also shows "still finishing" at `until` on its own timer, without waiting for a read; the iPhone keeps showing it after the read at `until`, since its pre-bound screen names no time (taking Android's timing is for a later change).
   - 0.1.74: 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). §6.6: a live call goes on in the background, with the `audio` mode and the relay collection kept by long poll while the call is live, handling only call traffic and lock signals, stopped when it ends: an exception to "close the socket", marked "(chosen; not in the spec)"; the owner-check note on a call over the covered shell no longer says iOS has no calls; §4 and "Later": CallKit is no longer later, only ringing a closed app by PushKit is. Note, no change to this plan's text: since 2026-11-14 `Release` carries calls code (CALLS-PLAN §12.5), and the log guard is CALLS-PLAN §12.8's.
   - 0.1.73: erratum, 2026-11-13 (ANDROID-PLAN 0.1.129; owner decision a, 2026-11-13). The owner's decision in ANDROID-PLAN §4 "Transfer (new phone)" holds for the iPhone's transfer-in too: a cut noticed just before the settlement window starts is not counted, as on Android, and it is left as it is.
@@ -2576,11 +2576,13 @@ Apple push this works only while the app is open:
   prompt) posts nothing; the item is still in the list and on the bell.
   One notification per item, updated in place without alerting again.
   (0.1.76) The one exception is ANDROID-PLAN 0.1.132's (Notifications 7),
-  by the same rules: when a passed check ends the held or due state in
-  an open session, each ask still waiting of exactly its three kinds
+  by the same rules: when a passed check, not an unlock's own, ends the
+  held or due state, each ask still waiting of exactly its three kinds
   (`connection.authenticate.requested`, `device.session.pending`,
   `approval.pending`; pairings left out) is notified once; an unlock,
-  also one that passes the check, replays nothing. Before phase P this
+  also one that passes the check, replays nothing. The iPhone reads
+  `pending.list` (all pages) with the approvals after a passed check,
+  and the replay uses the first such read that succeeds. Before phase P this
   is a banner while VettID is in front, skipped like any other while
   the Notifications list or the ask's own screen is in front; nothing
   posts under the app lock.
