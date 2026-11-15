@@ -101,13 +101,20 @@ changelog:
     calls code is in every build on both apps, `Release` included,
     replacing the rule that production builds carry none; what a member
     sees stays gated at run time by the `call.list` probe, for incoming
-    calls too; the lock screen and CallKit say "VettID call", never
-    with whom. §12.8: the iOS guard also refuses the raw-audio taps and
-    `turnLoggingId`, and `Release` now carries calls code. New §12.9: on iOS a live call
+    calls too, with no CallKit report for a refused one; every answer
+    goes through the microphone permission (what a refusal does on
+    each app); on iOS the lock screen and CallKit say "VettID call",
+    and on Android the call notification's public version names
+    nobody (no name at all when the member's notifications hide
+    names). §12.8: the iOS guard also refuses the raw-audio taps,
+    `turnLoggingId` and `TurnLoggingId`, with what it does not catch;
+    `Release` now carries calls code. New §12.9: on iOS a live call
     goes on in the background (the `audio` mode, and the relay
     collection kept by long poll while the call is live, handling only
-    call traffic and lock signals), an exception to IOS-PLAN §6.6.
-    §12.4 and §12.7 follow.
+    call traffic and lock signals; the 32-event cap as built), an
+    exception to IOS-PLAN §6.6. §12.4 (ARM-only release), the §6.4
+    table (the button row "until 0.1.11", the incoming row) and §12.7
+    follow.
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -470,7 +477,7 @@ from a push wake.
 |---|---|---|
 | Call buttons on a connection and in a conversation | enabled; disabled (vault locked, calls off for this connection, no microphone permission); 0.1.2 (until 0.1.11): **absent** in a build without calls code, and hidden for a vault that answers `call.list` with `unsupported_type` (§12.5); (0.1.11) every build has calls code, and the buttons are hidden until the probe has said the vault has calls (§12.5) | reasons for each disabled state |
 | Outgoing call | calling; ringing; connecting; declined; busy; no answer; failed | one line per ending |
-| Incoming call (full screen and notification) | ringing; answered on another device | "<First Last> is calling" (0.1.11: in VettID's own screen, once the phone is unlocked; the lock screen and CallKit say "VettID call", §12.5), Answer, Decline |
+| Incoming call (full screen and notification) | ringing; answered on another device | "<First Last> is calling" (0.1.11: in VettID's own screen, once the phone is unlocked; what the lock screen shows is §12.5's: "VettID call" on iOS, and on Android no name unless the member shows all notification content), Answer, Decline |
 | In call | audio; video; reconnecting; relayed or direct indicator; muted; speaker, Bluetooth | the encryption line; "Reconnecting…" |
 | Permission prompts | microphone, camera, Bluetooth, full-screen intent | why each is asked |
 | Call history (in the conversation; a list later) | outgoing, incoming, missed, with duration | — |
@@ -764,8 +771,8 @@ went from 31.3 to 51.0 MB and the `foss` release from 30.7 to 50.3 MB.
   then Decline, ends the call as missed with nothing sent; on Android a
   refused permission leaves the call ringing, with nothing answered or
   sent, and the member may Answer again or Decline, or let it ring out.
-- **(0.1.11) The lock screen says "VettID call", never with whom**
-  (owner decision 2026-11-14). On iOS, CallKit's caller name is "VettID
+- **(0.1.11) The lock screen does not say with whom** (owner
+  decision 2026-11-14; on iOS "VettID call", on Android as below). On iOS, CallKit's caller name is "VettID
   call" for every call, ringing or going on, and its handle is an opaque
   value per call, not the connection's id; the name shows only in
   VettID's own call screen, once the phone is unlocked. Android's rule
@@ -773,8 +780,9 @@ went from 31.3 to 51.0 MB and the `foss` release from 30.7 to 50.3 MB.
   shows when the member hides sensitive content: it says that a call is
   going on, never with whom. A member who lets the lock screen show all
   notification content sees the name there (the notification is
-  `VISIBILITY_PRIVATE`). Names are bidi-isolated wherever they are
-  shown.
+  `VISIBILITY_PRIVATE`). When the member's notifications hide names,
+  Android's call notification shows no name at all, in either version.
+  Names are bidi-isolated wherever they are shown.
 - **The app cannot read a feature list, because there is none.**
   VAULT-MESSAGING §11.10.8 ("No list in the protocol"): no message
   carries a release's features, and an app learns that a feature is
@@ -902,7 +910,9 @@ Android, where the call's foreground service keeps it.
   that is for ringing a closed app, with PushKit, later.
 - **The relay collection is kept only while a call is live in the
   background**, and stopped as soon as the call ends if the app is
-  still in the background. "Live" is any phase from starting to
+  still in the background. The hold is decided at the start of the
+  app's background work and checked again at its end; at the hold's
+  end the collection stops after any pending hang-ups. "Live" is any phase from starting to
   active, an incoming call still ringing included. The collection goes
   on by long poll: the WebSocket is cut at the switch, so the frames it
   had leased come back after their lease (up to 60 s). Without it the
@@ -933,7 +943,9 @@ Android, where the call's foreground service keeps it.
   end the unlock window. A redelivered list change is dropped only
   when that list's own read (requests, approvals, grants, shares,
   critical uses) was applied and already covers it, within 120 s in
-  vault time; a failed or superseded read sets no mark. A redelivery
+  vault time. A list's mark is set only as its read is applied, while
+  it is still the current read and the vault is open; a failed,
+  unsupported or superseded read sets no mark. A redelivery
   after 120 s or after a restart is not guarded: it can leave a list
   stale, never security state. Messages, feed, vote and connection
   events and the state events are always applied.
