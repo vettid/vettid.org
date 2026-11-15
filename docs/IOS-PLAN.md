@@ -4,7 +4,7 @@ status: approved (owner, 2026-10-17)
 version: 0.1.75
 date: 2026-11-15
 changelog:
-  - 0.1.75: erratum, 2026-11-15 (ANDROID-PLAN 0.1.131; owner decision a, 2026-11-15). §4.2 point 5: a pointer only, since the iPhone does not build the member API's `410` state yet: when it does, its pre-bound text and the time at which **Remove from this phone** comes are ANDROID-PLAN 0.1.131's, not Android #192's.
+  - 0.1.75: erratum, 2026-11-15 (ANDROID-PLAN 0.1.131; owner decision a, 2026-11-15). §4.2 point 5: a pointer only, since the iPhone does not build the member API's `410` state yet: when it does, its pre-bound text and the time at which **Remove from this phone** comes are ANDROID-PLAN 0.1.131's, not Android #192's. Point 4 is unchanged: on Android 0.1.131 also shows "still finishing" at `until` on its own timer, without waiting for a read; the iPhone keeps showing it after the read at `until`, since its pre-bound screen names no time (taking Android's timing is for a later change).
   - 0.1.74: 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). §6.6: a live call goes on in the background, with the `audio` mode and the relay collection kept by long poll while the call is live, handling only call traffic and lock signals, stopped when it ends: an exception to "close the socket", marked "(chosen; not in the spec)"; the owner-check note on a call over the covered shell no longer says iOS has no calls; §4 and "Later": CallKit is no longer later, only ringing a closed app by PushKit is. Note, no change to this plan's text: since 2026-11-14 `Release` carries calls code (CALLS-PLAN §12.5), and the log guard is CALLS-PLAN §12.8's.
   - 0.1.73: erratum, 2026-11-13 (ANDROID-PLAN 0.1.129; owner decision a, 2026-11-13). The owner's decision in ANDROID-PLAN §4 "Transfer (new phone)" holds for the iPhone's transfer-in too: a cut noticed just before the settlement window starts is not counted, as on Android, and it is left as it is.
   - 0.1.71: 2026-11-12 (ANDROID-PLAN 0.1.127, VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4.18 "Relay-key rotation texts": the iPhone shows ANDROID-PLAN §4 "Relay-key rotation texts", owner-approved 2026-11-12, in the same places and with the same texts.
@@ -1057,7 +1057,9 @@ answer to this phone's own `vault.delete` counts the same (VAULT-MESSAGING
    which shows the two apart). A `401` and `{vault: null}` are **no
    longer** signs that the vault is gone (until 0.1.32 they were).
 4. **After the bound.** If the vault is still listed at `until`, the
-   screen changes to the neutral "still finishing" text below, with
+   screen changes to the neutral "still finishing" text below (on
+   Android from ANDROID-PLAN 0.1.131 at `until` on its own timer; on
+   the iPhone unchanged, after the read at `until`), with
    **Check again** (a re-read now, whose result is shown as
    unconfirmed, unreachable or gone; behaviour and texts as Android
    #192). The
