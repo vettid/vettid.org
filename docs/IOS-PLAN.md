@@ -2579,7 +2579,9 @@ Apple push this works only while the app is open:
   by the same rules: when a passed check, not an unlock's own, ends the
   held or due state, each ask still waiting of exactly its three kinds
   (`connection.authenticate.requested`, `device.session.pending`,
-  `approval.pending`; pairings left out) is notified once; an unlock,
+  `approval.pending`; pairings left out) is notified once (any
+  notification still posted for it removed first, then posted as a new
+  arrival); an unlock,
   also one that passes the check, replays nothing. The iPhone reads
   `pending.list` (all pages) with the approvals after a passed check,
   and the replay uses the first such read that succeeds. Before phase P this

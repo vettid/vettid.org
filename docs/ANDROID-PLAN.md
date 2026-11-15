@@ -1976,11 +1976,12 @@ feed repository and no screen.
    its channel's sound, in the public version on the phone's lock
    screen as for every notification (Notification modes, Content). An
    ask that arrived as a live event during those reads is not notified
-   a second time. A replayed ask shows no snackbar: the approvals
-   indicator and its snackbar (Approvals indicator 7) are unchanged.
+   a second time. The replay itself adds no snackbar; Approvals
+   indicator 7 applies as before.
    **Pairings are left out** (`device.pair.pending`): they cannot be
    approved while held or due and time out; the vault does not list
-   them in `pending.list` (VAULT-MESSAGING §10.4.2) and deciding one does
+   them yet (kind `pairing` of `pending.list` is specified in
+   VAULT-MESSAGING §10.4.2 but not built in the vault), and deciding one does
    not mark its feed item, so the phone cannot tell one still waiting
    from one already done; a pairing this phone started is ended by the
    hold. A later change to this plan adds them once the vault lists
@@ -2018,9 +2019,13 @@ feed repository and no screen.
       notified once after a passed check, and not an expired, decided,
       read, archived or unlisted one, a pairing, another kind, one that
       already arrived during the reads, nor anything at an unlock (also
-      one that passes the check), after a lock during the reads, or
-      without a successful `pending.list` read; an unlock whose check
-      fails followed by a separate passed check replays.
+      one that passes the check), after a lock during the reads,
+      without a successful `pending.list` read, nor after a restart
+      between the check and its read; an unlock whose check fails
+      followed by a separate passed check replays. After a hold only
+      challenges can be waiting (session requests and held approvals
+      are dropped when the hold begins); those two kinds replay only
+      after the due state.
     - Unit (ViewModel, 0.1.26): viewing marks the unread non-urgent
       items read, urgent ones kept; arrivals in view marked, not while
       paused; the dots and the Unread chip kept until leaving; an item
