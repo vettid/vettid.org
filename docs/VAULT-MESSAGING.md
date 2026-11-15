@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.12
-date: 2026-11-14
+version: 0.90.13
+date: 2026-11-15
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -29,6 +29,20 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.13: 2026-11-15, **`B` judged after a batch's messages** (owner
+    approval 2026-11-13; as built in vettid-vault): §6.3.1: where the
+    pending epoch's `B` has passed and a batch carries a message
+    addressed to that epoch (by its recipient kid), `I` judges `B` at
+    the end of that same batch, after its messages, so that a
+    confirmation in it comes first; until then the batch's per-peer
+    housekeeping, token refresh and relay restart's tick end the epoch
+    no other way, and the rest of that peer's housekeeping waits for the
+    next batch. Before `B` has passed, and in any other batch, nothing
+    changes. Before 0.90.13, a confirmation that arrived
+    in the batch that reached `B` (after a lock longer than `B`) found
+    its epoch already abandoned: toward a device the device exception,
+    between vaults a reconnect. §3.4 "After the grace": wording ("a
+    `200` there can follow nothing but a lost `201`").
   - 0.90.12: 2026-11-14, **a lost answer that may have made a pending
     relay key's mailbox afresh** (erratum, as built in vettid-vault):
     §3.4 "The order of a relay-key rotation" step 2: the registration
@@ -4981,7 +4995,7 @@ create-only.
     stored with the key, it may follow this vault's own `201` whose
     answer was lost, so it is taken as one that made the mailbox afresh
     and the key waits as after a `201`; a stored wait stands (there a
-    `200` may only follow a lost `201`), and a `201` received starts the
+    `200` can follow nothing but a lost `201`), and a `201` received starts the
     wait again. Otherwise the vault continues with step 3. A `201`
     means a fresh mailbox, which at an id that has a tombstone refuses
     tokens issued before the deletion plus 90 s (RELAY-PROTOCOL §6.10).
@@ -9845,7 +9859,7 @@ peer on an earlier release ("No upgrade: release 29 starts clean", below; §3.4.
 |---|---|
 | An initiator's handshake awaiting `hs.resp` | 16 days from `hs.init` (§6.6 "After a restore": 7 days) |
 | A responder's answer awaiting `hs.fin` (`L`) | 16 days from its `hs.resp` |
-| An initiator's pending epoch awaiting confirmation (`B`) | 32 days from `hs.fin` (`L` + `T` + 2 days), judged only after the first collect after an unlock that returns fewer than `max` messages (§12.2) |
+| An initiator's pending epoch awaiting confirmation (`B`) | 32 days from `hs.fin` (`L` + `T` + 2 days), judged only after the first collect after an unlock that returns fewer than `max` messages (§12.2); (0.90.13) once passed, in a batch that carries a message under the epoch, at the end of that batch |
 | A responder's confirmed epoch while not current (below) | keys: up to 48 days from the first activation that superseded it, and 16 days (§6.5) once it stops being the confirmed epoch; id: until it stops being the confirmed epoch or the connection ends |
 
 The 48 days come from the 30-day life of a standing token (§6.6), not
@@ -9901,6 +9915,22 @@ A reconnect succeeds (§6.6 re-mint) at confirmation.
 - when it activates `R`'s handshake as responder (Responder, below);
 - when it starts a reconnect with `R`: a reconnect names `I`'s current
   epoch, never a pending one (§6.6).
+
+(0.90.13) Where the pending epoch's `B` has passed and a batch carries
+a message addressed to that epoch (a session-mode envelope whose
+`recipient_kid` is the epoch's, read before the message is opened), `I`
+judges `B` at the end of that same batch, after its messages, so that a
+confirmation in it (an `hs.confirm`, or any message under the pending
+epoch) comes first. Until then the per-peer housekeeping, the token
+refresh and the relay restart's tick end the epoch no other way (the
+missing standing token, a reconnect for an expired one, §3.4.2 RK6); the
+rest of that peer's per-peer housekeeping (the carried tokens' bound,
+the resend of `hs.confirm`, the pruning of epochs, a rekey that is due)
+waits for the next batch. The batch's messages are handled as they come,
+so `R`'s own valid `hs.fin`, later rekey or reconnect in it can end the
+epoch first, as at any time (not as `B`). Before `B`, and in any other
+batch, nothing changes: `B` is judged before the batch's messages, as
+before.
 
 In the write that abandons it, `I` records the revocation of the tokens
 its `hs.init` carried (a rekey's standing token, if it carried one, (0.88.2) which no release-29 rekey does; a
