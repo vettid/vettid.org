@@ -4,7 +4,7 @@ status: approved (owner, 2026-10-17)
 version: 0.1.74
 date: 2026-11-15
 changelog:
-  - 0.1.74: 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). §6.6: a live call goes on in the background, with the `audio` mode and the relay connection kept for the call only, closed when it ends: an exception to "close the socket", marked "(chosen; not in the spec)". `Release` carries calls code (CALLS-PLAN §12.5); the log guard is CALLS-PLAN §12.8's.
+  - 0.1.74: 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). §6.6: a live call goes on in the background, with the `audio` mode and the relay connection kept for the call only, closed when it ends: an exception to "close the socket", marked "(chosen; not in the spec)". Note, no change to this plan's text: since 2026-11-14 `Release` carries calls code (CALLS-PLAN §12.5), and the log guard is CALLS-PLAN §12.8's.
   - 0.1.73: erratum, 2026-11-13 (ANDROID-PLAN 0.1.129; owner decision a, 2026-11-13). The owner's decision in ANDROID-PLAN §4 "Transfer (new phone)" holds for the iPhone's transfer-in too: a cut noticed just before the settlement window starts is not counted, as on Android, and it is left as it is.
   - 0.1.71: 2026-11-12 (ANDROID-PLAN 0.1.127, VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4.18 "Relay-key rotation texts": the iPhone shows ANDROID-PLAN §4 "Relay-key rotation texts", owner-approved 2026-11-12, in the same places and with the same texts.
   - 0.1.70: erratum, 2026-11-12 (ANDROID-PLAN 0.1.126; owner decision a, GC #9050). The iPhone follows ANDROID-PLAN §4 "Locking the vault", "While pending": besides the lock and a pending `call.end`, the phone's `hs.resp` to a rekey the vault started goes while a lock is pending; everything else it would send waits until the lock ends; the rekey's `hs.fin` is still processed. Built in GC #8918's work.
@@ -2525,7 +2525,8 @@ leaving the screen.
   (S8, 0.1.7). Staging builds show the scaled times and "Staging: 1 day =
   1 hour"; a production build refuses any value other than 1 and sends
   nothing.
-- **Calls, presence, location**: not before push; their phases say how.
+- **Ringing a closed app (calls), presence, location**: not before push;
+  their phases say how. (0.1.74) A live call is the bullet above.
 
 ### 6.7 Push: not before APNs
 

@@ -102,7 +102,8 @@ changelog:
     replacing the rule that production builds carry none; what a member
     sees stays gated at run time by the `call.list` probe, for incoming
     calls too; the lock screen and CallKit say "VettID call", never
-    with whom. §12.8: the iOS guard also refuses the raw-audio taps, and
+    with whom. §12.8: the iOS guard also refuses the raw-audio taps and
+    `turnLoggingId`, and
     `Release` now carries calls code. New §12.9: on iOS a live call
     goes on in the background (the `audio` mode, and the relay
     connection held for the call only), an exception to IOS-PLAN §6.6.
@@ -467,7 +468,7 @@ from a push wake.
 
 | Screen or surface | States | Texts to specify later |
 |---|---|---|
-| Call buttons on a connection and in a conversation | enabled; disabled (vault locked, calls off for this connection, no microphone permission); 0.1.2: **absent** in a build without calls code, and hidden for a vault that answers `call.list` with `unsupported_type` (§12.5) | reasons for each disabled state |
+| Call buttons on a connection and in a conversation | enabled; disabled (vault locked, calls off for this connection, no microphone permission); 0.1.2: **absent** in a build without calls code, and hidden for a vault that answers `call.list` with `unsupported_type` (§12.5); (0.1.11) every build has calls code, and the buttons are hidden until the probe has said the vault has calls (§12.5) | reasons for each disabled state |
 | Outgoing call | calling; ringing; connecting; declined; busy; no answer; failed | one line per ending |
 | Incoming call (full screen and notification) | ringing; answered on another device | "<First Last> is calling", Answer, Decline |
 | In call | audio; video; reconnecting; relayed or direct indicator; muted; speaker, Bluetooth | the encryption line; "Reconnecting…" |
@@ -714,14 +715,14 @@ recipe before C1 ends (open; risk 1 of §10 stays until then).
 
 ### 12.4 One universal APK
 
-Owner decision of 2026-10-12: **no ABI splits.** Every distribution
-ships one APK with all four architectures, as today. With calls
-compiled in, that APK is about 57.6 MB where it was 9.1 MB (§12.1); the
-spike's proposal of per-architecture APKs is not taken. (0.1.11) Since
-2026-11-14 production builds carry calls too (§12.5). A release APK
-carries ARM only (owner decision 2026-11-05): on 2026-11-14 the `full`
-release went from 31.3 to 51.0 MB and the `foss` release from 30.7 to
-50.3 MB; staging keeps every architecture.
+Owner decision of 2026-10-12: **no ABI splits.** Each build is one APK,
+never one per architecture; the spike's proposal of per-architecture
+APKs is not taken. With calls compiled in, an APK with all four
+architectures is about 57.6 MB where it was 9.1 MB (§12.1). (0.1.11)
+Staging and debug builds carry all four architectures; a release
+carries ARM only (owner decision 2026-11-05). Since 2026-11-14 a
+release carries calls too (§12.5): on 2026-11-14 the `full` release
+went from 31.3 to 51.0 MB and the `foss` release from 30.7 to 50.3 MB.
 
 ### 12.5 Where calls code is, and how the app knows a vault has calls
 
@@ -730,7 +731,8 @@ release went from 31.3 to 51.0 MB and the `foss` release from 30.7 to
   at some point, let's do it now"). This replaces the rule of 0.1.2
   that production builds carry no calls code, no media library and
   none of the calls permissions until promotion. A production APK or
-  app now carries the media library and asks for the microphone; the
+  app now carries the media library and declares the microphone
+  permission (asked for only when a call needs it); the
   permission texts are the ones already approved. The build checks
   require calls code instead of refusing it (Android:
   `check<Variant>Calls`, with the media stack's native libraries pinned
@@ -738,21 +740,23 @@ release went from 31.3 to 51.0 MB and the `foss` release from 30.7 to
   the call-test build's marker and its test switches in a release, and
   on iOS the test hooks outside debug builds. Promotion (§7) is still
   what turns calls on: a production vault release without `calls`
-  answers the probe below `unsupported_type`, so production members see
-  nothing of calls.
+  answers the probe (next items) with `unsupported_type`, so production
+  members see nothing of calls.
 - **(0.1.11) What a member sees is gated at run time by the probe**
   below (owner decisions 2026-11-14). The call buttons (the connection
   page's Call, the calls row and the conversation's button) show only
-  once the probe said the vault has calls, or while a call goes on. A
+  once the probe has said the vault has calls (on Android `READY`, or
+  `IN_CALL` while a call goes on). A
   vault without calls, or one that has not answered yet, shows none of
   them: the conversation's button is no longer shown with a "calls not
   available" notice (replacing the choice of 2026-10-12). **Incoming
   calls are gated on the same answer:** an offer rings only once the
-  probe said the vault has calls, waiting for that answer at most as
-  long as it waits for an unlock that is completing (10 s); otherwise
-  it is refused, with no `call.ringing`, no call screen and no
-  microphone prompt, and it leaves no missed-call record, as an offer
-  to a locked vault does.
+  probe said the vault has calls, waiting for that answer within the
+  same 10 s it gives an unlock that is completing (during a live call it
+  does not wait: the probe has answered); otherwise it is refused, with
+  no `call.ringing`, no call screen and no microphone prompt, and it
+  leaves no missed-call record on this phone, as an offer to a locked
+  vault does (from C2 the vault records the missed call, §6.1 V2).
 - **(0.1.11) The lock screen says "VettID call", never with whom**
   (owner decision 2026-11-14). On iOS, CallKit's caller name is "VettID
   call" for every call, ringing or going on, and its handle is an opaque
@@ -801,12 +805,12 @@ the media section of CALLING-SERVICE is §6 there, not §7):
   vectors), ending or re-keying a call on a decryption failure, the
   versioned media suite and where it is carried and signed (§12.3).
 - **ANDROID-PLAN** §4 to §6: the probe (§12.5), the build rule for
-  calls code, the universal APK's size, Telecom in C3.
+  calls code ((0.1.11) now calls in every build, with the run-time
+  gate of §12.5, incoming calls included), the universal APK's size,
+  Telecom in C3.
 - **IOS-PLAN** (0.1.10): the log guard of §12.8, its scans and its
   test. (0.1.11) The build rule that `Release` links no calls code is
   withdrawn (§12.5); the exception to IOS-PLAN §6.6 of §12.9.
-- (0.1.11) **ANDROID-PLAN**: calls in every build (§12.5) and the run-time
-  gate, incoming calls included, in place of the probe's build rule.
 
 ### 12.8 The log guard on iOS
 
@@ -853,15 +857,15 @@ in place of the read-back:
   test, off by default, because the setting is process-wide. The test
   runs on the simulator; the scans are the guarantee for the device
   build.
-- **(0.1.11) The raw-audio taps** are refused by both scans as well,
+- **(0.1.11) The raw-audio taps and `turnLoggingId`** are refused by both scans as well,
   the iOS counterparts of what Android's guard refuses
   (`setSamplesReadyCallback`, `setPlaybackSamplesReadyCallback`,
   `setEnableVolumeLogger`): `addRenderer:` and `RTCAudioRenderer`, an
   adoption of `RTCAudioCustomProcessingDelegate` (read from the
-  class-name section, which survives stripping), a custom
-  `RTCAudioDevice` outside the tests, and `turnLoggingId`. Each would
-  hand decrypted audio, or a TURN identifier, to code outside the
-  engine's path.
+  class-name section, which survives stripping) and a custom
+  `RTCAudioDevice` outside the tests, each of which would hand decrypted
+  audio to code outside the engine's path; and `turnLoggingId`, which
+  would label the TURN traffic with an identifier.
 - **This guard is iOS's in place of Android's read-back**: Android keeps
   `MediaLogGuard` (the level read back, call keys refused while logging
   is on); iOS, which cannot read the level back, keeps the setter
