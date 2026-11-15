@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.130
+version: 0.1.131
 date: 2026-11-15
 changelog:
+  - 0.1.131: erratum, 2026-11-15 (owner decision a, 2026-11-15; keeps the 2026-10-24 decision). §4 "A vault being deleted", point 5: before `until`, "Your vault was deleted" says from what time **Remove from this phone** will be offered (`until` rounded up to the whole minute, in the phone's own time format; with no known `until` it names no time), instead of naming a removal the screen does not offer yet; from `until`, **Remove from this phone** is offered at once, without waiting for the read at the bound. Point 4: "still finishing" (with Remove) comes on its own timer at `until`, without waiting for a read, for the vault's own word too. Android only: vettid-ios does not build the member API's `410` state yet (IOS-PLAN §4.2 point 5), so the iPhone has no such screen.
   - 0.1.130: erratum, 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). The status line on calls: production release APKs carried no call code until 2026-11-14, when calls went into every build (CALLS-PLAN §12.5, with the run-time gate, incoming calls included).
   - 0.1.129: erratum, 2026-11-13 (owner decision a, 2026-11-13; as built in vettid-android #307; the decision holds for vettid-ios too). §4 "Transfer (new phone)": the settlement window's end moves out for a cut collect or a process freeze, within a cap, as built; a cut noticed just before the window starts is not counted, and the owner chose to leave that as it is.
   - 0.1.127: 2026-11-12 (VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4 "Relay-key rotation texts". The texts, owner-approved 2026-11-12, are: the held state, per message, of messages to a connection whose vault moved (`relay_held`); `connection.stale` with `reason: "relay_moved"`; S9's text for `connection.fork_suspected` (`ref` = `relay_revoked`); `message.not_delivered` at the hold's 60-day limit; and `message.delivery_unconfirmed` reused at the telling's limit (VAULT-MESSAGING §3.4.2 RK9, RK14). None of them shows before a vault release that rotates relay keys.
@@ -6385,7 +6386,12 @@ answer to this phone's own `vault.delete` counts the same (VAULT-MESSAGING
    which shows the two apart). A `401` and `{vault: null}` are **no
    longer** signs that the vault is gone (until 0.1.77 they were).
 4. **After the bound.** If the vault is still listed at `until`, the
-   screen changes to the neutral "still finishing" text below, with
+   screen changes to the neutral "still finishing" text below
+   ((0.1.131) on its own timer at `until`, without waiting for a read:
+   a read in flight then does not hold it back, and from `until` on
+   every read (a start, a return to the foreground, Check again) shows
+   it first; a read that then finds the vault gone moves on as in point
+   3), with
    **Check again** (a re-read now, whose result is shown as
    unconfirmed, unreachable or gone; behaviour and texts as Android
    #192). The
@@ -6420,8 +6426,15 @@ answer to this phone's own `vault.delete` counts the same (VAULT-MESSAGING
    105 s after `since`, then every 60 s until `until`; after it, at a
    start, a return to the foreground and Check again). **Owner decision
    (2026-10-24): the same bound as point 4.** Before `until` nothing
-   erases and **Remove from this phone** is not offered; from `until` it
-   is offered behind the same confirmation, and confirmed erases as in
+   erases and **Remove from this phone** is not offered, and (0.1.131;
+   owner decision 2026-11-15) the text says from what time it will be:
+   `until` rounded up to the whole minute, so never a minute before it,
+   in the phone's own time format ("If your vault doesn't confirm it by
+   {time}, you can remove VettID from this phone here."); with no known
+   `until` it names no time. It never names a removal the screen does
+   not offer yet. From `until` it is offered at once, as point 4 shows
+   "still finishing" (without waiting for a read), behind the same
+   confirmation, and confirmed erases as in
    point 3. If the event arrives (signal (a)) while a `410` stands, the
    app erases at once as in point 3. A later status that lists the vault
    again (a `200` with the vault) removes the marker and returns to the
