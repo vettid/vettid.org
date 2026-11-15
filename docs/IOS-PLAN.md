@@ -4,7 +4,7 @@ status: approved (owner, 2026-10-17)
 version: 0.1.74
 date: 2026-11-15
 changelog:
-  - 0.1.74: 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). §6.6: a live call goes on in the background, with the `audio` mode and the relay connection kept for the call only, closed when it ends: an exception to "close the socket", marked "(chosen; not in the spec)". Note, no change to this plan's text: since 2026-11-14 `Release` carries calls code (CALLS-PLAN §12.5), and the log guard is CALLS-PLAN §12.8's.
+  - 0.1.74: 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). §6.6: a live call goes on in the background, with the `audio` mode and the relay collection kept by long poll while the call is live, handling only call traffic and lock signals, stopped when it ends: an exception to "close the socket", marked "(chosen; not in the spec)". Note, no change to this plan's text: since 2026-11-14 `Release` carries calls code (CALLS-PLAN §12.5), and the log guard is CALLS-PLAN §12.8's.
   - 0.1.73: erratum, 2026-11-13 (ANDROID-PLAN 0.1.129; owner decision a, 2026-11-13). The owner's decision in ANDROID-PLAN §4 "Transfer (new phone)" holds for the iPhone's transfer-in too: a cut noticed just before the settlement window starts is not counted, as on Android, and it is left as it is.
   - 0.1.71: 2026-11-12 (ANDROID-PLAN 0.1.127, VAULT-MESSAGING 0.90.0; owner decisions 2026-11-12). New §4.18 "Relay-key rotation texts": the iPhone shows ANDROID-PLAN §4 "Relay-key rotation texts", owner-approved 2026-11-12, in the same places and with the same texts.
   - 0.1.70: erratum, 2026-11-12 (ANDROID-PLAN 0.1.126; owner decision a, GC #9050). The iPhone follows ANDROID-PLAN §4 "Locking the vault", "While pending": besides the lock and a pending `call.end`, the phone's `hs.resp` to a rekey the vault started goes while a lock is pending; everything else it would send waits until the lock ends; the rekey's `hs.fin` is still processed. Built in GC #8918's work.
@@ -2444,13 +2444,22 @@ leaving the screen.
   decisions 2026-11-14; CALLS-PLAN §12.9): the call goes on, as on
   Android. The `audio` background mode keeps the app running only while
   a call's audio is active (not the `voip` mode, which is for ringing a
-  closed app, later). While the call is live the relay connection is
-  kept in the background, for that call's traffic only (the other
-  side's hang-up, a hang-up from the lock screen or a headset), and it
-  is closed as soon as the call ends if the app is still in the
-  background. Nothing else stays connected: no new incoming call is
-  shown from the background, and votes and the owner check stay paused
-  as before. With no call live, the rule above applies unchanged. The
+  closed app, later). While a call is live (any phase from starting to
+  active, a ringing incoming call included) the relay collection goes
+  on in the background by long poll (the WebSocket is cut at the
+  switch; its leased frames come back after their lease, up to 60 s),
+  and it is stopped as soon as the call ends if the app is still in the
+  background. While held, only the call's messages (`call.offer`,
+  `call.answer`, `call.ringing`, `call.end`, `call.ice`) and lock
+  signals (`vault.locking`, `device.unlinked`, `vault.held`) are
+  handled, with what the device layer handles by itself and an event a
+  device step is waiting for. Every other event waits for the
+  foreground: left unacked and redelivered after its lease
+  (`credential.alarm`, `sync.event` and `connection.authenticate.*`
+  always; up to 32 others), and past 32 acked and kept in memory for
+  replay (CALLS-PLAN §12.9 has the details).
+  The app lock's background time is unchanged by a held call.
+  With no call live, the rule above applies unchanged. The
   lock screen and CallKit say "VettID call", never with whom
   (CALLS-PLAN §12.5).
 - **Lock and app lock**: the app-lock timeout counts from the moment

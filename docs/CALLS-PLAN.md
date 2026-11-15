@@ -105,7 +105,8 @@ changelog:
     with whom. §12.8: the iOS guard also refuses the raw-audio taps and
     `turnLoggingId`, and `Release` now carries calls code. New §12.9: on iOS a live call
     goes on in the background (the `audio` mode, and the relay
-    connection held for the call only), an exception to IOS-PLAN §6.6.
+    collection kept by long poll while the call is live, handling only
+    call traffic and lock signals), an exception to IOS-PLAN §6.6.
     §12.4 and §12.7 follow.
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -899,14 +900,47 @@ Android, where the call's foreground service keeps it.
   indicator, and CallKit's own call screen brings the member back. With
   no call live, VettID is suspended as before. **Not** the `voip` mode:
   that is for ringing a closed app, with PushKit, later.
-- **The relay connection is kept only while a call is live in the
-  background**, for that call's traffic only, and closed as soon as the
-  call ends if the app is still in the background. Without it the other
-  side's hang-up would not be received, a hang-up from the lock screen
-  or a headset would not be sent, and the call would end only when its
-  media failed. Nothing else stays connected: no new incoming call is
-  shown from the background, and votes and the owner check stay paused
-  as before.
+- **The relay collection is kept only while a call is live in the
+  background**, and stopped as soon as the call ends if the app is
+  still in the background. "Live" is any phase from starting to
+  active, an incoming call still ringing included. The collection goes
+  on by long poll: the WebSocket is cut at the switch, so the frames it
+  had leased come back after their lease (up to 60 s). Without it the
+  other side's hang-up would not be received, a hang-up from the lock
+  screen or a headset would not be sent, and the call would end only
+  when its media failed.
+- **Only call traffic and lock signals are handled while held:** the
+  call's messages (`call.offer`, `call.answer`, `call.ringing`,
+  `call.end`, `call.ice`), the lock signals (`vault.locking`,
+  `device.unlinked`, `vault.held`), what the device layer handles by
+  itself (pairing, relay tokens, identity rotation, the handshake,
+  replies) and an event a device step is waiting for. Every other
+  event waits for the foreground, which handles it as before; most are
+  left unacked at the relay and redelivered after their lease:
+  - `credential.alarm`, `sync.event` and `connection.authenticate.*`
+    are never acked while held;
+  - up to 32 other unsolicited events, each counted once (one that
+    comes back after its lease is held again, not counted again).
+    Past 32 the rest are acked and kept in memory (at most
+    500, the oldest dropped) and replayed at the foreground; if any
+    were dropped, the foreground ends the unlock window, forgets the
+    authentication and re-reads the owner check, the alarm and the
+    account. The figure 32 is as built in vettid-ios #274.
+- **At the foreground** the events kept in memory are replayed, then
+  the lists and the alarm are re-read. An alarm event older, in vault
+  time, than the newest alarm event applied or than the alarm read is
+  dropped; a dropped alarm event and a read that shows an alarm both
+  end the unlock window. A redelivered list change is dropped only
+  when that list's own read (requests, approvals, grants, shares,
+  critical uses) was applied and already covers it, within 120 s in
+  vault time; a failed or superseded read sets no mark. A redelivery
+  after 120 s or after a restart is not guarded: it can leave a list
+  stale, never security state. Messages, feed, vote and connection
+  events and the state events are always applied.
+- **A held background is still a background** for everything else
+  (quiet reads, the settlement clock, session starts, and the count of
+  backgrounds, once), and **the app
+  lock's background time is unchanged** by a held call.
 - This is an exception to IOS-PLAN §6.6, which closes the socket when
   the app leaves the screen; IOS-PLAN marks it "(chosen; not in the
   spec)". It goes into the App Store review notes with the microphone
