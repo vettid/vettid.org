@@ -174,7 +174,9 @@ export interface VaultConfig {
    * The calling service's issuer host on the enclave host's egress allowlist
    * (CALLING-SERVICE §5.5, §8.1; VAULT-MESSAGING §10.10 "Servers and
    * credentials", §11.10.8 `calls_url`). The channel's release constant
-   * `calls_url` pins `https://<callsHost>/v1/credentials`. Staging only:
+   * `calls_url` pins `https://<callsHost>` (a host name alone; the client
+   * adds `/v1/credentials`). It must equal the issuer front's name
+   * (`CallsConfig.host`, test/calls-stack.test.ts). Staging only:
    * production has no calling service yet (CALLS-PLAN D25), so its hosts
    * allow no calls name.
    */
