@@ -32,11 +32,15 @@ changelog:
   - 0.90.15: 2026-11-16, **no TURN credential in the response cache**
     (owner decision a, GC #12506; from the blind pair on vettid-vault
     #261): §10.10 "Servers and credentials": the cached copy of a
-    `call.start` response holds the ICE configuration without its TURN
-    entry, signed as such with the same `exp`; a retransmitted
-    `call.start` gets STUN only. The answer first sent is unchanged.
-    Before 0.90.15 the cache, which is state and kept 24 h, would have
-    held the retired credential. Not yet built.
+    `call.start` response holds the ICE configuration with the STUN
+    entry only, with the same `call_id` and `exp` and a fresh `ice_sig`
+    made when cached; a retransmitted `call.start` gets no TURN server.
+    The answer first sent is unchanged. The pool rule now says where a
+    handed-out credential can be in state: only in the outbox entries of
+    the `call.start` answer and the V→D `call.offer`, sealed to the
+    device, until deposited (§8.3). §8.2 points to the exception. Before
+    0.90.15 the cache, which is state and kept 24 h, would have held the
+    retired credential in the clear. Not yet built.
   - 0.90.14: 2026-11-16, **a clock allowance for a TURN credential's
     `exp`** (erratum, owner decision a, GC #12445; from the blind pair
     on vettid-vault #260): §10.10 "Servers and credentials": the vault
@@ -12450,6 +12454,8 @@ Both of the following layers are REQUIRED:
    This layer catches sender retransmissions, which the relay stores under
    different `msg_id`s. Responses are cached for 24 h, so a duplicate request
    gets the cached response again and is not re-executed.
+   (0.90.15) One type caches less than it sent: `call.start`'s cached
+   copy carries no TURN credential (§10.10 "Servers and credentials").
 
 **Exception: responses that carry secret values in the clear.** A type
 may mark its responses volatile: they are never cached and never written to
@@ -17995,15 +18001,17 @@ them on.
   would silently never get a TURN server. The vault does not interpret
   a username.
 - **The pool.** The vault keeps up to **4** credentials and the URLs
-  **in memory only**: never in its state, never in a flush, gone at
-  lock. It asks for 4 within 5 s of unlock, and again (for as many as
-  are missing) when fewer than 2 usable ones are left. A credential is
-  **usable** while its `exp` is more than 2 h away. (0.90.15) A
-  credential handed out leaves memory only in the answer itself: the
-  cached copy of a `call.start` response (the 24-hour response cache,
-  §8.2) holds the ICE configuration **without its TURN entry**, signed as
-  such with the same `exp`, so a retransmitted `call.start` gets the
-  same call with STUN only (no relay for that call).
+  **in memory only**: the pool is never in its state, never in a flush,
+  and gone at lock. It asks for 4 within 5 s of unlock, and again (for
+  as many as are missing) when fewer than 2 usable ones are left. A
+  credential is **usable** while its `exp` is more than 2 h away.
+  (0.90.15) A credential handed out reaches the vault's state only in
+  the messages that carry it to the vault's own devices, the
+  `call.start` answer and the V→D `call.offer`: each sits in the outbox
+  sealed to its device when it is queued, and is never held unsealed,
+  until its deposit is answered `201` and a later flush drops it (§8.3).
+  It is never in the response cache (below), and never in the clear in
+  state.
 - **One credential, one call.** A call's ICE configuration has one
   entry with the STUN URLs and, if the pool has a usable credential,
   one entry with the TURN URLs and that credential. `exp` of the
@@ -18014,6 +18022,14 @@ them on.
   again. So two calls of a member never show the TURN server the same
   username, and a connection that rings without being answered cannot
   empty the pool.
+  (0.90.15) **The cached `call.start` answer.** The copy kept in the
+  24-hour response cache (§8.2) differs from the answer first sent: its
+  ICE configuration has only the STUN entry (the entry with the
+  credential is left out; with no STUN URLs known, the list is empty),
+  with the same `call_id` and `exp` and a fresh `ice_sig` over those
+  bytes, made when the response is cached. The rest of the response
+  is unchanged. So a retransmitted `call.start` gets the same call
+  with no TURN server for it.
 - **Never waiting, almost.** If the pool has no usable credential when
   a configuration is needed, the vault MAY wait up to 2 s for a request
   in flight, or start one if its limits allow, and then answers with
