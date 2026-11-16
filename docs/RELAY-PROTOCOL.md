@@ -329,8 +329,9 @@ follow this, rounds it up.
   the id is refused because of a deletion or a removal. Other refusals,
   such as the denylist or expiry, still apply.
 
-  A `201` with no field, for an id whose earlier registration the
-  owner saw answered (`201` or `200`), means the relay holds no record
+  A `201` with no field, for an id whose earlier registration, or a
+  rotation onto it (0.13.0, §6.7), the owner saw answered (`201` or
+  `200`), means the relay holds no record
   of that mailbox. The cause is data loss, a rebuilt relay at the same
   base URL, or a deletion longer ago than tombstones are kept. The
   owner's unexpired tokens are then not refused, but the mailbox's
@@ -556,14 +557,15 @@ this owner's, whose mailbox was removed at the end of its grace: by the
 sweeper, or, if the sweeper hasn't reached it yet, by the rotate itself
 (vettid-relay #29 removes it first, leaving the tombstone). Or it may
 be a live mailbox that still carries an older tombstone. A successor
-made afresh starts empty. Either way, it carries the tombstone's
+made afresh starts empty. In each case the successor carries the tombstone's
 tokens-not-before (§6.10): about 90 seconds after the deletion or
 removal, which in the vettid-relay #29 case is about 90 seconds after
 the rotate, and for an older tombstone usually in the past. Tokens with
 `iat` before that time are refused (`token_revoked`).
 - **The answer says so itself.** A relay MAY report this. A relay that
-  does puts `"reports_tombstones_at_rotation": true` in **every**
-  rotate `200`, and MUST then include `"tokens_not_before"` in that
+  does MUST also advertise `reports_tombstones` (§6.1), and MUST put
+  `"reports_tombstones_at_rotation": true` in every rotate `200` it
+  answers under this rule. It MUST then include `"tokens_not_before"` in that
   answer while it holds a tombstone for the successor's id, leaving it
   out otherwise. The value, its form (an RFC 3339 UTC timestamp in
   whole seconds, rounded up) and the rule that it is the value §5.3
@@ -574,23 +576,34 @@ the rotate, and for an older tombstone usually in the past. Tokens with
   field with a marker that a different server instance, or the relay
   before a rollback, gave. A relay that reports tombstones only at
   registration (the 0.12.0 behavior) sends neither.
-- **Current state only.** As at registration, the relay answers from
-  the mailbox state its deposits are checked against. §6.10's allowance
+- **Current state only.** As at registration, a relay that sends the
+  marker MUST answer from the mailbox state its deposits are checked
+  against, and the answer describes the moment it was given. §6.10's allowance
   for other server instances does not cover a rotate answer that
   carries the marker.
 - **What the owner does.** It reads each rotate answer on its own:
   - **Marker and field T:** as §6.1's "Field present". It mints no
     token for the new key until its own clock reads at least T + 90 s,
-    then mints with `iat` at or after T.
+    then mints with `iat` at or after T. A value with a fractional
+    second is rounded up, as in §6.1.
   - **Marker, no field:** no token for the new key is refused for a
     deletion or a removal, as in the first paragraph of §6.1's "Flag
     set, field absent". A rotate answer does not say whether the
     successor was made afresh, so it cannot show a lost record the way
     a `201` does. An owner rotating onto a key it has used before
-    registers that key (§6.1) to learn that.
-  - **No marker:** a missing field proves nothing. The owner keeps
-    the no-flag rule of §6.1. On a relay that advertises
-    `reports_tombstones`, it may register the new key to ask (`200`).
+    therefore registers that key **before** it rotates (§6.1): a `201`
+    with no field then shows the lost record, and the rotate lands on
+    the live mailbox (above). A registration after the rotate always
+    answers `200`, and cannot show it. Registering first counts against
+    the registration limit as well as the rotate (§7.2). An owner that
+    did not register first, and cannot tell, does what §6.1 asks after a
+    lost record: it denies again.
+  - **No marker:** a missing field proves nothing. For a key it has
+    used before, the owner treats the rotation as a possible deletion
+    (the no-flag rule of §6.1). A fresh key can have no tombstone, so it
+    needs no wait. On a relay that advertises `reports_tombstones`, the
+    owner may register the new key to ask (`200`); that tells it T, but
+    not a lost record.
   - **What it can't read:** a marker with any value other than `true`
     counts as no marker. A field it cannot parse, or a field with no
     marker, counts as if neither were there: the no-flag rule.
@@ -1860,11 +1873,16 @@ The push gateway API is specified separately.
   - **With the marker:** the owner reads the answer as §6.1's "Field
     present" or "Flag set, field absent" (first paragraph). A rotate
     answer can't show a lost record, so an owner rotating onto a key it
-    has used before registers that key to learn that.
-  - **Without the marker:** a missing field proves nothing.
-  - **What it can't read:** an unparseable field, or a field without
-    the marker, counts as neither: the no-flag rule.
+    has used before registers that key **before** rotating; a
+    registration afterwards answers `200` and can't show it.
+  - **Without the marker:** a missing field proves nothing. For a key
+    used before, the rotation counts as a possible deletion (the no-flag
+    rule).
+  - **What it can't read:** a marker other than `true` counts as no
+    marker. An unparseable field, or a field without the marker, counts
+    as neither: the no-flag rule.
 
+  A relay that sends the marker also advertises `reports_tombstones`.
   0.12.0 relays stay conformant, because they send neither.
   §6.10's allowance for other instances doesn't cover a rotate answer
   with the marker, and its "Rotation" bullet points to §6.7. Additive.
