@@ -77,6 +77,9 @@ export class VettidOrgCallsDataStack extends cdk.Stack {
     const { config } = props;
     if (config.stage === 'prod' || !config.calls) throw new Error('VettidOrgCallsDataStack: the calling service is a staging stack (context callsStages)');
 
+    // For the cost budget of the service (CALLING-SERVICE §8.4, §10).
+    cdk.Tags.of(this).add('vettid-service', 'calls');
+
     const retain = cdk.RemovalPolicy.RETAIN;
     // Kept for life, but not stranded when the operation that creates them
     // rolls back (see VettidOrgPushDataStack).

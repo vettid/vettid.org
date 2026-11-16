@@ -54,7 +54,10 @@ export class CallsServer extends Construct {
       cidrBlock: CALLS_VPC_CIDR, enableDnsSupport: true, enableDnsHostnames: true, tags: [{ key: 'Name', value: name }],
     });
     const v6 = new ec2.CfnVPCCidrBlock(this, 'VpcV6', { vpcId: vpc.ref, amazonProvidedIpv6CidrBlock: true });
-    // The amazon-provided /56 (as the CDK's own Vpc reads it; the association is a dependency of everything that uses it).
+    // The amazon-provided /56. Reading it from the VPC does NOT depend on the
+    // association (`v6`): anything that uses `vpcV6` must depend on `v6`
+    // itself (the subnet and the launch template do). The addresses below are
+    // read from the subnet, which does.
     const vpcV6 = cdk.Fn.select(0, vpc.attrIpv6CidrBlocks);
     const subnet = new ec2.CfnSubnet(this, 'Subnet', {
       vpcId: vpc.ref,
@@ -68,15 +71,18 @@ export class CallsServer extends Construct {
     const igw = new ec2.CfnInternetGateway(this, 'Igw', { tags: [{ key: 'Name', value: name }] });
     const attach = new ec2.CfnVPCGatewayAttachment(this, 'IgwAttach', { vpcId: vpc.ref, internetGatewayId: igw.ref });
     const routes = new ec2.CfnRouteTable(this, 'Routes', { vpcId: vpc.ref, tags: [{ key: 'Name', value: name }] });
-    new ec2.CfnSubnetRouteTableAssociation(this, 'RoutesAssoc', { subnetId: subnet.ref, routeTableId: routes.ref });
+    const routesAssoc = new ec2.CfnSubnetRouteTableAssociation(this, 'RoutesAssoc', { subnetId: subnet.ref, routeTableId: routes.ref });
     const r4 = new ec2.CfnRoute(this, 'Route4', { routeTableId: routes.ref, destinationCidrBlock: '0.0.0.0/0', gatewayId: igw.ref });
     const r6 = new ec2.CfnRoute(this, 'Route6', { routeTableId: routes.ref, destinationIpv6CidrBlock: '::/0', gatewayId: igw.ref });
     r4.addDependency(attach);
     r6.addDependency(attach);
+    // The launch template reads the VPC's /56 (CALLS_OWN_NETWORKS), see `vpcV6`.
 
     // The server's IPv6 address: fixed host part inside the subnet's /64, so
     // replacing the instance keeps it. Fixed for the life of the VPC only.
-    const subnetV6 = cdk.Fn.select(0, cdk.Fn.split('/', cdk.Fn.select(0, cdk.Fn.cidr(vpcV6, 1, '64'))));
+    // Read from the subnet's own attribute: the subnet depends on `v6`, so
+    // this cannot resolve before the /56 is associated.
+    const subnetV6 = cdk.Fn.select(0, cdk.Fn.split('/', cdk.Fn.select(0, subnet.attrIpv6CidrBlocks)));
     const ipv6 = cdk.Fn.join('', [subnetV6, CALLS_IPV6_HOST]); // "<prefix>::" + "53"
 
     // ---- Security group: exactly §8.2 ----------------------------------------
@@ -105,8 +111,21 @@ export class CallsServer extends Construct {
       roleName: callsServerRoleName(config),
       description: 'VettID calling service TURN server: Session Manager, reads the TURN secret, puts its own metrics, takes its fixed addresses',
       assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
-      managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore')],
     });
+    // Session Manager only, in place of AmazonSSMManagedInstanceCore (which
+    // grants ssm:GetParameter* on every parameter of the account, among them
+    // the member service's and the vault's refs). Session Manager needs the
+    // agent's registration and the ssmmessages channels; the current agent
+    // does not need ec2messages for sessions (that is Run Command's).
+    role.addToPrincipalPolicy(new iam.PolicyStatement({
+      sid: 'SessionManager',
+      actions: [
+        'ssm:UpdateInstanceInformation',
+        'ssmmessages:CreateControlChannel', 'ssmmessages:CreateDataChannel',
+        'ssmmessages:OpenControlChannel', 'ssmmessages:OpenDataChannel',
+      ],
+      resources: ['*'], // none of these takes a resource
+    }));
     role.addToPrincipalPolicy(new iam.PolicyStatement({ sid: 'TurnSecret', actions: ['secretsmanager:GetSecretValue'], resources: [secretArn] }));
     role.addToPrincipalPolicy(new iam.PolicyStatement({
       sid: 'TurnSecretKey',
@@ -138,6 +157,21 @@ export class CallsServer extends Construct {
       resources: [ec2Arn('instance', '*')],
       conditions: { StringEquals: { 'ec2:ResourceTag/vettid-service': 'calls' } },
     }));
+    // In case EC2 also checks the primary interface for associate-address.
+    role.addToPrincipalPolicy(new iam.PolicyStatement({
+      sid: 'TakeFixedIpv4AddressInterface',
+      actions: ['ec2:AssociateAddress'],
+      resources: [ec2Arn('network-interface', '*')],
+      conditions: { ArnEquals: { 'ec2:Subnet': ec2Arn('subnet', subnet.ref) } },
+    }));
+    // A boot that fails marks its own instance unhealthy, so that the group
+    // replaces it and no dead instance holds the addresses. By name: the
+    // group is created after the role.
+    role.addToPrincipalPolicy(new iam.PolicyStatement({
+      sid: 'MarkOwnInstanceUnhealthy',
+      actions: ['autoscaling:SetInstanceHealth'],
+      resources: [`arn:${stack.partition}:autoscaling:${stack.region}:${stack.account}:autoScalingGroup:*:autoScalingGroupName/${name}`],
+    }));
     // assign-ipv6-addresses: network interfaces in the service's subnet only
     // (IAM cannot name the interface before it exists).
     role.addToPrincipalPolicy(new iam.PolicyStatement({
@@ -155,18 +189,26 @@ export class CallsServer extends Construct {
       '#!/bin/bash',
       'set -euo pipefail',
       '# Instance boot (CALLING-SERVICE 8.2): take the fixed addresses, run the pinned image.',
-      'retry() { for i in 1 2 3 4 5 6 7 8 9 10; do "$@" && return 0; sleep 6; done; return 1; }',
-      'TOKEN=$(curl -sS -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")',
-      'md() { curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" "http://169.254.169.254/latest/meta-data/$1"; }',
-      'IID=$(md instance-id)',
-      'MAC=$(md mac)',
-      'ENI=$(md "network/interfaces/macs/$MAC/interface-id")',
-      'PRIVATE_IPV4=$(md local-ipv4)',
+      '# retry <tries> <command...>: backoff 6 s, 12 s, ... capped at 60 s.',
+      'retry() { local n=$1 i; shift; for ((i=1; i<=n; i++)); do "$@" && return 0; sleep $(( i < 10 ? i * 6 : 60 )); done; return 1; }',
+      'TOKEN=$(retry 10 curl -fsS -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")',
+      'md() { curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" "http://169.254.169.254/latest/meta-data/$1"; }',
+      'IID=$(retry 10 md instance-id)',
       `export AWS_DEFAULT_REGION=${stack.region}`,
-      `retry aws ec2 associate-address --allocation-id ${eipId} --instance-id "$IID" --allow-reassociation`,
-      `retry aws ec2 assign-ipv6-addresses --network-interface-id "$ENI" --ipv6-addresses ${ipv6}`,
-      'retry dnf install -y docker',
+      '# Any failure below marks this instance unhealthy: the group replaces it and',
+      '# a dead instance does not keep the addresses.',
+      `fail() { aws autoscaling set-instance-health --instance-id "$IID" --health-status Unhealthy || true; exit 1; }`,
+      'trap fail ERR',
+      'MAC=$(retry 10 md mac)',
+      'ENI=$(retry 10 md "network/interfaces/macs/$MAC/interface-id")',
+      'PRIVATE_IPV4=$(retry 10 md local-ipv4)',
+      `retry 10 aws ec2 associate-address --allocation-id ${eipId} --instance-id "$IID" --allow-reassociation`,
+      '# An old interface may still hold the IPv6 address during a replacement: about 5 minutes.',
+      `retry 10 aws ec2 assign-ipv6-addresses --network-interface-id "$ENI" --ipv6-addresses ${ipv6}`,
+      `for i in $(seq 1 60); do ip -6 addr show scope global | grep -qiF "${ipv6}/" && break; [ "$i" -lt 60 ] || false; sleep 5; done`,
+      'retry 10 dnf install -y docker',
       'systemctl enable --now docker',
+      `retry 8 docker pull ${image}`,
       // No log driver: coturn's log names every client address and username and
       // is never kept or shipped (CALLING-SERVICE 10).
       'docker run --detach --name turn --restart unless-stopped --network host --read-only --log-driver none \\',
@@ -191,6 +233,9 @@ export class CallsServer extends Construct {
         instanceType: 't4g.small',
         // No keyName: Systems Manager sessions only.
         iamInstanceProfile: { arn: profile.attrArn },
+        // Hop limit 1: with host networking the container IS the host's network
+        // namespace and reaches IMDS (it needs the instance role); what stops a
+        // relay to the metadata address is coturn's denied-peer list (§7.2).
         metadataOptions: { httpTokens: 'required', httpEndpoint: 'enabled', httpPutResponseHopLimit: 1 },
         // A public address to reach the APIs before the Elastic IP is taken.
         networkInterfaces: [{ deviceIndex: 0, associatePublicIpAddress: true, groups: [sg.attrGroupId], deleteOnTermination: true }],
@@ -213,6 +258,9 @@ export class CallsServer extends Construct {
     });
     asg.cfnOptions.updatePolicy = { autoScalingRollingUpdate: { minInstancesInService: 0, maxBatchSize: 1 } };
     asg.addDependency(r4);
+    asg.addDependency(r6);
+    asg.addDependency(routesAssoc);
+    lt.addDependency(v6);
     asg.node.addDependency(role);
 
     // ---- DNS: the fixed addresses, in the stage's zone ----------------------------------
@@ -265,7 +313,7 @@ export class CallsServer extends Construct {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     alarm('Stopped', 'relay-stopped', {
-      alarmDescription: says('30 GB sent in a day: the instance group was set to ZERO and the relay is off until the operator sets the desired capacity back to 1 (RUNBOOK "Calling service" → After the daily stop)'),
+      alarmDescription: says('30 GB sent in a day: the instance group was set to ZERO and the relay is OFF. The stop is repeated every minute while this alarm stays in ALARM, so the relay stays off until the trailing 24 hours fall below 30 GB; an earlier restart is in RUNBOOK "Calling service" → After the daily stop'),
       metric: sentPerDay,
       threshold: CALLS_DAY_STOP_BYTES,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
@@ -288,6 +336,19 @@ export class CallsServer extends Construct {
       comparisonOperator: atLeast,
       evaluationPeriods: 2,
       datapointsToAlarm: 2,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    alarm('AgentErrors', 'turn-agent-errors', {
+      alarmDescription: says('turn-agent reported an error (agent_errors: secret, config, start, exit, scrape or metrics; its log is dropped, so this is the only sign)'),
+      metric: new cloudwatch.MathExpression({
+        label: 'agent errors',
+        expression: 'FILL(secret, 0) + FILL(config, 0) + FILL(start, 0) + FILL(exit, 0) + FILL(scrape, 0) + FILL(metrics, 0)',
+        usingMetrics: Object.fromEntries(['secret', 'config', 'start', 'exit', 'scrape', 'metrics'].map((k) => [k, own('agent_errors', 'Sum', five, { kind: k })])),
+        period: five,
+      }),
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 1,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     // TODO(first week of operation): CALLS_AUTH_FAILURES_PER_HOUR is a

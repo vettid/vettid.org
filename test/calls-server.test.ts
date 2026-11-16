@@ -51,6 +51,10 @@ describe('the data stack owns the address', () => {
       '/vettid-org/staging/calls/eip-address', '/vettid-org/staging/calls/eip-allocation-id', '/vettid-org/staging/calls/key-arn',
     ]);
   });
+  test('the data stack\'s resources carry the cost tag', () => {
+    const tagged = (r: any) => (r.Properties.Tags ?? []).some((x: any) => x.Key === 'vettid-service' && x.Value === 'calls');
+    for (const type of ['AWS::EC2::EIP', 'AWS::SNS::Topic', 'AWS::KMS::Key']) expect(tagged(of(data, type)[0])).toBe(true);
+  });
   test('the service stack creates no address and no stateful resource', () => {
     for (const type of ['AWS::EC2::EIP', 'AWS::Logs::LogGroup', 'AWS::S3::Bucket', 'AWS::KMS::Key', 'AWS::SNS::Topic', 'AWS::SecretsManager::Secret']) expect(of(svc, type)).toEqual([]);
   });
@@ -114,7 +118,56 @@ describe('instance', () => {
     expect(ud).toMatch(/aws ec2 associate-address --allocation-id <[^>]*eipallocationid/);
     expect(ud).toMatch(/aws ec2 assign-ipv6-addresses/);
     expect(ud).toMatch(/dnf install -y docker/);
-    expect(ud.match(/@sha256:/g)).toHaveLength(1);
+    expect(ud.match(/@sha256:/g)).toHaveLength(2); // the pull and the run: the same digest
+    expect(ud).toContain(`docker pull ${IMAGE}`);
+  });
+  test('user data: read-only, the tmpfs, no secret source other than Secrets Manager, hardened boot', () => {
+    expect(ud).toContain('--read-only');
+    expect(ud).toContain('--tmpfs /run/vettid-calls:rw,mode=0700,uid=65534,gid=65534');
+    expect(ud).not.toMatch(/CALLS_SECRETS|CALLS_SECRET_FILE/);
+    expect(ud).toContain('curl -fsS');
+    expect(ud).not.toMatch(/curl -sS/);
+    expect(ud).toContain('trap fail ERR');
+    expect(ud).toContain('set-instance-health --instance-id "$IID" --health-status Unhealthy');
+    expect(ud).toMatch(/retry 10 aws ec2 assign-ipv6-addresses/);
+    expect(ud).toMatch(/ip -6 addr show scope global/);
+    expect(ud.indexOf('assign-ipv6-addresses')).toBeLessThan(ud.indexOf('docker pull'));
+    expect(ud.indexOf('docker pull')).toBeLessThan(ud.indexOf('docker run'));
+  });
+  test('IMDS hop limit 1; the subnet does not map public IPs', () => {
+    expect(d.MetadataOptions.HttpPutResponseHopLimit).toBe(1);
+    expect(of(svc, 'AWS::EC2::Subnet')[0].Properties.MapPublicIpOnLaunch).toBe(false);
+  });
+  test('the group waits for the routes and their association', () => {
+    const [g] = of(svc, 'AWS::AutoScaling::AutoScalingGroup');
+    const ids = (type: string) => Object.keys(svc.Resources).filter((k) => svc.Resources[k].Type === type);
+    for (const k of [...ids('AWS::EC2::Route'), ...ids('AWS::EC2::SubnetRouteTableAssociation')]) expect(g.DependsOn).toContain(k);
+  });
+});
+
+describe('the IPv6 address does not race the association of the /56', () => {
+  const v6 = Object.keys(svc.Resources).find((k) => svc.Resources[k].Type === 'AWS::EC2::VPCCidrBlock')!;
+  const vpcId = Object.keys(svc.Resources).find((k) => svc.Resources[k].Type === 'AWS::EC2::VPC')!;
+  const subnetId = Object.keys(svc.Resources).find((k) => svc.Resources[k].Type === 'AWS::EC2::Subnet')!;
+  const dependsOn = (k: string) => [].concat(svc.Resources[k].DependsOn ?? []);
+  /** Every GetAtt of the VPC's Ipv6CidrBlocks in a value. */
+  const readsVpc = (v: unknown) => JSON.stringify(v).includes(`"Fn::GetAtt":["${vpcId}","Ipv6CidrBlocks"]`);
+  test('the subnet and the launch template, which read the VPC\'s /56, depend on its association', () => {
+    expect(dependsOn(subnetId)).toContain(v6);
+    const ltId = Object.keys(svc.Resources).find((k) => svc.Resources[k].Type === 'AWS::EC2::LaunchTemplate')!;
+    expect(readsVpc(svc.Resources[ltId])).toBe(true);
+    expect(dependsOn(ltId)).toContain(v6);
+  });
+  test('the AAAA record and the output read the subnet, not the VPC', () => {
+    const aaaa = of(svc, 'AWS::Route53::RecordSet').find((r) => r.Properties.Type === 'AAAA' && r.Properties.Name === 'turn.staging.vettid.org.');
+    expect(readsVpc(aaaa)).toBe(false);
+    expect(JSON.stringify(aaaa)).toContain(`"Fn::GetAtt":["${subnetId}","Ipv6CidrBlocks"]`);
+    const out = Object.entries<any>(svc.Outputs).find(([k]) => /ServerIpv6/.test(k))![1];
+    expect(readsVpc(out)).toBe(false);
+    expect(JSON.stringify(out)).toContain(subnetId);
+  });
+  test('anything else that reads the VPC\'s /56 depends on the association', () => {
+    for (const [k, r] of Object.entries<any>(svc.Resources)) if (readsVpc(r.Properties)) expect(dependsOn(k)).toContain(v6);
   });
 });
 
@@ -125,8 +178,21 @@ describe('IAM', () => {
   const st: any[] = policies.flatMap((p) => p.Properties.PolicyDocument.Statement);
   test('role: fixed name (the key policy names it), SSM core policy, no other managed policy', () => {
     expect(role.Properties.RoleName).toBe('vettid-org-staging-calls-server');
-    expect(JSON.stringify(role.Properties.ManagedPolicyArns)).toContain('AmazonSSMManagedInstanceCore');
-    expect(role.Properties.ManagedPolicyArns).toHaveLength(1);
+    // an inline Session Manager policy, not AmazonSSMManagedInstanceCore (ssm:GetParameter* on *)
+    expect(role.Properties.ManagedPolicyArns).toBeUndefined();
+    expect(JSON.stringify(svc)).not.toContain('AmazonSSMManagedInstanceCore');
+    expect(st.find((s) => s.Sid === 'SessionManager').Action).toEqual([
+      'ssm:UpdateInstanceInformation', 'ssmmessages:CreateControlChannel', 'ssmmessages:CreateDataChannel', 'ssmmessages:OpenControlChannel', 'ssmmessages:OpenDataChannel',
+    ]);
+  });
+  test('the role grants no ssm:GetParameter*, and no other ssm read', () => {
+    const actions = st.flatMap((s) => [].concat(s.Action));
+    expect(actions.filter((a: string) => /^ssm:(Get|List|Describe)/.test(a) || a === 'ssm:*' || a === '*')).toEqual([]);
+  });
+  test('it may mark only its own group\'s instances unhealthy', () => {
+    const s = st.find((x) => x.Sid === 'MarkOwnInstanceUnhealthy');
+    expect(s.Action).toBe('autoscaling:SetInstanceHealth');
+    expect(JSON.stringify(s.Resource)).toContain('autoScalingGroupName/vettid-org-staging-calls-server');
   });
   test('the one secret, the one key through Secrets Manager, the one namespace', () => {
     const get = st.find((s) => s.Sid === 'TurnSecret');
@@ -147,7 +213,13 @@ describe('IAM', () => {
     expect(st.find((s) => s.Sid === 'TakeFixedIpv6Address').Action).toBe('ec2:AssignIpv6Addresses');
     expect(JSON.stringify(st.find((s) => s.Sid === 'TakeFixedIpv6Address').Condition)).toContain('ec2:Subnet');
     const actions = st.flatMap((s) => [].concat(s.Action)).sort();
-    expect(actions).toEqual(['cloudwatch:PutMetricData', 'ec2:AssignIpv6Addresses', 'ec2:AssociateAddress', 'ec2:AssociateAddress', 'kms:Decrypt', 'secretsmanager:GetSecretValue']);
+    expect(st.find((s) => s.Sid === 'TakeFixedIpv4AddressInterface').Action).toBe('ec2:AssociateAddress');
+    expect(JSON.stringify(st.find((s) => s.Sid === 'TakeFixedIpv4AddressInterface').Condition)).toContain('ec2:Subnet');
+    expect(actions).toEqual([
+      'autoscaling:SetInstanceHealth', 'cloudwatch:PutMetricData', 'ec2:AssignIpv6Addresses', 'ec2:AssociateAddress', 'ec2:AssociateAddress', 'ec2:AssociateAddress',
+      'kms:Decrypt', 'secretsmanager:GetSecretValue',
+      'ssm:UpdateInstanceInformation', 'ssmmessages:CreateControlChannel', 'ssmmessages:CreateDataChannel', 'ssmmessages:OpenControlChannel', 'ssmmessages:OpenDataChannel',
+    ].sort());
   });
 });
 
@@ -193,6 +265,16 @@ describe('alarms and the daily stop', () => {
     const q = JSON.stringify(a.Metrics);
     expect(q).toContain('>= 80');
     for (const x of ['allocations_refused', 'quota_total', '"capacity"', '"allocations"']) expect(q).toContain(x);
+  });
+  test('turn-agent errors: any of the six kinds', () => {
+    const a = by('turn-agent-errors');
+    expect([a.Threshold, a.ComparisonOperator]).toEqual([0, 'GreaterThanThreshold']);
+    expect(JSON.stringify(a.Metrics)).toContain('agent_errors');
+    for (const k of ['secret', 'config', 'start', 'exit', 'scrape', 'metrics']) expect(JSON.stringify(a.Metrics)).toContain(`"Value":"${k}"`);
+  });
+  test('relay-stopped says that the stop repeats while in ALARM', () => {
+    expect(by('relay-stopped').AlarmDescription).toMatch(/every minute while this alarm stays in ALARM/);
+    expect(by('relay-stopped').AlarmDescription).not.toMatch(/until the operator sets the desired capacity back to 1/);
   });
   test('auth failures: placeholder baseline', () => {
     expect([by('turn-auth-failures').MetricName, by('turn-auth-failures').Threshold]).toEqual(['auth_failures', 1000]);

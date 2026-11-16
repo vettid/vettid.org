@@ -617,7 +617,8 @@ will extend it.
 
 | Context | Meaning |
 |---|---|
-| `callsStages` | `staging`. Without it the staging app has no calls stack. `prod` fails the synth (D25). |
+| `callsStages` | `staging`. **Committed in cdk.json** (with `stagingCallsTurnImage`; a TURN image without `callsStages` fails the synth), so every staging deploy keeps the data stack and its Elastic IP. `prod` fails the synth (D25). |
+| `stagingCallsTurnImage` | The TURN server's image by digest (a tag fails the synth). **Committed in cdk.json.** Never override it with an empty value on a deploy: the Elastic IP would drop out of the data stack and be orphaned (it is retained, so billed, and phones lose the address). |
 | `callsIssuerStub` | `true`: the origin is the **stub**, for the handshake test only. |
 | `stagingCallsIssuer`, `stagingCallsIssuerFile` | The real issuer: `<release URL>@sha256:<hex>` and the downloaded archive's path; the synth fails unless the file has that SHA-256. Never with the stub. |
 
@@ -804,19 +805,26 @@ the issuer's name is not trusted as reachable.
 
 ### The TURN server (context `stagingCallsTurnImage`)
 
-Built only when `-c stagingCallsTurnImage=ghcr.io/vettid/vettid-calls/turn@sha256:<hex>` is on the command (a digest; a tag fails the synth). The data stack then also allocates the Elastic IP (retained); the service stack adds its own VPC (one public subnet, IPv4 and IPv6, no NAT, **no flow logs**), the security group (inbound UDP 3478, TCP 3478, UDP 49152-65535, IPv4 and IPv6; outbound UDP and TCP 443), an Auto Scaling group `vettid-org-staging-calls-server` of one `t4g.small`, the records `turn.staging.vettid.org` (A, AAAA), the alarms and a $30/month budget on the tag `vettid-service=calls`. Order: data stack, then **the operator creates the secret** (`vettid-org/staging/calls/turn-secret`), then the service stack. The instance takes the Elastic IP and the fixed IPv6 address at boot and runs the image with `--log-driver none`; it has no key pair, Session Manager only.
+With `stagingCallsTurnImage` and `callsStages` committed in cdk.json, the data stack allocates the Elastic IP (retained) and the service stack, **when it has an issuer on the command** (`-c callsIssuerStub=true` or the real archive; the commands above and below are right as written, the committed values need not be repeated), adds its own VPC (one public subnet, IPv4 and IPv6, no NAT, **no flow logs**), the security group (inbound UDP 3478, TCP 3478, UDP 49152-65535, IPv4 and IPv6; outbound UDP and TCP 443), an Auto Scaling group `vettid-org-staging-calls-server` of one `t4g.small`, the records `turn.staging.vettid.org` (A, AAAA), the alarms and a $30/month budget on the tag `vettid-service=calls`. Order: data stack, then **the operator creates the secret** (`vettid-org/staging/calls/turn-secret`, tagged `vettid-service=calls` so the budget sees it), then the service stack. Without the secret the instance starts but turn-agent cannot read it (`turn-agent-errors`, `no-turn-heartbeat`). The instance takes the Elastic IP and the fixed IPv6 address at boot and runs the image with `--log-driver none`; it has no key pair, Session Manager only (an inline policy, no `ssm:GetParameter`). If a boot step still fails after its retries (the IPv6 address is retried for about 5 minutes), the instance marks itself unhealthy and the group replaces it.
 
-Alarms (to `vettid-org-calls-alerts`): `no-turn-heartbeat` (also on recovery), `relay-volume-day` (5 GB out in a day), `relay-stopped` (30 GB: the group is set to zero), `relay-capacity`, `turn-auth-failures` (placeholder baseline of 1,000 an hour until the first week's numbers).
+Diff and destroy are as for the issuer. Destroying the service stack removes the server (the Elastic IP stays, in the data stack); `diff` with the committed image shows the server resources.
 
-**After the daily stop** (`relay-stopped`): read the metrics, decide, then turn the relay back on:
+**AMI replacement.** The instance's image is the latest Amazon Linux 2023 arm64 (an SSM parameter, resolved at each deploy). A new AMI release therefore replaces the instance (calls drop; the addresses stay) on whichever deploy of `VettidOrgCallsStack` happens next. Read `cdk diff` before deploying.
+
+Alarms (to `vettid-org-calls-alerts`): `no-turn-heartbeat` (also on recovery; **it fires during a daily stop**, with no instance there is no heartbeat), `relay-volume-day` (5 GB out in a day), `relay-stopped` (30 GB: the group is set to zero), `relay-capacity`, `turn-agent-errors` (turn-agent's own errors; its log is dropped), `turn-auth-failures` (placeholder baseline of 1,000 an hour until the first week's numbers).
+
+**Cost budget.** It relies on the cost allocation tag `vettid-service` (activated by the owner). The stacks tag everything they create (the data stack's address, key and topic too); the operator-made secret should carry the tag as well.
+
+**After the daily stop** (`relay-stopped`): the relay is **off, and stays off by default until the trailing 24 hours drop below 30 GB**. An Auto Scaling alarm action is invoked again every minute while the alarm is in ALARM, so setting the desired capacity back to 1 is undone within a minute. Read the metrics and decide. To restart earlier, **disarm the stop** (the cost cap is then off until you re-arm it; watch `relay-volume-day` and `NetworkOut` yourself):
 
 ```bash
+aws cloudwatch disable-alarm-actions --alarm-names vettid-org-staging-calls-relay-stopped --profile vault-staging
 aws autoscaling set-desired-capacity --auto-scaling-group-name vettid-org-staging-calls-server --desired-capacity 1 --profile vault-staging
+# later, once relay-stopped is back to OK:
+aws cloudwatch enable-alarm-actions --alarm-names vettid-org-staging-calls-relay-stopped --profile vault-staging
 ```
 
-The `relay-stopped` alarm looks at a rolling 24 hours and stays in ALARM until the window falls below 30 GB; it acts only when it changes to ALARM, so it will not stop the relay again at once. A CloudFormation deploy of the service stack does not change the desired capacity unless the template's value changes.
-
-The budget needs the owner to activate `vettid-service` as a cost allocation tag (Billing, up to 24 h before it shows).
+A CloudFormation deploy of the service stack does not change the desired capacity unless the template's value changes. While the group is at zero, nothing is running and costs about $3.7 a month (the address).
 
 ### Tear down
 
