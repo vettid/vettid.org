@@ -802,6 +802,22 @@ the name resolves, the parent forwards it, the clock is right, and the TLS
 handshake completes under the release's allowlist entry. Until that passes
 the issuer's name is not trusted as reachable.
 
+### The TURN server (context `stagingCallsTurnImage`)
+
+Built only when `-c stagingCallsTurnImage=ghcr.io/vettid/vettid-calls/turn@sha256:<hex>` is on the command (a digest; a tag fails the synth). The data stack then also allocates the Elastic IP (retained); the service stack adds its own VPC (one public subnet, IPv4 and IPv6, no NAT, **no flow logs**), the security group (inbound UDP 3478, TCP 3478, UDP 49152-65535, IPv4 and IPv6; outbound UDP and TCP 443), an Auto Scaling group `vettid-org-staging-calls-server` of one `t4g.small`, the records `turn.staging.vettid.org` (A, AAAA), the alarms and a $30/month budget on the tag `vettid-service=calls`. Order: data stack, then **the operator creates the secret** (`vettid-org/staging/calls/turn-secret`), then the service stack. The instance takes the Elastic IP and the fixed IPv6 address at boot and runs the image with `--log-driver none`; it has no key pair, Session Manager only.
+
+Alarms (to `vettid-org-calls-alerts`): `no-turn-heartbeat` (also on recovery), `relay-volume-day` (5 GB out in a day), `relay-stopped` (30 GB: the group is set to zero), `relay-capacity`, `turn-auth-failures` (placeholder baseline of 1,000 an hour until the first week's numbers).
+
+**After the daily stop** (`relay-stopped`): read the metrics, decide, then turn the relay back on:
+
+```bash
+aws autoscaling set-desired-capacity --auto-scaling-group-name vettid-org-staging-calls-server --desired-capacity 1 --profile vault-staging
+```
+
+The `relay-stopped` alarm looks at a rolling 24 hours and stays in ALARM until the window falls below 30 GB; it acts only when it changes to ALARM, so it will not stop the relay again at once. A CloudFormation deploy of the service stack does not change the desired capacity unless the template's value changes.
+
+The budget needs the owner to activate `vettid-service` as a cost allocation tag (Billing, up to 24 h before it shows).
+
 ### Tear down
 
 `cdk destroy VettidOrgCallsStack` as above removes the front and the origin.

@@ -355,6 +355,12 @@ export interface CallsConfig {
   /** The TURN server's name (`turn.<stage>.vettid.org`), put into the credentials' URLs. */
   readonly turnHost: string;
   readonly issuer: CallsIssuer;
+  /**
+   * The TURN server's container image, pinned by digest (context
+   * `stagingCallsTurnImage`; the vettid-calls CI publishes it). Unset: the
+   * server (VPC, instance, addresses, its alarms) is not built.
+   */
+  readonly turnImage: string | undefined;
 }
 
 /**
@@ -363,6 +369,7 @@ export interface CallsConfig {
  *
  *   -c callsStages=staging -c callsIssuerStub=true          (the handshake test)
  *   -c callsStages=staging -c stagingCallsIssuer=<url>@sha256:<hex> -c stagingCallsIssuerFile=<path>
+ *   -c stagingCallsTurnImage=ghcr.io/vettid/vettid-calls/turn@sha256:<hex>   (builds the TURN server)
  *
  * There is no production calling service (CALLS-PLAN D25: production's DNS
  * Firewall does not admit its name, and production has no `calls_url`), so
@@ -384,8 +391,9 @@ function loadCalls(node: Node, stage: string, zoneName: string): CallsConfig | u
   }
   const archive = String(node.tryGetContext('stagingCallsIssuer') ?? '');
   const file = String(node.tryGetContext('stagingCallsIssuerFile') ?? '');
+  const turnImage = String(node.tryGetContext('stagingCallsTurnImage') ?? '');
   if (!listed.includes(stage)) {
-    for (const [k, v] of [['callsIssuerStub', stubOn ? 'true' : ''], ['stagingCallsIssuer', archive], ['stagingCallsIssuerFile', file]]) {
+    for (const [k, v] of [['callsIssuerStub', stubOn ? 'true' : ''], ['stagingCallsIssuer', archive], ['stagingCallsIssuerFile', file], ['stagingCallsTurnImage', turnImage]]) {
       if (v) throw new Error(`context ${k} is set but callsStages does not name "${stage}"`);
     }
     return undefined;
@@ -400,7 +408,11 @@ function loadCalls(node: Node, stage: string, zoneName: string): CallsConfig | u
     if (!file) throw new Error('context stagingCallsIssuerFile: the downloaded archive is needed with stagingCallsIssuer');
     issuer = { kind: 'archive', url: m[1], sha256: m[2], file };
   }
-  return { host: `calls.${zoneName}`, turnHost: `turn.${zoneName}`, issuer };
+  // A tag can be moved; only a digest names one image (as relayImage).
+  if (turnImage && !/^[a-z0-9][a-z0-9._\/-]*@sha256:[0-9a-f]{64}$/.test(turnImage)) {
+    throw new Error(`context stagingCallsTurnImage: expected an image pinned by digest (…@sha256:<64 hex>), got ${JSON.stringify(turnImage)}`);
+  }
+  return { host: `calls.${zoneName}`, turnHost: `turn.${zoneName}`, issuer, turnImage: turnImage || undefined };
 }
 
 /**
