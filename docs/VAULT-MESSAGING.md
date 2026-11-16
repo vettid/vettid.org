@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.14
+version: 0.90.15
 date: 2026-11-16
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -29,6 +29,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.15: 2026-11-16, **no TURN credential in the response cache**
+    (owner decision a, GC #12506; from the blind pair on vettid-vault
+    #261): §10.10 "Servers and credentials": the cached copy of a
+    `call.start` response holds the ICE configuration without its TURN
+    entry, signed as such with the same `exp`; a retransmitted
+    `call.start` gets STUN only. The answer first sent is unchanged.
+    Before 0.90.15 the cache, which is state and kept 24 h, would have
+    held the retired credential. Not yet built.
   - 0.90.14: 2026-11-16, **a clock allowance for a TURN credential's
     `exp`** (erratum, owner decision a, GC #12445; from the blind pair
     on vettid-vault #260): §10.10 "Servers and credentials": the vault
@@ -17990,7 +17998,12 @@ them on.
   **in memory only**: never in its state, never in a flush, gone at
   lock. It asks for 4 within 5 s of unlock, and again (for as many as
   are missing) when fewer than 2 usable ones are left. A credential is
-  **usable** while its `exp` is more than 2 h away.
+  **usable** while its `exp` is more than 2 h away. (0.90.15) A
+  credential handed out leaves memory only in the answer itself: the
+  cached copy of a `call.start` response (the 24-hour response cache,
+  §8.2) holds the ICE configuration **without its TURN entry**, signed as
+  such with the same `exp`, so a retransmitted `call.start` gets the
+  same call with STUN only (no relay for that call).
 - **One credential, one call.** A call's ICE configuration has one
   entry with the STUN URLs and, if the pool has a usable credential,
   one entry with the TURN URLs and that credential. `exp` of the
