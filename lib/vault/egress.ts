@@ -9,10 +9,11 @@ import { AppConfig, VaultConfig, resourceName, vaultRecoveryBucketName } from '.
  *  - The enclave's own egress (the parent's forwarder allowlist,
  *    parent.DefaultAllow): the relay, the pinned KMS endpoint, Google's
  *    attestation status list, the push gateway of the vault's channel
- *    (VAULT-MESSAGING §14.3; PUSH-GATEWAY §10.1), and (release R) the
- *    recovery counter bucket's virtual-hosted name, which the enclave
- *    reaches over its own TLS (VAULT-HOST-PROTOCOL §8.1; VAULT-RELEASES
- *    §8.4). Its traffic, like all S3 traffic, goes through the gateway
+ *    (VAULT-MESSAGING §14.3; PUSH-GATEWAY §10.1), the calling service's
+ *    issuer where the channel has one (staging, C2; CALLING-SERVICE §5.5),
+ *    and (release R) the recovery counter bucket's virtual-hosted name,
+ *    which the enclave reaches over its own TLS (VAULT-HOST-PROTOCOL §8.1;
+ *    VAULT-RELEASES §8.4). Its traffic, like all S3 traffic, goes through the gateway
  *    endpoint, whose policy admits this account's buckets.
  *  - What the parent uses (AWS SDK, the vault's own account): SQS, DynamoDB
  *    (including the SDK's account-based endpoint), S3 (path and the data
@@ -38,6 +39,8 @@ export function vaultHostDnsAllowlist(config: AppConfig, vault: VaultConfig): st
     'android.googleapis.com',
     vault.pushHost,
     `${vaultRecoveryBucketName(vault.account)}.s3.${r}.amazonaws.com`,
+    // the calling service's issuer (staging only, C2)
+    ...(vault.callsHost ? [vault.callsHost] : []),
     // parent
     aws('sqs'),
     aws('dynamodb'),

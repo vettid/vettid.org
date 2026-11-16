@@ -38,6 +38,11 @@ describe('context', () => {
     const c = cfg({ stage: 'staging', callsStages: 'staging', callsIssuerStub: 'true' }).calls!;
     expect([c.host, c.turnHost, c.issuer.kind]).toEqual(['calls.staging.vettid.org', 'turn.staging.vettid.org', 'stub']);
   });
+  // The vault hosts' DNS Firewall entry (VaultConfig.callsHost) is the name this front serves.
+  test('the issuer front is the name staging vault hosts may reach', () => {
+    const c = cfg({ stage: 'staging', callsStages: 'staging', callsIssuerStub: 'true' });
+    expect(c.vault!.callsHost).toBe(c.calls!.host);
+  });
   test('refusals', () => {
     expect(() => cfg({ stage: 'staging', callsStages: 'prod' })).toThrow(/no production calling service/);
     expect(() => cfg({ callsStages: 'prod' })).toThrow(/no production calling service/);

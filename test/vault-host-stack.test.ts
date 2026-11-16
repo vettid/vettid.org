@@ -158,6 +158,42 @@ describe('VettidOrgVaultHostStack: network and egress (§8.4)', () => {
     expect(pushHosts('staging')).toEqual(['push.staging.vettid.org']);
   });
 
+  // Staging's whole list (a change here is a security review item too).
+  test('DNS Firewall allowlist, staging (snapshot)', () => {
+    const lists = resources(host('staging').json, 'AWS::Route53Resolver::FirewallDomainList');
+    expect(lists.find((l) => l.Properties.Name.endsWith('vault-host-allow'))!.Properties.Domains).toEqual([
+      'relay.vettid.org',
+      'kms.us-east-1.amazonaws.com',
+      'android.googleapis.com',
+      'push.staging.vettid.org',
+      'vettid-org-vault-recovery-347272280361.s3.us-east-1.amazonaws.com',
+      'calls.staging.vettid.org',
+      'sqs.us-east-1.amazonaws.com',
+      'dynamodb.us-east-1.amazonaws.com',
+      '347272280361.ddb.us-east-1.amazonaws.com',
+      's3.us-east-1.amazonaws.com',
+      'vettid-org-staging-vault-data-347272280361.s3.us-east-1.amazonaws.com',
+      'ssm.us-east-1.amazonaws.com',
+      'ssmmessages.us-east-1.amazonaws.com',
+      'ec2messages.us-east-1.amazonaws.com',
+      'logs.us-east-1.amazonaws.com',
+      'monitoring.us-east-1.amazonaws.com',
+      'autoscaling.us-east-1.amazonaws.com',
+      '*.ec2.internal',
+    ]);
+  });
+
+  // C2 (CALLING-SERVICE §5.5; VAULT-MESSAGING §10.10): staging hosts allow the
+  // staging issuer only; production, which has no calling service, allows none.
+  test('calling service: staging allows only its own issuer, production none', () => {
+    const allow = (stage: string) =>
+      resources(host(stage).json, 'AWS::Route53Resolver::FirewallDomainList')
+        .find((l) => l.Properties.Name.endsWith('vault-host-allow'))!.Properties.Domains as string[];
+    const callsHosts = (stage: string) => allow(stage).filter((d) => d.startsWith('calls.') || d.startsWith('turn.'));
+    expect(callsHosts('prod')).toEqual([]);
+    expect(callsHosts('staging')).toEqual(['calls.staging.vettid.org']);
+  });
+
   // Release R (VAULT-HOST-PROTOCOL §8.1; VAULT-RELEASES §8.4): the enclave
   // reaches its channel's recovery counter bucket by its virtual-hosted name,
   // and no other channel's. The name is the one the release pins
