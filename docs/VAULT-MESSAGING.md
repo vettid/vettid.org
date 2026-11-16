@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.15
+version: 0.90.16
 date: 2026-11-16
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -29,6 +29,15 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.16: 2026-11-16, errata from the blind pairs on vettid-vault
+    #261 and #262: (1) §10.10 "Servers and credentials": a credential is
+    retired on any device `call.answer` for its call that the vault
+    reads, refused or undelivered too (as built in #261). (2) §10.4's
+    app text: an integer has no sign (it said "in magnitude"), as §5.3
+    and the vault's check 2 already have it. (3) §15 item 53: service-vault
+    enforces §5.3's number rule before sending, since its `CanonicalJSON`
+    accepts any number and a member's vault drops such a document. No
+    rule a vault or app checks changes.
   - 0.90.15: 2026-11-16, **no TURN credential in the response cache**
     (owner decision a, GC #12506; from the blind pair on vettid-vault
     #261): §10.10 "Servers and credentials": the cached copy of a
@@ -14294,9 +14303,9 @@ vault signs a fresh challenge with the member's **credential key**
       - `outage` (object, exactly `{from: integer, to: integer, source:
         string}`): Outage from, Outage to and Reported by.
 
-    An integer is a JSON number with no fraction or exponent, at most
-    2^53 − 1 in magnitude (§5.3); one the app cannot hold exactly does
-    not match the form, and the raw view shows it. A time is
+    An integer is a JSON number with no sign, fraction or exponent, at
+    most 2^53 − 1 (§5.3; 0.90.16: a document with any other number is
+    dropped by the vault at check 2, so the app never sees one). A time is
     an integer from 0 to 253,402,300,799 (Unix seconds up to the year
     9999), shown as date and time in the member's time zone with the
     zone named, and in UTC, with seconds whenever they are not zero. Any
@@ -18021,7 +18030,10 @@ them on.
   one entry with the TURN URLs and that credential. `exp` of the
   configuration is the credential's `exp`, or now + 6 h without one.
   The vault **retires** a credential when a call that carried it was
-  placed (`call.start` succeeded) or answered on this side; a
+  placed (`call.start` succeeded) or answered on this side; (0.90.16)
+  "answered" is any `call.answer` from one of the vault's devices for
+  that call that the vault reads, whether or not it is then refused or
+  delivered, since the device has already used the credential. A
   credential that only went out with offers nobody answered is used
   again. So two calls of a member never show the TURN server the same
   username, and a connection that rings without being answered cannot
@@ -32709,8 +32721,12 @@ Follow-ups:
         `approval_document`, and refuse at once (naming the others)
         when fewer than the threshold can be asked;
       - enforce before sending what a member's vault checks: 16 levels
-        (its `CanonicalJSON` allows 64), the 1,024-byte `summary`, and
-        its own character set;
+        (its `CanonicalJSON` allows 64), the 1,024-byte `summary`, its
+        own character set, and (0.90.16) numbers as §5.3 allows them,
+        integers with no sign, fraction or exponent, at most 2^53 − 1
+        (its `CanonicalJSON` accepts any RFC 8785 number, which a
+        member's vault drops as `shape`, so the approval would gather no
+        answers);
       - verify the document form, and never count a purpose-form
         answer toward an approval whose `context` cannot show the action
         whole: its status names
