@@ -342,8 +342,9 @@ follow this, rounds it up.
     (or all of them, if it doesn't track use), since a used one would
     otherwise work again.
 - **No flag:** the answer says nothing about tombstones. A `201` for an
-  id the owner registered or rotated onto before, or a `200` after a registration that
-  got no answer, must be treated as a possible deletion. Every earlier
+  id the owner registered or rotated onto before, or a `200` after a
+  registration that got no answer, must be treated as a possible
+  deletion or removal. Every earlier
   token may be refused, and replacements need `iat` ≥ the deletion time
   plus 90 s in relay time (§6.10; `iat` is in whole seconds, so that
   is the same as at or after it rounded up). The owner doesn't know
@@ -564,8 +565,8 @@ the rotate, and for an older tombstone usually in the past. Tokens with
 `iat` before that time are refused (`token_revoked`).
 - **The answer says so itself.** A relay MAY report this. A relay that
   does MUST also advertise `reports_tombstones` (§6.1), and MUST put
-  `"reports_tombstones_at_rotation": true` in every rotate `200` that
-  any of its server instances which report at rotation gives. It MUST
+  `"reports_tombstones_at_rotation": true` in every rotate `200` given
+  by a server instance that reports at rotation. It MUST
   then include `"tokens_not_before"` in that
   answer while it holds a tombstone for the successor's id, leaving it
   out otherwise. The value, its form (an RFC 3339 UTC timestamp in
@@ -600,7 +601,8 @@ the rotate, and for an older tombstone usually in the past. Tokens with
     mailbox (above). A registration that creates the mailbox (`201`)
     draws on §7.2's limit 3, as the rotate does.
   - **On any other relay,** or if it did not register first, the owner
-    can't tell, and denies again as §6.1 asks.
+    can't tell, and denies again as §6.1 asks. (On such a relay,
+    registering first gains nothing.)
 - **What the owner does with the answer.** It reads each rotate answer
   on its own:
   - **Marker and field T:** as §6.1's "Field present". It mints no
@@ -886,7 +888,8 @@ be replayed as a deletion.
   rotate's `200` too, which then carries
   `reports_tombstones_at_rotation` ("Tombstones at rotation", §6.7).
   Until 0.13.0 the rotate answer didn't report it, and an owner that
-  needed it registered the new key (`200`, §6.1).
+  needed it registered the new key (`200`, §6.1). An owner rotating onto
+  a key it has used before registers it first (§6.7).
 - **Timing.** Deletion is immediate; nothing waits for the message TTL. Clients
   SHOULD treat a lost response as unknown and repeat the request (it is
   idempotent and retryable on `429`/`5xx`, §7.2).
@@ -1870,7 +1873,8 @@ The push gateway API is specified separately.
 ## 10. Changelog
 
 - **0.13.0** — the owner decision of 2026-11-16. §6.7: a relay MAY
-  report tombstones at rotation. If it does, every rotate `200` carries
+  report tombstones at rotation. If it does, every rotate `200` from a
+  server instance that reports at rotation carries
   `reports_tombstones_at_rotation: true`, plus `tokens_not_before` while
   it holds a tombstone for the successor's id. Value, form and repeats
   are as at registration. Before, only registration reported it, so
