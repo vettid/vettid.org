@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
+import * as budgets from 'aws-cdk-lib/aws-budgets';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
@@ -17,6 +18,7 @@ import { stageZone } from '../constructs/stage-zone';
 import {
   CALLS_ALERTS_TOPIC_NAME, callsIssuerLogGroupName, callsIssuerRoleName, callsMetricsNamespace, callsName, callsSecretName,
 } from './calls-data-stack';
+import { CallsServer } from './calls-server';
 
 export interface VettidOrgCallsStackProps extends cdk.StackProps {
   /** The staging configuration (`config.calls` is set and names an issuer). */
@@ -27,6 +29,8 @@ export interface VettidOrgCallsStackProps extends cdk.StackProps {
 export const CALLS_ISSUER_CONCURRENCY = 4;
 /** The invocation alarm: a vault asks for credentials rarely (§5.4); 1,000 in 5 minutes is not a vault. */
 export const CALLS_INVOCATIONS_PER_5_MIN = 1000;
+/** §8.4 (D8): the service's monthly cost ceiling, a budget on its tag. */
+export const CALLS_MONTHLY_BUDGET_USD = 30;
 /** §10: more refused attestations than this in an hour fire `issuer-errors`. */
 export const CALLS_ATTESTATION_REFUSALS_PER_HOUR = 25;
 
@@ -84,8 +88,17 @@ export const CALLS_STUB_CODE = `exports.handler = async (event) => {
  *    money), and of the real issuer only (the stub emits no metric):
  *    `issuer-errors`, `issuer-attestation-refusals`, `issuer-manifest`.
  *
- * Not yet here: the VPC, security group, Auto Scaling group and instance of
- * the TURN server, their DNS records and the server's alarms (step 4).
+ *  - **The TURN server** (CALLING-SERVICE §4.1, §7, §8.2, §10), only when
+ *    context `stagingCallsTurnImage` (the image by digest) is set; see
+ *    {@link CallsServer}: its own VPC (one public subnet, IPv4 and IPv6, no
+ *    NAT, no flow logs), the security group, an Auto Scaling group of one
+ *    `t4g.small` that takes the data stack's Elastic IP and a fixed IPv6
+ *    address at boot and runs the image with no log driver, its A and AAAA
+ *    records, its alarms and the daily stop (30 GB a day: the group is set
+ *    to zero).
+ *  - **The cost budget**: $30 a month on the tag `vettid-service=calls`,
+ *    mailed to the admin address (the owner activates the tag as a cost
+ *    allocation tag; it shows in Billing 24 h later).
  *
  * No log is added or changed outside this service: its log group is
  * VettidOrgCallsDataStack's, and CloudFront's access log is off.
@@ -290,6 +303,26 @@ export class VettidOrgCallsStack extends cdk.Stack {
         datapointsToAlarm: 4,
       });
     }
+
+    if (calls.turnImage) {
+      new CallsServer(this, 'Server', { config, image: calls.turnImage, zone, topicArn });
+    }
+
+    // §8.4, §10: the ceiling is $30 a month (D8), on this service's cost tag.
+    new budgets.CfnBudget(this, 'CostBudget', {
+      budget: {
+        budgetName: `${callsName(config)}-monthly-30`,
+        budgetType: 'COST',
+        timeUnit: 'MONTHLY',
+        budgetLimit: { amount: CALLS_MONTHLY_BUDGET_USD, unit: 'USD' },
+        metrics: ['UnblendedCost'],
+        filterExpression: { tags: { key: 'vettid-service', values: ['calls'] } },
+      },
+      notificationsWithSubscribers: [
+        { notification: { notificationType: 'FORECASTED', comparisonOperator: 'GREATER_THAN', threshold: 100, thresholdType: 'PERCENTAGE' }, subscribers: [{ subscriptionType: 'EMAIL', address: config.adminEmail }] },
+        { notification: { notificationType: 'ACTUAL', comparisonOperator: 'GREATER_THAN', threshold: 100, thresholdType: 'PERCENTAGE' }, subscribers: [{ subscriptionType: 'EMAIL', address: config.adminEmail }] },
+      ],
+    });
 
     new cdk.CfnOutput(this, 'Url', { value: `https://${calls.host}` });
     new cdk.CfnOutput(this, 'IssuerKind', { value: issuer.kind, description: '"stub" until the real issuer is deployed (RUNBOOK "Calling service")' });

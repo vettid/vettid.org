@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -61,16 +62,23 @@ export const callsMetricsNamespace = (config: Pick<AppConfig, 'stage'>): string 
  *  - **The alarm topic** `vettid-org-calls-alerts`, emailed to the admin
  *    address (confirm the subscription once).
  *
- * Not here yet: the server's Elastic IP and fixed IPv6 address (§8.2). They
- * are a step 4 item (CALLS-PLAN §13.3) and an unattached public IPv4
- * address costs $3.65 a month, so they are allocated when the server
- * stack is, not for the handshake test.
+ *  - **The server's Elastic IP**, only when context `stagingCallsTurnImage`
+ *    is set (an unattached address costs $3.65 a month, so not for the
+ *    handshake test). Retained.
+ *
+ * Not here: the server's fixed IPv6 address. An IPv6 address belongs to a
+ * VPC subnet, which is the service stack's (CALLING-SERVICE §8.2); it is
+ * fixed within that VPC (VettidOrgCallsStack). See the pull request's
+ * open questions.
  */
 export class VettidOrgCallsDataStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: VettidOrgCallsDataStackProps) {
     super(scope, id, props);
     const { config } = props;
     if (config.stage === 'prod' || !config.calls) throw new Error('VettidOrgCallsDataStack: the calling service is a staging stack (context callsStages)');
+
+    // For the cost budget of the service (CALLING-SERVICE §8.4, §10).
+    cdk.Tags.of(this).add('vettid-service', 'calls');
 
     const retain = cdk.RemovalPolicy.RETAIN;
     // Kept for life, but not stranded when the operation that creates them
@@ -135,6 +143,18 @@ export class VettidOrgCallsDataStack extends cdk.Stack {
     const alerts = new sns.Topic(this, 'Alerts', { topicName: CALLS_ALERTS_TOPIC_NAME, displayName: 'VettID calling service alarms' });
     alerts.applyRemovalPolicy(retain); // a deleted topic would silence every alarm that names it by ARN
     alerts.addSubscription(new subs.EmailSubscription(config.adminEmail));
+
+    // The server's fixed IPv4 address (§8.2): phones cache it, so it outlives
+    // the service stack. Only with the TURN image (context
+    // stagingCallsTurnImage): an unattached address costs $3.65 a month.
+    // There is no fixed IPv6 address here: see VettidOrgCallsStack.
+    if (config.calls.turnImage) {
+      const eip = new ec2.CfnEIP(this, 'ServerIp', { domain: 'vpc', tags: [{ key: 'Name', value: callsName(config, 'server') }] });
+      eip.applyRemovalPolicy(retainOnceCreated);
+      publishRef(this, config, 'calls/eip-allocation-id', eip.attrAllocationId);
+      publishRef(this, config, 'calls/eip-address', eip.ref);
+      new cdk.CfnOutput(this, 'ServerIpv4', { value: eip.ref });
+    }
 
     new cdk.CfnOutput(this, 'KeyArn', { value: key.keyArn });
   }

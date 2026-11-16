@@ -612,12 +612,13 @@ will extend it.
 
 | Stack | Holds |
 |---|---|
-| `VettidOrgCallsDataStack` (stateful) | the key `alias/vettid-org-calls`, the log groups `/vettid-org/staging/calls-issuer` and `calls-server` (14 days), the topic `vettid-org-calls-alerts`. No secret (the operator creates it, step 4), no address yet (step 4). |
+| `VettidOrgCallsDataStack` (stateful) | the key `alias/vettid-org-calls`, the log groups `/vettid-org/staging/calls-issuer` and `calls-server` (14 days), the topic `vettid-org-calls-alerts`. No secret (the operator creates it, step 4). With the TURN image committed (see "The TURN server"): the server's Elastic IP, retained. |
 | `VettidOrgCallsStack` | the issuer's front: ACM certificate, CloudFront (HTTP/2, TLS 1.3 only, https only, no cache, no access log), the origin function (reserved concurrency 4) behind an open function URL (decision in CALLING-SERVICE §8.2), the A/AAAA aliases, the alarm `vettid-org-staging-calls-issuer-invocations` (more than 1,000 in 5 minutes) and the cost tag `vettid-service=calls`. |
 
 | Context | Meaning |
 |---|---|
-| `callsStages` | `staging`. Without it the staging app has no calls stack. `prod` fails the synth (D25). |
+| `callsStages` | `staging`. **Committed in cdk.json** (with `stagingCallsTurnImage`; a TURN image without `callsStages` fails the synth), so every staging deploy keeps the data stack and its Elastic IP. `prod` fails the synth (D25). |
+| `stagingCallsTurnImage` | The TURN server's image by digest (a tag fails the synth). **Committed in cdk.json.** Never override it with an empty value on a deploy: the Elastic IP would drop out of the data stack and be orphaned (it is retained, so billed, and phones lose the address). |
 | `callsIssuerStub` | `true`: the origin is the **stub**, for the handshake test only. |
 | `stagingCallsIssuer`, `stagingCallsIssuerFile` | The real issuer: `<release URL>@sha256:<hex>` and the downloaded archive's path; the synth fails unless the file has that SHA-256. Never with the stub. |
 
@@ -630,7 +631,9 @@ entry) the real archive replaces it and `curl -sI https://calls.staging.vettid.o
 must show no `x-vettid-calls-stub` header; stack output `IssuerKind` says
 `stub` or `archive`.
 
-### Deploy for the test (on the owner's go)
+### Deploy for the test (on the owner's go) - HISTORICAL
+
+Written before the TURN server existed. **With `stagingCallsTurnImage` and `callsStages` committed in cdk.json, these commands also build the server** (and its Elastic IP): use them only knowingly, or for the first-deployment order below instead.
 
 ```bash
 npx cdk diff   VettidOrgCallsDataStack VettidOrgCallsStack --exclusively -c stage=staging -c callsStages=staging -c callsIssuerStub=true --profile vault-staging
@@ -776,7 +779,7 @@ func main() {
    Fail: CALLING-SERVICE §13 (the issuer moves behind a load balancer)
    before anything is built on it.
 
-### Right after the test: destroy the stub
+### Right after the test: destroy the stub - HISTORICAL (also destroys the TURN server, the Elastic IP stays)
 
 An open function URL costs money per invocation, and the reserved
 concurrency caps parallel runs, not volume. So the stub does not stay up
@@ -801,6 +804,51 @@ debug probe of `GET /v1/health` through the egress transport). It must show
 the name resolves, the parent forwards it, the clock is right, and the TLS
 handshake completes under the release's allowlist entry. Until that passes
 the issuer's name is not trusted as reachable.
+
+### The TURN server (context `stagingCallsTurnImage`)
+
+With `stagingCallsTurnImage` and `callsStages` committed in cdk.json, the data stack allocates the Elastic IP (retained) and the service stack, **when it has an issuer on the command** (`-c callsIssuerStub=true` or the real archive; the commands above and below are right as written, the committed values need not be repeated), adds its own VPC (one public subnet, IPv4 and IPv6, no NAT, **no flow logs**), the security group (inbound UDP 3478, TCP 3478, UDP 49152-65535, IPv4 and IPv6; outbound UDP and TCP 443), an Auto Scaling group `vettid-org-staging-calls-server` of one `t4g.small`, the records `turn.staging.vettid.org` (A, AAAA), the alarms and a $30/month budget on the tag `vettid-service=calls`. Order: data stack, then **the operator creates the secret** (`vettid-org/staging/calls/turn-secret`, tagged `vettid-service=calls` so the budget sees it), then the service stack. Without the secret the instance starts but turn-agent cannot read it (`turn-agent-errors`, `no-turn-heartbeat`). The instance takes the Elastic IP and the fixed IPv6 address at boot and runs the image with `--log-driver none`; it has no key pair, Session Manager only (an inline policy, no `ssm:GetParameter`). If a boot step still fails after its retries (the IPv6 address is retried for about 5 minutes), the instance marks itself unhealthy and the group replaces it.
+
+Diff and destroy are as for the issuer. Destroying the service stack removes the server (the Elastic IP stays, in the data stack); `diff` with the committed image shows the server resources.
+
+**AMI replacement.** The instance's image is the latest Amazon Linux 2023 arm64 (an SSM parameter, resolved at each deploy). A new AMI release therefore replaces the instance (calls drop; the addresses stay) on whichever deploy of `VettidOrgCallsStack` happens next. Read `cdk diff` before deploying.
+
+Alarms (to `vettid-org-calls-alerts`): `no-turn-heartbeat` (also on recovery; **it fires during a daily stop**, with no instance there is no heartbeat), `relay-volume-day` (5 GB out in a day), `relay-stopped` (30 GB: the group is set to zero), `relay-capacity`, `turn-agent-errors` (turn-agent's own errors; its log is dropped), `turn-auth-failures` (placeholder baseline of 1,000 an hour until the first week's numbers).
+
+**First deployment, step 4** (on the owner's go; `--exclusively` as above):
+
+```bash
+# 1. the data stack alone: key, topic, log groups, the Elastic IP
+npx cdk deploy VettidOrgCallsDataStack --exclusively -c stage=staging --profile vault-staging
+# 2. the owner creates the secret vettid-org/staging/calls/turn-secret (callsctl secret new), tagged vettid-service=calls
+# 3. the service stack with the real issuer (archive and its SHA-256 as in "The real issuer")
+npx cdk diff   VettidOrgCallsStack --exclusively -c stage=staging -c stagingCallsIssuer=<url>@sha256:<hex> -c stagingCallsIssuerFile=<path> --profile vault-staging
+npx cdk deploy VettidOrgCallsStack --exclusively -c stage=staging -c stagingCallsIssuer=<url>@sha256:<hex> -c stagingCallsIssuerFile=<path> --profile vault-staging
+```
+
+**If instances keep cycling** (a boot failure that repeats marks every new instance unhealthy, and nothing it logged survives): stop the replacement, then look.
+
+```bash
+aws autoscaling suspend-processes --auto-scaling-group-name vettid-org-staging-calls-server --scaling-processes ReplaceUnhealthy --profile vault-staging
+# or: set the desired capacity to 0 (see "After the daily stop" for the disarm if relay-stopped is in ALARM)
+# then, in a Session Manager session on the instance: /var/log/cloud-init-output.log, or from outside:
+aws ec2 get-console-output --instance-id <id> --latest --profile vault-staging
+# fix the cause, then resume:
+aws autoscaling resume-processes --auto-scaling-group-name vettid-org-staging-calls-server --scaling-processes ReplaceUnhealthy --profile vault-staging
+```
+
+**Cost budget.** It relies on the cost allocation tag `vettid-service` (activated by the owner). The stacks tag everything they create (the data stack's address, key and topic too); the operator-made secret should carry the tag as well.
+
+**After the daily stop** (`relay-stopped`): the relay is **at 0 and nothing restarts it**: when the alarm returns to OK the capacity is not raised; the operator sets the desired capacity to 1. An Auto Scaling alarm action is invoked again every minute while the alarm is in ALARM, so setting it to 1 is undone within a minute until the trailing 24 hours drop below 30 GB (alarm OK). Read the metrics and decide. To restart earlier, **disarm the stop** (the cost cap is then off until you re-arm it; watch `relay-volume-day` and `NetworkOut` yourself). Note that `disable-alarm-actions` also silences that alarm's notification:
+
+```bash
+aws cloudwatch disable-alarm-actions --alarm-names vettid-org-staging-calls-relay-stopped --profile vault-staging
+aws autoscaling set-desired-capacity --auto-scaling-group-name vettid-org-staging-calls-server --desired-capacity 1 --profile vault-staging
+# later, once relay-stopped is back to OK:
+aws cloudwatch enable-alarm-actions --alarm-names vettid-org-staging-calls-relay-stopped --profile vault-staging
+```
+
+A CloudFormation deploy of the service stack does not change the desired capacity unless the template's value changes. While the group is at zero, nothing is running and costs about $3.7 a month (the address).
 
 ### Tear down
 

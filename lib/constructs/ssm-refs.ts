@@ -47,6 +47,9 @@ export type SsmRefKey =
   | 'push/staging-zone-id'
   // Calling service (VettidOrgCallsDataStack, staging account), read by VettidOrgCallsStack.
   | 'calls/key-arn'
+  // The TURN server's fixed Elastic IP (VettidOrgCallsDataStack, only with the TURN image).
+  | 'calls/eip-allocation-id'
+  | 'calls/eip-address'
   | 'member-api/domain'
   // The member API's function that cancels a member's pending vault
   // deletion and does nothing else; the admin API invokes it (it runs under
