@@ -158,6 +158,17 @@ describe('VettidOrgVaultHostStack: network and egress (§8.4)', () => {
     expect(pushHosts('staging')).toEqual(['push.staging.vettid.org']);
   });
 
+  // C2 (CALLING-SERVICE §5.5; VAULT-MESSAGING §10.10): staging hosts allow the
+  // staging issuer only; production, which has no calling service, allows none.
+  test('calling service: staging allows only its own issuer, production none', () => {
+    const allow = (stage: string) =>
+      resources(host(stage).json, 'AWS::Route53Resolver::FirewallDomainList')
+        .find((l) => l.Properties.Name.endsWith('vault-host-allow'))!.Properties.Domains as string[];
+    const callsHosts = (stage: string) => allow(stage).filter((d) => d.startsWith('calls.') || d.startsWith('turn.'));
+    expect(callsHosts('prod')).toEqual([]);
+    expect(callsHosts('staging')).toEqual(['calls.staging.vettid.org']);
+  });
+
   // Release R (VAULT-HOST-PROTOCOL §8.1; VAULT-RELEASES §8.4): the enclave
   // reaches its channel's recovery counter bucket by its virtual-hosted name,
   // and no other channel's. The name is the one the release pins
