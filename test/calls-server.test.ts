@@ -1,5 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { buildApp } from '../lib/app';
 import { loadConfig } from '../lib/config';
 
@@ -28,6 +30,18 @@ function text(v: any): string {
 const t = synth({ stagingCallsTurnImage: IMAGE });
 const svc = t.get('VettidOrgCallsStack');
 const data = t.get('VettidOrgCallsDataStack');
+
+describe('the committed context (cdk.json)', () => {
+  const committed = JSON.parse(readFileSync(join(__dirname, '..', 'cdk.json'), 'utf8')).context;
+  test('callsStages and the TURN image digest are committed', () => {
+    expect(committed.callsStages).toBe('staging');
+    expect(committed.stagingCallsTurnImage).toBe(IMAGE);
+  });
+  test('a staging synth with only the committed context has the data stack and its Elastic IP', () => {
+    const only = synth({ callsStages: committed.callsStages, stagingCallsTurnImage: committed.stagingCallsTurnImage, callsIssuerStub: false });
+    expect(of(only.get('VettidOrgCallsDataStack'), 'AWS::EC2::EIP')).toHaveLength(1);
+  });
+});
 
 describe('context', () => {
   test('the image must be a digest, and callsStages must name the stage', () => {
@@ -128,6 +142,9 @@ describe('instance', () => {
     expect(ud).toContain('curl -fsS');
     expect(ud).not.toMatch(/curl -sS/);
     expect(ud).toContain('trap fail ERR');
+    expect(ud).toContain('--no-should-respect-grace-period');
+    expect(ud).not.toMatch(/\| grep -q/);
+    expect(ud).toContain('[ "$i" -lt "$n" ] && sleep');
     expect(ud).toContain('set-instance-health --instance-id "$IID" --health-status Unhealthy');
     expect(ud).toMatch(/retry 10 aws ec2 assign-ipv6-addresses/);
     expect(ud).toMatch(/ip -6 addr show scope global/);
@@ -176,7 +193,7 @@ describe('IAM', () => {
   const role = svc.Resources[roleId];
   const policies = of(svc, 'AWS::IAM::Policy').filter((p) => JSON.stringify(p.Properties.Roles).includes(roleId));
   const st: any[] = policies.flatMap((p) => p.Properties.PolicyDocument.Statement);
-  test('role: fixed name (the key policy names it), SSM core policy, no other managed policy', () => {
+  test('role: fixed name (the key policy names it), an inline Session Manager policy, no managed policy', () => {
     expect(role.Properties.RoleName).toBe('vettid-org-staging-calls-server');
     // an inline Session Manager policy, not AmazonSSMManagedInstanceCore (ssm:GetParameter* on *)
     expect(role.Properties.ManagedPolicyArns).toBeUndefined();

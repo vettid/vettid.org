@@ -190,14 +190,14 @@ export class CallsServer extends Construct {
       'set -euo pipefail',
       '# Instance boot (CALLING-SERVICE 8.2): take the fixed addresses, run the pinned image.',
       '# retry <tries> <command...>: backoff 6 s, 12 s, ... capped at 60 s.',
-      'retry() { local n=$1 i; shift; for ((i=1; i<=n; i++)); do "$@" && return 0; sleep $(( i < 10 ? i * 6 : 60 )); done; return 1; }',
+      'retry() { local n=$1 i; shift; for ((i=1; i<=n; i++)); do "$@" && return 0; [ "$i" -lt "$n" ] && sleep $(( i < 10 ? i * 6 : 60 )); done; return 1; }',
       'TOKEN=$(retry 10 curl -fsS -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")',
       'md() { curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" "http://169.254.169.254/latest/meta-data/$1"; }',
       'IID=$(retry 10 md instance-id)',
       `export AWS_DEFAULT_REGION=${stack.region}`,
       '# Any failure below marks this instance unhealthy: the group replaces it and',
       '# a dead instance does not keep the addresses.',
-      `fail() { aws autoscaling set-instance-health --instance-id "$IID" --health-status Unhealthy || true; exit 1; }`,
+      `fail() { aws autoscaling set-instance-health --instance-id "$IID" --health-status Unhealthy --no-should-respect-grace-period || true; exit 1; }`,
       'trap fail ERR',
       'MAC=$(retry 10 md mac)',
       'ENI=$(retry 10 md "network/interfaces/macs/$MAC/interface-id")',
@@ -205,7 +205,7 @@ export class CallsServer extends Construct {
       `retry 10 aws ec2 associate-address --allocation-id ${eipId} --instance-id "$IID" --allow-reassociation`,
       '# An old interface may still hold the IPv6 address during a replacement: about 5 minutes.',
       `retry 10 aws ec2 assign-ipv6-addresses --network-interface-id "$ENI" --ipv6-addresses ${ipv6}`,
-      `for i in $(seq 1 60); do ip -6 addr show scope global | grep -qiF "${ipv6}/" && break; [ "$i" -lt 60 ] || false; sleep 5; done`,
+      `for i in $(seq 1 60); do ip -6 addr show scope global | grep -iF "${ipv6}/" >/dev/null && break; [ "$i" -lt 60 ] || false; sleep 5; done`,
       'retry 10 dnf install -y docker',
       'systemctl enable --now docker',
       `retry 8 docker pull ${image}`,
@@ -313,7 +313,7 @@ export class CallsServer extends Construct {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     alarm('Stopped', 'relay-stopped', {
-      alarmDescription: says('30 GB sent in a day: the instance group was set to ZERO and the relay is OFF. The stop is repeated every minute while this alarm stays in ALARM, so the relay stays off until the trailing 24 hours fall below 30 GB; an earlier restart is in RUNBOOK "Calling service" → After the daily stop'),
+      alarmDescription: says('30 GB sent in a day: the instance group was set to ZERO and the relay is OFF. The stop is repeated every minute while this alarm stays in ALARM, and nothing raises the capacity afterwards: the relay stays at 0 until the operator sets the desired capacity to 1, which holds only once this alarm is OK (the trailing 24 hours below 30 GB). An earlier restart needs disable-alarm-actions on this alarm first, which also silences its notification; see RUNBOOK "Calling service" → After the daily stop'),
       metric: sentPerDay,
       threshold: CALLS_DAY_STOP_BYTES,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
@@ -363,7 +363,7 @@ export class CallsServer extends Construct {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
 
-    new cdk.CfnOutput(this, 'ServerGroup', { value: asg.ref, description: 'Set its desired capacity back to 1 after the daily stop' });
+    new cdk.CfnOutput(this, 'ServerGroup', { value: asg.ref, description: 'After the daily stop the group stays at 0 until the operator sets its desired capacity to 1 (holds only once relay-stopped is OK; an early restart needs disable-alarm-actions first)' });
     new cdk.CfnOutput(this, 'ServerIpv6', { value: ipv6 });
   }
 }
