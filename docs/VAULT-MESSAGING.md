@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.13
-date: 2026-11-15
+version: 0.90.14
+date: 2026-11-16
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -10,7 +10,7 @@ related:
   - VAULT-SERVICE-CONTRACT.md (1.0.0), VAULT-SERVICE-INDEPENDENCE.md (0.2.1)
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
-  - CALLING-SERVICE.md (0.2.2)
+  - CALLING-SERVICE.md (0.2.3)
   - CALLS-PLAN.md (0.1.5) §6.1 V4, §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md (0.3.0)
@@ -29,6 +29,16 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.14: 2026-11-16, **a clock allowance for a TURN credential's
+    `exp`** (erratum, owner decision a, GC #12445; from the blind pair
+    on vettid-vault #260): §10.10 "Servers and credentials": the vault
+    accepts an issuer's answer whose `exp` values are at most 6 h + 5 min
+    ahead of its own clock, not 6 h. The issuer still stamps `exp` 6 h
+    after its own clock (D14 unchanged). Before 0.90.14, a vault clock
+    behind the issuer's by a second or more discarded every answer, and
+    by less, some of them. Not yet built: no deployed release sets
+    `calls_url`, and the vault's issuer client (vettid-vault #260, #261)
+    is not merged.
   - 0.90.13: 2026-11-15, **`B` judged after a batch's messages** (owner
     approval 2026-11-13; as built in vettid-vault): §6.3.1: where the
     pending epoch's `B` has passed and a batch carries a message
@@ -17966,9 +17976,16 @@ them on.
   credentials `{username, credential, exp}`. The vault accepts only an
   answer in which every URL passes the rules above, there are at most
   4 URLs of each kind, each `username` and `credential` is 1–512 bytes
-  without control characters, and each `exp` is in the future and at
-  most 6 h ahead; otherwise the answer is discarded as a failed
-  attempt. The vault does not interpret a username.
+  without control characters, and each `exp` is in the future and
+  (0.90.14) at most 6 h + 5 min ahead, both by the vault's clock;
+  otherwise the answer is discarded as a failed attempt. The 5 minutes
+  are a clock allowance, not a longer lifetime: the issuer stamps `exp`
+  6 h after its own clock, in whole seconds (CALLING-SERVICE §5.3,
+  D14), and the vault's clock may be behind the issuer's. Without the
+  allowance, a vault whose clock was behind by a second or more would
+  discard every answer (and by less, some of them), and its calls
+  would silently never get a TURN server. The vault does not interpret
+  a username.
 - **The pool.** The vault keeps up to **4** credentials and the URLs
   **in memory only**: never in its state, never in a flush, gone at
   lock. It asks for 4 within 5 s of unlock, and again (for as many as
