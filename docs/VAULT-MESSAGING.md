@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.13
-date: 2026-11-15
+version: 0.90.14
+date: 2026-11-16
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -29,6 +29,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.14: 2026-11-16, **a clock allowance for a TURN credential's
+    `exp`** (erratum, owner decision a, GC #12445; from the blind pair
+    on vettid-vault #260): §10.10 "Servers and credentials": the vault
+    accepts an issuer's answer whose `exp` values are at most 6 h + 5 min
+    ahead of its own clock, not 6 h. The issuer still stamps `exp` 6 h
+    after its own clock (D14 unchanged). Before 0.90.14, an enclave clock
+    behind the issuer's by about half a second or more discarded every
+    answer. Not yet built (release C2 has no `calls_url`).
   - 0.90.13: 2026-11-15, **`B` judged after a batch's messages** (owner
     approval 2026-11-13; as built in vettid-vault): §6.3.1: where the
     pending epoch's `B` has passed and a batch carries a message
@@ -17967,8 +17975,14 @@ them on.
   answer in which every URL passes the rules above, there are at most
   4 URLs of each kind, each `username` and `credential` is 1–512 bytes
   without control characters, and each `exp` is in the future and at
-  most 6 h ahead; otherwise the answer is discarded as a failed
-  attempt. The vault does not interpret a username.
+  most 6 h + 5 min ahead of the vault's clock; otherwise the answer is
+  discarded as a failed attempt. (0.90.14) The 5 minutes are a clock
+  allowance, not a longer lifetime: the issuer stamps `exp` exactly 6 h
+  after its own clock (CALLING-SERVICE §5.3, D14), and the enclave's
+  clock may be behind the issuer's. Without it, a vault whose clock was
+  behind by about half a second or more would discard every answer,
+  and its calls would silently never get a TURN server. The vault does
+  not interpret a username.
 - **The pool.** The vault keeps up to **4** credentials and the URLs
   **in memory only**: never in its state, never in a flush, gone at
   lock. It asks for 4 within 5 s of unlock, and again (for as many as
