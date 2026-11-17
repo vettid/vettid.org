@@ -1,9 +1,36 @@
 {
-  "serial": 30,
+  "serial": 31,
   "releases": [
     {
-      "release": 30,
+      "release": 31,
       "status": "active",
+      "published_at": "2026-11-17T15:31:40Z",
+      "pcr0": "d820a8f3d3887ae300d42e396b2aa550e70a91ad4180cbb2b30d5120c575786a1a251b56c8e4092938736ab6e3633219",
+      "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
+      "pcr2": "0a122cb32e4e95ade595afdc3047b133ab9f160828af11afddba082c171a15d71c22ba523e9515172eae94eb4722d16b",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/672e627e-bce5-45a8-815b-aa52a4823757",
+      "notes": "https://staging.vettid.org/security/releases/31/",
+      "tag": "release/staging/31",
+      "source_commit": "8056b695c3529aca15a8d8d616e31fed5431cfa4",
+      "summary": "Release 31 lets calls connect on networks that block direct connections, prepares for approval documents, and opens release 30 vaults as they are.",
+      "changes": [
+        "Release 31 opens a vault made by release 30 as it is: nothing is erased and nothing needs to be set up again.",
+        "Calls can now connect on networks that block a direct connection between phones, such as office, hotel and public Wi-Fi networks: the call goes through VettID's call relay, which sees your phone's network address and carries the audio, encrypted end to end, without reading it.",
+        "For this, your vault gets short-lived call relay credentials from VettID's calling service when it opens, one per call. The request names neither you nor anyone you call. Without a credential, as when the service can't be reached, a call tries a direct connection only, as before.",
+        "A service can now send the whole document of what it asks you to approve, such as a vote or an action. Your vault checks that it is well formed and is the one the request names, and drops the request if not. Once your app shows it, your approval signs that exact document.",
+        "Nothing changes for approval documents until your VettID app shows them and a service sends them.",
+        "Your vault now tells each service you are connected to which version of the service contract it follows (1.0), and keeps the version the service says it follows. Nothing depends on it yet.",
+        "After a long lock, your vault could throw away a confirmation of a key change that arrived just as it opened, then have a connection reconnect or tell one of your devices to update. It now reads such a confirmation before giving up on the change.",
+        "Fixes to how your vault changes the key it uses with VettID's relay. That key change stays switched off, so nothing changes for you yet.",
+        "Time scale: 1 day = 1 hour (staging)",
+        "Built from vettid-vault commit 8056b69 (tag release/staging/31) and independently rebuilt on 2026-11-17 with a matching PCR0."
+      ],
+      "security": "none",
+      "listed": true
+    },
+    {
+      "release": 30,
+      "status": "deprecated",
       "published_at": "2026-11-14T17:18:08Z",
       "pcr0": "6d7a86b534ec5ec2c15b401abd216dc8a432bf5c6f512175d1f0490d288fca39fe99b2123b4d73faba06736feaea4ff2",
       "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
