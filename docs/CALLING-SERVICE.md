@@ -55,10 +55,11 @@ changelog:
   - 0.2.3 (2026-10-29): editorial, from the review of vettid.org #454.
     §8.2 records the decision that the issuer's function URL is not
     IAM-authenticated, and that the front is TLS 1.3 only
-  - 0.2.4 (2026-11-17): erratum. §5.5: the parent's allowlist lists
-    staging's calls host only, as built (vettid-vault #266); production's
-    is added in the release that first gives production a `calls_url`
-    (CALLS-PLAN D25, erratum 0.1.12)
+  - 0.2.4 (2026-11-17): erratum (owner decision 2026-11-17, GC #12832).
+    §5.5: the parent's allowlist lists staging's calls host only, as
+    built (vettid-vault#260); production's is added in the release that
+    first gives production a `calls_url` (CALLS-PLAN D25, erratum
+    0.1.12; VAULT-RELEASES §8.4 Control 1)
 classification: public (no secrets; safe for github.com/vettid)
 review-cycle: 6 months or upon WebRTC PQC / AWS milestone, whichever first
 ---
@@ -303,14 +304,16 @@ gateway (VAULT-HOST-PROTOCOL §8; VAULT-RELEASES §8.4):
 
 - the enclave's release allowlist gains the host of `calls_url`, with
   Amazon's roots, TLS 1.3 and HTTP/2;
-- the parent's allowlist (`CallsHosts`) gains `calls.staging.vettid.org`
-  only. `calls.vettid.org` serves nothing yet; it is added to the
-  parent's allowlist in the release that first gives production a
-  `calls_url` (D25, erratum 0.1.12);
+- the parent's `DefaultAllow` (through `parent.CallsHosts`) gains
+  `calls.staging.vettid.org` only. `calls.vettid.org` serves nothing
+  yet; it is added in the release that first gives production a
+  `calls_url` (D25, erratum 0.1.12). One parent binary serves every
+  channel, so production's parent also carries staging's name, which
+  production's DNS Firewall and enclave allowlist block;
 - each stage's DNS Firewall admits only its own channel's name
   (`lib/vault/egress.ts`). Production's does not admit one until
-  production has a calling service; its entry is added with the
-  parent's.
+  production has a calling service; its entry is deployed before that
+  release's hosts start (VAULT-RELEASES §5.2, §8.4 Control 1).
 
 So the issuer MUST present a certificate that chains to an Amazon root,
 MUST accept TLS 1.3 and HTTP/2, and MUST answer on port 443. This
