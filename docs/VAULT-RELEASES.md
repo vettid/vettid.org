@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.35
-date: 2026-11-05
+version: 0.1.36
+date: 2026-11-17
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -274,6 +274,10 @@ changelog:
     their release is removed, weeks after it is cut, not right after use; §11.1's
     shared relay stays (D11), not "at first" (STAGING-DEVELOPMENT-PLAN
     §7); no rule changes
+  - 0.1.36: erratum. §8.4 Control 1: the parent's allowlist lists
+    staging's calls host only, as built (vettid-vault #266);
+    production's is added in the release that first gives production a
+    `calls_url` (CALLS-PLAN D25, erratum 0.1.12); no other rule changes
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.37.0) §11.10 release updates, §11.10.8 release constants, §12.5 deletion, §13.5, §13.9
@@ -1517,10 +1521,13 @@ is the enclave's fifth destination, from the staging release that
 carries `calls_url` (§5.2). It follows the push gateway's pattern
 exactly:
 
-- **Control 1.** The parent's `DefaultAllow` gains `calls.vettid.org`
-  and `calls.staging.vettid.org`, port 443 (one parent binary for every
-  channel; both names are listed now, CALLS-PLAN decision D25). The enclave's own release
-  allowlist gains only the host of its channel's `calls_url`.
+- **Control 1.** The parent's allowlist (`CallsHosts`) gains
+  `calls.staging.vettid.org`, port 443. `calls.vettid.org` serves
+  nothing yet: production's name is added to the parent's allowlist in
+  the release that first gives production a `calls_url`, together with
+  production's DNS Firewall entry (CALLS-PLAN decision D25, erratum
+  0.1.12). The enclave's own release allowlist gains only the host of
+  its channel's `calls_url`.
 - **Control 2.** TLS 1.3 ends in the enclave against Amazon's roots,
   with HTTP/2; the issuer is deployed behind an Amazon certificate for
   that reason (CALLING-SERVICE §8.2). That the enclave completes this

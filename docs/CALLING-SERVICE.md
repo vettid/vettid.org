@@ -1,8 +1,8 @@
 ---
 title: CALLING-SERVICE
 status: approved by the owner 2026-10-12 (D12–D26 of CALLS-PLAN §13.5; D23 as (c))
-version: 0.2.3
-date: 2026-10-29
+version: 0.2.4
+date: 2026-11-17
 owner: Al Liebl (Mesmer)
 component: calling-service (optional, media plane only): a STUN/TURN server and a credential issuer
 related:
@@ -55,6 +55,10 @@ changelog:
   - 0.2.3 (2026-10-29): editorial, from the review of vettid.org #454.
     §8.2 records the decision that the issuer's function URL is not
     IAM-authenticated, and that the front is TLS 1.3 only
+  - 0.2.4 (2026-11-17): erratum. §5.5: the parent's allowlist lists
+    staging's calls host only, as built (vettid-vault #266); production's
+    is added in the release that first gives production a `calls_url`
+    (CALLS-PLAN D25, erratum 0.1.12)
 classification: public (no secrets; safe for github.com/vettid)
 review-cycle: 6 months or upon WebRTC PQC / AWS milestone, whichever first
 ---
@@ -299,12 +303,14 @@ gateway (VAULT-HOST-PROTOCOL §8; VAULT-RELEASES §8.4):
 
 - the enclave's release allowlist gains the host of `calls_url`, with
   Amazon's roots, TLS 1.3 and HTTP/2;
-- the parent's allowlist (`DefaultAllow`) gains `calls.vettid.org` and
-  `calls.staging.vettid.org` (one parent binary serves every channel,
-  as for the push gateways; D25);
+- the parent's allowlist (`CallsHosts`) gains `calls.staging.vettid.org`
+  only. `calls.vettid.org` serves nothing yet; it is added to the
+  parent's allowlist in the release that first gives production a
+  `calls_url` (D25, erratum 0.1.12);
 - each stage's DNS Firewall admits only its own channel's name
-  (`lib/vault/egress.ts`). Production's does not admit either until
-  production has a calling service.
+  (`lib/vault/egress.ts`). Production's does not admit one until
+  production has a calling service; its entry is added with the
+  parent's.
 
 So the issuer MUST present a certificate that chains to an Amazon root,
 MUST accept TLS 1.3 and HTTP/2, and MUST answer on port 443. This

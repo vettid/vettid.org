@@ -1,8 +1,8 @@
 ---
 title: CALLS-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1) and 2026-10-12 (§13, D12–D26 as recommended; D23 as (c))
-version: 0.1.11
-date: 2026-11-15
+version: 0.1.12
+date: 2026-11-17
 owner: Al Liebl (Mesmer)
 related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) §2 rules, §2.4 promotion, §5 phase 2
@@ -115,6 +115,11 @@ changelog:
     exception to IOS-PLAN §6.6. §12.4 (ARM-only release), the §6.4
     table (the button row "until 0.1.11", the incoming row) and §12.7
     follow.
+  - 0.1.12 (2026-11-17): erratum. D25: the parent's allowlist, as built
+    (vettid-vault #266, `parent/config.go`), names staging's calls host
+    only; production's is added in the release that first gives
+    production a `calls_url`, with production's DNS Firewall entry. The
+    owner kept the narrower list
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -1106,7 +1111,7 @@ before a second suite).
 | D22 | The call limits (V5) | The proposal of §3: **3 unanswered calls in 10 minutes or 10 in 24 hours** per connection, then no ring and one merged missed-call item. To confirm: a declined call counts as unanswered; an answered call or a call back clears the counts; "Calls: off" stops both directions (the member's own calls to that connection too) | **As proposed**, with those three points | **As recommended** |
 | D23 | Should the app pin a connection's identity key itself, so that the call's `peer_ik` check also holds against the member's own vault | What it would take: a store on each device of every connection's key, taken at the first sight or when the member compares the verification code; the vault handing the device each key rotation with its proof, and the device checking it; a warning screen for a changed key and a way to accept it; re-pinning after a transfer, a recovery or a new desktop, where the store starts empty and the vault must be believed again. What it would give: the member's own vault could no longer listen to a call by swapping key shares without the phone noticing, provided the other member's vault is honest. It would protect calls only: the member's own vault still reads every message and holds the member's identity key. Options: (a) in C2; (b) later, as a design of its own across calls and messages, if the threat model is changed to distrust the member's own enclave; (c) **never** | Recommended was (b). The owner chose otherwise | **(c) Never.** The app does not pin a connection's identity key itself, keeps no pin store and shows no changed-key warning. The member's own vault is trusted, for calls and messages alike (VAULT-MESSAGING §2.1). The `peer_ik` check binds a call to the connection the vault names and to the fingerprint shown; it is not a defence against the member's own vault, by design |
 | D24 | Does the push wake for a ringing call (V4, a C3 item) ride in C2's vault release | (a) **Yes, if its text for VAULT-MESSAGING §14.2 is approved before the release is cut**: one release and one round of moves fewer. (b) Its own release with C3 | **(a)** | **As recommended:** it rides in release C2. Its §14.2 text is still to be written and approved before the release is cut. *0.1.4:* written and approved 2026-10-17 (VAULT-MESSAGING 0.38.0) |
-| D25 | The parent's allowlist names the issuer of both channels now | (a) **`calls.staging.vettid.org` and `calls.vettid.org`**, as it names both push gateways: production's DNS Firewall does not admit the name, and production has no `calls_url`. (b) Staging's only: production's name then needs another parent change later | **(a)** | **As recommended** |
+| D25 | The parent's allowlist names the issuer of both channels now | (a) **`calls.staging.vettid.org` and `calls.vettid.org`**, as it names both push gateways: production's DNS Firewall does not admit the name, and production has no `calls_url`. (b) Staging's only: production's name then needs another parent change later | **(a)** | **As recommended.** *Erratum 0.1.12 (2026-11-17):* the code (vettid-vault #266) lists staging's name only; production's `calls.vettid.org` is added at promotion, in the release that first gives production a `calls_url`, with its DNS Firewall entry. The owner kept the narrower list (merge go on #266, 2026-11-17) |
 | D26 | Key confirmation in every signed-form call, or only when more than one suite is offered | (a) **Every call.** (b) Only with two or more suites offered | **(a)**: one path, tested from the first day, and audio is never sent to a device that has not shown it holds the key | **As recommended** |
 
 ### 13.6 Effort
