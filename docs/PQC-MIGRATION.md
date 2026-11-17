@@ -1,8 +1,8 @@
 ---
 title: PQC-MIGRATION
 status: draft
-version: 0.3.1
-date: 2026-10-02
+version: 0.4.0
+date: 2026-11-17
 owner: Al Liebl (Mesmer)
 component: cross-cutting (vettid-agent, relay, vault manager, credential format)
 related:
@@ -10,7 +10,19 @@ related:
   - RELAY-PROTOCOL.md
   - PUSH-GATEWAY.md
   - CALLING-SERVICE.md
+  - CALLS-PLAN.md
+  - VAULT-MESSAGING.md
 changelog:
+  - 0.4.0: after NIST IR 8547 (final, October 2026): new §2.1 with the NIST
+    timeline and a dated target (every VettID-controlled signing key trusted
+    for longer than an online check is on a PQ or hybrid suite by
+    2030-12-31, with named exceptions); Phase 2 start is a proposed date (an
+    owner decision); the toolchains already have ML-DSA (Go 1.27, AWS KMS,
+    CryptoKit on iOS 26, Android's APK Signature Scheme v3.2), so the real
+    constraints are pins, verifiers, Rekor and hardware tokens (§10); §3 and
+    §4 list the keys and channels known on 2026-11-17 (new keys must be added
+    when introduced); row 5a corrected to the FrameCryptor (CALLS-PLAN D11);
+    vault messaging (#1, #2) marked done; §9 and §10 updated
   - 0.3.1: §6.5 defers the QR and bundle format to VAULT-MESSAGING §6.4
   - 0.3.0: §5.1 names a standardized instantiation (HPKE with MLKEM768X25519,
     in the Go 1.26 standard library) as the preferred way to meet the hybrid
@@ -20,7 +32,7 @@ changelog:
     (new section 6.5)
   - 0.1.0: initial draft
 classification: public (no secrets; safe for github.com/vettid)
-review-cycle: 6 months or upon NIST/AWS/Go milestone, whichever first
+review-cycle: 6 months or upon NIST (incl. IR 8547 updates)/AWS/Go milestone, whichever first
 ---
 
 # Post-Quantum Cryptography Migration Plan
@@ -56,32 +68,151 @@ Two distinct quantum threats drive different timelines:
 Symmetric cryptography (ChaCha20-Poly1305) and password hashing (Argon2id) at
 256-bit strength are reduced at most to ~128-bit effective security by
 Grover's algorithm and are considered post-quantum safe. **No changes.**
+AES-128, which the call media frames use (CALLS-PLAN D11), is NIST Category 1
+under NIST IR 8547 (approved primitives at 128-bit classical strength or more
+meet at least Category 1) and is acceptable. It is the floor of a call and
+its weakest part.
+
+### 2.1 NIST timeline and VettID's alignment
+
+NIST IR 8547 (final, October 2026) sets the timeline for leaving
+quantum-vulnerable public-key algorithms:
+
+- RSA, ECDSA, EdDSA, ECDH and finite-field DH/MQV are **deprecated after
+  2030** and **disallowed after 2035**. The threshold is 112-bit strength
+  or more; for EdDSA it is 128 bits or more (Table 2).
+- NIST does not name Ed25519 or X25519. VettID's Ed25519 is EdDSA. X25519 is
+  elliptic-curve DH, not an SP 800-56A scheme; it is treated the same here.
+- ML-KEM is the only approved PQ key establishment. NIST recommends
+  ML-KEM-768 as the default. HQC is selected and will be approved later.
+- Approved PQ signatures: ML-DSA-44/65/87 (FIPS 204), SLH-DSA (FIPS 205),
+  LMS/HSS and XMSS/XMSS^MT (SP 800-208).
+- Hybrid key establishment is allowed: SP 800-56C composite `Z' = Z || T`
+  is permitted even if one input is from a disallowed algorithm; `T || Z`
+  is allowed once SP 800-56C is updated; the order is fixed by the
+  protocol. It is FIPS-140-validatable if one input is approved. Combiner
+  guidance is in SP 800-227.
+- Dual or composite signatures are allowed if at least one component is
+  NIST-approved and every component verifies. That supports §5.2's AND
+  policy. Their security properties need careful analysis.
+- Symmetric: 112-bit standards are disallowed in 2030.
+- Key establishment goes first, as with HNDL above.
+
+US federal high value assets and high impact systems (OMB M-26-15) must use
+quantum-resistant key establishment by 2030-12-31 and signatures by
+2031-12-31. That does not bind VettID. It is context for the dates below.
+
+VettID aligns to NIST's timeline, not to FIPS approval. ChaCha20-Poly1305,
+Argon2id, X25519 and the X-Wing combiner are not NIST-approved.
+
+Plan statement (for the owner's approval):
+
+- **Every VettID-controlled signing key whose signatures are trusted for
+  longer than an online check (credentials, releases, manifests, recovery
+  requests, the ballot site key, service identity and voting keys) is on a
+  PQ or hybrid suite by 2030-12-31.**
+- Exceptions, each listed in §4 with its reason:
+  - Keys whose signatures are checked online and expire in minutes (#6-#8).
+  - The service-list and per-service anchor keys (#12, #18). They are
+    VettID-held but can only use an algorithm Rekor accepts. They are the
+    one long-lived exception, with a decision due before 2029 (§10 item 6).
+  - Keys bound to platform hardware or to third-party formats without PQ
+    support (marked "platform" or "external" in §4).
+  All are re-confirmed at each review against 2030 and 2035.
+- A deferral of a VettID-controlled key in a format VettID chooses stands
+  only if what it authorizes is short-lived and checked online. A platform or
+  external row stands only with a named external blocker, re-confirmed at
+  each review.
+- Phase 1 (key establishment) is done for vault messaging; for calls it is
+  specified and on staging (§9).
+- Phase 2 (signatures) starts no later than 2027-06-30 and finishes by the
+  date above. **The start date is an owner decision (proposed date).**
+  What exists today, by platform:
+  - Go: the repos pin Go 1.26 (vettid-vault, vettid-agent and service-vault
+    `go 1.26.0` with toolchain 1.26.10; relay, push and vettid-calls
+    `go 1.26.0`). Go 1.26 has no `crypto/mldsa`. Go 1.27 (go1.27.0 tagged
+    2026-08-19) has it (ML-DSA-44/65/87; golang/go#77626). Go has no
+    SLH-DSA package. Phase 2 in Go needs a pin bump to 1.27.
+  - AWS KMS: ML-DSA is available (key specs ML_DSA_44/65/87, signing
+    algorithm ML_DSA_SHAKE_256, in aws-cdk-lib's `kms.KeySpec` and the AWS
+    SDK). KMS has no SLH-DSA and no composite key; a hybrid is two KMS
+    keys and two Sign calls.
+  - Apple CryptoKit: ML-KEM-768/1024 from iOS 26 (Apple's security guide);
+    ML-DSA-65/87 and Secure Enclave variants from iOS 26 per third-party
+    write-ups, to confirm on developer.apple.com.
+  - Android: APK Signature Scheme v3.2 (Android 17, API 37) is a hybrid
+    block, one classical signer plus ML-DSA-65 or ML-DSA-87
+    (source.android.com). Android Keystore/StrongBox: to confirm.
+  - BouncyCastle: the Android app pins 1.86; ML-DSA support in it, to
+    confirm.
+- Phase 3 items are reviewed against the 2035 disallowance.
+- External dependencies (Nitro, Sigstore/Rekor, WebPKI certificates, platform
+  hardware) follow their own timelines and are tracked, not scheduled here.
+- This is a list of the keys known on 2026-11-17. A new key must be added to
+  §3 and §4 when it is introduced.
 
 ## 3. Current cryptographic inventory
 
 | Primitive | Where used | Quantum exposure |
 |---|---|---|
-| X25519 | Vault session key agreement; relay E2E payload encryption | **HNDL — highest risk** |
-| Ed25519 | Protean Credential; relay keypairs; wake keypairs; mailbox proof-of-possession; PASETO v4.public deposit tokens | Forgery post-CRQC; risk scales with key lifetime |
+| X25519 alone (suite 1) | Vault messaging suite 1: MUST NOT be sent or accepted (VAULT-MESSAGING §4.1) | None in use |
+| HPKE(MLKEM768X25519, HKDF-SHA256, ChaCha20-Poly1305) | Vault messaging suite 2: every E2E key agreement, including relay payloads (VAULT-MESSAGING §1.1 item 7, §4) | Hybrid; HNDL addressed |
+| Ed25519 | Protean Credential; vault `ik` and device `ik` (message, share and ICE-configuration signatures); relay keypairs; wake keypairs; mailbox proof-of-possession; PASETO v4.public deposit tokens; the calling service's per-request key (CALLING-SERVICE: "made for this one request") | Forgery post-CRQC; risk scales with key lifetime |
 | ChaCha20-Poly1305 | Payload and sealed-storage encryption | Safe (Grover only) |
+| AES-128-GCM (FrameCryptor) | Call media frames, keyed from `k_call` | Safe (NIST Category 1) |
 | Argon2id | Key derivation from user secrets | Safe |
 | AWS Nitro attestation (LAT trust root) | Enclave PCR attestation | AWS-controlled; not migratable by VettID |
+| Ed25519 (KMS, non-exportable) | Ballot (votes) site key; signs the service list (label ‖ SHA-256(list)) | Forgery post-CRQC; long-lived, identity-like |
+| ECDSA P-256 (KMS) | Service-list anchor key; logs each list in Rekor (Sigstore hashedrekord) | Forgery post-CRQC; depends on Sigstore/Rekor |
+| ECDSA P-256 (KMS `ECC_NIST_P256`, `lib/config.ts`) | Release manifest signing key A; manifests are verified by every app | Forgery post-CRQC; high value, long-lived |
+| ECDSA P-256 (YubiKey PIV slot 9c, `lib/config.ts`) | Release manifest signing key B (offline standby) | Forgery post-CRQC; hardware token |
+| Ed25519 (SSH signatures) | Release tags on vettid-vault | Forgery post-CRQC; long-lived |
+| SSH ed25519-sk (primary) or ed25519 file key (fallback) | vettid-agent release signing (AGENT-PLAN A5.2); the key is not yet published in `release/allowed_signers` | Forgery post-CRQC; hardware token |
+| ECDSA P-256 (KMS) | Recovery request key; signs `recovery` and `recovery_cancel`, pinned in releases (`lib/stacks/data-stack.ts`; VAULT-MESSAGING §11.14.8) | Forgery post-CRQC; long-lived |
+| ECDSA P-256 (KMS) | service-vault per-service ballot anchor key (service-vault `cdk/lib/anchor-signer-stack.ts`; BALLOT-PROTOCOL §2, §3.3) | Forgery post-CRQC; depends on Rekor |
+| Ed25519 | Service identity key (signs proposals, receipts, results); per-proposal voting key `vk` (BALLOT-PROTOCOL §5) | Permanent public records |
+| Ed25519 | LEASH delegation and status signatures (LEASH README) | Forgery post-CRQC; follows `ik` |
+| P-256 ECDH (WebCrypto) | Recovery code browser seal (VAULT-MESSAGING §11.11.2 "PQC exception"; `sites/account/js/recovery-keys.js`, `recovery-code.js`; vettid-vault `vms/altchan/recovery.go`) | Classical; documented exception: WebCrypto offers no PQ or hybrid KEM (P-256 and X25519 are both classical); code expires in 48 h, single-use |
+| RSA-2048 RSAES-OAEP | KMS Recipient key transport to the enclave (vettid-vault `enclave/sealer.go`, `enclave/cms/cms.go`) | AWS-defined; carried inside the enclave's TLS 1.3 to KMS, which negotiates X25519MLKEM768 (`enclave/egress/egress.go` uses Go defaults) |
+| P-256 ECDH (iPhone Secure Enclave) | Unlock secret and seed wrap (VAULT-MESSAGING §11.14.1 "On an iPhone") | Local only; Secure Enclave ML-KEM-768 exists from iOS 26 (to confirm) |
+| P-256 (Android Keystore/StrongBox, Secure Enclave) | App key and Android device key (VAULT-MESSAGING §11.7, §11.12.2) | Hardware-bound; platform timeline |
+| Android app signing certificate | Pinned by vault releases (`android_signers`) | Hybrid possible from Android 17 (APK Signature Scheme v3.2) |
+| TLS 1.3 key exchange; ECDSA/RSA certificates | VettID endpoints (CloudFront, push gateway, relay) | The 8 hosts checked accept hybrid (apps' TLS to confirm). Certificates: WebPKI timeline |
+| secp256k1 ECDSA/Schnorr | Wallet (bitcoin) | Outside NIST; follows the Bitcoin protocol |
+| Short-lived or third-party (one group) | APNs ES256 and FCM RS256 provider JWTs (minutes to an hour; vettid-push); service-vault pinned P-256 TLS identity; Sigstore TSA and Rekor roots pinned in the vault; GitHub/Sigstore build provenance (`actions/attest-build-provenance` in vettid-vault `release.yml`; Fulcio certificate algorithm to confirm); Cognito tokens; WebPKI leaves (RSA-2048 on all 8 hosts checked); Android key attestation and iOS App Attest roots (with Nitro); iOS code signing; the admin tunnel (Headscale/WireGuard X25519, `lib/stacks/admin-access-stack.ts`; the inner TLS is hybrid where the client offers it) | External or short-lived; tracked |
+| Local key protectors (TPM, Keychain, DPAPI) | vettid-agent and desktop (AGENT-PLAN AG3) | Local platform; follows the OS timeline |
 
 ## 4. Target algorithm map
 
 | # | Component | Current | Target | Phase | Rationale |
 |---|---|---|---|---|---|
-| 1 | Relay E2E payload encryption | X25519 | **Hybrid X25519 + ML-KEM-768** | 1 (now) | HNDL-exposed; mailbox blobs are the primary quantum target. ML-KEM-768 matches industry consensus (X25519MLKEM768). ~1.2 KB ciphertext overhead is negligible against 8 MB claim-check blobs. Go stdlib `crypto/mlkem` (Go ≥ 1.24). |
-| 2 | Vault session key agreement | X25519 | **Hybrid X25519 + ML-KEM-768** | 1 (now) | Same HNDL logic; same construction (§5). |
-| 3 | Protean Credential signing keys | Ed25519 | **Hybrid Ed25519 + ML-DSA-65** | 2 (Go 1.27) | Longest-lived, highest-value keys → lead the signature migration. Level 3 parameter set appropriate for an identity root. ~3.3 KB signatures live inside vault/enclave exchanges where size does not pinch. Rotation delivers the migration (§7). |
+| 1 | Relay E2E payload encryption | Hybrid (vault messaging suite 2) | **Hybrid X25519 + ML-KEM-768** | 1 (**done**) | The relay carries only opaque E2E payloads (RELAY-PROTOCOL). VAULT-MESSAGING §1.1 item 7 and §4.1: every E2E key agreement is hybrid; suite 1 MUST NOT be sent or accepted. ~1.2 KB ciphertext overhead is negligible against 8 MB claim-check blobs. |
+| 2 | Vault session key agreement | Hybrid (suite 2) | **Hybrid X25519 + ML-KEM-768** | 1 (**done**: HPKE MLKEM768X25519, VAULT-MESSAGING §4) | Same HNDL logic; same construction (§5). |
+| 3 | Protean Credential signing keys; vault and device `ik` | Ed25519 | **Hybrid Ed25519 + ML-DSA-65** | 2 (by 2030-12-31) | Longest-lived, highest-value keys → lead the signature migration. Level 3 parameter set appropriate for an identity root. ~3.3 KB signatures live inside vault/enclave exchanges where size does not pinch. Rotation delivers the migration (§7). VAULT-MESSAGING suite 3 is reserved for it; message, share and ICE-configuration signatures made with `ik` move with it. |
 | 4 | Selective disclosure layer | (implicit; full-credential presentation) | **Salted-hash attribute commitments** (SD-JWT pattern) | 2 | Hash-based → post-quantum by construction; well-vetted; algorithm-agnostic (works under Ed25519 or ML-DSA). See §6. |
-| 5 | Release/update signing root (vettid-agent) | — (new) | **SLH-DSA-128s** | 2 | Lattice-independent conservative root; hash-based assumptions only. Offline signing → 7.8 KB / ~274 ms cost irrelevant. |
-| 5a | 1:1 call media encryption | DTLS-SRTP only (not PQ) | **SFrame frame encryption keyed from hybrid KEM (§5.1)** over DTLS-SRTP | 2 | E2E and PQ guarantees ride above the transport; DTLS-SRTP becomes defense-in-depth, not a dependency. TURN providers are untrusted regardless of vendor. See CALLING-SERVICE.md §7. |
-| 6 | Relay keypairs + PASETO deposit tokens | Ed25519 (PASETO v4.public) | Deferred → ML-DSA-44 wrapper | 3 | Short-lived, verified online → zero HNDL exposure. No PQ PASETO version exists; inventing a token format now violates the well-vetted constraint. Revisit post-Go 1.27; expect a versioned PASERK-style wrapper. |
+| 5 | Release/update signing root (vettid-agent) | SSH ed25519-sk (primary) or ed25519 file key (fallback) (AGENT-PLAN A5.2); the key is not yet published in `release/allowed_signers` | **SLH-DSA-128s** | 2 (by 2030-12-31) | Lattice-independent conservative root; hash-based assumptions only. Offline signing → 7.8 KB / ~274 ms cost irrelevant. Go has no SLH-DSA package. The SSH signature format and the token must support it (to confirm). |
+| 5a | 1:1 call media encryption | AES-128-GCM frame encryption by the media stack's FrameCryptor, keyed from `k_call`; DTLS-SRTP below | **No change to the frame cipher** | specified; on staging; production when calls ship | Not SFrame (CALLS-PLAN D11 replaced it; this row was stale). `k_call` is agreed between the two devices for each call with HPKE MLKEM768X25519 (VAULT-MESSAGING §10, §10.10); the vaults relay only the public `ek` and `enc` and never hold it. Media confidentiality is therefore PQ, bounded by AES-128 (Category 1, the floor and the weakest part of a call). The share signatures are Ed25519 and move with suite 3. DTLS-SRTP below is classical and not relied upon. TURN providers are untrusted regardless of vendor. |
+| 6 | Relay keypairs + PASETO deposit tokens; the calling service's per-request Ed25519 key | Ed25519 (PASETO v4.public) | Deferred → ML-DSA-44 wrapper | 3 | Short-lived, verified online → zero HNDL exposure. No PQ PASETO version exists; inventing a token format now violates the well-vetted constraint. ML-DSA is in Go 1.27; the blocker is the token format, not the toolchain. Expect a versioned PASERK-style wrapper. |
 | 7 | Mailbox proof-of-possession | Ed25519 | Deferred (rides with #6) | 3 | Same online, ephemeral profile as relay keypairs. |
-| 8 | Wake keypairs | Ed25519 | **No migration planned** | — | Wake tokens transit APNs (4 KB payload cap); a ≥2.4 KB ML-DSA signature nearly consumes it. Signatures are seconds-lived and gate nothing confidential — payload encryption (#1) protects content. Classical remains the correct engineering answer. |
-| 9 | LAT / Nitro attestation | AWS PCR attestation | **AWS timeline** | external | Not migratable by VettID. Mitigation: LAT format carries a signature-suite version field so an AWS PQC attestation rollout is a version bump, not a protocol change. |
+| 8 | Wake keypairs | Ed25519 | **No migration planned; reviewed against 2035** | — | Wake tokens transit APNs (4 KB payload cap); a ≥2.4 KB ML-DSA signature nearly consumes it. Signatures are seconds-lived and gate nothing confidential — payload encryption (#1) protects content. Classical remains the correct engineering answer. |
+| 9 | LAT / Nitro attestation | AWS PCR attestation | **AWS timeline** | external | Not migratable by VettID. Mitigation: LAT format carries a signature-suite version field so an AWS PQC attestation rollout is a version bump, not a protocol change. Android key attestation and iOS App Attest roots go with it. |
 | 10 | ChaCha20-Poly1305, Argon2id, CEK sealed storage | — | **No change** | — | Post-quantum safe at 256-bit strength. |
+| 11 | Ballot (votes) site key | Ed25519, non-exportable KMS key; signs the service list (label ‖ SHA-256(list)) | **Hybrid Ed25519 + ML-DSA-65**: a second `ML_DSA_65` KMS key, two Sign calls, both signatures required | 2 (by 2030-12-31) | Long-lived, identity-like key. KMS offers ML-DSA; the constraint is the verifiers (§10 item 5). |
+| 12 | Service-list anchor key | ECDSA P-256 in KMS; each list is logged in Rekor (Sigstore hashedrekord) | **Sigstore/Rekor PQ timeline** | external (track) | Depends on the algorithms Rekor accepts, like Nitro (#9). Tracked each review cycle. |
+| 13 | Release manifest signing keys A and B | A: KMS `ECC_NIST_P256` (`lib/config.ts`). B: YubiKey PIV slot 9c, P-256 (`lib/config.ts`) | A: **hybrid ECDSA P-256 + ML-DSA-65** (a second `ML_DSA_65` KMS key, both signatures required). B: a new offline token or an accepted software offline key (PIV has no PQ algorithm) | 2 (by 2030-12-31) | Manifests are verified by every app; high value, long-lived. Hybrid keeps §1 and §5.2's AND policy. Key B is hardware-bound (§10 item 5). |
+| 14 | TLS on VettID endpoints (CloudFront, push gateway, relay) | TLS 1.3 | **No VettID change for key exchange; certificates follow the WebPKI** | external | **Checked 2026-11-17 with OpenSSL 3.5:** staging.vettid.org, vettid.org, account.vettid.org, account.staging.vettid.org, relay.vettid.org, push.staging.vettid.org, calls.staging.vettid.org and votes.staging.vettid.org accept X25519MLKEM768 in TLS 1.3 when it is offered. Not covered: turn.staging.vettid.org gave no TLS answer on 443; push.vettid.org and relay.staging.vettid.org did not connect. Whether the apps' TLS stacks (Android and iOS platform TLS) offer it is to confirm per platform. Certificates (ECDSA/RSA) follow the WebPKI's own timeline. **Rule:** never set `CurvePreferences` without X25519MLKEM768 (the enclave's egress uses Go defaults, which include it). |
+| 15 | Release tag signing (vettid-vault) | SSH Ed25519 tag signatures | **With #5** | 2 (by 2030-12-31) | Long-lived signatures on release tags. |
+| 16 | Wallet (bitcoin) | secp256k1 ECDSA/Schnorr | **Out of scope** | — | Outside NIST's list; follows Bitcoin protocol changes. Listed for completeness. |
+| 17 | Recovery request key | ECDSA P-256 in KMS (`lib/stacks/data-stack.ts`) | **Hybrid ECDSA P-256 + ML-DSA-65** (a second `ML_DSA_65` KMS key, both signatures required) | 2 (by 2030-12-31) | Signs `recovery` and `recovery_cancel`; pinned in releases (VAULT-MESSAGING §11.14.8), so a change is a release change. |
+| 18 | service-vault per-service ballot anchor key | ECDSA P-256 in KMS | **With #12** | external (track) | Anchored in Rekor (BALLOT-PROTOCOL §2, §3.3). |
+| 19 | Service identity key; per-proposal voting key `vk` | Ed25519 | **With suite 3 / #3** | 2 (by 2030-12-31) | Signatures on proposals, receipts and results are permanent public records (BALLOT-PROTOCOL §5). |
+| 20 | LEASH delegation and status signatures | Ed25519 | **With #3** | 2 (by 2030-12-31) | The status issuer is the vault's `ik`; it moves with suite 3. |
+| 21 | Recovery code browser seal | P-256 ECDH (WebCrypto) | **Accepted exception** | — | WebCrypto offers no PQ or hybrid KEM (P-256 and X25519 are both classical). The code expires in 48 h and is single-use (VAULT-MESSAGING §11.11.2 "PQC exception"). Reviewed against 2035. |
+| 22 | KMS Recipient key transport | RSA-2048 RSAES-OAEP | **AWS-defined** | external | Protected in transit by the enclave's Go TLS 1.3 to the seal region's KMS endpoint (kms.us-east-1.amazonaws.com checked), which negotiates X25519MLKEM768. Rule in #14. |
+| 23 | iPhone Secure Enclave P-256 ECDH | P-256 | **Secure Enclave ML-KEM-768 (iOS 26+)** | to schedule | Local only: unlock secret and seed wrap (VAULT-MESSAGING §11.14.1 "On an iPhone"). Depends on the minimum iOS version; the Secure Enclave API to confirm on developer.apple.com. |
+| 24 | App key (iOS) and device key (Android) | P-256: iOS Secure Enclave; Android Keystore/StrongBox | iOS: **Secure Enclave ML-DSA-65 (iOS 26+), to confirm**. Android: platform timeline, to confirm for Android 17 | platform | Hardware-bound (VAULT-MESSAGING §11.7, §11.12.2). App-key signatures are checked online within a 300-second window (`TS_WINDOW_S`, `lambda/shared/app-auth.ts`), which is what qualifies this row for the exception. |
+| 25 | Android app signing certificate | APK signing, pinned by vault releases (`android_signers`) | **Hybrid: APK Signature Scheme v3.2 (classical + ML-DSA-65)** | 2 (by 2030-12-31) | v3.2 starts at Android 17 (API 37). Older Android ignores it and uses v3.0/v3.1. Moving is an implicit key rotation: vault releases' `android_signers` must pin the new signer first. Tooling and store route to confirm. |
+| 26 | Short-lived or third-party keys (grouped) | APNs ES256 and FCM RS256 provider JWTs; service-vault pinned P-256 TLS identity; Sigstore TSA and Rekor roots pinned in the vault; GitHub/Sigstore build provenance; Cognito tokens; WebPKI leaves (RSA-2048); iOS code signing; the admin tunnel (Headscale/WireGuard X25519) | **External** | external | Minutes-to-an-hour lived or owned by others. Re-confirmed each review. |
 
 ## 5. Hybrid constructions
 
@@ -108,7 +239,7 @@ Requirements:
   protocol label.
 - An attacker must break **both** X25519 and ML-KEM-768 to recover `ss`.
 - Recipient key bundles advertise `{pk_x25519, pk_mlkem, suite_version}`.
-  Suite version `1` = classical only (transition); `2` = hybrid.
+  Suite version `1` MUST NOT be sent or accepted (VAULT-MESSAGING §4.1); `2` = hybrid.
 
 **Standardized instantiation (preferred).** The construction above states the
 security requirements; implementations SHOULD meet them with a standardized
@@ -198,8 +329,8 @@ roadmapped via BBS pending post-quantum maturity.
 
 The Protean Credential's rotation cycle is the migration vehicle:
 
-1. Enclave build N+1 ships hybrid keygen (Ed25519 + ML-DSA-65) and hybrid
-   KEM support.
+1. Enclave build N+1 ships hybrid keygen (Ed25519 + ML-DSA-65). Hybrid KEM
+   support is already in place (suite 2).
 2. On each credential rotation event, the vault issues the new hybrid
    keypair alongside the rotation; the returned credential copy the user
    stores locally (per the backup model — no seed phrases) is the hybrid
@@ -217,28 +348,44 @@ consistent with the relay migration approach in RELAY-PLAN.md.
 | Dependency | Requirement | Notes |
 |---|---|---|
 | Go ≥ 1.24 | `crypto/mlkem` (ML-KEM-768) | Available now; stdlib, no new third-party deps |
-| Go 1.27 | `crypto/mldsa` (ML-DSA-44/65/87) | Released/imminent Aug 2026; preferred over third-party |
-| Interim ML-DSA (optional) | Trail of Bits pure-Go ML-DSA/SLH-DSA | Reviewed, constant-time; use only if Phase 2 must start before Go 1.27 is pinned across repos |
+| Go ≥ 1.27 | `crypto/mldsa` (ML-DSA-44/65/87) | Available (released 2026-08). The repos pin 1.26, so Phase 2 in Go needs a pin bump. Preferred over third-party |
+| AWS KMS | `ML_DSA_44/65/87`, signing algorithm `ML_DSA_SHAKE_256` | Available (aws-cdk-lib `kms.KeySpec`, AWS SDK). No SLH-DSA, no composite key |
+| Trail of Bits pure-Go SLH-DSA (and ML-DSA, if a pin bump is not possible) | Reviewed, constant-time. SLH-DSA is not in the Go standard library |
 | HKDF | `golang.org/x/crypto/hkdf` or stdlib | Already in dependency set |
-| SLH-DSA-128s | Go stdlib when available; Trail of Bits interim | Offline signing only |
+| SLH-DSA-128s | Trail of Bits interim (not in the Go standard library) | Offline signing only; not offered by KMS |
 
 Dependency policy unchanged: prefer stdlib; `golang.org/x/crypto` acceptable;
 no new external agentic/crypto frameworks.
 
 ## 9. Phases summary
 
-- **Phase 1 (now):** Hybrid X25519+ML-KEM-768 on relay E2E and vault
-  sessions. Direct cutover. Closes the HNDL window.
-- **Phase 2 (on Go 1.27 pin):** Hybrid Ed25519+ML-DSA-65 credentials via
-  rotation-carried migration; salted-hash selective disclosure; SLH-DSA-128s
-  release-signing root; SFrame call media encryption keyed from the hybrid
-  KEM (CALLING-SERVICE.md), removing calling as the one non-PQ transport.
-- **Phase 3 (deliberate deferral):** Relay keypairs, PASETO deposit tokens,
-  mailbox proof-of-possession → ML-DSA-44 wrapper design doc first.
-- **External:** LAT/Nitro attestation on AWS timeline; format is
-  version-ready.
-- **Never:** Wake keypairs (APNs constraint, ephemeral, non-confidential);
-  symmetric layer (already PQ-safe).
+- **Phase 1 (key establishment):** Hybrid X25519+ML-KEM-768 on relay E2E and
+  vault sessions (#1, #2): done for vault messaging, as suite 2 (HPKE
+  MLKEM768X25519; suite 1 MUST NOT be sent or accepted). It closes the HNDL
+  window for vault messaging and, as specified and on staging, for calls;
+  the exceptions are in §3 (recovery code seal, KMS Recipient transport,
+  platform hardware). Call media secrecy no longer depends on a classical
+  key exchange (`k_call` comes from suite 2). The 8 hosts checked accept
+  X25519MLKEM768 in TLS (2026-11-17; the apps' TLS stacks to confirm).
+- **Phase 2 (starts no later than 2027-06-30, an owner decision; done by
+  2030-12-31):** Hybrid Ed25519+ML-DSA-65 credentials via rotation-carried
+  migration (suite 3); salted-hash selective disclosure; SLH-DSA-128s
+  release-signing root; the ballot site key, release manifest keys A and B,
+  release tags, the recovery request key, service identity and voting keys,
+  LEASH signatures, and the Android signing certificate (#11, #13, #15,
+  #17, #19, #20, #25).
+- **Phase 3 (deliberate deferral, reviewed against the 2035 disallowance):**
+  Relay keypairs, PASETO deposit tokens, mailbox proof-of-possession →
+  ML-DSA-44 wrapper design doc first.
+- **External or platform:** LAT/Nitro attestation on AWS timeline (format is
+  version-ready); Sigstore/Rekor (#12, #18); WebPKI certificates (#14, #26);
+  KMS Recipient transport (#22); platform hardware (#23, #24); the wallet (#16, out of scope).
+- **Accepted exception:** the recovery code browser seal (#21).
+- **Long-lived exception:** the anchor keys (#12, #18), until Rekor accepts
+  a PQ algorithm (decision before 2029, §10 item 6).
+- **No migration planned, reviewed against 2035:** Wake keypairs (APNs
+  constraint, ephemeral, non-confidential). The symmetric layer is already
+  PQ-safe.
 
 ## 10. Open questions
 
@@ -251,14 +398,31 @@ no new external agentic/crypto frameworks.
    move to relay bootstrap deposits; QR size is invariant to bundle growth.
 4. FIPS 140-3 Go Cryptographic Module version pinning, if compliance ever
    becomes a sales requirement.
+5. Which verifiers gate each KMS key's move to ML-DSA, and what to do about
+   hardware tokens. KMS already offers ML-DSA, so the constraints are:
+   - the verifiers: apps, the enclave, votesctl, and the push and calls
+     manifest checks must all accept the new algorithm before a key moves;
+   - Rekor's accepted algorithms (#12, #18);
+   - hardware tokens: key B (YubiKey PIV, P-256) and the release keys (SSH
+     ed25519-sk) have no PQ algorithm. Options: a new offline token that
+     supports one, or an accepted software offline key. To confirm; decide
+     before 2029.
+6. Sigstore/Rekor PQ support for the service-list anchor (#12, #18), and what
+   to do if it is not ready before 2030 (to confirm).
+7. Whether the apps' platform TLS stacks (Android, iOS) offer X25519MLKEM768
+   (to confirm per platform).
+8. Phase 2 start date: 2027-06-30 is proposed. The owner decides.
 
 ## 11. References
 
 - NIST FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA)
-- Go `crypto/mlkem` (Go 1.24+); Go 1.27 `crypto/mldsa` proposal (golang/go
-  #77626)
+- NIST IR 8547 (final, October 2026), Transition to Post-Quantum
+  Cryptography Standards; NIST SP 800-56C, SP 800-208, SP 800-227
+- Go `crypto/mlkem` (Go 1.24+); Go `crypto/mldsa` (Go 1.27+; golang/go#77626)
 - draft-irtf-cfrg-bbs-signatures (BBS Signature Scheme)
 - X25519MLKEM768 hybrid TLS key exchange (deployed default in OpenSSL,
   Chrome, Cloudflare)
+- APK Signature Scheme v3.2 (source.android.com, Android 17)
+- Apple CryptoKit post-quantum support (Apple Platform Security guide)
 - Trail of Bits pure-Go ML-DSA / SLH-DSA implementations (constant-time
   engineering notes)
