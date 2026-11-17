@@ -1101,8 +1101,8 @@
         "summary": "Release 32 checks the staging vote site's list of voting services with the site's new signing key, and opens release 31 vaults as they are.",
         "changes": [
           "Release 32 opens a vault made by release 31 as it is: nothing is erased and nothing needs to be set up again.",
-          "VettID's staging vote site now signs its list of voting services with a new key, held in AWS's key service, and records each list in a public transparency log. Your vault now checks the list with that key and refuses a list signed with the old one.",
-          "The list itself is unchanged, so the services you can vote with stay the same.",
+          "VettID's staging vote site now signs its list of voting services with a new key, held in AWS's key service, and records each list in a public transparency log that anyone can check. Your vault checks the list's signature with that key and refuses a list signed with the old one.",
+          "The list itself is unchanged, so the services you can vote with stay the same. A vault on release 30 or 31 can't check the site's list until it updates.",
           "Time scale: 1 day = 1 hour (staging)",
           "Built from vettid-vault commit 99a64ee (tag release/staging/32) and independently rebuilt on 2026-11-17 with a matching PCR0."
         ],
