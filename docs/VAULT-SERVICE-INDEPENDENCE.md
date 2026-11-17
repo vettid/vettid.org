@@ -1,8 +1,8 @@
 ---
 title: VAULT-SERVICE-INDEPENDENCE
 status: draft
-version: 0.2.2
-date: 2026-11-13
+version: 0.2.3
+date: 2026-11-17
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), service vault (vettid/service-vault), the vault↔service interface
 related:
@@ -13,6 +13,7 @@ related:
   - vettid/service-vault `docs/RELEASE-29.md` (0.9.0) §6, §11, §14; `docs/SERVICE-VAULT.md`; `docs/SOURCE.md`; `go.mod`
   - vettid/vettid-vault `vms/altchan/capabilities.go`, `vault/features086.go`, `compat/live-releases.txt`
 changelog:
+  - 0.2.3: 2026-11-17, erratum. Ground Control rule 3 (owner, 2026-11-17) suspends only the two-release support window (R2, Q6) and the per-change "previous release" analysis until the first production service. Dated notes in section 1, R1, R2, R3, R5, 4.2 and Q6; the original text stays. Feature negotiation, the downgrade rule, the owner go, the `vote_site_key` rule, the trust-root check, the `contract` field, release tags and shared-code pinning stay.
   - 0.2.2: R3, `vote_site_key`: the compromise exception (owner, GC #10325) and the correct outcome for a list under another key (`rejected`, not ignored); VOTE-SITE-KEY-COMPROMISE.md holds the procedure.
   - 0.2.1: second review round. No new release-to-release sync in R6, S7 and 4.1 (a copy is needed only when roots or site key differ); `contract` named in the downgrade rule and given a send trigger; withdrawable names read from `profile.update` only; R1 retitled and "never a format weaker than the current minimum"; R2 states the deprecated interaction and Q6 decides it; W10 uses the real bundle versions; rotation procedure names `rootwatch` and leaves the site-key change open; table and quote nits.
   - 0.2.0: blind-review revisions (PR #593). Public documents are service-first (R1, R3); 4.2 rewritten honestly and `results_after_close` dropped; downgrade rule, add-only withdrawal and sticky names (R1); contract version on the wire (R2, R4); security fast path in R2; cross-repo CI and `vms` additivity (R4, R5); new couplings S7, S8, W10 (trust-root PRs, Sigstore and site-key rotation, invitation before `features`); corrections to 2.3, W1, 2.6; Q3, Q4, Q5 rewritten.
@@ -28,6 +29,28 @@ service-vault master (31dc502) and a depth-50 clone of vettid-vault.
 Anything not confirmed is marked **unverified**.
 
 ## 1. Goal and scope
+
+**Note (2026-11-17, Ground Control rule 3, owner).** Until the first
+production service, vault and service vault ship together on staging.
+Rule 3 suspends two things only: the support window (R2, Q6) and the
+per-change analysis of how each side behaves against the other's
+previous release. Support and withdrawal notices tied to the window wait
+with it.
+
+They resume before the first production service, as an item on the
+production-launch checklist (not yet written; until then, the line added
+to STAGING-DEVELOPMENT-PLAN §2.4, the promotion checklist).
+
+What stays: the `contract` field, the release tags and the pinning of
+shared code to tags (R5). The downgrade rule (R1), feature negotiation
+(R1), the owner go before any release ends connections or removes
+behavior (R3), the `vote_site_key` rule and its compromise exception,
+the service's trust-root check, and every vault check of what the
+service signs do not change.
+
+The sections below keep the 2026-11-13 text as the decision record. Read
+every window and "previous release" rule in them with this note. Other
+notes in this document refer here.
 
 **The decision (owner, 2026-11-13).** A member vault and a service vault
 must be able to ship independently. There is no release-to-release
@@ -139,6 +162,14 @@ Each row says what binds the two sides and where it is written.
 
 ### R1. Capability negotiation for behavior changes
 
+*Note (2026-11-17, rule 3): while vault and service ship together on
+staging, "every supported vault release" means the vault release shipped
+with it, and the analysis against older releases waits for the first
+production service. A stricter vault check of service-signed documents
+still ships only with or after a service release that meets it (service
+deployed first or with it), and the checklist item naming that release
+stays.*
+
 - Every **negotiable** behavior change across the interface is gated on a feature the peer advertises. The old behavior stays while the peer lacks it. What is not negotiable is below (public documents, the invitation, external rotation).
 - **Public documents are not negotiated (W11).** A change to a public document, and any stricter vault check of what the service signs, is **service-first**: the service ships it and meets the strictest supported vault release, then the vault ships its check. Or it is a planned flag day with an owner go (R3). A feature cannot gate it.
 - **Downgrade rule.** `features` is the peer's own claim. A vault's check of what the service signs is never gated on, or relaxed by, the service's features. Features may only choose formats (never a format weaker than the current minimum) or opt in to stricter handling. A name never relaxes a check that protects the member. The same holds for `contract` (R2): it is informational, drives support notices only, never selects behavior and never relaxes a check.
@@ -150,6 +181,11 @@ Each row says what binds the two sides and where it is written.
 - A registry table in the contract (R4) names each feature, who advertises it, what it gates and the first release of each side that has it.
 
 ### R2. A compatibility window
+
+*Note (2026-11-17, rule 3): the window and its withdrawal announcements
+are suspended until the first production service. The `contract` field
+stays, and stays informational; "held and shown, not ended" and the
+owner go stay.*
 
 - Each side supports peers from at least the **current and previous release**.
 - **Vault release:** a release number in the signed manifest (§11.10.1) with status `active`, or a candidate. `deprecated` is move-only (§11.10.1): a deprecated release still unlocks and moves. #158 counts it as supported today (S5). Whether it counts here is Q6. **Interaction:** if the previous release goes `deprecated` when the next goes active, the window is one release, and members on a deprecated release stay connected until they move. R2 leaves the choice to Q6.
@@ -164,6 +200,13 @@ Each row says what binds the two sides and where it is written.
 - The vault's window is the long one: phones and vaults are the slow side.
 
 ### R3. No flag-day endings without an owner go
+
+*Note (2026-11-17, rule 3): in step 4, "after the window" waits for the
+first production service, as does the per-change "previous release"
+analysis. Steps 1–3 (R1 feature negotiation, never mid-handshake), the
+owner go before a release removes old behavior or ends connections,
+"held and shown, not ended", the compromise exception and the rest of R3
+stay.*
 
 - No release ends connections, or refuses a peer's state, on its own. The pre-29 sweep (C1) is what this forbids.
 - **A negotiable change rolls out in four steps:**
@@ -189,6 +232,10 @@ Each row says what binds the two sides and where it is written.
 - **CI.** Each repo runs the vectors against the other side's supported releases. To avoid recreating the coupling, **recommended:** the cross-repo job is **advisory** (reported, not blocking). The blocking jobs are each repo's own tests, plus R5's additive-`vms` rule. The alternative is a blocking cross job, which stops a vault merge for a service problem.
 
 ### R5. Shared code pinned to vault release tags, not main
+
+*Note (2026-11-17, rule 3): the tag pin stays; "additive-only within the
+window" and the cross-release vector job (R4, cards 7 and 9) wait with
+the window.*
 
 - `go.mod` names a **tag** (Q3), not a `main` pseudo-version.
 - **Who picks:** the service's own release. A bump stays its own PR with the vectors passing. `SOURCE.md` is generated from `go.mod` (S2).
@@ -233,6 +280,14 @@ Each row says what binds the two sides and where it is written.
   limit is R5's job.
 
 ### 4.2 What this does to hold #8169
+
+*Note (2026-11-17, rule 3): while vault and service ship together on
+staging, "every supported vault release" means the vault release shipped
+with it, and the analysis against older releases waits for the first
+production service. A stricter vault check of service-signed documents
+still ships only with or after a service release that meets it (service
+deployed first or with it), and the checklist item naming that release
+stays.*
 
 It does **not** remove it. #223 is a stricter vault check of a public document (W11), so R1 and R3 apply: it is service-first. The hold was right for that class, and it will recur for each such change. A capability name cannot replace it.
 
@@ -306,7 +361,7 @@ Each is small and independent.
   - (a) The vault fails the results as now (`failed`, a high-priority `vote.problem`, `limit` at 16 records) with a clear reason from the evidence.
   - (b) The vault warns and accepts. It weakens the check.
   - *Recommendation: (a),* with 4.2's service-first rule so it rarely happens.
-- **Q6. The window's length, and deprecated releases.** If the previous release goes `deprecated` when the next goes active, the window is one release, and members on it stay connected until they move.
+- **Q6. The window's length, and deprecated releases.** *(Note 2026-11-17, rule 3: the window is suspended until the first production service; see section 1. The owner's choice below stands for then.)* If the previous release goes `deprecated` when the next goes active, the window is one release, and members on it stay connected until they move.
   - (a) Count `deprecated` as supported for the service's checks while members remain on it (the window follows the members).
   - (b) Two releases or 90 days, whichever is longer, whatever the status.
   - (c) Active only (a one-release window).

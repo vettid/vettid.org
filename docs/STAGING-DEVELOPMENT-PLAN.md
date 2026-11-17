@@ -1,8 +1,8 @@
 ---
 title: STAGING-DEVELOPMENT-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D3 as in ANDROID-PLAN 0.1.36, which replaced 0.1.34's answer the same day)
-version: 0.1.6
-date: 2026-10-26
+version: 0.1.7
+date: 2026-11-17
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-RELEASES.md (0.1.10) §3 releases, §8.6 scaler, §8.9 cost, §11.1 staging, §15 O2
@@ -41,6 +41,10 @@ changelog:
     CA (`automation_attestation`, signer class `automation`), with the
     end date 2027-06-30 that rule §2.5.5 asks for, and is not built
     until a staging release carries the member
+  - 0.1.7: 2026-11-17, editorial; no other rule changes. §2.4: one line
+    for the production launch, restoring the vault↔service support
+    window that Ground Control rule 3 (owner, 2026-11-17) suspended
+    until the first production service
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -149,6 +153,10 @@ A feature may go into a production release when all of these are true:
 7. It needs no staging-only shortcut (§4).
 8. Its release-log text is written (VAULT-RELEASES §7).
 9. The owner approves the production release PR that lists the features.
+
+Before the first production service: restore the vault↔service support
+window and the per-change previous-release analysis
+(VAULT-SERVICE-INDEPENDENCE §1, rule 3).
 
 Production releases stay on the monthly train of VAULT-RELEASES §3.3 once
 release 1 exists; staging no longer follows that cadence.
