@@ -1193,6 +1193,65 @@
         "security": "recommended",
         "security_text": "Release 30 includes the fixes of releases 28 and 29. It counts each PIN tried at an unlock before checking it: before, a vault whose count could not be saved could allow more guesses than the limit. A failed save during a move to a new phone, followed by a lock, could leave neither phone able to open your vault. A crash just after a key change could leave your phone's session broken, and a connection begun before a key change could end with the wrong key. A move did not change the key your credential signs with, so your old phone, with your PIN, your password and an old copy of your vault's data, could still sign in your name. Messages that waited too long, or whose connection's keys changed, could be dropped without telling you. It also pauses a connection in more cases where an old copy of a vault may be running. We know of no use of any of these against any vault. Your PIN and credential password were not exposed. Vaults on releases 7 to 27 are affected."
       }
+    },
+    {
+      "release": 31,
+      "status": "candidate",
+      "pcr0": "d820a8f3d3887ae300d42e396b2aa550e70a91ad4180cbb2b30d5120c575786a1a251b56c8e4092938736ab6e3633219",
+      "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
+      "pcr2": "0a122cb32e4e95ade595afdc3047b133ab9f160828af11afddba082c171a15d71c22ba523e9515172eae94eb4722d16b",
+      "seal_key": "",
+      "admitted_pcr0s": [
+        "2303feb157143c5393fe55e8dd880f0ebc82f982c5f0e2a64e0d1c3b53e306d5c36641544185c1dfed7d7834188864e8",
+        "8eebbb1012f55e131ab24a8259d1e714ffc6cc2f9ea090c41e3773702979fd0756134b7035773f8b58ab174f864f5f7d",
+        "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e",
+        "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e",
+        "398b654dfcd98079fe558e4a2a2c000877fd59b4f9298383dc66ed0d54f6706938e1620f2d1d80b8cb02dca2eef3e72b",
+        "859733fa15df56bfedcb8c3a0a1524e9287aea6a8fa01d798d0f8c8df32cc2cbf32cdc5102bbd89b1f6c6e05e478e4bf",
+        "0f4d7915f5fc56aa7d705e82ddd14ec48e48ce3bb99217792b3e67bee9a6db6bd74dee16971d750f4af3a294e2bccdb2",
+        "082e1380273fd025f934e24941d6d91513e8e9e70d8d28ae3ea1dcc63b82c04bc0ee2ca495598df6355c1042ad90ec7e",
+        "76b9dc48934fde944227d2714fc93278f4527fefcd8152fd5471f7075d906f51a5430d5e2eb5f19a8906e80a0c5c1bba",
+        "937ccd203cc54a6da405ff9f2a612465befc4c3d77072f1683489b042cde07fad343bd25fb1115a3b6429fd5cf55c248",
+        "535e0fb98d08ee0c485c147f5f04c6d9826dfeb1a73210cb8bf2e0ec0f50fb74ffdb1ab3111a66c001c935bb8c967181",
+        "38daf72e76dcbb5672e69d664b8d5d619edf91ce7d3c523bedd823383b5515cf79c7e2da2100f0aefaca507049a40758",
+        "44f731679d8c0a9aa63a814f9f6eae03798879ee8aa6ed9da7a8fd0dde90613d5650ea0f16abbafac0c85edf4eb63d25",
+        "891a9401d7aa314e843cfc655e494899ed6e230c8a03cf4246f23197779d22a55c929fc22b2649f9d4207d4b1832ad24",
+        "d4e759beb13b906d063e1ee084bfd94dd441c82c8a101da8b02c2852a2b32a4ed89dcf372854c240a615fc37a964fe90",
+        "ed22773fa50f0507e06db63baffd4c64802e9c3bcd946706b2935a610d1ddf1f80baa779f20bb07bad4c34bd915fc32e",
+        "108dc95d6bc310e39c8cfcd18c20ad5fc40c252e6e562ddcd1752b29f1a701c2790f5727cf401e4ddab51dd2cef6ff1a",
+        "2c44e12be20a6683cc733929a8c752cd0ea19fce88e2769efc9e57987d3764df1cadb2d08b4979bcde84bd2e277e6006",
+        "067f83f975f71b6637417af147b0d14f6481f9cf45a6a2352d51eb2d07c554e7a07f0fc75273de22d25616c680f432af",
+        "6fa87c5c02d14e95004769b2475a334a7cb1f23a5e1823ab87e3ffa2bfd6cb25dd01aed0ebdf48723ee400c8c2bcc699",
+        "6d7a86b534ec5ec2c15b401abd216dc8a432bf5c6f512175d1f0490d288fca39fe99b2123b4d73faba06736feaea4ff2"
+      ],
+      "notes": "https://staging.vettid.org/security/releases/31/",
+      "host": {
+        "tag": "release/staging/31",
+        "source_commit": "8056b695c3529aca15a8d8d616e31fed5431cfa4",
+        "measurements_sha256": "d050d88535e99afab09c064e2092507a70f3d6ffee309c5575e3423473fec101",
+        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
+        "nitro_cli_version": "1.5.0",
+        "base_ami": "ami-04048e843b318bc37",
+        "ami_revision": 0,
+        "min_instances": 0,
+        "max_instances": 2
+      },
+      "log": {
+        "summary": "Release 31 lets calls connect on networks that block direct connections, prepares for approval documents, and opens release 30 vaults as they are.",
+        "changes": [
+          "Release 31 opens a vault made by release 30 as it is: nothing is erased and nothing needs to be set up again.",
+          "Calls can now connect on networks that block a direct connection between phones, such as office, hotel and public Wi-Fi networks: the call goes through VettID's call relay, which sees your phone's network address and carries the audio, encrypted end to end, without reading it.",
+          "For this, your vault gets short-lived call relay credentials from VettID's calling service when it opens, one per call. The request names neither you nor anyone you call. Without a credential, as when the service can't be reached, a call tries a direct connection only, as before.",
+          "A service can now send the whole document of what it asks you to approve, such as a vote or an action. Your vault checks that it is well formed and is the one the request names, and drops the request if not. Once your app shows it, your approval signs that exact document.",
+          "Nothing changes for approval documents until your VettID app shows them and a service sends them.",
+          "Your vault now tells each service you are connected to which version of the service contract it follows (1.0), and keeps the version the service says it follows. Nothing depends on it yet.",
+          "After a long lock, your vault could throw away a confirmation of a key change that arrived just as it opened, then have a connection reconnect or tell one of your devices to update. It now reads such a confirmation before giving up on the change.",
+          "Fixes to how your vault changes the key it uses with VettID's relay. That key change stays switched off, so nothing changes for you yet.",
+          "Time scale: 1 day = 1 hour (staging)",
+          "Built from vettid-vault commit 8056b69 (tag release/staging/31) and independently rebuilt on 2026-11-17 with a matching PCR0."
+        ],
+        "security": "none"
+      }
     }
   ]
 }
