@@ -1,8 +1,8 @@
 ---
 title: CALLS-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1) and 2026-10-12 (§13, D12–D26 as recommended; D23 as (c))
-version: 0.1.11
-date: 2026-11-15
+version: 0.1.12
+date: 2026-11-17
 owner: Al Liebl (Mesmer)
 related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) §2 rules, §2.4 promotion, §5 phase 2
@@ -115,6 +115,12 @@ changelog:
     exception to IOS-PLAN §6.6. §12.4 (ARM-only release), the §6.4
     table (the button row "until 0.1.11", the incoming row) and §12.7
     follow.
+  - 0.1.12 (2026-11-17): erratum (owner decision 2026-11-17, GC #12832,
+    merge go on vettid-vault#266). D25: the parent's allowlist, as built
+    (vettid-vault#260, `parent/config.go`), names staging's calls host
+    only; production's is added in the release that first gives
+    production a `calls_url`. The owner kept the narrower list. The
+    full promotion list is VAULT-RELEASES §8.4 Control 1
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -540,7 +546,7 @@ days of implementation and review, as ranges; owner testing is extra.
 | C4 | Video: camera, switching cameras, adding video to a voice call, network change (V7) | Video both ways for 10 minutes; walk from Wi-Fi to mobile data without the call dropping | A vault release (V7) | 8–14 | Not started |
 | C5 | The TURN fallback and hostile networks | A call from a network allowing only TCP 443; a call with relay forced on one side and on both (debug option; both on one TURN server: the old backend ran two servers because this case failed there); **the share of calls that needed TURN, counted over at least 50 real calls on mobile data and home networks** (the app records direct or relayed per call, locally) and written into this plan | App only (0.1.3: and a stack deploy for TURN over TLS on 443, which D18 puts here) | 4–7 | Not started |
 | C6 | Hardening: call limits and spam, battery over 24 h idle and an hour's call, Bluetooth and wired headsets, a mobile call arriving during a VettID call, accessibility, texts | A written test sheet passed on all three phones | App only | 8–12 | Not started |
-| Promotion | STAGING-DEVELOPMENT-PLAN §2.4: specs merged, a published staging release, both kinds of phone, a move to the next release with call history intact, seven quiet days, the production calling service deployed, the owner's approval | — | A production vault release with `calls` listed; a production calling service | 3–5 plus the seven days | Not started |
+| Promotion | STAGING-DEVELOPMENT-PLAN §2.4: specs merged, a published staging release, both kinds of phone, a move to the next release with call history intact, seven quiet days, the production calling service deployed, the owner's approval | — | A production vault release with `calls` listed; a production calling service (what changes in the parent, the enclave, `prod.json` and the DNS Firewall: VAULT-RELEASES §8.4 Control 1) | 3–5 plus the seven days | Not started |
 
 Total: roughly 60–95 working days. No phase needs a relay release.
 At most two staging releases a week (§2.1 there) is not a constraint:
@@ -1106,7 +1112,7 @@ before a second suite).
 | D22 | The call limits (V5) | The proposal of §3: **3 unanswered calls in 10 minutes or 10 in 24 hours** per connection, then no ring and one merged missed-call item. To confirm: a declined call counts as unanswered; an answered call or a call back clears the counts; "Calls: off" stops both directions (the member's own calls to that connection too) | **As proposed**, with those three points | **As recommended** |
 | D23 | Should the app pin a connection's identity key itself, so that the call's `peer_ik` check also holds against the member's own vault | What it would take: a store on each device of every connection's key, taken at the first sight or when the member compares the verification code; the vault handing the device each key rotation with its proof, and the device checking it; a warning screen for a changed key and a way to accept it; re-pinning after a transfer, a recovery or a new desktop, where the store starts empty and the vault must be believed again. What it would give: the member's own vault could no longer listen to a call by swapping key shares without the phone noticing, provided the other member's vault is honest. It would protect calls only: the member's own vault still reads every message and holds the member's identity key. Options: (a) in C2; (b) later, as a design of its own across calls and messages, if the threat model is changed to distrust the member's own enclave; (c) **never** | Recommended was (b). The owner chose otherwise | **(c) Never.** The app does not pin a connection's identity key itself, keeps no pin store and shows no changed-key warning. The member's own vault is trusted, for calls and messages alike (VAULT-MESSAGING §2.1). The `peer_ik` check binds a call to the connection the vault names and to the fingerprint shown; it is not a defence against the member's own vault, by design |
 | D24 | Does the push wake for a ringing call (V4, a C3 item) ride in C2's vault release | (a) **Yes, if its text for VAULT-MESSAGING §14.2 is approved before the release is cut**: one release and one round of moves fewer. (b) Its own release with C3 | **(a)** | **As recommended:** it rides in release C2. Its §14.2 text is still to be written and approved before the release is cut. *0.1.4:* written and approved 2026-10-17 (VAULT-MESSAGING 0.38.0) |
-| D25 | The parent's allowlist names the issuer of both channels now | (a) **`calls.staging.vettid.org` and `calls.vettid.org`**, as it names both push gateways: production's DNS Firewall does not admit the name, and production has no `calls_url`. (b) Staging's only: production's name then needs another parent change later | **(a)** | **As recommended** |
+| D25 | The parent's allowlist names the issuer of both channels now | (a) **`calls.staging.vettid.org` and `calls.vettid.org`**, as it names both push gateways: production's DNS Firewall does not admit the name, and production has no `calls_url`. (b) Staging's only: production's name then needs another parent change later | **(a)** | **As recommended.** *Erratum 0.1.12 (2026-11-17):* the code (vettid-vault#260) lists staging's name only, which is option (b) in effect, with its stated cost: production's name needs another parent change at promotion (VAULT-RELEASES §8.4 Control 1 lists everything that changes then). The owner kept the narrower list (owner decision 2026-11-17, GC #12832, merge go on vettid-vault#266) |
 | D26 | Key confirmation in every signed-form call, or only when more than one suite is offered | (a) **Every call.** (b) Only with two or more suites offered | **(a)**: one path, tested from the first day, and audio is never sent to a device that has not shown it holds the key | **As recommended** |
 
 ### 13.6 Effort
