@@ -1248,7 +1248,7 @@
           "After a long lock, your vault could throw away a confirmation of a key change that arrived just as it opened, then have a connection reconnect or tell one of your devices to update. It now reads such a confirmation before giving up on the change.",
           "Fixes to how your vault changes the key it uses with VettID's relay, which stays switched off: nothing changes for you yet.",
           "Time scale: 1 day = 1 hour (staging)",
-          "Built from vettid-vault commit 8056b69 (tag release/staging/31) and independently rebuilt on TODO with a matching PCR0."
+          "Built from vettid-vault commit 8056b69 (tag release/staging/31) and independently rebuilt on 2026-11-17 with a matching PCR0."
         ],
         "security": "none"
       }
