@@ -1,22 +1,35 @@
 ---
 title: VAULT-SERVICE-CONTRACT
 status: draft
-version: 1.0.0
-date: 2026-11-13
+version: 1.0.1
+date: 2026-11-17
 owner: Al Liebl (Mesmer)
 component: the vault↔service interface (member vault ↔ service vault)
 related:
-  - VAULT-SERVICE-INDEPENDENCE.md (0.2.1): the design this contract follows; owner decision of 2026-11-13 and its recommendations (R1–R6, Q1–Q7, 4.2 (i))
+  - VAULT-SERVICE-INDEPENDENCE.md (0.2.3): the design this contract follows; owner decision of 2026-11-13 and its recommendations (R1–R6, Q1–Q7, 4.2 (i))
   - VAULT-MESSAGING.md (0.90.10) §6.4, §10.1, §10.8, §10.19, §11.10.1, §11.10.8, §11.10.9
   - BALLOT-PROTOCOL.md (vettid/service-vault `docs/BALLOT-PROTOCOL.md`; not in this repository)
 changelog:
+  - 1.0.1: 2026-11-17, erratum (patch: no change to any message or to the wire value 1.0; a release-process suspension). Ground Control rule 3 (owner, 2026-11-17) suspends the support window (§4) and the per-change "previous release" analysis, and service-first's support for older vault releases (§5.1), until the first production service. Notes in the intro, §4, §5.1, §5.5, §6 and §7. The `contract` field, the release tags and shared-code pinning stay.
   - 1.0.0: 2026-11-13, the skeleton (VAULT-SERVICE-INDEPENDENCE 4.3, card 1): the feature table with today's names, the support table, the rules for public documents (service-first), downgrades, withdrawal, the invitation's format and `vote_site_key`, and the contract version on the wire (`contract` in `profile.update`, VAULT-MESSAGING 0.90.10).
 ---
 
 # Vault↔service contract
 
 A member vault and a service vault ship independently (owner decision,
-2026-11-13). This document is what each side may rely on from the
+2026-11-13).
+
+**Note (2026-11-17, Ground Control rule 3, owner):** until the first
+production service, vault and service vault ship together on staging.
+Only the support window (§4) and the per-change "previous release"
+analysis are suspended. They resume before the first production service
+(VAULT-SERVICE-INDEPENDENCE §1). Everything else stays, including the
+`contract` field (§1), the release tags (§2), feature negotiation (§3),
+the downgrade rule (§5.2), the stricter-check order of §5.1 (see its
+note), shared-code pinning (§7) and the owner go (§6). The text below is
+the 2026-11-13 decision, kept as written.
+
+This document is what each side may rely on from the
 other, and how that changes. It does **not** restate the vault's rules:
 VAULT-MESSAGING keeps them, and BALLOT-PROTOCOL keeps the ballot's. It
 names the features, the releases each side supports, and the rules for
@@ -88,6 +101,13 @@ it must, that is a planned flag day (§6).
 
 ## 4. Support
 
+**Suspended (2026-11-17, rule 3).** Until the first production service,
+the support window, its withdrawal steps and the security fast path are
+not run, and no support notice is sent. The service's pre-send
+trust-root check (the service row) runs as today, and no side holds,
+refuses or ends a connection by `contract` or without an owner go (§6).
+The window resumes at the production-launch item (see INDEPENDENCE §1).
+
 **The window (owner decision, Q6 (b)).** Each side supports peers of the
 other side's **current and previous release, and of every release that
 was current at any time in the last 90 days**, whatever the release's
@@ -117,6 +137,14 @@ needed"), not ended (§6).
 ## 5. Rules
 
 ### 5.1 Public documents are service-first
+
+*Note (2026-11-17, rule 3): while vault and service ship together on
+staging, "every supported vault release" means the vault release shipped
+with it, and the analysis against older releases waits for the first
+production service. A stricter vault check of service-signed documents
+still ships only with or after a service release that meets it (service
+deployed first or with it), and the checklist item naming that release
+stays.*
 
 Proposals, extensions, results and rows on votes.vettid.org are one
 signed copy for every member, so a feature cannot choose among members.
@@ -160,6 +188,8 @@ to the invitation is a planned flag day (§6).
 
 ### 5.5 `vote_site_key`
 
+*Note (2026-11-17, rule 3): §5.5 does not change.*
+
 `vote_site_key` is a measured release constant (VAULT-MESSAGING
 §11.10.8), and `services.json` carries one signature. It **does not
 change while a supported vault release pins it**, and no procedure for
@@ -168,6 +198,12 @@ the list under the old one inside the window. A procedure, including one
 for a compromise of the key, comes in a later version, with the owner.
 
 ## 6. Flag days
+
+*Note (2026-11-17, rule 3): the window and the per-change "previous
+release" analysis in this section are suspended until the first
+production service (INDEPENDENCE §1). The owner go before a release ends
+connections or refuses a peer's state, "held and shown, not ended", and
+the rest of this section stay.*
 
 No release ends connections, or refuses a peer's state, on its own. A
 change that cannot be negotiated (§5.1, §5.4, §5.5, a new signature
@@ -186,6 +222,9 @@ not know and never writes a marker that newer code needs.
 
 These follow in later minor versions, with their cards
 (VAULT-SERVICE-INDEPENDENCE 4.3):
+
+*Note (rule 3): the tag pin stays; "additive-only within the window" and
+the cross-release vector job (R4, cards 7 and 9) wait with the window.*
 
 - the messages and fields each side sends and accepts;
 - the shared test vectors and their cross-repository check (R4, R5,
