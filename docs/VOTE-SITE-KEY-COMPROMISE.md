@@ -11,7 +11,7 @@ related:
   - BALLOT-PROTOCOL.md §3.3, §8.5 (vettid/service-vault `docs/BALLOT-PROTOCOL.md`; not in this repository)
   - vettid/votes `docs/VOTES-SITE.md` §3, `site/services.go`
 changelog:
-  - 0.4.1: 2026-11-17, erratum. A note in section 1: the support window is suspended until the first production service (Ground Control rule 3, owner, 2026-11-17). The compromise procedure is unchanged.
+  - 0.4.1: 2026-11-17, erratum. A note in section 1: the support window is suspended until the first production service (Ground Control rule 3, owner, 2026-11-17); on staging, "supported" means the live staging releases. The compromise procedure is unchanged.
   - 0.4.0: owner decisions (2026-11-13, GC #10325, "recommended"): Q1 yes; Q2 card fixes 7.1 and 7.2; Q3 option a now, b or c decided later; Q4 card the custody check and the list log and monitor. The exception is written into VAULT-SERVICE-INDEPENDENCE R3 (0.2.2).
   - 0.3.1: Opus round 3 (MERGE WITH NITS). 7.2 is limited to digest and signature mismatches, so a bundle that verifies with a bad time keeps its final outcome; a site bundle never moves an accepted record back to `checking`; a held list with no recorded key counts as verified under another key; §11.10.1 for the pinned manifest keys.
   - 0.3.0: blind review round 2 (both MERGE WITH NITS once the Mediums were fixed):
@@ -54,9 +54,9 @@ approves (§11.10.4).
 
 **Note (2026-11-17, Ground Control rule 3, owner).** Until the first
 production service, vault and service vault ship together on staging,
-and the support window above is suspended. It resumes at the
-production-launch checklist. This procedure for a stolen key does not
-change.
+and the support window above is suspended (VAULT-SERVICE-INDEPENDENCE
+§1). On staging, "supported" means the live staging releases. This
+procedure for a stolen key does not change.
 
 This note covers the site key only. Sigstore's roots (`vote_trust_roots`)
 change on Sigstore's schedule; the independence note's rotation proposal
