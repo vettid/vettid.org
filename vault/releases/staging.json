@@ -1240,13 +1240,13 @@
         "summary": "Release 31 lets calls connect on networks that block direct connections, prepares for approval documents, and opens release 30 vaults as they are.",
         "changes": [
           "Release 31 opens a vault made by release 30 as it is: nothing is erased and nothing needs to be set up again.",
-          "Calls now connect on networks that block a direct connection between phones, such as many office, hotel and public Wi-Fi networks: the call goes through VettID's relay, which carries its audio but cannot read it. The audio stays encrypted end to end.",
-          "For this, your vault gets short-lived relay credentials from VettID's calling service when it opens, and each call uses its own. The request names neither you nor anyone you call. If the calling service cannot be reached, a call tries a direct connection only, as before.",
-          "A service can now send the whole document of what it asks you to approve, such as a vote or an action. Your vault checks it before showing you the request, refuses one that does not match, and signs the document itself when you approve.",
-          "Nothing changes for approval documents until a service starts sending them.",
+          "Calls can now connect on networks that block a direct connection between phones, such as office, hotel and public Wi-Fi networks: the call goes through VettID's call relay, which sees your phone's network address and carries the audio, encrypted end to end, without reading it.",
+          "For this, your vault gets short-lived call relay credentials from VettID's calling service when it opens, one per call. The request names neither you nor anyone you call. Without a credential, as when the service can't be reached, a call tries a direct connection only, as before.",
+          "A service can now send the whole document of what it asks you to approve, such as a vote or an action. Your vault checks that it is well formed and is the one the request names, and drops the request if not. Once your app shows it, your approval signs that exact document.",
+          "Nothing changes for approval documents until your VettID app shows them and a service sends them.",
           "Your vault now tells each service you are connected to which version of the service contract it follows (1.0), and keeps the version the service says it follows. Nothing depends on it yet.",
           "After a long lock, your vault could throw away a confirmation of a key change that arrived just as it opened, then have a connection reconnect or tell one of your devices to update. It now reads such a confirmation before giving up on the change.",
-          "Fixes to how your vault changes the key it uses with VettID's relay, which stays switched off: nothing changes for you yet.",
+          "Fixes to how your vault changes the key it uses with VettID's relay. That key change stays switched off, so nothing changes for you yet.",
           "Time scale: 1 day = 1 hour (staging)",
           "Built from vettid-vault commit 8056b69 (tag release/staging/31) and independently rebuilt on 2026-11-17 with a matching PCR0."
         ],
