@@ -147,7 +147,7 @@
     },
     {
       "release": 7,
-      "status": "deprecated",
+      "status": "removed",
       "pcr0": "2303feb157143c5393fe55e8dd880f0ebc82f982c5f0e2a64e0d1c3b53e306d5c36641544185c1dfed7d7834188864e8",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "7a2b75f1b6be6dd65892fbdae01cfac2e2c00b0b0385bbd5f8122a4d5826ce9c63b3e615c9c463a8d5e0468054b66153",
@@ -159,18 +159,8 @@
         "c6dd654f6b261f616f9115b215600eb992365943c52177adc86bafdba0fd7138c0dfe6558d8b2052ff1aed4dee50232f"
       ],
       "published_at": "2026-10-09T20:00:44Z",
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/7/",
-      "host": {
-        "tag": "release/staging/7",
-        "source_commit": "c22a750d90d037a8a7a3e4bbb525386b07ef38ce",
-        "measurements_sha256": "bc533dcef155e8744ced5e70d9eb15d1c0ddf09ad6f55c93ec0589f90702532b",
-        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-065b1b834d2a83a7a",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Test build adding asks from connections, with rate limits per connection rule.",
         "changes": [
@@ -183,7 +173,7 @@
     },
     {
       "release": 8,
-      "status": "deprecated",
+      "status": "removed",
       "pcr0": "8eebbb1012f55e131ab24a8259d1e714ffc6cc2f9ea090c41e3773702979fd0756134b7035773f8b58ab174f864f5f7d",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "1e47cea4f04f8e7d2f5fd00f4b06e645bb61bd922a947f890f7ac12f0c19171aba04db046448523928a58387b5dc6809",
@@ -196,18 +186,8 @@
         "2303feb157143c5393fe55e8dd880f0ebc82f982c5f0e2a64e0d1c3b53e306d5c36641544185c1dfed7d7834188864e8"
       ],
       "published_at": "2026-10-10T14:05:08Z",
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/8/",
-      "host": {
-        "tag": "release/staging/8",
-        "source_commit": "6a752d2a6219fc91ecadc94328c999e741fcdcc1",
-        "measurements_sha256": "cf51e00a3ca6b933040df80a849057e754637cf7c67ec7372f31e04cdf88afd4",
-        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-065b1b834d2a83a7a",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Test build that records which device unlocked or locked your vault in its history.",
         "changes": [
@@ -220,7 +200,7 @@
     },
     {
       "release": 9,
-      "status": "deprecated",
+      "status": "removed",
       "pcr0": "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "ec9157672809295e6650135ff56c2e37a86fff9de2a066b3a22a4dcc8df5c0cb76f365d14c344bdaa139ee914dad0cf0",
@@ -234,18 +214,8 @@
         "8eebbb1012f55e131ab24a8259d1e714ffc6cc2f9ea090c41e3773702979fd0756134b7035773f8b58ab174f864f5f7d"
       ],
       "published_at": "2026-10-11T00:27:16Z",
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/9/",
-      "host": {
-        "tag": "release/staging/9",
-        "source_commit": "f6614b97e06911d6bb799203805b206f38aa687c",
-        "measurements_sha256": "598fccff272c6559683f7e6420408bed5ca35c33001c46a8cceca1a961fb90d4",
-        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-065b1b834d2a83a7a",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 9 fixes a problem where your vault could lock itself again right after an update, and prepares it for push notifications through Google and Apple.",
         "changes": [
@@ -259,7 +229,7 @@
     },
     {
       "release": 10,
-      "status": "deprecated",
+      "status": "removed",
       "pcr0": "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "591df284aa375ebbb619221fb348b17e4929b07b0fe386ca1a7bd13665278eba6f52fcf87e5fe0cfda55dd0e120cf1c1",
@@ -274,18 +244,8 @@
         "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e"
       ],
       "published_at": "2026-10-11T22:24:04Z",
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/10/",
-      "host": {
-        "tag": "release/staging/10",
-        "source_commit": "8678752f19dd5da1c9bdaa698e2eda26cb62fa7b",
-        "measurements_sha256": "197c60ac258c8df4fa72593049d973238f614bde39fe98533de58924f17ad0d5",
-        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-065b1b834d2a83a7a",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 10 tightens how your vault checks your phone's app and records which version of VettID it was set up with.",
         "changes": [
@@ -309,7 +269,7 @@
     },
     {
       "release": 11,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-13T18:35:58Z",
       "pcr0": "398b654dfcd98079fe558e4a2a2c000877fd59b4f9298383dc66ed0d54f6706938e1620f2d1d80b8cb02dca2eef3e72b",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
@@ -321,18 +281,8 @@
         "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e",
         "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/11/",
-      "host": {
-        "tag": "release/staging/11",
-        "source_commit": "a450941cc4f0f7241001852d3426df3ff61b064b",
-        "measurements_sha256": "e82ee027752f82dbcf5f234db95f308094e962f445ea732695a6454067c49c95",
-        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-01ef1060bc43e3f91",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 11 locks your vault when its host goes silent and tightens what a vault's process may do inside the enclave.",
         "changes": [
@@ -354,7 +304,7 @@
     },
     {
       "release": 12,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-14T22:31:53Z",
       "pcr0": "859733fa15df56bfedcb8c3a0a1524e9287aea6a8fa01d798d0f8c8df32cc2cbf32cdc5102bbd89b1f6c6e05e478e4bf",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
@@ -371,18 +321,8 @@
         "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e",
         "398b654dfcd98079fe558e4a2a2c000877fd59b4f9298383dc66ed0d54f6706938e1620f2d1d80b8cb02dca2eef3e72b"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/12/",
-      "host": {
-        "tag": "release/staging/12",
-        "source_commit": "5339f8bf136fbdee82f952ba1c04164368807aa6",
-        "measurements_sha256": "1a25294d5466d6dae449f08be50f2bddfaf9d159d81fff239d568bedd99286b0",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-09e274cdb5d58e11e",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 12 fixes an unlock that could fail when several vaults unlocked at once, keeps vaults further apart, and lets only your phone approve connections.",
         "changes": [
@@ -405,7 +345,7 @@
     },
     {
       "release": 13,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-15T22:19:32Z",
       "pcr0": "0f4d7915f5fc56aa7d705e82ddd14ec48e48ce3bb99217792b3e67bee9a6db6bd74dee16971d750f4af3a294e2bccdb2",
       "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
@@ -423,18 +363,8 @@
         "398b654dfcd98079fe558e4a2a2c000877fd59b4f9298383dc66ed0d54f6706938e1620f2d1d80b8cb02dca2eef3e72b",
         "859733fa15df56bfedcb8c3a0a1524e9287aea6a8fa01d798d0f8c8df32cc2cbf32cdc5102bbd89b1f6c6e05e478e4bf"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/13/",
-      "host": {
-        "tag": "release/staging/13",
-        "source_commit": "0969bd48fa51d8d8e460f76b4e9b264533f44a45",
-        "measurements_sha256": "484058d0f1379d575a5f6f9a6643914504b909d04cfcc438ef14b4ef1359c6a7",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-0b2dad606b16e669c",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 13 runs your vault on a newer, hardened kernel, lets its process use only the system calls it needs, and fixes long conversations that would not open.",
         "changes": [
@@ -457,7 +387,7 @@
     },
     {
       "release": 14,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-16T11:59:06Z",
       "pcr0": "082e1380273fd025f934e24941d6d91513e8e9e70d8d28ae3ea1dcc63b82c04bc0ee2ca495598df6355c1042ad90ec7e",
       "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
@@ -476,18 +406,8 @@
         "859733fa15df56bfedcb8c3a0a1524e9287aea6a8fa01d798d0f8c8df32cc2cbf32cdc5102bbd89b1f6c6e05e478e4bf",
         "0f4d7915f5fc56aa7d705e82ddd14ec48e48ce3bb99217792b3e67bee9a6db6bd74dee16971d750f4af3a294e2bccdb2"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/14/",
-      "host": {
-        "tag": "release/staging/14",
-        "source_commit": "3dda2b03398340301d396c09ed91f5d9c2f70445",
-        "measurements_sha256": "9466b9631fb89675b8a099565a489d8544711991877a131709bbae5b7aee4130",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-0b2dad606b16e669c",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 14 lets your vault send and receive photos in messages with your connections.",
         "changes": [
@@ -503,7 +423,7 @@
     },
     {
       "release": 15,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-16T23:40:16Z",
       "pcr0": "76b9dc48934fde944227d2714fc93278f4527fefcd8152fd5471f7075d906f51a5430d5e2eb5f19a8906e80a0c5c1bba",
       "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
@@ -523,18 +443,8 @@
         "0f4d7915f5fc56aa7d705e82ddd14ec48e48ce3bb99217792b3e67bee9a6db6bd74dee16971d750f4af3a294e2bccdb2",
         "082e1380273fd025f934e24941d6d91513e8e9e70d8d28ae3ea1dcc63b82c04bc0ee2ca495598df6355c1042ad90ec7e"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/15/",
-      "host": {
-        "tag": "release/staging/15",
-        "source_commit": "2c3fe131778a862f31393a533230ba976c493464",
-        "measurements_sha256": "bb2aa006086b0d0fd4969c1bd4a2a0ef09c571de25c2c77439204dcd203cc0ac",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 15 changes how your vault is recovered and unlocked, so that guesses at your PIN and password are counted where VettID cannot erase them.",
         "changes": [
@@ -554,7 +464,7 @@
     },
     {
       "release": 17,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-18T19:20:56Z",
       "pcr0": "937ccd203cc54a6da405ff9f2a612465befc4c3d77072f1683489b042cde07fad343bd25fb1115a3b6429fd5cf55c248",
       "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
@@ -575,18 +485,8 @@
         "082e1380273fd025f934e24941d6d91513e8e9e70d8d28ae3ea1dcc63b82c04bc0ee2ca495598df6355c1042ad90ec7e",
         "76b9dc48934fde944227d2714fc93278f4527fefcd8152fd5471f7075d906f51a5430d5e2eb5f19a8906e80a0c5c1bba"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/17/",
-      "host": {
-        "tag": "release/staging/17",
-        "source_commit": "9378113ca988db5f7b9774c248f2f2d8680a448f",
-        "measurements_sha256": "738edd18bb9556dce1ee6b0e016a57256d11ba24e1d00bfc6719da0c4be0e4bc",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 17 lets iPhones running the VettID test app enroll, limits how often a desktop or agent can ask for a session, and fixes wallet and location details.",
         "changes": [
@@ -602,7 +502,7 @@
     },
     {
       "release": 18,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-19T01:05:41Z",
       "pcr0": "535e0fb98d08ee0c485c147f5f04c6d9826dfeb1a73210cb8bf2e0ec0f50fb74ffdb1ab3111a66c001c935bb8c967181",
       "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
@@ -624,18 +524,8 @@
         "76b9dc48934fde944227d2714fc93278f4527fefcd8152fd5471f7075d906f51a5430d5e2eb5f19a8906e80a0c5c1bba",
         "937ccd203cc54a6da405ff9f2a612465befc4c3d77072f1683489b042cde07fad343bd25fb1115a3b6429fd5cf55c248"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/18/",
-      "host": {
-        "tag": "release/staging/18",
-        "source_commit": "07bf77082e6b228ac51d02075313347103c1eae0",
-        "measurements_sha256": "f38c3806ee0a94e11759f8a66ea13be647aa87b14fd9890080da033f48e0d440",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 18 makes staging's waits 24 times shorter for testing, and counts wrong PINs and passwords consistently in credential changes.",
         "changes": [
@@ -649,7 +539,7 @@
     },
     {
       "release": 19,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-19T20:59:03Z",
       "pcr0": "38daf72e76dcbb5672e69d664b8d5d619edf91ce7d3c523bedd823383b5515cf79c7e2da2100f0aefaca507049a40758",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
@@ -672,18 +562,8 @@
         "937ccd203cc54a6da405ff9f2a612465befc4c3d77072f1683489b042cde07fad343bd25fb1115a3b6429fd5cf55c248",
         "535e0fb98d08ee0c485c147f5f04c6d9826dfeb1a73210cb8bf2e0ec0f50fb74ffdb1ab3111a66c001c935bb8c967181"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/19/",
-      "host": {
-        "tag": "release/staging/19",
-        "source_commit": "a0b935e4f6550e96afadd1200233254331f6a7e9",
-        "measurements_sha256": "ae2d39c68c51c69f4e1c9c7f3bb33e7ab86649f133945a91872a83ed54406764",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 19 runs a newer enclave kernel, lets a recovery count as your daily check, and reports which recovery an unlock on your phone cancelled.",
         "changes": [
@@ -698,7 +578,7 @@
     },
     {
       "release": 20,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-20T23:32:10Z",
       "pcr0": "44f731679d8c0a9aa63a814f9f6eae03798879ee8aa6ed9da7a8fd0dde90613d5650ea0f16abbafac0c85edf4eb63d25",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
@@ -718,18 +598,8 @@
         "535e0fb98d08ee0c485c147f5f04c6d9826dfeb1a73210cb8bf2e0ec0f50fb74ffdb1ab3111a66c001c935bb8c967181",
         "38daf72e76dcbb5672e69d664b8d5d619edf91ce7d3c523bedd823383b5515cf79c7e2da2100f0aefaca507049a40758"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/20/",
-      "host": {
-        "tag": "release/staging/20",
-        "source_commit": "577275fd3779d89b29c40d1bb32d839bc139ce90",
-        "measurements_sha256": "29158d51a81fdc788dccfc3a0b110f9227e488fa93a58286447168959ca4c677",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 20 updates the enclave's certificate checks, marks later recovery attempts urgent again, and finishes a vault deletion that stopped partway.",
         "changes": [
@@ -748,7 +618,7 @@
     },
     {
       "release": 21,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-22T19:26:29Z",
       "pcr0": "891a9401d7aa314e843cfc655e494899ed6e230c8a03cf4246f23197779d22a55c929fc22b2649f9d4207d4b1832ad24",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
@@ -769,18 +639,8 @@
         "38daf72e76dcbb5672e69d664b8d5d619edf91ce7d3c523bedd823383b5515cf79c7e2da2100f0aefaca507049a40758",
         "44f731679d8c0a9aa63a814f9f6eae03798879ee8aa6ed9da7a8fd0dde90613d5650ea0f16abbafac0c85edf4eb63d25"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/21/",
-      "host": {
-        "tag": "release/staging/21",
-        "source_commit": "aa4501a6a83ce0e89c7ab848b917ad8bc125f411",
-        "measurements_sha256": "49e04fc110f03e3e8daa89ded49f52c49527c8c7edf6350662476113127088e1",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 21 ends the enclave key a minute early so phones accept it, and adds a History entry when the vault clears a credential holder it cannot find.",
         "changes": [
@@ -793,7 +653,7 @@
     },
     {
       "release": 22,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-24T15:08:20Z",
       "pcr0": "d4e759beb13b906d063e1ee084bfd94dd441c82c8a101da8b02c2852a2b32a4ed89dcf372854c240a615fc37a964fe90",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
@@ -815,18 +675,8 @@
         "44f731679d8c0a9aa63a814f9f6eae03798879ee8aa6ed9da7a8fd0dde90613d5650ea0f16abbafac0c85edf4eb63d25",
         "891a9401d7aa314e843cfc655e494899ed6e230c8a03cf4246f23197779d22a55c929fc22b2649f9d4207d4b1832ad24"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/22/",
-      "host": {
-        "tag": "release/staging/22",
-        "source_commit": "255067505bb6292a498fe0d5018e3f98fcb7b381",
-        "measurements_sha256": "b83e3d620510b9f446baf33b0db378e1a032ba546dedae7e41ff65ba4dca4ac9",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 22 remembers your vault's Android version of VettID when it moves to an iPhone, so moving back to a different version asks you to confirm.",
         "changes": [
@@ -849,7 +699,7 @@
     },
     {
       "release": 23,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-27T19:25:32Z",
       "pcr0": "ed22773fa50f0507e06db63baffd4c64802e9c3bcd946706b2935a610d1ddf1f80baa779f20bb07bad4c34bd915fc32e",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
@@ -872,18 +722,8 @@
         "891a9401d7aa314e843cfc655e494899ed6e230c8a03cf4246f23197779d22a55c929fc22b2649f9d4207d4b1832ad24",
         "d4e759beb13b906d063e1ee084bfd94dd441c82c8a101da8b02c2852a2b32a4ed89dcf372854c240a615fc37a964fe90"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/23/",
-      "host": {
-        "tag": "release/staging/23",
-        "source_commit": "acb007e6680ee8edd6dad734e6ff1e135da68dbe",
-        "measurements_sha256": "dccfb8f1cb57ae6fefa593711949d132d71cfac1faac7e422ba21d1b42626563",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 23 locks a vault whose owner check is overdue, saves its app keys durably, and fixes two recovery edge cases.",
         "changes": [
@@ -898,7 +738,7 @@
     },
     {
       "release": 24,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-29T17:44:32Z",
       "pcr0": "108dc95d6bc310e39c8cfcd18c20ad5fc40c252e6e562ddcd1752b29f1a701c2790f5727cf401e4ddab51dd2cef6ff1a",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
@@ -922,18 +762,8 @@
         "d4e759beb13b906d063e1ee084bfd94dd441c82c8a101da8b02c2852a2b32a4ed89dcf372854c240a615fc37a964fe90",
         "ed22773fa50f0507e06db63baffd4c64802e9c3bcd946706b2935a610d1ddf1f80baa779f20bb07bad4c34bd915fc32e"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/24/",
-      "host": {
-        "tag": "release/staging/24",
-        "source_commit": "214b88f531e60cedc22614cd714a1babc27004b0",
-        "measurements_sha256": "3cd065890deef6564320b7e7ead1bb55afa719faf691edc11652698aad7a7f13",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 24 makes reconnecting after a restore or a key change more reliable, and lets your phone list requests still waiting.",
         "changes": [
@@ -949,7 +779,7 @@
     },
     {
       "release": 25,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-31T20:31:40Z",
       "pcr0": "2c44e12be20a6683cc733929a8c752cd0ea19fce88e2769efc9e57987d3764df1cadb2d08b4979bcde84bd2e277e6006",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
@@ -974,18 +804,8 @@
         "ed22773fa50f0507e06db63baffd4c64802e9c3bcd946706b2935a610d1ddf1f80baa779f20bb07bad4c34bd915fc32e",
         "108dc95d6bc310e39c8cfcd18c20ad5fc40c252e6e562ddcd1752b29f1a701c2790f5727cf401e4ddab51dd2cef6ff1a"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/25/",
-      "host": {
-        "tag": "release/staging/25",
-        "source_commit": "bc5660f2f752a3540742783179ae9c7eb6f81830",
-        "measurements_sha256": "fdd89db81fce00e120c2cec56da01d3da954e10a83038545a0744f28af2c8916",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 25 adds voting with services you are connected to, and makes sign-in requests from services easier to check.",
         "changes": [
@@ -1002,7 +822,7 @@
     },
     {
       "release": 26,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-11-02T10:15:32Z",
       "pcr0": "067f83f975f71b6637417af147b0d14f6481f9cf45a6a2352d51eb2d07c554e7a07f0fc75273de22d25616c680f432af",
       "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
@@ -1028,18 +848,8 @@
         "108dc95d6bc310e39c8cfcd18c20ad5fc40c252e6e562ddcd1752b29f1a701c2790f5727cf401e4ddab51dd2cef6ff1a",
         "2c44e12be20a6683cc733929a8c752cd0ea19fce88e2769efc9e57987d3764df1cadb2d08b4979bcde84bd2e277e6006"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/26/",
-      "host": {
-        "tag": "release/staging/26",
-        "source_commit": "528bd9023a24c022e4d4f3f24dd57ac8d2e9279f",
-        "measurements_sha256": "b55bfd6f182ea9dc941d1de0842f339e497a45058ae59c2f3c2303bbc6b6299d",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 26 adds spending limits for wallets, lets approval requests from services wait up to 24 hours, and updates the enclave's kernel.",
         "changes": [
@@ -1060,7 +870,7 @@
     },
     {
       "release": 27,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-11-04T09:49:24Z",
       "pcr0": "6fa87c5c02d14e95004769b2475a334a7cb1f23a5e1823ab87e3ffa2bfd6cb25dd01aed0ebdf48723ee400c8c2bcc699",
       "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
@@ -1087,18 +897,8 @@
         "2c44e12be20a6683cc733929a8c752cd0ea19fce88e2769efc9e57987d3764df1cadb2d08b4979bcde84bd2e277e6006",
         "067f83f975f71b6637417af147b0d14f6481f9cf45a6a2352d51eb2d07c554e7a07f0fc75273de22d25616c680f432af"
       ],
+      "ends_at": "2026-11-17T17:15:00Z",
       "notes": "https://staging.vettid.org/security/releases/27/",
-      "host": {
-        "tag": "release/staging/27",
-        "source_commit": "569746d4ab23711e92f7ff0b37dcdc478b5e5645",
-        "measurements_sha256": "785e4b7826c629c193c544d3bcaaa3564928d7265a3ec8550bc90a92826e1de9",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 27 stops vote message sizes from hinting at your choice, keeps vote records until their results check out, and lets desktops and agents name sessions.",
         "changes": [
