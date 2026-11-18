@@ -11810,14 +11810,16 @@ new app its `user_guid`.
   with a `user_guid` that fails the check, is a **malformed answer**:
   the new app refuses it and drops the pairing before it stores or sends
   anything (fail closed), and the move ends as "The move stopped on this
-  phone" (the apps' existing text for a transfer session that ended).
+  phone" (the apps' existing title for a transfer session that ended; the body
+  for this case is set in the app plans).
   The app does not keep the vault and does not offer a warning to
   continue. The consequence, stated plainly: a `device.paired` is sent
   only after the transfer's step-2 state write is stored (§11.14.10
   rule 2), which removed the old phone (§11.14.2 table: it is out from
   then on). So the old phone cannot take the vault back: its "The move
-  didn't finish" fails, and it keeps keys that open nothing until the
-  member removes VettID, since no notice comes. The new phone has
+  didn't finish" fails, and it keeps keys that open nothing until a
+  completed recovery's open sends it the notice (§11.14.10) or the
+  member removes VettID. The new phone has
   dropped its handshake, attested key and epoch-1 secret (§11.14.10
   rule 5), so the vault opens on neither phone. Where the release offers
   recovery (`recovery_offered`; staging does, production's release
@@ -24279,12 +24281,14 @@ and 32) lists `recovery_r` and `vote_rows` (vettid-vault
 `vms/altchan/capabilities.go` `ReleaseCapabilities`), and production has
 no vault release yet, so there is no release without `recovery_r` for an
 app to meet. The apps refuse a descriptor or a transfer bundle without
-`recovery_r`, before anything is sent: Android's text for a
-descriptor is "This vault's software is older than the software this
-phone last used with it. Contact VettID." (ANDROID-PLAN), iOS's "This
-vault's release is too old for the iPhone app" (IOS-PLAN ID8, §14); the
-plans define no separate text for a bundle, so the app plans' refusal
-text applies. They use no path from before R. The `active`-release rule
+`recovery_r`, before anything is sent. Android's refusal is still to be
+built: today it takes the earlier path for a vault it does not know and
+shows its rollback text ("This vault's software is older than the
+software this phone last used with it. Contact VettID.") only for a
+vault already known to have `recovery_r` (ANDROID-PLAN §4 "Release
+capabilities"); the text for a first enrollment or a new phone is to be
+set in ANDROID-PLAN, with the owner's approval. iOS shows "This vault's
+release is too old for the iPhone app" (IOS-PLAN ID8, §14). They use no path from before R. The `active`-release rule
 above, the mark and the list's binding are unchanged.
 
 The release **number** is not repeated: the app takes
