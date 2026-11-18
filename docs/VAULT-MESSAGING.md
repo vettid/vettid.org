@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.16
-date: 2026-11-16
+version: 0.90.17
+date: 2026-11-17
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -29,6 +29,26 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.17: 2026-11-17, errata recording owner rule 3 (Ground Control
+    #r58, 2026-11-17: no backward compatibility before production users;
+    apps require the current vault release; no per-feature dormant paths
+    between app and vault; staging runs only the current release; never
+    weaken a security check or fail-closed behavior). Three passages
+    still prescribed behavior toward older vault releases; each keeps its
+    text and gets a dated note: (1) §6.7.1 (the `user_guid` bullet) and
+    §15 item 25.3: a transfer's `device.paired` without a valid
+    `user_guid` is a malformed answer; the new app refuses it and drops
+    the pairing before storing or sending anything, and the move ends as
+    "The move stopped on this phone" (it no longer keeps the vault and
+    warns; the vault has by then moved and the old phone is out, so the
+    member recovers it where the release offers recovery and the
+    credential backup is on, and otherwise starts over, §11.11.9). (2) §10.4.2 "Older vaults": `unsupported_type` for
+    `pending.list` or `share.pending.list` is an ordinary failure, with
+    no fallback. (3) §11.10.9: every live staging release (30, 31, 32)
+    lists `recovery_r` and `vote_rows`, production has no vault release
+    yet, and the apps refuse a descriptor or bundle without `recovery_r`.
+    No vault behavior changes (a current vault always sends `transfer`
+    and `user_guid`, vettid-vault `vault/oneapp.go` `transferPairedBody`).
   - 0.90.16: 2026-11-16, errata from the blind pairs on vettid-vault
     #261 and #262: (1) §10.10 "Servers and credentials": a credential is
     retired on any well-formed device `call.answer` for its call,
@@ -11688,7 +11708,8 @@ Old app (holder)           Vault                  Relay             New app
    (0.15.0, §6.2, §11.12). (0.34.0, release R) It reads the bundle's
    `capabilities` first: with `recovery_r` it sends the `hs.init` of
    §11.14.10 (with `unlock_secret`), without it the one of this section
-   (§11.10.9). An invalid attestation drops
+   (§11.10.9; superseded 2026-11-17: the new app refuses a bundle without
+   `recovery_r`, §11.10.9 note). An invalid attestation drops
    the `hs.init` (audit `device.transfer.attestation_failed`); the holder
    sees no pending transfer. Otherwise the vault answers with `hs.resp`
    at once (0.10.3, as for any pairing, §6.7), the new app answers with
@@ -11781,6 +11802,34 @@ new app its `user_guid`.
   tells the member that this phone cannot unlock the vault after it
   locks until the vault runs a release of 0.17.0 or later, which always
   sends it.
+  **Note (2026-11-17, owner rule 3, Ground Control #r58; supersedes the
+  two sentences above).** Every current release sends `transfer: true`
+  and a valid `user_guid` in a transfer's `device.paired` (vettid-vault
+  `vault/oneapp.go` `transferPairedBody`), and a current vault never
+  produces the case above. A transfer's `device.paired` without them, or
+  with a `user_guid` that fails the check, is a **malformed answer**:
+  the new app refuses it and drops the pairing before it stores or sends
+  anything (fail closed), and the move ends as "The move stopped on this
+  phone" (the apps' existing title for a transfer session that ended; the body
+  for this case is set in the app plans).
+  The app does not keep the vault and does not offer a warning to
+  continue. The consequence, stated plainly: a `device.paired` is sent
+  only after the transfer's step-2 state write is stored (§11.14.10
+  rule 2), which removed the old phone (§11.14.2 table: it is out from
+  then on). So the old phone cannot take the vault back: its "The move
+  didn't finish" fails, and it keeps keys that open nothing until a
+  completed recovery's open sends it the notice (§11.14.10) or the
+  member removes VettID. The new phone has
+  dropped its handshake, attested key and epoch-1 secret (§11.14.10
+  rule 5), so the vault opens on neither phone. Where the release offers
+  recovery (`recovery_offered`; staging does, production's release
+  config does not yet) and the credential backup is on, the member
+  recovers it with a new phone, the PIN and the password, after the
+  72-hour quiet period the approval started (§11.14.5, §11.14.6).
+  Otherwise there is no recovery, and the vault can only be deleted and
+  started over (§11.11.9). Only for a store fault of §11.14.2 can an
+  operator restore give it back to the old phone. A current vault never
+  produces this case, so it is accepted.
 
 **Failures and aborts.** An aborted transfer is audited
 `device.transfer.aborted` (`ref` = `transfer_id`) and announced as
@@ -14854,6 +14903,13 @@ which are not asks). Five kinds arrived only as events and were lost;
   `unsupported_type` (§5.3); the app then keeps today's behaviour (an
   ask lost at a lock shows "No longer on this phone") and does not ask
   again until the next unlock.
+  **Note (2026-11-17, owner rule 3, Ground Control #r58; supersedes the
+  sentence above).** The app has no fallback for an older vault: it
+  treats `unsupported_type` for `pending.list` (and for
+  `share.pending.list`) as an ordinary failure of the request, like any
+  other error, and shows what it shows for one. It keeps no "No longer
+  on this phone" behavior for that case and builds no separate path for
+  a vault that lacks the type. Apps require the current vault release.
 - **Vault:** a staging release after 24.
 
 ### 10.5 Messaging
@@ -24144,6 +24200,8 @@ build (IOS-PLAN §5), `apple-app-site-association` on each account host
 
 #### 11.10.9 Release capabilities (0.34.0, release R)
 
+*(Superseded in part 2026-11-17: the apps refuse a descriptor or bundle without `recovery_r`; see the note in "One `active` release" below.)*
+
 *Owner decisions of 2026-10-16 (approved with vettid.org #311): the
 member is named `capabilities`; a release that does not offer recovery
 says so by leaving out `recovery_offered`; a vault without `recovery_r`
@@ -24215,7 +24273,25 @@ keeps `recovery_r` (below), so from then on every release a member can
 enroll into has it. vettid.org's manifest checks refuse a manifest with
 more than one `active` release before it is signed and in CI. The app
 does not refuse to enroll into a release without `recovery_r`: production
-has none with it yet. The release **number** is not repeated: the app takes
+has none with it yet. **Note (2026-11-17, owner rule 3, Ground Control
+#r58; supersedes the sentence above ("The app does not refuse to
+enroll…") and "Choosing the path" below as far as it keeps a path from
+before R).** Every live staging release (30, 31
+and 32) lists `recovery_r` and `vote_rows` (vettid-vault
+`vms/altchan/capabilities.go` `ReleaseCapabilities`), and production has
+no vault release yet, so there is no release without `recovery_r` for an
+app to meet. The apps refuse a descriptor or a transfer bundle without
+`recovery_r`, before anything is sent. Android's refusal is still to be
+built: today it takes the earlier path for a vault it does not know and
+shows its rollback text ("This vault's software is older than the
+software this phone last used with it. Contact VettID.") only for a
+vault already known to have `recovery_r` (ANDROID-PLAN §4 "Release
+capabilities"); the text for a first enrollment or a new phone is to be
+set in ANDROID-PLAN, with the owner's approval. iOS shows "This vault's
+release is too old for the iPhone app" (IOS-PLAN ID8, §14). They use no path from before R. The `active`-release rule
+above, the mark and the list's binding are unchanged.
+
+The release **number** is not repeated: the app takes
 it, as before, from the manifest entry that the attested PCRs match
 (§11.10.1).
 
@@ -30564,6 +30640,16 @@ Follow-ups:
        transfer is already complete, so the new app keeps the vault and
        warns that it cannot unlock after the vault locks until the vault
        runs 0.17.0 or later (§6.7.1).
+       *Note (2026-11-17, owner rule 3, Ground Control #r58): superseded.
+       Every current release sends `transfer: true` and a valid
+       `user_guid`; a transfer's `device.paired` without them is a
+       malformed answer, which the new app refuses and drops before storing
+       or sending anything, ending as "The move stopped on this phone". The
+       vault has by then moved and the old phone was removed (§11.14.10
+       rule 2), so the vault opens on neither phone: the member recovers
+       it where recovery is offered and the credential backup is on
+       (§11.14.6), and otherwise starts over (§11.11.9). A current vault
+       never produces this case (§6.7.1, "Note (2026-11-17").*
     4. **`backoff` carries `retry_after`** (whole seconds, rounded up, at
        least 1) in its error body, for the owner check (§3.6.1) as the
        unlock result already does (§11.4). Decided with it, recommended
