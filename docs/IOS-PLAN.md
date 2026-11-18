@@ -2594,9 +2594,10 @@ Apple push this works only while the app is open:
   #13774; lead decisions #13781, #13821). ANDROID-PLAN 0.1.134
   (Notification modes 7, "While the vault's release is checked")
   governs both apps; in short: after every opening the release gate is
-  *checking*, *paused* (failed, or behind) or *over*; feed events,
-  arrivals and the waiting-asks replay are held while checking (64 each,
-  one arrival per item) and kept over a pause, never while the daily
+  *checking* (a failed check stays checking, retried, features paused),
+  *behind* or *over*; feed events, arrivals and the waiting-asks replay
+  are held while checking (64 each, one arrival per item), kept while
+  behind with new ones dropped (the replay keeps its window), never while the daily
   check is due or held (dropped then), and dropped by a lock, the check
   due or held, a wipe or a vault switch; released once, arrivals then
   events, after the feed's reads and with a loaded feed (a full read at
