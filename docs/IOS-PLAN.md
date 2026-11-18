@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.76
+version: 0.1.77
 date: 2026-11-15
 changelog:
+  - 0.1.77: erratum, 2026-11-18 (ANDROID-PLAN 0.1.134; owner rule 3, #r60; owner decisions a, 2026-11-18, #13774). §6.7: a new point "While the vault's release is checked", the rules of ANDROID-PLAN 0.1.134 for both apps, with the push-wake rule for when phase P brings Apple push.
   - 0.1.76: erratum, 2026-11-15 (ANDROID-PLAN 0.1.132; owner decisions a, 2026-11-15). §6.7 "Local notifications for feed items before phase P": the one exception to "never a full read" is ANDROID-PLAN's: when a passed check, not an unlock's own, ends the held or due state, each ask still waiting of its three kinds is notified once (pairings left out; nothing at an unlock); before phase P this is a banner while VettID is in front.
   - 0.1.75: erratum, 2026-11-15 (ANDROID-PLAN 0.1.131; owner decision a, 2026-11-15). §4.2 point 5: a pointer only, since the iPhone does not build the member API's `410` state yet: when it does, its pre-bound text and the time at which **Remove from this phone** comes are ANDROID-PLAN 0.1.131's, not Android #192's. Point 4 is unchanged: on Android 0.1.131 also shows "still finishing" at `until` on its own timer, without waiting for a read; the iPhone keeps showing it after the read at `until`, since its pre-bound screen names no time (taking Android's timing is for a later change).
   - 0.1.74: 2026-11-15 (CALLS-PLAN 0.1.11; owner decisions 2026-11-14). §6.6: a live call goes on in the background, with the `audio` mode and the relay collection kept by long poll while the call is live, handling only call traffic and lock signals, stopped when it ends: an exception to "close the socket", marked "(chosen; not in the spec)"; the owner-check note on a call over the covered shell no longer says iOS has no calls; §4 and "Later": CallKit is no longer later, only ringing a closed app by PushKit is. Note, no change to this plan's text: since 2026-11-14 `Release` carries calls code (CALLS-PLAN §12.5), and the log guard is CALLS-PLAN §12.8's.
@@ -2588,6 +2589,21 @@ Apple push this works only while the app is open:
   is a banner while VettID is in front, skipped like any other while
   the Notifications list or the ask's own screen is in front; nothing
   posts under the app lock.
+- **(0.1.77) While the vault's release is checked** (owner rule 3,
+  Ground Control #r60; vettid-ios #307; owner decisions a, 2026-11-18,
+  #13774). The rules of ANDROID-PLAN 0.1.134 (Notification modes 7,
+  "While the vault's release is checked"), word for word: feed events
+  and arrivals are held while the release is checked or a failed check
+  pauses the features (at most 64 each), never while the daily check
+  alone is due or held (dropped then); released once, in order, after
+  the feed's reads and with a loaded feed (a full read first at the
+  lift); a failed read stalls nothing; a released arrival as the feed
+  lists it now; a covered held event only if its message's `ts` is at
+  or after the vault's opening, the mark on the vault's clock from an
+  answer of this opening, else the phone's; an item notified at a
+  change not again for the same or an older one. When phase P brings
+  Apple push, an event a push actually started the process for
+  notifies whatever its `ts`; every other event follows the rule above.
 - **In front:** a banner with its category's sound; Vault activity
   and an update in place go to Notification Center's list only.
 - **When they go:** an item read, archived or deleted on any device
