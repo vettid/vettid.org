@@ -2601,7 +2601,7 @@ Apple push this works only while the app is open:
   check is due or held (dropped then), and dropped by a lock, the check
   due or held, a wipe or a vault switch; released once, arrivals then
   events, after the feed's reads and with a loaded feed (a full read at
-  the lift); a read that fails and leaves the feed not loaded stalls
+  the end of a failed check or the lift); a read that fails and leaves the feed not loaded stalls
   nothing; a released arrival or replay as the feed lists it now, if
   active; a covered held event only if its message's `ts` is at or after
   the vault's opening, judged on the vault's clock from the first answer

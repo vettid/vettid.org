@@ -2514,7 +2514,7 @@ its process runs; nothing keeps it running in the background).
      once: every held arrival first, then every held event, each queue in
      order (so an arrival can come before an older event of another
      item). It waits for the feed's reads under way and for a loaded feed
-     (one not loaded is read first); at the lift from *behind*, it waits
+     (one not loaded is read first); at the end of a failed check, or at the lift from *behind*, it waits
      for a full read. A live event never overtakes what is held. A read
      that fails and leaves the feed not loaded releases nothing and starts
      no read of its own; the next event starts one, so the feed never
