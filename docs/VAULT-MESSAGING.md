@@ -40,7 +40,9 @@ changelog:
     `user_guid` is a malformed answer; the new app refuses it and drops
     the pairing before storing or sending anything, and the move ends as
     "The move stopped on this phone" (it no longer keeps the vault and
-    warns). (2) §10.4.2 "Older vaults": `unsupported_type` for
+    warns; the vault has by then moved and the old phone is out, so the
+    member recovers it where the release offers recovery and the
+    credential backup is on, and otherwise starts over, §11.11.9). (2) §10.4.2 "Older vaults": `unsupported_type` for
     `pending.list` or `share.pending.list` is an ordinary failure, with
     no fallback. (3) §11.10.9: every live staging release (30, 31, 32)
     lists `recovery_r` and `vote_rows`, production has no vault release
@@ -11706,7 +11708,8 @@ Old app (holder)           Vault                  Relay             New app
    (0.15.0, §6.2, §11.12). (0.34.0, release R) It reads the bundle's
    `capabilities` first: with `recovery_r` it sends the `hs.init` of
    §11.14.10 (with `unlock_secret`), without it the one of this section
-   (§11.10.9). An invalid attestation drops
+   (§11.10.9; superseded 2026-11-17: the new app refuses a bundle without
+   `recovery_r`, §11.10.9 note). An invalid attestation drops
    the `hs.init` (audit `device.transfer.attestation_failed`); the holder
    sees no pending transfer. Otherwise the vault answers with `hs.resp`
    at once (0.10.3, as for any pairing, §6.7), the new app answers with
@@ -11807,11 +11810,24 @@ new app its `user_guid`.
   with a `user_guid` that fails the check, is a **malformed answer**:
   the new app refuses it and drops the pairing before it stores or sends
   anything (fail closed), and the move ends as "The move stopped on this
-  phone". The app does not keep the vault and does not offer a warning
-  to continue. The consequence, stated plainly: by then the vault has
-  already moved and the old phone was removed at the approval (step 4),
-  so the vault opens on neither phone, and the member recovers it
-  (§11.14). That cannot arise from a current vault, so it is accepted.
+  phone" (the apps' existing text for a transfer session that ended).
+  The app does not keep the vault and does not offer a warning to
+  continue. The consequence, stated plainly: a `device.paired` is sent
+  only after the transfer's step-2 state write is stored (§11.14.10
+  rule 2), which removed the old phone (§11.14.2 table: it is out from
+  then on). So the old phone cannot take the vault back: its "The move
+  didn't finish" fails, and it keeps keys that open nothing until the
+  member removes VettID, since no notice comes. The new phone has
+  dropped its handshake, attested key and epoch-1 secret (§11.14.10
+  rule 5), so the vault opens on neither phone. Where the release offers
+  recovery (`recovery_offered`; staging does, production's release
+  config does not yet) and the credential backup is on, the member
+  recovers it with a new phone, the PIN and the password, after the
+  72-hour quiet period the approval started (§11.14.5, §11.14.6).
+  Otherwise there is no recovery, and the vault can only be deleted and
+  started over (§11.11.9). Only for a store fault of §11.14.2 can an
+  operator restore give it back to the old phone. A current vault never
+  produces this case, so it is accepted.
 
 **Failures and aborts.** An aborted transfer is audited
 `device.transfer.aborted` (`ref` = `transfer_id`) and announced as
@@ -24182,6 +24198,8 @@ build (IOS-PLAN §5), `apple-app-site-association` on each account host
 
 #### 11.10.9 Release capabilities (0.34.0, release R)
 
+*(Superseded in part 2026-11-17: the apps refuse a descriptor or bundle without `recovery_r`; see the note in "One `active` release" below.)*
+
 *Owner decisions of 2026-10-16 (approved with vettid.org #311): the
 member is named `capabilities`; a release that does not offer recovery
 says so by leaving out `recovery_offered`; a vault without `recovery_r`
@@ -24254,15 +24272,22 @@ enroll into has it. vettid.org's manifest checks refuse a manifest with
 more than one `active` release before it is signed and in CI. The app
 does not refuse to enroll into a release without `recovery_r`: production
 has none with it yet. **Note (2026-11-17, owner rule 3, Ground Control
-#r58; supersedes those two sentences and "Choosing the path" below as far
-as it keeps a path from before R).** Every live staging release (30, 31
+#r58; supersedes the sentence above ("The app does not refuse to
+enroll…") and "Choosing the path" below as far as it keeps a path from
+before R).** Every live staging release (30, 31
 and 32) lists `recovery_r` and `vote_rows` (vettid-vault
 `vms/altchan/capabilities.go` `ReleaseCapabilities`), and production has
 no vault release yet, so there is no release without `recovery_r` for an
 app to meet. The apps refuse a descriptor or a transfer bundle without
-`recovery_r`, as they refuse one that dropped it after the mark (below):
-they send nothing and use no path from before R. The `active`-release
-rule above, the mark and the list's binding are unchanged. The release **number** is not repeated: the app takes
+`recovery_r`, before anything is sent: Android's text for a
+descriptor is "This vault's software is older than the software this
+phone last used with it. Contact VettID." (ANDROID-PLAN), iOS's "This
+vault's release is too old for the iPhone app" (IOS-PLAN ID8, §14); the
+plans define no separate text for a bundle, so the app plans' refusal
+text applies. They use no path from before R. The `active`-release rule
+above, the mark and the list's binding are unchanged.
+
+The release **number** is not repeated: the app takes
 it, as before, from the manifest entry that the attested PCRs match
 (§11.10.1).
 
@@ -30616,9 +30641,11 @@ Follow-ups:
        `user_guid`; a transfer's `device.paired` without them is a
        malformed answer, which the new app refuses and drops before storing
        or sending anything, ending as "The move stopped on this phone". The
-       vault has by then moved and the old phone was removed, so the vault
-       opens on neither phone and the member recovers (§11.14). A current
-       vault never produces this case (§6.7.1, "Note (2026-11-17").*
+       vault has by then moved and the old phone was removed (§11.14.10
+       rule 2), so the vault opens on neither phone: the member recovers
+       it where recovery is offered and the credential backup is on
+       (§11.14.6), and otherwise starts over (§11.11.9). A current vault
+       never produces this case (§6.7.1, "Note (2026-11-17").*
     4. **`backoff` carries `retry_after`** (whole seconds, rounded up, at
        least 1) in its error body, for the owner check (§3.6.1) as the
        unlock result already does (§11.4). Decided with it, recommended
