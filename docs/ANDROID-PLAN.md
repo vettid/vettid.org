@@ -2,9 +2,9 @@
 title: ANDROID-PLAN
 status: draft
 version: 0.1.134
-date: 2026-11-17
+date: 2026-11-18
 changelog:
-  - 0.1.134: erratum, 2026-11-18 (owner rule 3 as amended, Ground Control #r60; owner decisions a, 2026-11-18, #13774; lead decisions #13781, #13821; IOS-PLAN 0.1.77). Notification modes 7: a new paragraph "While the vault's release is checked": what is held, dropped while the owner check gates, released in order after the feed's reads, and what notifies on release (a released arrival as the feed lists it now; a covered held event only if its message came after the vault's opening, on the vault's clock from an answer of this opening; a push wake's event whatever its time). The 0.1.133 notes cite #r58; #r60 amends it (upgrades from the previous release must work), which changes none of them. The opening-mark rule (from an answer of this opening) and the push-wake rule (a push-started process only) are built by the cards Ground Control #13822 (Android) and #13823 (iOS).
+  - 0.1.134: erratum, 2026-11-18 (owner rule 3 as amended, Ground Control #r60; owner decisions a, 2026-11-18, #13774; lead decisions #13781, #13821; IOS-PLAN 0.1.77). Notification modes 7: a new paragraph "While the vault's release is checked": the release gate's three states; what is held (events, arrivals and the waiting-asks replay), dropped while the owner check is due or held, released after the feed's reads (arrivals, then events), and what notifies on release (an arrival or a replay as the feed lists it now; a covered held event only if its message came at or after the vault's opening, judged on the vault's clock from the first answer of this opening; a push-started process's events whatever their time). Built today by vettid-android #407 except: the opening's moment from an answer of this opening, the push wake limited to a push-started process, the replay against the first `pending.list` after the check and kept as a fresh arrival, no repeat within the opening, and a failed incremental read: Ground Control #13822. The 0.1.133 notes cite #r58; #r60 amends it (upgrades from the previous release must work), which changes none of them.
   - 0.1.133: erratum, 2026-11-17 (owner rule 3, Ground Control #r58; VAULT-MESSAGING 0.90.17). §4 "Transfer (new phone)": a transfer's `device.paired` without `transfer: true` and a valid `user_guid` is refused and dropped (the app no longer completes and warns); a dated note on the row, text kept. §4 "Release capabilities": a dated note that without `recovery_r` the app will refuse before anything is sent and `Path.EARLIER` goes (text to be set, owner approval). iOS has no such rule in IOS-PLAN, so no change there.
   - 0.1.132: erratum, 2026-11-15 (owner decisions of 2026-11-15: choice a, and choice a on its scope). Notifications 7 and 11, Notification modes 3 and 11, Approvals indicator 12: when a passed check ends the held or due state, except the check an unlock makes, each ask still waiting of exactly three kinds (`connection.authenticate.requested`, `device.session.pending`, `approval.pending`) is notified once; nothing else missed while held or due is replayed, pairings are left out, and an unlock (one that also passes the check included) replays nothing. Why: an ask that came while the vault was held or due went by unseen even after the check passed.
   - 0.1.131: erratum, 2026-11-15 (owner decision a, 2026-11-15; keeps the 2026-10-24 decision). §4 "A vault being deleted", point 5: before `until`, "Your vault was deleted" says from what time **Remove from this phone** will be offered (`until` rounded up to the whole minute, in the phone's own time format; with no known `until` it names no time), instead of naming a removal the screen does not offer yet; from `until`, **Remove from this phone** is offered at once, without waiting for the read at the bound. Point 4: "still finishing" (with Remove) comes on its own timer at `until`, without waiting for a read, for the vault's own word too. Android only: vettid-ios does not build the member API's `410` state yet (IOS-PLAN §4.2 point 5), so the iPhone has no such screen.
@@ -2485,42 +2485,76 @@ its process runs; nothing keeps it running in the background).
    notify.
 
    **(0.1.134) While the vault's release is checked** (owner rule 3,
-   Ground Control #r60; the release gate, vettid-android #392 and #407;
-   owner decisions a, 2026-11-18, Ground Control #13774; lead decisions
-   #13781, #13821). The app does not yet know whether the vault runs the
-   current release, so nothing that depends on it notifies:
-   - **Held.** A `feed.event` or an arrival (a live event or a
-     catch-up) that comes while the release is checked, or while a
-     failed check pauses the vault's features, is held in memory, in
-     order (at most 64 events and 64 arrivals; the oldest go first). It
-     is neither shown nor notified nor acted on. A lock, a hold, a wipe
-     or a vault switch drops what is held.
-   - **Not while the owner check gates.** While the daily check alone is
-     due or held, nothing new is held: it is dropped, as at any time
-     while due or held (7, Notifications 7), so nothing missed while
-     held notifies later.
-   - **Released.** When the check passes, or the gate lifts, what was
-     held comes once, in order, after the feed's reads under way and
-     with a loaded feed (one not loaded is read first; at the lift, a
-     full read first). A live event never overtakes what is held. A
-     failed read releases nothing and starts no read of its own; the
-     next event starts one, so the feed never stalls and never loops.
-   - **What notifies on release.** A held arrival notifies as the feed
-     lists it now, and not at all if the feed no longer lists it
-     (deleted, past retention) or it is no longer active. A held event
-     that the opening's read already covers notifies **only if its
-     message's time (`ts`, on the vault's clock) is at or after the
-     vault's opening**; earlier ones are backlog, things missed while
-     the vault was locked, and stay silent ("never a full read, so
-     nothing missed while the vault was locked is replayed"). The
-     opening's mark is taken on the vault's clock **only from an answer
-     of this opening** (the unlock's answer, or the first answer to a
-     request after the opening); when there is none, the phone's clock.
-     An item already notified at a change is not notified again for the
-     same or an older change.
-   - **A push wake.** An event that a push actually started the process
-     for notifies whatever its `ts` (it is what the push was for). Every
-     other event held at a start follows the rule above.
+   Ground Control #r60; vettid-android #392 and #407; owner decisions a,
+   2026-11-18, Ground Control #13774; lead decisions #13781, #13821).
+   **The release gate**: after every opening of the vault (an unlock, the
+   end of setup, a start that finds it open), the app checks that the
+   vault runs the current release. It is in one of three states:
+   *checking*; *paused* (the check failed or the vault is behind: "update
+   required", only the update and the ways to leave it work); or *over*
+   (the vault is current). The app does not know until it is over whether
+   anything depends on a release it shouldn't, so nothing notifies before:
+   - **Held.** A `feed.event`, an arrival (a live event or a catch-up)
+     and a waiting-asks replay (Notifications 7, 0.1.132) that come
+     while *checking* are held in memory, neither shown nor notified nor
+     acted on: at most 64 events and 64 arrivals, one held arrival per
+     item (a newer one replaces it), the oldest dropped first when full.
+     While *paused*, what is held stays held for the lift; new events and
+     arrivals are dropped, except a waiting-asks replay, which keeps its
+     window until the lift. A lock, the owner check due or held, a wipe
+     or a vault switch drops everything held.
+   - **Not while the owner check gates.** Whenever the daily check is due
+     or held, also during the release check, nothing new is held: it is
+     dropped, as at any time while due or held (Notification modes 3,
+     Notifications 7), so nothing missed while due or held notifies later.
+   - **Released.** When the state becomes *over*, what was held comes
+     once: every held arrival first, then every held event, each queue in
+     order (so an arrival can come before an older event of another
+     item). It waits for the feed's reads under way and for a loaded feed
+     (one not loaded is read first); at the lift from *paused*, it waits
+     for a full read. A live event never overtakes what is held. A read
+     that fails and leaves the feed not loaded releases nothing and starts
+     no read of its own; the next event starts one, so the feed never
+     stalls and never loops.
+   - **What notifies on release.**
+     - A held arrival notifies as the feed lists it now, and not at all if
+       the feed no longer lists it (deleted, past retention) or it is no
+       longer active. A held waiting-asks replay is posted as a new
+       arrival, as 0.1.132 says, against the first successful
+       `pending.list` after the check (owner decision a, #13774, 3); an
+       ask decided meanwhile is left out by its item's status.
+     - A held event that no read has covered yet is applied as a live one.
+       A held event that a read has already covered (its `seq` is at or
+       below the feed's) notifies the item as the feed lists it now, only
+       if it is active, and **only if the event's message time (`ts`, the
+       vault's clock) is at or after the vault's opening**. Earlier ones
+       are backlog, things missed while the vault was locked, and stay
+       silent (IOS-PLAN §6.7: "never a full read, so nothing missed while
+       the vault was locked is replayed"). This also covers messages
+       deposited before a lock and collected after the next opening
+       (Notification modes 3, "Vault locked": they are in the list and on
+       the bell, not notified).
+     - **The opening's moment on the vault's clock**: the phone records the
+       opening on its own monotonic clock, and converts it with the offset
+       that **the first answer of this opening** gives (the unlock's
+       answer, or the first answer to a request after the opening). It is
+       judged at release, when a read has answered. If no answer of this
+       opening has come by then, the phone's clock is used. A vault time
+       learnt before this opening (an older message's `ts`) is never used.
+     - An item notified at a change is not notified again, during the
+       same opening, for the same or an older change (`seq`).
+   - **A push wake.** The `feed.event`s that a process started by a push
+     collects before it knows the vault's state (Notification modes 4,
+     "Events collected before the vault is known to be open", 0.1.32) are
+     still held during the check, and on release notify as listed and
+     active **whatever their `ts`**: they are what the push was for. The
+     events of a start that no push caused follow the rule above.
+   - **Tests** (Notification modes 11): each bullet above, including a
+     backlog event before the opening (silent) and one after it
+     (notifies), with the phone's clock ahead of and behind the vault's;
+     a failed read then a live event (shown and notified); the lift after
+     an item was read elsewhere (no alert); the replay held over a pause.
+
 8. **Content** (privacy). Every notification is
    `VISIBILITY_PRIVATE`, with a public version "New activity in VettID"
    (the Security and Daily check channels: "VettID needs your
