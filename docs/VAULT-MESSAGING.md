@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.16
-date: 2026-11-16
+version: 0.90.17
+date: 2026-11-17
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -29,6 +29,24 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.90.17: 2026-11-17, errata recording owner rule 3 (Ground Control
+    #r58, 2026-11-17: no backward compatibility before production users;
+    apps require the current vault release; no per-feature dormant paths
+    between app and vault; staging runs only the current release; never
+    weaken a security check or fail-closed behavior). Three passages
+    still prescribed behavior toward older vault releases; each keeps its
+    text and gets a dated note: (1) §6.7.1 (the `user_guid` bullet) and
+    §15 item 25.3: a transfer's `device.paired` without a valid
+    `user_guid` is a malformed answer; the new app refuses it and drops
+    the pairing before storing or sending anything, and the move ends as
+    "The move stopped on this phone" (it no longer keeps the vault and
+    warns). (2) §10.4.2 "Older vaults": `unsupported_type` for
+    `pending.list` or `share.pending.list` is an ordinary failure, with
+    no fallback. (3) §11.10.9: every live staging release (30, 31, 32)
+    lists `recovery_r` and `vote_rows`, production has no vault release
+    yet, and the apps refuse a descriptor or bundle without `recovery_r`.
+    No vault behavior changes (a current vault always sends `transfer`
+    and `user_guid`, vettid-vault `vault/oneapp.go` `transferPairedBody`).
   - 0.90.16: 2026-11-16, errata from the blind pairs on vettid-vault
     #261 and #262: (1) §10.10 "Servers and credentials": a credential is
     retired on any well-formed device `call.answer` for its call,
@@ -11781,6 +11799,19 @@ new app its `user_guid`.
   tells the member that this phone cannot unlock the vault after it
   locks until the vault runs a release of 0.17.0 or later, which always
   sends it.
+  **Note (2026-11-17, owner rule 3, Ground Control #r58; supersedes the
+  two sentences above).** Every current release sends `transfer: true`
+  and a valid `user_guid` in a transfer's `device.paired` (vettid-vault
+  `vault/oneapp.go` `transferPairedBody`), and a current vault never
+  produces the case above. A transfer's `device.paired` without them, or
+  with a `user_guid` that fails the check, is a **malformed answer**:
+  the new app refuses it and drops the pairing before it stores or sends
+  anything (fail closed), and the move ends as "The move stopped on this
+  phone". The app does not keep the vault and does not offer a warning
+  to continue. The consequence, stated plainly: by then the vault has
+  already moved and the old phone was removed at the approval (step 4),
+  so the vault opens on neither phone, and the member recovers it
+  (§11.14). That cannot arise from a current vault, so it is accepted.
 
 **Failures and aborts.** An aborted transfer is audited
 `device.transfer.aborted` (`ref` = `transfer_id`) and announced as
@@ -14854,6 +14885,13 @@ which are not asks). Five kinds arrived only as events and were lost;
   `unsupported_type` (§5.3); the app then keeps today's behaviour (an
   ask lost at a lock shows "No longer on this phone") and does not ask
   again until the next unlock.
+  **Note (2026-11-17, owner rule 3, Ground Control #r58; supersedes the
+  sentence above).** The app has no fallback for an older vault: it
+  treats `unsupported_type` for `pending.list` (and for
+  `share.pending.list`) as an ordinary failure of the request, like any
+  other error, and shows what it shows for one. It keeps no "No longer
+  on this phone" behavior for that case and builds no separate path for
+  a vault that lacks the type. Apps require the current vault release.
 - **Vault:** a staging release after 24.
 
 ### 10.5 Messaging
@@ -24215,7 +24253,16 @@ keeps `recovery_r` (below), so from then on every release a member can
 enroll into has it. vettid.org's manifest checks refuse a manifest with
 more than one `active` release before it is signed and in CI. The app
 does not refuse to enroll into a release without `recovery_r`: production
-has none with it yet. The release **number** is not repeated: the app takes
+has none with it yet. **Note (2026-11-17, owner rule 3, Ground Control
+#r58; supersedes those two sentences and "Choosing the path" below as far
+as it keeps a path from before R).** Every live staging release (30, 31
+and 32) lists `recovery_r` and `vote_rows` (vettid-vault
+`vms/altchan/capabilities.go` `ReleaseCapabilities`), and production has
+no vault release yet, so there is no release without `recovery_r` for an
+app to meet. The apps refuse a descriptor or a transfer bundle without
+`recovery_r`, as they refuse one that dropped it after the mark (below):
+they send nothing and use no path from before R. The `active`-release
+rule above, the mark and the list's binding are unchanged. The release **number** is not repeated: the app takes
 it, as before, from the manifest entry that the attested PCRs match
 (§11.10.1).
 
@@ -30564,6 +30611,14 @@ Follow-ups:
        transfer is already complete, so the new app keeps the vault and
        warns that it cannot unlock after the vault locks until the vault
        runs 0.17.0 or later (§6.7.1).
+       *Note (2026-11-17, owner rule 3, Ground Control #r58): superseded.
+       Every current release sends `transfer: true` and a valid
+       `user_guid`; a transfer's `device.paired` without them is a
+       malformed answer, which the new app refuses and drops before storing
+       or sending anything, ending as "The move stopped on this phone". The
+       vault has by then moved and the old phone was removed, so the vault
+       opens on neither phone and the member recovers (§11.14). A current
+       vault never produces this case (§6.7.1, "Note (2026-11-17").*
     4. **`backoff` carries `retry_after`** (whole seconds, rounded up, at
        least 1) in its error body, for the owner check (§3.6.1) as the
        unlock result already does (§11.4). Decided with it, recommended
