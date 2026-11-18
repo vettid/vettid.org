@@ -40,6 +40,9 @@ changelog:
     `counts.eligible`), `removed_may_vote` false, and the
     `outcome` (consistent in itself, BALLOT-PROTOCOL §8.5, and
     recomputed, §7.1); a contradiction is `failed` (reason `results`).
+    §10.19.8: `vote.get` carries the proposal's `decision` and, from
+    checked results, the `outcome`; the apps show both from their own
+    vault, never from the site's documents.
     §16: the vote vectors are 0.14.1's (`documents` changed; new
     `documents_decided`, `outcomes`, `decisions`, `outcome_shapes` and
     `proposal_removed_may_vote_true`).
@@ -21280,10 +21283,14 @@ summary: { "proposal_id": "<ULID>", "connection_id": "<id>", "title": "...",
            "can_cast": true, "cannot_cast": "<error code>?",
            "site": "matches|mismatch|not_listed|unreachable|unpublished" }
 vote:    summary + { "text": "...", "choices": [{"id": "yes", "label": "Yes"}],
-                     "quorum": {"text": "...", "min_ballots": 1}, "binding": false,
+                     "quorum": {"text": "...", "min_ballots": 1},
+                     "decision": {"rule": "majority", "base": "cast", "threshold": null},
+                     "binding": false,
                      "record_tag": "<b64>", "choice_id": "yes?", "pad": "0…?", "extensions": 0,
                      "tally": {"yes": 1}?, "counts": {"eligible": 3, "ballots": 2,
-                     "removed": 1, "unhandled": 0}?, "ik_fingerprint": "..." }
+                     "removed": 1, "unhandled": 0}?,
+                     "outcome": {"quorum_met": true, "status": "decided", "choice": "yes"}?,
+                     "ik_fingerprint": "..." }
 entry:   { "proposal_id": "<ULID>", "index?": { "proposal_id": "<ULID>", "service_id": "...", "proposal_hash": "<b64>",
                        "opens_at": 0, "closes_at": 0, "extended": 0, "published": false, "unhandled": 0 (optional) },
            "document": { "status": "found", "proposal": "<b64>", "proposal_sig": "<b64 of the raw 64 bytes>", "bundle": {…},
@@ -21293,7 +21300,7 @@ row:     { "ballot": { "vk": "<b64>", "choice_id": "...", "ballot_sig": "<b64>",
 row_proof: { "index": 1, "tree_size": 3, "path": ["<b64 32 bytes>"] }
 ```
 
-- Times are RFC 3339 with milliseconds (§10.1). `ballot` and `check` are absent until they exist; `tally` and `counts` come only from verified results. **`choice_id` is in `vote.get` and in `vote.evidence`, and only after the member cast** (0.81.3: the export carries it, with the foreign ballots' and the results row's, because a receipt cannot be verified without it; `record_secret` is never exported). **The one other place a choice appears** (0.81.3) is `service_ballot: {choice_id, msg_ms}` in `vote.get`, present exactly while a confirmation is pending (after a restore, a ballot of the service made with the record's own `vk`, not yet answered with `vote.confirm`); the app's "Is this your vote?" dialog shows the label of that `choice_id`. The `vote.list` summary carries only `confirm_pending: true` for such a record. The choice is in no list, event, feed item, audit entry, notification or log line.
+- Times are RFC 3339 with milliseconds (§10.1). `ballot` and `check` are absent until they exist; `tally` and `counts` come only from verified results. (0.90.18, BALLOT-PROTOCOL 0.14.0 §3.5, §7.1) **`decision`** is the proposal's, as BALLOT-PROTOCOL §8.5 writes it (`base` and `threshold` `null` where they don't apply), present whenever `text` is: the apps show the rule before the member votes, **from this answer and never from the site's documents**. **`outcome`** comes, like `tally` and `counts`, only from results the check judged `verified` or `unconfirmed` (so recomputed, §10.19.6 step 3): the apps show it with `counts.unhandled` beside it whenever that is above 0 (owner decision 2026-11-18). **`choice_id` is in `vote.get` and in `vote.evidence`, and only after the member cast** (0.81.3: the export carries it, with the foreign ballots' and the results row's, because a receipt cannot be verified without it; `record_secret` is never exported). **The one other place a choice appears** (0.81.3) is `service_ballot: {choice_id, msg_ms}` in `vote.get`, present exactly while a confirmation is pending (after a restore, a ballot of the service made with the record's own `vk`, not yet answered with `vote.confirm`); the app's "Is this your vote?" dialog shows the label of that `choice_id`. The `vote.list` summary carries only `confirm_pending: true` for such a record. The choice is in no list, event, feed item, audit entry, notification or log line.
 - `title`, `text` and the labels are the service's words: the app shows them as plain text, as the service's.
 - `can_cast` is true when `vote.cast` would pass every check except the unlock window; `cannot_cast` is the code it would give (`checking`, `not_open`, `closed`, `closing`, `already_voted`, `site_mismatch`, `connection_unavailable`, `not_signed_in`).
 - `vote.list` order: `open`, `upcoming`, `checking` and `rejected` first (by `closes_at`), then `closed` by `closes_at` descending. `list_version` and `list_sha256` (the SHA-256 of the exact bytes) are the service list the vault holds.
