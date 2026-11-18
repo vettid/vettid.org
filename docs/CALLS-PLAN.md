@@ -1,8 +1,8 @@
 ---
 title: CALLS-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1) and 2026-10-12 (§13, D12–D26 as recommended; D23 as (c))
-version: 0.1.12
-date: 2026-11-17
+version: 0.1.13
+date: 2026-11-18
 owner: Al Liebl (Mesmer)
 related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) §2 rules, §2.4 promotion, §5 phase 2
@@ -115,6 +115,12 @@ changelog:
     exception to IOS-PLAN §6.6. §12.4 (ARM-only release), the §6.4
     table (the button row "until 0.1.11", the incoming row) and §12.7
     follow.
+  - 0.1.13 (2026-11-18): §12.10, the C1 exit test on two phones: 20
+    calls Pixel 7 → Pixel 10 Pro Fold, tap to ring median 0.605 s
+    (0.472 to 0.749 s); every call rang, was answered and connected.
+    Ring-back on screen, decline, a glare and no answer each seen once;
+    the vault's limit on unanswered calls met in an earlier run; what
+    the test did not show (busy needs a third phone). §7: C1's status.
   - 0.1.12 (2026-11-17): erratum (owner decision 2026-11-17, GC #12832,
     merge go on vettid-vault#266). D25: the parent's allowlist, as built
     (vettid-vault#260, `parent/config.go`), names staging's calls host
@@ -540,7 +546,7 @@ days of implementation and review, as ranges; owner testing is extra.
 | Phase | Contents | Exit test on real phones | Needs | Effort | Status (2026-10-23) |
 |---|---|---|---|---|---|
 | C0 | Spike (§4): library in the `foss` flavour, audio between two phones on one Wi-Fi with hard-coded signalling, frame encryption, Telecom (0.1.2: done except Telecom, which moves to C3; results in §12.1) | The five proofs of §4, written up; the owner confirms D2 | Nothing deployed | 5–8 | Partly: the spike and its results are written up (§12.1; vettid-android #123, not for merge). The F-Droid (`foss`) scanner and build check and the build on a second machine have never run |
-| C1 | Voice calls through two staging vaults, app open, same network (the vault gives no servers yet) | Pixel 10 Pro ↔ Pixel 7 on S10: call, ring-back, answer, hang up, decline, busy, no answer; time from tap to ring measured 20 times | **No vault release** (S10 as it is) | 12–18 | Partly: #124 to #126 (signalling, engine, state machine, audio, controller), #175 (media stack 150.7871.04, suite 2 in the engine) and #178 (a refused `setKeys` ends the call) are merged. #128 (the call screens) has been open since 2026-10-12 and has 6 conflicts with master. The two-phone exit test has not been run |
+| C1 | Voice calls through two staging vaults, app open, same network (the vault gives no servers yet) | Pixel 10 Pro ↔ Pixel 7 on S10: call, ring-back, answer, hang up, decline, busy, no answer; time from tap to ring measured 20 times | **No vault release** (S10 as it is) | 12–18 | Partly: #124 to #126 (signalling, engine, state machine, audio, controller), #175 (media stack 150.7871.04, suite 2 in the engine) and #178 (a refused `setKeys` ends the call) are merged. #128 (the call screens) has been open since 2026-10-12 and has 6 conflicts with master. (0.1.13) The two-phone exit test ran on 2026-11-18 on the Pixel 7 and the Pixel 10 Pro Fold, against staging vaults newer than S10 (§12.10) |
 | C2 | The calling service on staging; vault fixes V1–V3, V5, V6, V8; 0.1.3: also the media suites as signed members and key confirmation (§12.3), detailed in §13 | The same calls with one phone on mobile data and one on Wi-Fi; app killed mid-call frees both vaults within 2 minutes; glare connects one call (0.1.3: in measurable steps, §13.4) | New service and stack; **a vault release**; host stack deploy (egress) | 12–20 (0.1.3: 14–22, for the added scope, §13.6) | The service only: vettid-calls `main` (the issuer, the coturn image with `turn-agent`, `callsctl`; committed 2026-10-17, follow-ups #1 to #3 to 2026-10-20). No stack deployed; no vault work (V1 to V8, signed suites, release C2) and no app work (§13.2) |
 | C3 | Ringing with the app closed; 0.1.2: Telecom (`core-telecom`, the `phoneCall` service, `CallStyle`, answering from a notification) and its proof on GrapheneOS and stock, moved here from C0 and C1 (§12.6) | On-phone service: rings within 2 s on both kinds of phone, screen off, including after a reboot; behaviour in Doze recorded. Google push on the Pixel 7 once Firebase exists (does not block the phase); *0.1.4:* including a call that rings within 2 s of another wake of the same phone (the gateway answers that wake without a second push, PUSH-GATEWAY §5.2 step 4; the app woken by the first push must still find the offer) | **A vault release** for V4 (can ride with C2's) | 6–10 | Not started |
 | C4 | Video: camera, switching cameras, adding video to a voice call, network change (V7) | Video both ways for 10 minutes; walk from Wi-Fi to mobile data without the call dropping | A vault release (V7) | 8–14 | Not started |
@@ -963,6 +969,94 @@ Android, where the call's foreground service keeps it.
   the app leaves the screen; IOS-PLAN marks it "(chosen; not in the
   spec)". It goes into the App Store review notes with the microphone
   and CallKit.
+
+### 12.10 The C1 exit test (0.1.13)
+
+Run on 2026-11-18 by the agent through adb, on the owner's go. The owner
+chose the **Pixel 10 Pro Fold** (stock Android) in place of the Pixel 10
+Pro.
+
+**Setup.**
+- **Phones and build:** the Pixel 7 (caller) and the Pixel 10 Pro Fold
+  (callee) ran `com.vettid.app.staging` 2.0.0-a2-staging (version code
+  102, last updated on both 2026-11-14; not rebuilt for this test).
+- **Vaults:** two test-only staging members. The Fold's vault ran release
+  30, and the Pixel 7's a release before 32 (its app offered 32). No
+  update was approved.
+- **Connection:** the two members were connected for the test by a link
+  invitation, comparing the safety code.
+- **Screens:** the app was open and in front on both phones, with the
+  screens on.
+- **Network:** both on Wi-Fi, on two network names whose BSSIDs differ
+  only in the first byte: likely one access point, but not strictly
+  "one network".
+
+**How it was timed.**
+- **Tap time:** the caller's clock right after `input tap` on Call
+  returned, so the tap itself was a little earlier.
+- **Ring time:** the callee's audio service logging a new
+  `USAGE_NOTIFICATION_RINGTONE` player, in millisecond device time.
+- **Clocks:** both times were converted to the host's clock through each
+  phone's offset from it. Each offset was measured before each call as
+  the lowest round trip of five, 17 to 90 ms. Each offset can be off by
+  half its round trip, and the two add, so a call's error is under
+  about 70 ms.
+- **Checks on each call:** a screen dump on both phones confirmed
+  "<name> is calling" on the callee and "Ringing…" on the caller. The
+  callee then answered, both phones showed the call's timer running 3 s
+  later, and the caller hung up.
+
+**Results: 20 of 20 calls rang, were answered and connected.**
+
+| | Tap to ring (s) |
+|---|---|
+| Minimum | 0.472 |
+| Median (mean of the 10th and 11th) | 0.605 |
+| 90th percentile (nearest rank: the 18th of 20) | 0.696 |
+| Maximum | 0.749 |
+
+The 20 values, in order: 0.594, 0.619, 0.680, 0.571, 0.523, 0.696,
+0.472, 0.729, 0.478, 0.564, 0.585, 0.749, 0.675, 0.623, 0.568, 0.558,
+0.618, 0.637, 0.616, 0.538.
+
+**The other cases, each tried once.**
+- **Ring-back:** the caller showed "Ringing…" on every call (the screen;
+  no ring-back tone was listened for).
+- **Decline:** the callee's Decline ended the call, and the caller
+  recorded "Call declined".
+- **Two calls at once (a glare, a C2 case):** each side called the other
+  at the same moment. One call connected (40 s, "end-to-end encrypted"
+  and a running timer on both screens), and the other ended "Call not
+  answered: busy".
+- **No answer, and the limit on unanswered calls:**
+  - An earlier run of 20 calls that nobody answered rang only for its
+    first call (unanswered trial calls before it had already counted).
+    From then on the callee's vault refused the offers ("Call refused:
+    too many calls" in its History), as VAULT-MESSAGING §10.10 says: 3
+    unanswered calls in the last 10 minutes, or 10 in the last 24 hours,
+    and declined, busy and refused calls count.
+  - The caller saw each of those as "Call not answered", with nothing to
+    tell a refusal from no answer.
+  - The counts cleared when the Fold placed one call to the Pixel 7. The
+    measured run answers every call, which clears them again each time.
+
+**What it did not show.**
+- **Busy:** a call to a phone already in a call needs a third phone and
+  was not made.
+- **Direction and who hangs up:** the caller always hung up; the callee
+  never did. The Fold called the Pixel 7 only in the glare and to clear
+  the counts.
+- **The callee's screen:** the ring time is the ringtone starting; when
+  the incoming screen was drawn was only seen within the 2 s of a screen
+  dump.
+- **Audio:** no one listened, so whether either side heard the other,
+  and the ring-back tone, are not checked. The calls lasted about 10 s.
+- **The background:** no ringing with the app in the background, the
+  screen off or the phone locked (C3).
+- **Networks and phones:** no mobile data or a different network (C2),
+  and not the Pixel 10 Pro or a GrapheneOS phone.
+- **Releases:** the vault releases were 30 (the Fold) and one before 32
+  (the Pixel 7), not S10; nothing on release 32.
 
 ## 13. Phase C2 (0.1.3; approved by the owner 2026-10-12)
 
