@@ -6,8 +6,9 @@ date: 2026-11-19
 changelog:
   - 0.1.12: erratum, 2026-11-19, with VAULT-MESSAGING 0.91.0 (AV9 and
     AV10 as built, vettid/vettid-vault#270 to #275). §4.9: a connector
-    sends a cleaned absolute path for `program` and `cwd`, with no
-    trailing separator. No other change
+    sends a cleaned absolute path for `program` and `cwd`: no trailing
+    separator, no `:` in any element, at most 4,096 bytes, no control,
+    Cf, Zl or Zp character. No other change
   - 0.1.11: 2026-11-05, the owner's request in the implementing session
     (after the lead's summary, thread 01M6PJT84B0Z9DK24SPAVDDK71): macOS
     signing for the separate-account mode (AGENT-SEPARATE-ACCOUNT,

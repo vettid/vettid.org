@@ -58,8 +58,9 @@ changelog:
     4); (7) pins: recorded only from an app approval, with no unlock
     window, replaced by a `program_changed` approval even when `each`
     is `true`, recorded even if the field was removed meanwhile; an
-    approval is judged again under the current settings, and stands
-    unless it must record a pin on other flags. **Apps and connectors
+    approval is judged again under the current settings: refused if
+    they now refuse it, referred again if it would record a pin its
+    approval did not show, and otherwise it stands. **Apps and connectors
     must now handle:** `approval.decide` `result: "referred"`;
     `replaces` in `approval.pending` and its `pending.list` entry;
     `referred` in `sync.event{approval.decided}`; a connector sends
@@ -12225,8 +12226,8 @@ device (`limit` beyond that):
    audited `approval.granted`, though nothing ran. **App rule.** On
    `result: "referred"` an app does not report the request as
    approved. It drops the ask named by `replaces` and shows the new one
-   as a new decision, saying the program was recorded or changed
-   meanwhile.
+   as a new decision, saying the item's settings or its recorded
+   program changed meanwhile.
 
 **Ending.** An app ends a device's access session with
 `device.session.end{device_id}`; a desktop or agent ends its own with
@@ -12291,9 +12292,9 @@ devices learn of it as `sync.event` (§10.1) (0.77.0, spelled out):
 - **Decision on a held request:** `approval.granted` or
   `approval.denied`; `sync.event{kind: "approval.decided", approval_id,
   approved}`; (0.91.0) `approval.referred` when the approved request
-  was referred again, and `referred: true` in the event. Order: after
-  the answer to the requester; on a re-referral, after the new
-  `approval.pending` (§6.8 step 4).
+  was referred again, and `referred: true` in the event. Order: on an
+  approval, after the answer to the requester; on a re-referral, after
+  the new `approval.pending` (§6.8 step 4).
 - **End** (`device.session.end`): `device.session.ended` (`device_id`).
   Each held request answered `denied` is also audited `approval.denied`
   and sends `sync.event{kind: "approval.decided", approval_id, approved:
@@ -18935,8 +18936,8 @@ item's settings allow for its task:
   - (0.91.0) **An item with no use left** (§10.11 "Agent share
     rules") is not a withdrawal: it keeps its settings. The member can
     still reach it with `leash.item.set` and `leash.item.list`, to see
-    and change them (a widening still needs the unlock window). The agent's requests, the catalog and the
-    decisions do not reach it, and it is not in the agent's included
+    and change them (a widening still needs the unlock window). The
+    agent's requests, the catalog and the decisions do not reach it, and it is not in the agent's included
     items until it has a use again.
   - (0.91.0) **Versions.** `version` starts at 1 and goes up with each
     change. When the settings are deleted and later set again it starts
@@ -19176,7 +19177,9 @@ item's settings allow for its task:
   > this reason (§8.2 "Exception: responses that carry secret values in
   > the clear"). A volatile type is not possible, since the request
   > counts uses and may record a pin. Option: cache a copy without
-  > `value`, as `call.start` does (§10.10). Not decided.
+  > `value`, as `call.start` does (§10.10). The same question will
+  > apply to `item.proxy` (AV11), whose answer also carries `value`.
+  > Not decided.
 
   The app shows, for an `item.run`: the agent, the item and field, the
   program, (0.85.3) its fingerprint (the first 16 hex digits of
