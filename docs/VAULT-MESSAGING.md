@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.90.20
+version: 0.91.0
 date: 2026-11-19
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -29,37 +29,44 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.90.20: 2026-11-19, erratum: AV9 and AV10 as built (AGENT-PLAN
-    §4.9; vettid/vettid-vault#270 to #275, merged). No wire change
-    beyond the members named here. §10.11 "Ways to use a secret":
-    (1) program strings (at most 4,096 bytes, no control, format or
-    line-separator characters, absolute or bare, UNC refused) and
-    clean paths (`program`, a binding's `program` and `cwd`: no empty,
-    `.` or `..` element, and no `:` on any system; the colon is
-    refused everywhere, a stricter rule than the connector needs); a
-    bare entry matches the exact last path element; the no-two-match
-    rule on Windows names; (2) proxy hosts refuse `localhost`, names
-    under it and single-label names; (3) a changed proxy `header` is a
-    widening, `prefix` is not; more cases of widening and narrowing;
-    (4) an item with no use left keeps its settings and stays
-    reachable by `leash.item.set` and `leash.item.list`; versions
-    restart at 1; a `version` sent with no settings is `conflict`; an
-    item without settings lists as `{agent_id, item_id, ways: ["use"]}`;
-    (5) `item.run`: `name` refused with `stdin`, an `env` name equal to
-    `name` refused, NUL refused in `argv` and `env`, unknown members
-    accepted, the successful answer kept in the response cache; (6) a
-    run referred again counts as a new referral and is held under a new
-    approval (`replaces`); `approval.decide` answers `referred`;
+  - 0.91.0: 2026-11-19, erratum: AV9 and AV10 as built (AGENT-PLAN
+    §4.9; vettid/vettid-vault#270 to #275, merged). As built; no vault
+    release. A minor version, because it adds app-facing results and
+    members and a normative event and audit order (the test of
+    0.45.0). §10.11 "Ways to use a secret": (1) program strings (at
+    most 4,096 bytes, no control, format or line-separator
+    characters, absolute or bare, UNC refused) and clean paths (a
+    run's `program` and `cwd`, and an entry's absolute `program`: no
+    empty, `.` or `..` element, and no `:` on any system; the colon
+    rule is stricter than the connector needs and is an open owner
+    question); a bare entry matches the exact last path element; the
+    no-two-match rule on Windows names; (2) proxy hosts refuse
+    `localhost`, names under it and single-label names; (3) a changed
+    proxy `header` is a widening, `prefix` is not; more cases of
+    widening and narrowing; (4) an item with no use left keeps its
+    settings and stays reachable by `leash.item.set` and
+    `leash.item.list`; versions restart at 1; a `version` sent with no
+    settings is `conflict`; an item without settings lists as
+    `{agent_id, item_id, ways: ["use"]}`; (5) `item.run`: `name`
+    refused with `stdin`, an `env` name equal to `name` refused, NUL
+    refused in `argv` and `env`, unknown members accepted, the answer
+    cached as sent (an open owner question); (6) a run referred again
+    counts as a new referral and is held under a new approval
+    (`replaces`); `approval.decide` answers `referred`;
     `approval.referred` is audited and `sync.event{approval.decided}`
-    carries `referred`; (7) pins: recorded only from an app approval,
-    with no unlock window, replaced by a `program_changed` approval
-    even when `each` is `true`, recorded even if the field was removed
-    meanwhile; of two runs with different files the second is referred
-    again; an approval stands when the item became unbound while the
-    run waited. Three points are left to the owner (§10.11, "Open
-    (owner)"): the lists of shells and interpreters, `inline_code`'s
-    argument match, and the colon. AGENT-PLAN 0.1.12: §4.9, connectors
-    send cleaned absolute paths.
+    carries `referred`; the order of these events is fixed (§6.8 step
+    4); (7) pins: recorded only from an app approval, with no unlock
+    window, replaced by a `program_changed` approval even when `each`
+    is `true`, recorded even if the field was removed meanwhile; an
+    approval is judged again under the current settings, and stands
+    unless it must record a pin on other flags. **Apps and connectors
+    must now handle:** `approval.decide` `result: "referred"`;
+    `replaces` in `approval.pending` and its `pending.list` entry;
+    `referred` in `sync.event{approval.decided}`; a connector sends
+    cleaned absolute paths (AGENT-PLAN 0.1.12). Four points are left to
+    the owner (§10.11, "Open (owner)"): the lists of shells and
+    interpreters, `inline_code`'s argument match, the colon, and the
+    cached `item.run` answer.
   - 0.90.19: 2026-11-18, status answers and refusals bind the proposal
     hash (BALLOT-PROTOCOL 0.15.0, owner decision 2026-11-18). §10.19.5:
     `status_sig` (label `vettid/vote/2/status`) covers H(the answer's
@@ -12183,7 +12190,8 @@ While the vault is held, a session is suspended but still returned.
 device (`limit` beyond that):
 
 1. The vault sends the owner's apps `approval.pending{approval_id,
-   device_id, role, name, type, body, exp, flags?}` (`flags`, 0.42.0:
+   device_id, role, name, type, body, exp, flags?, previous_sha256?,
+   previous_path?, replaces?}` (`flags`, 0.42.0:
    warnings for an agent's way of using a secret, §10.11) and the requester
    `approval.waiting{approval_id, request_id, exp}`; a requester that
    receives it waits up to `exp` for the response instead of the usual
@@ -12195,7 +12203,7 @@ device (`limit` beyond that):
 3. The held request keeps its inner `id`: a retransmission while it is
    held is absorbed by the dedupe of §8.2, and once answered gets the
    cached response.
-4. (0.90.20) **Referred again.** The handler of an approved agent
+4. (0.91.0) **Referred again.** The handler of an approved agent
    request may refer it again (an `item.run` whose pin situation
    changed while it waited, §10.11). The request is held again under a
    new approval, with the same bytes that were approved and the new
@@ -12204,13 +12212,21 @@ device (`limit` beyond that):
    is `not_found`. `approval.decide` answers `{result: "referred"}`.
    The new `approval.pending` and its `pending.list` entry carry
    `replaces`, the id of the approval it replaces. A re-referral is
-   audited `approval.referred` (`ref` = the old approval's id) in place
-   of `approval.granted`, after the run's own audit lines. Other apps
-   get `sync.event{approval.decided, referred: true}` after the answer
-   to the agent and after the new `approval.pending`. A re-referral
-   whose new hold is refused (`limit`, `internal`) is audited
-   `approval.granted`, though nothing ran. A handler that refers again
-   a request not run on an approval is answered `internal`.
+   audited `approval.referred` (`device_id` = the requester, `ref` =
+   the old approval's id) in place of `approval.granted`, after the
+   run's own audit lines. **Order.** On an approval, other devices get
+   `sync.event{approval.decided}` after the answer to the requester,
+   and `approval.granted` follows the executed request's own audit
+   lines. On a re-referral there is no answer: every app, the deciding
+   one included, gets the new `approval.pending{replaces}` (a fresh
+   5-minute `exp`), the agent gets `approval.waiting`, and the other
+   devices then get `sync.event{approval.decided, referred: true}`. A
+   re-referral whose new hold is refused (`limit`, `internal`) is
+   audited `approval.granted`, though nothing ran. **App rule.** On
+   `result: "referred"` an app does not report the request as
+   approved. It drops the ask named by `replaces` and shows the new one
+   as a new decision, saying the program was recorded or changed
+   meanwhile.
 
 **Ending.** An app ends a device's access session with
 `device.session.end{device_id}`; a desktop or agent ends its own with
@@ -12274,8 +12290,10 @@ devices learn of it as `sync.event` (§10.1) (0.77.0, spelled out):
   absent when it has none. A deny does not end a current session.
 - **Decision on a held request:** `approval.granted` or
   `approval.denied`; `sync.event{kind: "approval.decided", approval_id,
-  approved}`; (0.90.20) `approval.referred` when the approved request
-  was referred again, and `referred: true` in the event (§6.8 step 4).
+  approved}`; (0.91.0) `approval.referred` when the approved request
+  was referred again, and `referred: true` in the event. Order: after
+  the answer to the requester; on a re-referral, after the new
+  `approval.pending` (§6.8 step 4).
 - **End** (`device.session.end`): `device.session.ended` (`device_id`).
   Each held request answered `denied` is also audited `approval.denied`
   and sends `sync.event{kind: "approval.decided", approval_id, approved:
@@ -13543,7 +13561,7 @@ an answer to an unknown or expired id is dropped.
   | `block.added`, `block.removed` | `block_id` (§10.4) |
   | `connection.authenticate.decided` | `request_id`, `approved`, `withdrawn?` (`true` when the challenger withdrew the challenge, always with `approved: false`; absent otherwise; 0.80.0) (§10.4) |
   | `device.session` | `device_id`, `expires_at` (absent when the device has no session) (§6.8) |
-  | `approval.decided` | `approval_id`, `approved`, (0.90.20) `referred?` (`true` when the approved request was referred again; absent otherwise) (§6.8) |
+  | `approval.decided` | `approval_id`, `approved`, (0.91.0) `referred?` (`true` when the approved request was referred again; absent otherwise) (§6.8) |
   | `leash.grant.changed` | `grant_id`, `agent_id`, `version` (§10.11) |
   | `leash.grant.revoked` | `grant_id`, `agent_id` (§10.11) |
   | `leash.agent.suspended` | `agent_id`, `suspended` (§10.11) |
@@ -13673,9 +13691,9 @@ device belongs to the unlock it ends.
 | `device.session.granted` (to the device) | — | `{session_id, expires_at}` |
 | `device.session.end` (app: `{device_id}`; desktop, agent: `{}`, its own; (0.82.5) either may add `session_id`) | as left | `{}`; (0.82.5) also `{}`, with nothing changed, when `session_id` is not the device's current, unexpired session (a session suspended by the hold, §3.6.3, is current); `bad_request` for a `session_id` that is not a non-empty string (§6.8 "Ending") |
 | `device.session.ended` (to the device) | — | `{reason: "denied" \| "ended"}` |
-| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?, replaces?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history`, (0.85.3) `program_unrecorded`, `program_changed` (with `previous_sha256` and `previous_path`) (§10.11); (0.90.20) `replaces`: the approval a run referred again replaces (§6.8 step 4) |
+| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?, replaces?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history`, (0.85.3) `program_unrecorded`, `program_changed` (with `previous_sha256` and `previous_path`) (§10.11); (0.91.0) `replaces`: the approval a run referred again replaces (§6.8 step 4) |
 | `approval.waiting` (to the requester) | — | `{approval_id, request_id, exp}` |
-| `approval.decide` (app) | `{approval_id, approve: bool}` | `{result}`: `"ok"`, (0.90.20) `"referred"` when the request was referred again (§6.8), or the error code the held request was answered with |
+| `approval.decide` (app) | `{approval_id, approve: bool}` | `{result}`: `"ok"`, (0.91.0) `"referred"` when the request was referred again (§6.8), or the error code the held request was answered with |
 
 - `last_active_at` is when the vault last processed a durable message from
   the principal, to the minute; `session_expires_at` is present while an
@@ -17018,8 +17036,8 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `device.session.ended` (`device_id`), `device.session.denied`
   (`device_id`, `ref` = `request_id`; 0.77.0), `approval.granted`,
   `approval.denied` (`device_id` = the requester, `ref` =
-  `approval_id`), (0.90.20) `approval.referred` (`ref` = the replaced
-  approval's id) (§6.8);
+  `approval_id`), (0.91.0) `approval.referred` (`device_id` = the
+  requester, `ref` = the replaced approval's id) (§6.8);
   `connection.authenticate.key_rotated`,
   `connection.authenticate.rotation_rejected` (§10.4); (0.81.0, votes,
   §10.19; each with the service's `connection_id`; **never a choice**)
@@ -18828,13 +18846,17 @@ item's settings allow for its task:
     `true`) refers every run to an app; it can be `false` only when
     `programs` is not empty, and even then a run of a shell or an
     interpreter is referred (below).
-  - (0.90.20) **Program strings.** A `program` (an entry's or a run's)
+  - (0.91.0) **Program strings.** A `program` (an entry's or a run's)
     is at most 4,096 bytes of UTF-8 with no control character, no
     Unicode format character (Cf: bidirectional overrides and
     isolates, zero width) and no line or paragraph separator (Zl, Zp);
-    otherwise `bad_request`. It is **absolute** (`/` followed by a
-    name, never `//`, or a drive path `X:\` or `X:/`) or a **bare name**
-    (no `/`, `\` or `:`). A UNC path is refused, as the connector
+    otherwise `bad_request`. A run's `cwd` has the same limit and
+    character rules. A run's `program` is **absolute**; only an
+    entry's may be a bare name. Absolute is `/` followed by a name,
+    never `//`, or a drive path `X:\` or `X:/`; a **bare name** has no
+    `/`, `\` or `:`, and a bare name or a last element made only of
+    dots and spaces is refused. `/` and `\` both separate elements on
+    every system. A UNC path is refused, as the connector
     refuses it (AGENT-PLAN §4.9). A bare entry matches the **exact last
     path element** of a run's `program`; on Windows the member writes
     `git.exe`. An absolute `program` (a run's or an entry's) and a
@@ -18884,7 +18906,8 @@ item's settings allow for its task:
     hash is not recorded. A run whose pin no longer matches the one now
     recorded (another approval recorded a different one meanwhile) is
     referred again as a new approval; the value is never sent on the
-    old one.
+    old one. (0.91.0: judged again whatever the `version`; see the rule
+    "An approval is judged again", below.)
   - (0.85.3; owner decision of 2026-11-05, option a) **The variables
     a program may receive.** An entry's `env` (0–32 names, default
     empty) lists the names a run of that program may set in its `env`.
@@ -18893,12 +18916,13 @@ item's settings allow for its task:
     settings.
   - `proxy` is present exactly when `ways` holds `proxy`. `hosts` (1–8):
     lowercase DNS names, each with an optional `:port` (default 443);
-    no wildcards, no IP literals; (0.90.20) `localhost`, names under
+    no wildcards, no IP literals; (0.91.0) `localhost`, names under
     it and single-label names are refused, while names under `.local`
     (mDNS) are accepted. `header`: the HTTP field that carries
     the credential, a token of 1–64 characters, not a hop-by-hop field,
     `Host`, `Content-Length`, `Transfer-Encoding` or `Cookie`.
-    (`Bearer `). Otherwise `bad_request`. (0.90.20) The value goes
+    `prefix`: 0–32 printable ASCII characters put before the value
+    (`Bearer `). Otherwise `bad_request`. (0.91.0) The value goes
     only to the item's bound hosts, so a change of `prefix` is free; a
     change of the `header` name (not of its case) is a widening
     (below), because some hosts echo or log a header.
@@ -18908,13 +18932,13 @@ item's settings allow for its task:
     item. When the item is withdrawn from all of them (§10.12), its
     settings are deleted, so a later inclusion starts again at
     `["use"]`.
-  - (0.90.20) **An item with no use left** (§10.11 "Agent share
+  - (0.91.0) **An item with no use left** (§10.11 "Agent share
     rules") is not a withdrawal: it keeps its settings. The member can
     still reach it with `leash.item.set` and `leash.item.list`, to see
-    and narrow them. The agent's requests, the catalog and the
+    and change them (a widening still needs the unlock window). The agent's requests, the catalog and the
     decisions do not reach it, and it is not in the agent's included
     items until it has a use again.
-  - (0.90.20) **Versions.** `version` starts at 1 and goes up with each
+  - (0.91.0) **Versions.** `version` starts at 1 and goes up with each
     change. When the settings are deleted and later set again it starts
     again at 1. A `version` sent with `leash.item.set` when the item has
     no settings is `conflict`. `leash.item.list` shows an item with no
@@ -18925,7 +18949,7 @@ item's settings allow for its task:
     `env` (0.85.3), or sets `each` to `false` needs the credential's
     unlock window, as issuing a grant does
     (`credential_locked` outside it). One that only narrows does not.
-    (0.90.20) More cases: changing the proxy `header` name (above) is a
+    (0.91.0) More cases: changing the proxy `header` name (above) is a
     widening. Binding an unbound item (giving `programs` entries when
     it had none) narrows, unless an entry lists `env` names (an
     unbound item allows none) or `each` is `false`. An absolute entry
@@ -18972,27 +18996,33 @@ item's settings allow for its task:
   `item.get` always, every reveal asked on its own (owner decision of
   2026-10-18; it replaces, for agents' reveals, the 2026-10-03 rule
   that `ask` means one prompt per item, not per read).
-- (0.90.20) **Pins, as built.**
+- (0.91.0) **Pins, as built.**
   - Recording a pin needs no unlock window: the member's approval of
     the flagged run is the decision. The pin is exactly the approved
     run's `sha256` and `program`, recorded only from an app's approval.
     A `program_changed` approval replaces the pin even when `each` is
     `true`. The pin is recorded even if the field was removed
     meanwhile; the run is then answered `not_found`.
-  - A run whose approval showed another pin situation (its flags or its
-    previous pin) than it has now is referred again, whatever the
-    settings `version`. So of two runs held with different files, the
-    first approved records its pin, and the other, when approved, is
-    referred again as `program_changed` against the new pin.
-  - **An approval stands** when the item became unbound while the run
-    waited (its `programs` emptied): the member approved that run, and
-    the vault runs it. Settings that now refuse the run are the
-    exception (above).
+  - **An approval is judged again.** When an app approves a held
+    `item.run`, the vault judges it again under the current settings,
+    whatever their `version`. Settings that now refuse the run give
+    that refusal. A run that would now record a pin
+    (`program_unrecorded`, `program_changed`) and whose approval showed
+    other flags or another previous pin is referred again. Otherwise
+    the approval stands: for example when the run now matches the
+    recorded pin (another approval recorded the same file meanwhile),
+    when `each` became `true`, or when the item became unbound
+    (`programs` emptied). A pin is then recorded only if the run is
+    flagged to record one. So of two runs held with different files,
+    the first approved records its pin and the other is referred again
+    with `program_changed`.
   - **A run referred again** counts as a new referral for the cap (§10.11
     "Refusals do not become spam"). Under the cap or past it, it is
     never counted in the windows. Past the cap it is `forbidden`,
-    nothing is held, and `leash.referrals_limited` and a throttled
-    refusal are recorded as at the first decision.
+    nothing is held, and it is recorded as the decision step records
+    it: `leash.referrals_limited` the first time in the hour, the
+    refusal counted as throttled (toward suspension);
+    `approval.decide` then answers `{result: "forbidden"}`.
   - The new hold is a new approval (§6.8): the agent gets
     `approval.waiting` and no answer yet.
 - `item.run{item_id, field_id, program, sha256, argv, cwd, how, name?, env?}`:
@@ -19005,7 +19035,7 @@ item's settings allow for its task:
   `name`), `stdin` (written to standard input) or `file` (an owner-only
   temporary file whose path is in `name` and in each argument that is
   exactly `{secret_file}`); `name` matches `^[A-Z_][A-Z0-9_]{0,63}$`,
-  is required for `env` and `file` (and (0.90.20) refused with `stdin`),
+  is required for `env` and `file` (and (0.91.0) refused with `stdin`),
   and is none of the connector's minimal environment (the Windows names
   `SYSTEMROOT`, `WINDIR`, `SYSTEMDRIVE` and `PATHEXT` too, on every
   system), `PATH`, `TMPDIR`, `TEMP` or `TMP`, nor starts with
@@ -19060,7 +19090,7 @@ item's settings allow for its task:
   entry's `env`), and it holds even for a listed name. `env` holds
   0–32 more variables `{NAME: value}`, names by the same rule, values
   at most 4,096 bytes, each name listed in the matched entry's `env`
-  (`env_not_allowed` otherwise, above). (0.90.20) An `env` name equal
+  (`env_not_allowed` otherwise, above). (0.91.0) An `env` name equal
   to `name` is `bad_request`. No string of `argv` and no `env` value may
   hold a NUL character (`bad_request`: no process could receive it);
   other characters are accepted, and the approval shows them escaped.
@@ -19068,12 +19098,12 @@ item's settings allow for its task:
   name rule is checked first (`bad_request`), then the allowlist
   (`env_not_allowed`). An `address` field cannot be used (`not_found`). The
   answer is `{item_id, field_id, value}`, for the connector to pass to
-  that one process only. Recorded as `leash.item.run`. (0.90.20) Members
+  that one process only. Recorded as `leash.item.run`. (0.91.0) Members
   of the body that are not listed here are ignored, as in other
-  operations (§10.1). A successful answer is kept in the response cache
-  (§8.2) under the request's id, as an `item.get` answer is, so a
-  retransmission within 24 hours gets the same answer and runs
-  nothing again.
+  operations (§10.1). As built, an `item.run` answer is cached as
+  sent (§8.2): a retransmission of the same request id within 24
+  hours gets that answer and is not handled again (no new audit line,
+  no pin).
 - `item.proxy{item_id, field_id, host, seconds?}`: `host` one of the
   item's `hosts`; `seconds` 60–3,600, default 900, cut to the access
   session's end. A value that is not visible ASCII and spaces cannot
@@ -19119,10 +19149,10 @@ item's settings allow for its task:
     `previous_path`, the recorded ones. Approving it records the new
     ones; the old approval never covers a changed or moved file;
   - `history`: an `item.get`;
-  - (0.90.20) an approval of a run referred again (above) also carries
+  - (0.91.0) an approval of a run referred again (above) also carries
     `replaces`, the id of the approval it replaces.
 
-  > Open (owner), 0.90.20: **shell and interpreter detection is by name
+  > Open (owner), 0.91.0: **shell and interpreter detection is by name
   > only.** Launchers and evaluators such as `sudo`, `doas`, `xargs`,
   > `nohup`, `timeout`, `ssh`, `wsl`, `awk`, `lua`, `deno`, `bun`, `py`,
   > `pypy`, `java`, `cscript`, `wscript` and `mshta`, and Windows 8.3
@@ -19130,15 +19160,23 @@ item's settings allow for its task:
   > runs them unasked with any `argv`. Option: extend the lists. Not
   > decided.
   >
-  > Open (owner), 0.90.20: **`inline_code` matches whole arguments
+  > Open (owner), 0.91.0: **`inline_code` matches whole arguments
   > only.** `-Ic`, `-ne`, `-pe`, `--eval=` and `node -p` are not
   > flagged. The flag is advice, since an interpreter is always
   > referred (above). Option: match these too. Not decided.
   >
-  > Open (owner), 0.90.20: **the colon is refused in every path element
+  > Open (owner), 0.91.0: **the colon is refused in every path element
   > on every system** ("Program strings", above), which also refuses a
   > POSIX folder named `a:b` (a GVFS mount). Option: refuse it only in
   > drive paths. Not decided.
+  >
+  > Open (owner), 0.91.0: **an `item.run` or `item.get` answer is
+  > cached as sent** (§8.2), so the secret value sits in vault state
+  > for 24 hours. 0.90.15 kept a TURN credential out of the cache for
+  > this reason (§8.2 "Exception: responses that carry secret values in
+  > the clear"). A volatile type is not possible, since the request
+  > counts uses and may record a pin. Option: cache a copy without
+  > `value`, as `call.start` does (§10.10). Not decided.
 
   The app shows, for an `item.run`: the agent, the item and field, the
   program, (0.85.3) its fingerprint (the first 16 hex digits of
@@ -19442,8 +19480,8 @@ grant set carries a `grant_seq`:
 | `leash.agent.resume` (app) | `{agent_id}` | `{}`; `not_found` unless the agent is suspended |
 | `leash.status.get` (agent) | `{grant_id}` | `{grant_id, status, status_sig, rotations?}`; `not_found`, `forbidden` (suspended), `owner_check_required` (the vault is held, §3.6.3) |
 | `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}`; (0.42.0) `{op: "item.run", item_id, field_id, program, sha256 (0.85.3), argv, cwd, how, name?, env?}` or `{op: "item.proxy", item_id, field_id, host, seconds?}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}`; (0.42.0) `{item_id, field_id, value}` or `{item_id, field_id, value, header, prefix, host, expires_at}`; `way_not_allowed` (body `{ways}`), `program_not_allowed`, (0.85.3) `env_not_allowed` (body `{names}`) |
-| `leash.item.set` (app; widening within the unlock window) | `{agent_id, item_id, version?, ways, run?, proxy?}` (0.42.0); `version` required to replace existing settings (`conflict`) | `<item_ways>`; `not_found` unless a rule of the agent includes the item or it has settings (§10.11, "an item with no use left"); `credential_locked` for a widening outside the window; `bad_request` |
-| `leash.item.list` (app, desktop) | `{agent_id, item_id?}` (0.42.0) | `{items: [<item_ways>]}`: the settings of each item the agent's rules include, (0.90.20) and of each item that kept settings with no use left |
+| `leash.item.set` (app; widening within the unlock window) | `{agent_id, item_id, version?, ways, run?, proxy?}` (0.42.0); `version` required to replace existing settings (`conflict`) | `<item_ways>`; `not_found` unless a rule of the agent includes the item, with or without a use left (§10.11 "An item with no use left"); `credential_locked` for a widening outside the window; `bad_request` |
+| `leash.item.list` (app, desktop) | `{agent_id, item_id?}` (0.42.0) | `{items: [<item_ways>]}`: each item the agent's rules include, (0.91.0) with or without a use left, with or without settings (shown as `{agent_id, item_id, ways: ["use"]}` when it has none) |
 
 - `agent_id` names an active device of role `agent` (`not_found`
   otherwise). A grant replaced or issued for an agent is sent to it in

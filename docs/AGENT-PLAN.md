@@ -4,7 +4,7 @@ status: draft
 version: 0.1.12
 date: 2026-11-19
 changelog:
-  - 0.1.12: erratum, 2026-11-19, with VAULT-MESSAGING 0.90.20 (AV9 and
+  - 0.1.12: erratum, 2026-11-19, with VAULT-MESSAGING 0.91.0 (AV9 and
     AV10 as built, vettid/vettid-vault#270 to #275). §4.9: a connector
     sends a cleaned absolute path for `program` and `cwd`, with no
     trailing separator. No other change
@@ -811,8 +811,11 @@ allowed ways, so the agent can choose again.
   absent, the run's `work/` (below). (0.1.12) The connector sends
   `program` and `cwd` as cleaned absolute paths: no trailing separator
   (except the root itself), no empty, `.` or `..` element, and no `:`
-  after a Windows drive (VAULT-MESSAGING 0.90.20 §10.11 "Program
-  strings"). The vault refuses any other form.
+  in any element after the root, on any system (VAULT-MESSAGING 0.91.0
+  §10.11; the scope is an open owner question). Each is at most 4,096
+  bytes, with no control, Cf, Zl or Zp character, so a connector can
+  refuse such a path itself with a plain notice. The vault refuses
+  any other form.
 - **The run's own directory** (the lead's answer, 2026-11-05). Each run
   has `run/<id>/` under the state directory, owner-only (0700; on
   Windows the owner-only DACL of A1.1), holding `tmp/` (for `TMPDIR`,
