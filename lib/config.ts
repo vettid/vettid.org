@@ -80,15 +80,6 @@ export interface AppConfig {
    */
   readonly androidAppUrl?: string;
   /**
-   * The staging-only switch-over of MEMBER-API 2.0.0 (ENROLLMENT-CODES §8
-   * step 3): the member API still admits portal-style sessions on the app
-   * routes (`enclave`, `enroll`, `unlock`, recovery `register`) next to app
-   * keys, so the apps of before 2.0.0 keep working until the staging
-   * cut-over. Context `<stage>VaultLegacySessionAuth` (`true`); refused in
-   * production, where the API never accepts cookies on the app routes.
-   */
-  readonly vaultLegacySessionAuth?: boolean;
-  /**
    * The staging time scale (MEMBER-API 2.8.0 "Staging time scale";
    * STAGING-TIME-SCALE §4 item 5, §5.3): the member API divides the
    * start-over deletion's 24 h, the account site PIN's 24 h lock and the
@@ -655,11 +646,12 @@ export function loadConfig(node: Node): AppConfig {
   if (androidAppUrl && !/^https:\/\/[^\s"<>]+$/.test(androidAppUrl)) {
     throw new Error(`context ${appUrlKey}: expected an https URL, got ${JSON.stringify(androidAppUrl)}`);
   }
+  // The legacy session switch-over is over: the app routes accept only signed
+  // requests on every stage. A deploy that still passes the old context key
+  // stops here rather than deploy something other than what it asked for.
   const legacyKey = `${stage}VaultLegacySessionAuth`;
-  const legacyRaw = node.tryGetContext(legacyKey);
-  const vaultLegacySessionAuth = legacyRaw === true || legacyRaw === 'true';
-  if (stage === PROD_STAGE && (node.tryGetContext('vaultLegacySessionAuth') !== undefined || legacyRaw !== undefined)) {
-    throw new Error('vault legacy session auth is staging-only: production never accepts cookies on the app routes (MEMBER-API 2.0.0)');
+  if (node.tryGetContext(legacyKey) !== undefined || node.tryGetContext('vaultLegacySessionAuth') !== undefined) {
+    throw new Error(`context ${legacyKey}: removed; the app routes accept only signed requests (MEMBER-API 2.0.0). Drop the -c flag`);
   }
   const { timeScale, timeScaleFromRelease } = loadTimeScale(node, stage);
   const cancelIdKey = stage === PROD_STAGE ? 'recoveryCancelIdFromRelease' : `${stage}RecoveryCancelIdFromRelease`;
@@ -691,7 +683,6 @@ export function loadConfig(node: Node): AppConfig {
       ? { ...STAGE_ACCOUNTS[stage].vault!, vaultsStreamArn: String(node.tryGetContext(streamKey) ?? '') }
       : undefined,
     ...(androidAppUrl ? { androidAppUrl } : {}),
-    ...(vaultLegacySessionAuth ? { vaultLegacySessionAuth } : {}),
     timeScale,
     ...(timeScaleFromRelease !== undefined ? { timeScaleFromRelease } : {}),
     ...(recoveryCancelIdFromRelease !== undefined ? { recoveryCancelIdFromRelease } : {}),

@@ -24,8 +24,7 @@
  *    row allows for the route: the host-written `app_key`, the redeem's
  *    `app_key_pending` (1 hour), a recovery's claim keys or its recovering
  *    key. `enclave`, `enroll`, `unlock` and recovery `register` accept only
- *    signed requests (a staging-only switch, VAULT_LEGACY_SESSION_AUTH, still
- *    admits sessions there for the switch-over: ENROLLMENT-CODES §8 step 3).
+ *    signed requests.
  *
  * Setup codes (2.0.0, §11.12.1, lambda/shared/enroll-code.ts): the portal
  * issues a 5-minute issuance with a 128-bit QR secret and an 8-symbol typed
@@ -978,23 +977,6 @@ async function newKeyCaller(req: MemberRequest, vault: (h: AppHeader) => boolean
   return { h, key };
 }
 
-/** The staging-only switch-over (ENROLLMENT-CODES §8 step 3): sessions still admitted on the app routes. Never on in production. */
-const legacySessions = () => process.env.VAULT_LEGACY_SESSION_AUTH === '1';
-
-/**
- * `enclave`, `enroll`, `unlock`, recovery `register`: the app only (2.0.0),
- * or, with the staging switch on and no app header, a session as before
- * 2.0.0 (with its terms check).
- */
-async function appOnlyCaller(req: MemberRequest, roles: KeyRole[]): Promise<Caller> {
-  if (req.appHeader === undefined && legacySessions()) {
-    const m = await loadVaultMember(req);
-    return { via: 'session', m, vault: activeVault((await currentVault(m.user_guid)).vault), key: null, role: null };
-  }
-  if (req.appHeader === undefined) throw unauthorized();
-  return appCaller(req, roles);
-}
-
 // ---- instances, leases, releases -----------------------------------------------------
 
 const describe = (i: InstanceRow) => ({ instance_id: i.instance_id, release: i.release, descriptor: i.descriptor, attestation: i.attestation });
@@ -1243,13 +1225,11 @@ router.on('GET', '/api/vault/status', async (req) => {
 router.on('GET', '/api/vault/enclave', async (req) => {
   // The recovering key is also one of the claim keys; it is matched as
   // `recovering` first (2.7.0: its enclave should have the heavy permit free).
-  const c = await appOnlyCaller(req, ['app', 'pending', 'recovering', 'claim']);
+  const c = await appCaller(req, ['app', 'pending', 'recovering', 'claim']);
   const m = c.m;
   // Enrollment (the pending key) needs an active member; an enrolled vault an active account (2.0.0).
-  if (c.via === 'app') {
-    if (c.role === 'pending') requireActiveMember(m);
-    else requireActive(m);
-  }
+  if (c.role === 'pending') requireActiveMember(m);
+  else requireActive(m);
   await requireService();
   await limit(`vault-enclave#${m.user_guid}`, 30, 60);
   const now = nowS();
@@ -1278,33 +1258,25 @@ router.on('GET', '/api/vault/enclave', async (req) => {
 });
 
 router.on('POST', '/api/vault/enroll', async (req) => {
-  const c = await appOnlyCaller(req, ['pending']);
+  const c = await appCaller(req, ['pending']);
   const m = c.m;
-  if (c.via === 'app') requireActiveMember(m);
+  requireActiveMember(m);
   await requireService();
   // 2.0.0: the redeem's vault_id; the app's request names it twice (body and header).
-  const vaultId = c.via === 'app' ? field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex') : null;
+  const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
   const instanceId = field(req.body, 'instance_id', INSTANCE_ID_RE, 'an instance id');
   const etkKid = field(req.body, 'etk_kid', KID_RE, '16 lowercase hex');
   const envelope = checkEnvelope(req.body.envelope, ENVELOPE_BYTES_LARGE, etkKid);
   const manifestSha256 = field(req.body, 'manifest_sha256', SHA256_RE, '64 lowercase hex');
-  if (vaultId !== null && vaultId !== c.vault!.vault_id) throw notFound('No such vault');
+  if (vaultId !== c.vault.vault_id) throw notFound('No such vault');
   await limit(`vault-enroll#${m.user_guid}`, 3, 86_400);
 
   // Dark launch: no `active` release, nothing to enroll into (503 vault_unavailable).
   const targets = await enrollmentTargets(isCanaryMember(m));
   const now = nowS();
-  let vault: VaultRow;
-  let inst: InstanceRow;
-  if (c.via === 'app') {
-    inst = await routeCheck(c.vault, instanceId, now);
-    vault = c.vault!;
-  } else {
-    const cur = await currentVault(m.user_guid);
-    inst = await routeCheck(activeVault(cur.vault), instanceId, now);
-    vault = await vaultForEnrollment(m.user_guid, cur);
-  }
+  const inst = await routeCheck(c.vault, instanceId, now);
+  const vault = c.vault;
   // Enrollment goes to an instance of an `active` release (§11.1), or of a
   // canary release for a canary member.
   if (!targets.some((r) => r.release === inst.release)) throw instanceMoved();
@@ -1315,7 +1287,7 @@ router.on('POST', '/api/vault/enroll', async (req) => {
   if (!account) throw vaultUnavailable();
   // The enclave binds the vault to the key the request was signed with (§11.5: `app_key`).
   await enqueue('enroll', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 }, {
-    extra: { ...(c.key ? { app_key: c.key.key } : {}), account },
+    extra: { app_key: c.key.key, account },
     slot: slotOf(c),
   });
   await audit(memberActor(m.user_guid), 'vault.enroll_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release, ...viaOf(c) });
@@ -1325,11 +1297,11 @@ router.on('POST', '/api/vault/enroll', async (req) => {
 router.on('POST', '/api/vault/unlock', async (req) => {
   // 2.7.0 (release R): the recovering key no longer unlocks (403); a
   // registered phone opens the recovery instead (POST /api/vault/recovery/open).
-  const c = await appOnlyCaller(req, ['app', 'recovering']);
+  const c = await appCaller(req, ['app', 'recovering']);
   if (c.role === 'recovering') throw recoveringRefused();
   const m = c.m;
   // 2.0.0: an active account; the current terms are no longer required (§11.1).
-  if (c.via === 'app') requireActive(m);
+  requireActive(m);
   await requireService();
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
@@ -3166,9 +3138,9 @@ async function recordRegisterId(v: VaultRow, recoveryId: string, requestId: stri
 
 router.on('POST', '/api/vault/recovery/register', async (req) => {
   // 2.0.0: signed by one of the recovery's claim keys; an active account.
-  const c = await appOnlyCaller(req, ['claim']);
+  const c = await appCaller(req, ['claim']);
   const m = c.m;
-  if (c.via === 'app') requireActive(m);
+  requireActive(m);
   await requireService();
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
@@ -3188,7 +3160,7 @@ router.on('POST', '/api/vault/recovery/register', async (req) => {
   // §11.11.7), and its key, which then becomes the recovering key; the
   // queue message carries the key for the enclave to bind (§11.5).
   await enqueue('recovery_register', m, vault, requestId, inst, { etk_kid: etkKid, envelope }, {
-    extra: c.key ? { app_key: c.key.key } : {},
+    extra: { app_key: c.key.key },
     slot: { recovery_id: recoveryId, ...slotOf(c) },
   });
   await recordRegisterId(vault, recoveryId, requestId);

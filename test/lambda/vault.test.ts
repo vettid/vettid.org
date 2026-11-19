@@ -3580,30 +3580,27 @@ describe('2.4.0: the recovery locator and the claim by locator', () => {
   });
 });
 
-// ---- the staging-only switch-over (ENROLLMENT-CODES §8 step 3) ---------------------------
+// ---- the removed legacy session switch ------------------------------------------------
 
-describe('legacy sessions on the app routes (staging switch-over)', () => {
-  beforeEach(() => {
-    process.env.VAULT_LEGACY_SESSION_AUTH = '1';
-    release(R0, 4);
-    instance('i-1', R0);
-  });
+describe('the old legacy session variable', () => {
   afterEach(() => {
     delete process.env.VAULT_LEGACY_SESSION_AUTH;
   });
 
-  test('a session enrolls and unlocks as before 2.0.0 (terms required; no app_key in the message)', async () => {
-    expect((await call('GET', '/api/vault/enclave', undefined, { session: true })).status).toBe(200);
-    const r = await call('POST', '/api/vault/enroll', { request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }, { session: true });
-    expect(r.status).toBe(202);
-    expect(sent()[0].msg.app_key).toBeUndefined();
-    expect(sent()[0].msg.account).toMatchObject({ first_name: 'Ada', last_name: 'One', name_change: { allowed_after: null, last: null } }); // 2.2.0
-    expect(getItem('vaults', 'user#g1').current_vault_id).toBe(r.body.vault_id);
-    put('members', { user_guid: 'g1', email: 'g1@x.org', first_name: 'Ada', last_name: 'One', state: 'registered', account_status: 'active' });
-    expect((await call('GET', '/api/vault/enclave', undefined, { session: true })).body.error).toBe('terms_required');
-  });
-
-  test('signed requests work alongside', async () => {
+  test('left in a function environment, it admits no session on the app routes (401), and signed requests still work', async () => {
+    process.env.VAULT_LEGACY_SESSION_AUTH = '1';
+    release(R0, 4);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0 });
+    for (const [method, path, body] of [
+      ['GET', '/api/vault/enclave'],
+      ['POST', '/api/vault/enroll', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }],
+      ['POST', '/api/vault/unlock', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }],
+      ['POST', '/api/vault/recovery/register', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV }],
+    ] as [string, string, unknown?][]) {
+      expect({ path, status: (await call(method, path, body, { session: true })).status }).toEqual({ path, status: 401 });
+    }
+    expect(sqs.calls()).toHaveLength(0);
     expect((await call('GET', '/api/vault/enclave')).status).toBe(200);
   });
 });

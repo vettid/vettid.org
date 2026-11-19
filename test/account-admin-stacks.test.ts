@@ -1009,12 +1009,12 @@ describe('VettidOrgMemberApiStack', () => {
       });
     });
 
-    test('the legacy session switch is staging-only: refused in production, set in staging when asked', () => {
-      expect(() => loadConfig(new cdk.App({ context: { prodVaultLegacySessionAuth: true } }).node)).toThrow(/staging-only/);
-      expect(() => loadConfig(new cdk.App({ context: { vaultLegacySessionAuth: true } }).node)).toThrow(/staging-only/);
-      const staging = loadConfig(new cdk.App({ context: { stage: 'staging', stagingVaultLegacySessionAuth: true } }).node);
-      expect(staging.vaultLegacySessionAuth).toBe(true);
-      expect(loadConfig(new cdk.App({ context: { stage: 'staging' } }).node).vaultLegacySessionAuth).toBeUndefined();
+    test('the removed legacy session switch: its context keys are refused on every stage', () => {
+      expect(() => loadConfig(new cdk.App({ context: { prodVaultLegacySessionAuth: true } }).node)).toThrow(/removed/);
+      expect(() => loadConfig(new cdk.App({ context: { vaultLegacySessionAuth: true } }).node)).toThrow(/removed/);
+      expect(() => loadConfig(new cdk.App({ context: { stage: 'staging', stagingVaultLegacySessionAuth: true } }).node)).toThrow(/removed/);
+      expect(() => loadConfig(new cdk.App({ context: { stage: 'staging', stagingVaultLegacySessionAuth: 'false' } }).node)).toThrow(/removed/);
+      expect(() => loadConfig(new cdk.App({ context: { stage: 'staging' } }).node)).not.toThrow();
     });
   });
 
