@@ -973,7 +973,7 @@ describe('VettidOrgMemberApiStack', () => {
       expect(all.some((x: any) => str(x.Action).includes('ssm:Put'))).toBe(false);
     });
 
-    test('the vault routes: members by email (typed codes), subscriptions (the snapshot), no legacy sessions in production', () => {
+    test('the vault routes: members by email (typed codes), subscriptions (the snapshot), no legacy session variable', () => {
       const own = stmtsOf('VaultFunction');
       expect(own.some((x: any) => str(x.Action).includes('dynamodb:Query') && str(x.Resource).includes('vettid-org-members/index/*'))).toBe(true);
       expect(own.some((x: any) => str(x.Action).includes('dynamodb:GetItem') && str(x.Resource).includes('vettid-org-subscriptions'))).toBe(true);
