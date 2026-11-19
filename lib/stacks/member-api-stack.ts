@@ -265,11 +265,6 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     const enrollKeyParam = enrollCodeKeyParamName(config);
     vault.addEnvironment('ENROLL_CODE_KEY_PARAM', enrollKeyParam);
     vault.addToRolePolicy(new iam.PolicyStatement({ actions: ['ssm:GetParameter'], resources: [`arn:${this.partition}:ssm:${this.region}:${this.account}:parameter${enrollKeyParam}`] }));
-    // The staging-only switch-over (ENROLLMENT-CODES §8 step 3; never in production, lib/config.ts).
-    if (config.vaultLegacySessionAuth) {
-      if (config.stage === 'prod') throw new Error('vaultLegacySessionAuth is staging-only');
-      vault.addEnvironment('VAULT_LEGACY_SESSION_AUTH', '1');
-    }
 
     // A member's typed setup-code entry reached its ceiling of 800 attempts
     // (MEMBER-API 2.0.0 "Setup codes"): the vault Lambda writes

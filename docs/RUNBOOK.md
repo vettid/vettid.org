@@ -2527,13 +2527,6 @@ after the redemption email): support deletes it with the host `delete` op
 (ENROLLMENT-CODES §10 decision 11). Since MEMBER-API 2.1.0 the member can
 also do it themselves: "Delete my vault and start over" (below).
 
-**The staging switch-over.** `stagingVaultLegacySessionAuth: true` in
-cdk.json context makes the staging member API still accept portal-style
-sessions on `enclave`, `enroll`, `unlock` and recovery `register`, for apps
-built before 2.0.0, until the staging cut-over (ENROLLMENT-CODES §8 step
-5); then remove it and redeploy `VettidOrgMemberApiStack`. The synth
-refuses it for production.
-
 **The account snapshot.** `vettid-org-member-account-push` sends a
 member's running vault their new account snapshot after terms, subscription
 or cancellation changes (the account routes and the admin site's

@@ -973,7 +973,7 @@ describe('VettidOrgMemberApiStack', () => {
       expect(all.some((x: any) => str(x.Action).includes('ssm:Put'))).toBe(false);
     });
 
-    test('the vault routes: members by email (typed codes), subscriptions (the snapshot), no legacy sessions in production', () => {
+    test('the vault routes: members by email (typed codes), subscriptions (the snapshot), no legacy session variable', () => {
       const own = stmtsOf('VaultFunction');
       expect(own.some((x: any) => str(x.Action).includes('dynamodb:Query') && str(x.Resource).includes('vettid-org-members/index/*'))).toBe(true);
       expect(own.some((x: any) => str(x.Action).includes('dynamodb:GetItem') && str(x.Resource).includes('vettid-org-subscriptions'))).toBe(true);
@@ -1009,12 +1009,15 @@ describe('VettidOrgMemberApiStack', () => {
       });
     });
 
-    test('the legacy session switch is staging-only: refused in production, set in staging when asked', () => {
-      expect(() => loadConfig(new cdk.App({ context: { prodVaultLegacySessionAuth: true } }).node)).toThrow(/staging-only/);
-      expect(() => loadConfig(new cdk.App({ context: { vaultLegacySessionAuth: true } }).node)).toThrow(/staging-only/);
-      const staging = loadConfig(new cdk.App({ context: { stage: 'staging', stagingVaultLegacySessionAuth: true } }).node);
-      expect(staging.vaultLegacySessionAuth).toBe(true);
-      expect(loadConfig(new cdk.App({ context: { stage: 'staging' } }).node).vaultLegacySessionAuth).toBeUndefined();
+    test('the removed legacy session switch: its context keys are refused on every stage', () => {
+      expect(() => loadConfig(new cdk.App({ context: { prodVaultLegacySessionAuth: true } }).node)).toThrow(/removed/);
+      expect(() => loadConfig(new cdk.App({ context: { vaultLegacySessionAuth: true } }).node)).toThrow(/removed/);
+      expect(() => loadConfig(new cdk.App({ context: { stage: 'staging', stagingVaultLegacySessionAuth: true } }).node)).toThrow(/removed/);
+      expect(() => loadConfig(new cdk.App({ context: { stage: 'staging', stagingVaultLegacySessionAuth: 'false' } }).node)).toThrow(/removed/);
+      // Whatever the stage, and the message names the key found.
+      expect(() => loadConfig(new cdk.App({ context: { stage: 'staging', prodVaultLegacySessionAuth: true } }).node)).toThrow(/^context prodVaultLegacySessionAuth: removed/);
+      expect(() => loadConfig(new cdk.App({ context: { stagingVaultLegacySessionAuth: true } }).node)).toThrow(/^context stagingVaultLegacySessionAuth: removed.*cdk\.json context/);
+      expect(() => loadConfig(new cdk.App({ context: { stage: 'staging' } }).node)).not.toThrow();
     });
   });
 
