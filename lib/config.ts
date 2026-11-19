@@ -648,10 +648,12 @@ export function loadConfig(node: Node): AppConfig {
   }
   // The legacy session switch-over is over: the app routes accept only signed
   // requests on every stage. A deploy that still passes the old context key
-  // stops here rather than deploy something other than what it asked for.
-  const legacyKey = `${stage}VaultLegacySessionAuth`;
-  if (node.tryGetContext(legacyKey) !== undefined || node.tryGetContext('vaultLegacySessionAuth') !== undefined) {
-    throw new Error(`context ${legacyKey}: removed; the app routes accept only signed requests (MEMBER-API 2.0.0). Drop the -c flag`);
+  // stops here rather than deploy something other than what it asked for,
+  // whichever stage's key it passes.
+  const legacyKeys = ['vaultLegacySessionAuth', ...new Set([...Object.keys(STAGE_ACCOUNTS), stage].map((s) => `${s}VaultLegacySessionAuth`))];
+  const legacyFound = legacyKeys.find((k) => node.tryGetContext(k) !== undefined);
+  if (legacyFound) {
+    throw new Error(`context ${legacyFound}: removed; the app routes accept only signed requests (MEMBER-API 2.0.0). Remove it from the -c flags or cdk.json context`);
   }
   const { timeScale, timeScaleFromRelease } = loadTimeScale(node, stage);
   const cancelIdKey = stage === PROD_STAGE ? 'recoveryCancelIdFromRelease' : `${stage}RecoveryCancelIdFromRelease`;

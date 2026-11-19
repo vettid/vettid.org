@@ -1014,6 +1014,9 @@ describe('VettidOrgMemberApiStack', () => {
       expect(() => loadConfig(new cdk.App({ context: { vaultLegacySessionAuth: true } }).node)).toThrow(/removed/);
       expect(() => loadConfig(new cdk.App({ context: { stage: 'staging', stagingVaultLegacySessionAuth: true } }).node)).toThrow(/removed/);
       expect(() => loadConfig(new cdk.App({ context: { stage: 'staging', stagingVaultLegacySessionAuth: 'false' } }).node)).toThrow(/removed/);
+      // Whatever the stage, and the message names the key found.
+      expect(() => loadConfig(new cdk.App({ context: { stage: 'staging', prodVaultLegacySessionAuth: true } }).node)).toThrow(/^context prodVaultLegacySessionAuth: removed/);
+      expect(() => loadConfig(new cdk.App({ context: { stagingVaultLegacySessionAuth: true } }).node)).toThrow(/^context stagingVaultLegacySessionAuth: removed.*cdk\.json context/);
       expect(() => loadConfig(new cdk.App({ context: { stage: 'staging' } }).node)).not.toThrow();
     });
   });
