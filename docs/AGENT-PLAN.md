@@ -1,9 +1,14 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.13
+version: 0.1.14
 date: 2026-11-20
 changelog:
+  - 0.1.14: 2026-11-20, with VAULT-MESSAGING 0.92.0 (owner decisions a,
+    GC #15273 and #15274). §4.3: a cached copy carries `withheld: true`,
+    which the connector treats as "ask again as a new request"; the
+    field-without-`value` rule stays as a backstop. AA8: a proxy's
+    approval shows `approval.pending`'s `proxy` member
   - 0.1.13: erratum, 2026-11-20, with VAULT-MESSAGING 0.91.1. §4.5
     "Marks learned outside the sets": as built in vettid-agent #43 (the
     lead's a2 in GC thread #996, replacing the 2026-11-05 rule), only a
@@ -561,8 +566,9 @@ connector.
   §8.2): a run or proxy answer without `value`, or an `item.get`
   answer with a field without `value`, means "ask again as a new
   request" (to be built: today the connector accepts such a field).
-  A withheld `notes` cannot be told from no notes (an open owner point
-  there).
+  (0.1.14) Every such copy carries `withheld: true` (VAULT-MESSAGING
+  0.92.0, owner decision a, GC #15273), which the connector checks
+  first; the missing `value` stays as a backstop.
 - **Held vault** (§3.6.3): `owner_check_required` for everything but
   `vault.status` and `device.session.end`; status statements lapse within
   `status_ttl`. The connector reports "Your vault is waiting for your
@@ -1265,7 +1271,7 @@ ones).
 | AA5 | **Approvals for agents**: approve (not only decline) `device.session.pending` with a changeable length, and `approval.pending` for an agent's `agent.request` (say which item, "read" or "use", and which agent) and for delegable owner types; replace "This version of the app does not pair desktops or agents, so it can only decline." | §6.8, §10.3 | decline only |
 | AA6 | **Feed and History**: details for `leash.*` (`leash.rate_limited`, `leash.referrals_limited`, `leash.agent.suspended`, `leash.item.read`, `leash.item.used`, summaries), which today open "Not available in this version of the app" (ANDROID-PLAN §4 feed table); the `agents` History category | §10.9, §10.11 | texts only |
 | AA7 | **How an agent may use an item** (AG13): per agent and included item, the ways (use always; run, proxy, "May be shown to agents", all off by default), the allowed programs and "Ask me before each run", (0.1.10) for each program the variables it may receive (none by default, adding one is a widening) and whether its fingerprint is recorded, with a way to forget it, the API hosts and the header (name and prefix); widening asks for the password (unlock window); `leash.item.set`, `.list`, `sync.event{leash.item.changed}`. Not started. Acceptance: each setting round-trips; widening without the unlock window asks for the password; narrowing does not; the reveal switch shows the history warning before it turns on | §10.11 | none |
-| AA8 | **Approvals for the new ways** (AG13): `approval.pending` for `item.run` (program, every argument unabridged, directory, how the secret is passed, extra variables, the `shell`, `inline_code` and `unbound_program` warnings; (0.1.10) the program's fingerprint, and for `program_unrecorded` that approving lets later runs of this exact file follow the item's settings, for `program_changed` the old fingerprint and path beside the new and that the program changed or moved), `item.proxy` (host, header name and prefix, length) and `item.get` (the history warning). Not started. Acceptance: screenshots for each kind and flag in the PR; a long or non-printable argument is shown in full, escaped, never cut | §6.8, §10.11 | none |
+| AA8 | **Approvals for the new ways** (AG13): `approval.pending` for `item.run` (program, every argument unabridged, directory, how the secret is passed, extra variables, the `shell`, `inline_code` and `unbound_program` warnings; (0.1.10) the program's fingerprint, and for `program_unrecorded` that approving lets later runs of this exact file follow the item's settings, for `program_changed` the old fingerprint and path beside the new and that the program changed or moved), `item.proxy` (host, header name and prefix, length; (0.1.14) from `approval.pending`'s `proxy` member, never the app's own copy of the settings) and `item.get` (the history warning). Not started. Acceptance: screenshots for each kind and flag in the PR; a long or non-printable argument is shown in full, escaped, never cut | §6.8, §10.11 | none |
 
 IOS-PLAN places devices and agents in its "Later" list, following
 Android; nothing here blocks on iOS.
