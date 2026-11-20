@@ -19181,9 +19181,11 @@ item's settings allow for its task:
   go in a header (`bad_request`); an `address` field cannot be used
   (`not_found`). The answer is `{item_id, field_id, value, header,
   prefix, host, expires_at}`. Recorded as `leash.item.proxy`.
-  (0.91.1) As built (vettid/vettid-vault#276; the first, third,
-  fourth and fifth points are the lead's calls, GC #14605, the others
-  the implementation's choices):
+  (0.91.1) As built (vettid/vettid-vault#276). The first, third,
+  fourth and fifth points rest on the lead's calls (GC #14605); their
+  details (the default port, no cut to a grant's expiry, an empty value
+  passing) and the second point are the implementation's choices; the
+  last is the owner's decision:
   - A `host` the item does not bind is `bad_request`, counted as
     refused (with its cooldown). Hosts compare with the default port
     made explicit (`api.example.com` is `api.example.com:443`); the
@@ -19213,9 +19215,11 @@ item's settings allow for its task:
   > Open (owner), 0.91.1: **`approval.pending` carries the held
   > request's body, not the header and prefix** the decision saw (they
   > are in the vault's held note only). An app shows them from its own
-  > copy of the item's settings, which may be older than the vault's;
-  > a header changed meanwhile is caught by the re-referral above,
-  > but the screen can show the old one. Option: carry `{host, header,
+  > copy of the item's settings, which may be older than the vault's.
+  > A header changed after the vault's decision is caught by the
+  > re-referral above; one changed before it, while the app's copy was
+  > already stale, is not, and the value goes out with a header the
+  > screen did not show. Option: carry `{host, header,
   > prefix}` from the note in `approval.pending` (spec, then vault and
   > apps). Not decided.
 - **The connector holds the value** for a run or a proxy. The vault
@@ -19312,16 +19316,16 @@ item's settings allow for its task:
     `luac`, `luarocks`, `luatex`, `lualatex`, `qemu-img`, `qemu-nbd`,
     `ubuntu-drivers` and names ending in `awk` that are not awks; and
     by a short name another program also uses, such as `arch`, `r`,
-    `nu`, `rc`, `es`, `dc`, `nc`, `at`, `wt`, `open`, `cdb` and
-    `swift`. The approval's warning for the flag (AGENT-PLAN §11:
+    `nu`, `rc`, `es`, `wt`, `open`, `cdb` and `swift`. The approval's warning for the flag (AGENT-PLAN §11:
     "This runs a shell") predates launchers and evaluators; its new
     wording is owed with the binding-screen warning
     (vettid/vettid.org#636). These endings and lists
     give flags only; a binding's key compares as above ("Program
     strings"). A `.cmd` or `.bat` run's argv passes through `cmd.exe`
     a second time, which this flag does not address: the connector
-    refuses any argument of such a run that holds a `cmd.exe`
-    metacharacter (owner decision b, GC #14880; AGENT-PLAN §4.9);
+    refuses such a program today, to be replaced by a refusal of any
+    argument holding a `cmd.exe` metacharacter (owner decision b, GC
+    #14880; AGENT-PLAN §4.9);
   - `inline_code`: it starts with `python`, `node`, `perl`, `ruby`,
     `php` or `osascript` and an argument is `-c`, `-e`, `-E`, `-r` or
     `--eval`;

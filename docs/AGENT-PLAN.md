@@ -746,7 +746,8 @@ allowed ways, so the agent can choose again.
   (`cmd.exe` parses its arguments again, so they can run other
   commands; (0.1.13) owner decision b, GC #14880: such a run is to be
   allowed, with any argument holding a `cmd.exe` metacharacter
-  (`&|<>^%!"` or a line break) refused, fail closed; until the
+  refused, fail closed (the question listed `&|<>^%!"` and line
+  breaks; the card settles the full set, `(` and `)` included); until the
   connector builds that check, in a card after A3.8a that also sets
   its message, the outright refusal stands), a name found with
   another extension than `.exe` or `.com`,
