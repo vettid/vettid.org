@@ -4,20 +4,25 @@ status: draft
 version: 0.1.13
 date: 2026-11-20
 changelog:
-  - 0.1.13: erratum, 2026-11-20, with VAULT-MESSAGING 0.91.1; text
-    only, no new rule. §4.5 "Marks learned outside the sets": as built
-    in vettid-agent #43 (the lead's later call), only a
+  - 0.1.13: erratum, 2026-11-20, with VAULT-MESSAGING 0.91.1. §4.5
+    "Marks learned outside the sets": as built in vettid-agent #43 (the
+    lead's a2 in GC thread #996, replacing the 2026-11-05 rule), only a
     `leash.status.get` answer marks a grant dead (`not_found`) or the
     agent suspended (`forbidden`); an `agent.request` `forbidden` names
     no grant and only asks for a fresh list at once. §7.1 AV1: the
     `Config.PersistBatch` follow-up (vettid-vault #283), which
     vettid-agent #46 uses; A2.2's save-before-ack rule says so. AV7 to
     AV11 carry "Built" notes with their vettid-vault pull requests
-    (AV9 to AV11 are not yet in a staging release). §4.9: the vault's
-    `shell` flag now covers launchers and evaluators, compares names
-    without `.cmd`, `.bat`, `.ps1` and `.com` endings too, and refuses
-    a `~` in a program's last element (owner decisions a, GC #14596,
-    and b, GC #14779 and #14880); one sentence after "the phone shows"
+    (AV9 to AV11 are not yet in a staging release); A3's status line
+    names A3.5 (#43). §4.9: the vault refuses a `~` in a program's last
+    element and flags launchers and evaluators (owner decision a, GC
+    #14596); and the owner's decision b on GC #14880 for the connector:
+    a `.cmd` or `.bat` run is to be allowed with `cmd.exe`
+    metacharacters in its arguments refused, fail closed, replacing
+    the outright refusal once built (a card after A3.8a). §4.3: an
+    `item.get` retransmission can now get a copy without values
+    (VAULT-MESSAGING 0.91.1, an open owner point); `item.run` and
+    `item.proxy` answers without `value` mean "ask again"
   - 0.1.12: erratum, 2026-11-19, with VAULT-MESSAGING 0.91.0 (AV9 and
     AV10 as built, vettid/vettid-vault#270 to #275). §4.9: a connector
     sends a cleaned absolute path for `program` and `cwd`: no trailing
@@ -549,7 +554,11 @@ connector.
   request_id, exp}` makes the connector wait until `exp` (+ 30 s) for
   the response instead of the usual 30 s (§8.1); a retransmission reuses
   the inner `id` (at most twice, §8.6), and the vault's dedupe answers
-  it.
+  it. (0.1.13) For `item.get`, `item.run` and `item.proxy` the dedupe's
+  answer is a copy without the secret value (VAULT-MESSAGING 0.91.1
+  §8.2): a run or proxy answer without `value` means "ask again as a
+  new request". For `item.get` the copy cannot yet be told from an
+  item whose fields hold no value (an open owner point there).
 - **Held vault** (§3.6.3): `owner_check_required` for everything but
   `vault.status` and `device.session.end`; status statements lapse within
   `status_ttl`. The connector reports "Your vault is waiting for your
@@ -603,8 +612,10 @@ The lead's rules for A3.5 (2026-11-05):
   marks that grant dead, and `forbidden` marks the agent suspended, so
   nothing is presented. An `agent.request` answer `forbidden` names no
   grant: it marks nothing and asks for a fresh list at once (not
-  waiting out the pause after failed lists), whose number says whether
-  the agent was suspended or a grant revoked. The connector keeps its counter `gen` for these marks only.
+  waiting out the pause after failed lists, except for a vault known
+  to be too old for `grant_seq`), whose number says whether the agent
+  was suspended or a grant revoked. The connector keeps its counter
+  `gen` for these marks only.
   A list answered before the revocation can carry a higher number than
   the connector's and would bring the grant back, so a mark is cleared
   only by the answer to a list this process sent after learning it,
@@ -726,11 +737,19 @@ allowed ways, so the agent can choose again.
   the phone shows. (0.1.13) The vault refuses a `program` with a `~`
   in its last element (`bad_request`, VAULT-MESSAGING 0.91.1: on Windows
   an 8.3 short name), and flags launchers and evaluators `shell`, so
-  they are always referred.
+  they are always referred; it compares names without `.exe`, `.com`,
+  `.cmd`, `.bat` or `.ps1` endings for that flag. A run answer without
+  `value` (the vault's cached copy, VAULT-MESSAGING §8.2) starts
+  nothing; the connector asks again as a new request.
 - **What is refused as a program** (2026-11-05; the owner's decisions
   and the lead's design notes): on Windows a `.bat` or `.cmd` file
   (`cmd.exe` parses its arguments again, so they can run other
-  commands), a name found with another extension than `.exe` or `.com`,
+  commands; (0.1.13) owner decision b, GC #14880: such a run is to be
+  allowed, with any argument holding a `cmd.exe` metacharacter
+  (`&|<>^%!"` or a line break) refused, fail closed; until the
+  connector builds that check, in a card after A3.8a that also sets
+  its message, the outright refusal stands), a name found with
+  another extension than `.exe` or `.com`,
   a UNC path, a stream name (`file:stream`), a drive that is not a
   fixed local NTFS or ReFS drive (owner decision 2026-11-05), and a junction or
   other reparse point anywhere in the resolved path; on every platform,
@@ -1129,7 +1148,7 @@ recorded as decided in the table and the changelog (0.1.4, 0.1.5).
 
 ### A3 — LEASH and the MCP server
 
-*Status: A3.1 #26, A3.2 #27, A3.3 #28, A3.4 #32 and A3.6 #36 are done (follow-ups #30, #34). A3.5 and A3.7 to A3.9 are not built; A3.8a is in progress (vettid-agent #42, draft).*
+*Status: A3.1 #26, A3.2 #27, A3.3 #28, A3.4 #32, A3.5 #43 (0.1.13) and A3.6 #36 are done (follow-ups #30, #34). A3.7 to A3.9 are not built; A3.8a is in progress (vettid-agent #42, draft).*
 
 | PR | Contents | Acceptance |
 |---|---|---|
@@ -1215,7 +1234,7 @@ AV7 and AV8 change the enclave and ship in a staging release.
 | AV6 | **The bound on access-session prompts** (VAULT-MESSAGING 0.40.0, §7.3 Q3): a `device.session.request` within 10 minutes of the device's last accepted one is answered `too_soon` (`{allowed_after}`), notifies no app and records no feed item, and does not replace a pending request; tests for each case. An enclave change: in the next staging release (0.1.9) **Built:** vettid-vault #109 (merged 2026-10-17); it ships in the staging releases from S17 on (S16 was not published). | §6.8, §10.3 | `hSessionRequest` (`vault/access.go`) notifies the apps and records a high-priority feed item for every request; only "newest replaces older" bounded them | — |
 | AV7 | **Grant-set sequence numbers** (VAULT-MESSAGING 0.41.0 §10.11). (0.1.13) **Built:** vettid-vault #210, with follow-ups #211 and #212 (merged 2026-11-10). One counter in the vault's sealed state; every change to an agent's grant set (a grant issued, replaced or revoked, a share rule of the agent set or deleted, a grant revoked with its connection, suspension, resumption, the set a pairing completes with) takes its next value; `leash.grant.updated` and the agent's `leash.grant.list` answer carry it as `grant_seq`; never reset, never reused; tests for each change and for a re-paired agent | §10.11, §8.4 | Without it, a `leash.grant.list` answer sent before a revocation can arrive after it and bring the grant back | A3.5 |
 | AV8 | **The device's own session in `vault.status`** (VAULT-MESSAGING 0.41.0 §10.2). (0.1.13) **Built:** vettid-vault #183 (merged 2026-11-02, VAULT-MESSAGING 0.82.5). `vault.status` to a desktop or agent also returns `session: {session_id, expires_at}` for the caller's own current access session, or `null`; never another device's | §10.2, §6.8 | An agent has no message that returns its own session; the connector probes with `leash.grant.list` (§4.3 step 4) | — |
-| AV9 | **Ways to use a secret: settings, catalog, reveal off** (VAULT-MESSAGING 0.42.0 §10.11). (0.1.13) **Built:** vettid-vault #270 to #272 (merged 2026-11-19), not yet in a staging release. `leash.item.set` and `.list`, the settings per agent and item, the unlock window to widen, deletion when the item is no longer included, `sync.event{leash.item.changed}`; `ways`, `programs` and `hosts` in `catalog`; `item.get` only with `reveal` (`way_not_allowed`, counted as refused) and always referred; `approval.pending{flags}`; every existing agent item starts with `["use"]`. (0.1.10, VAULT-MESSAGING 0.85.3) `programs` entries are `{program, sha256?, path?, env}`, no two matching one path: the pin (`sha256` and `path`) recorded by the vault, never the app, when the member approves a run flagged `program_unrecorded` or `program_changed`, and kept or dropped (never set) by `leash.item.set`; `env` names checked by the name rule, adding one widens; the catalog's entries with the pinned `path`, never the hash | §10.11, §10.12, §6.8 | `item.get` hands every included item's value to the agent's app, which may keep it in its history | A3.7 |
+| AV9 | **Ways to use a secret: settings, catalog, reveal off** (VAULT-MESSAGING 0.42.0 §10.11). (0.1.13) **Built:** vettid-vault #270 to #272 (merged 2026-11-19), with #278 (2026-11-20: a reveal's answer cached without its values), not yet in a staging release. `leash.item.set` and `.list`, the settings per agent and item, the unlock window to widen, deletion when the item is no longer included, `sync.event{leash.item.changed}`; `ways`, `programs` and `hosts` in `catalog`; `item.get` only with `reveal` (`way_not_allowed`, counted as refused) and always referred; `approval.pending{flags}`; every existing agent item starts with `["use"]`. (0.1.10, VAULT-MESSAGING 0.85.3) `programs` entries are `{program, sha256?, path?, env}`, no two matching one path: the pin (`sha256` and `path`) recorded by the vault, never the app, when the member approves a run flagged `program_unrecorded` or `program_changed`, and kept or dropped (never set) by `leash.item.set`; `env` names checked by the name rule, adding one widens; the catalog's entries with the pinned `path`, never the hash | §10.11, §10.12, §6.8 | `item.get` hands every included item's value to the agent's app, which may keep it in its history | A3.7 |
 | AV10 | **`item.run`** (§10.11). (0.1.13) **Built:** vettid-vault #273 to #275 (merged 2026-11-19), with #278 to #280 (2026-11-20: the answer cached without the value, launchers and evaluators flagged `shell`, no `~` in a program's last element), not yet in a staging release. Checks of `program`, `argv`, `cwd`, `how`, `name` and `env`; `programs` binding (`program_not_allowed`); referral when `each`, unbound, or a shell or interpreter; `flags` (`shell`, `inline_code`, `unbound_program`); (0.1.10, VAULT-MESSAGING 0.85.3) `sha256` checked against the matched entry, a missing pin, or a different hash or path, referred with `program_unrecorded` or `program_changed` (with `previous_sha256` and `previous_path`) and recorded on approval; a run whose settings changed while it waited decided again; `env` names only from the matched entry's `env`, none for an unbound item (`env_not_allowed`, counted as refused); the code-loading names refused; the windows and `uses` counted; `leash.item.run` audited and in the feed. Tests for each refusal, each flag and each referral case | §10.11 | The second way needs the value released to the connector for one approved command | A3.8a, A3.8b |
 | AV11 | **`item.proxy`** (§10.11). (0.1.13) **Built:** vettid-vault #276 (merged 2026-11-19), with #278 (the answer cached without the value), not yet in a staging release; as built in VAULT-MESSAGING 0.91.1. Always referred; `host` among the item's `hosts`; `seconds` bounded by 3,600 and the access session; a value that is not header-safe refused; `leash.item.proxy` audited and in the feed; tests for each | §10.11 | The third way needs the value released to the connector for one host and a bounded time | A3.9 |
 

@@ -32,16 +32,24 @@ changelog:
   - 0.91.1: 2026-11-20, erratum: AV11 and the owner's decisions on two
     of 0.91.0's open points, as built (vettid/vettid-vault#276, #278,
     #279, #280, merged). No vault release. A patch: no member or result
-    is added. §10.11: (1) `item.proxy` as built: a host the item does
-    not bind is `bad_request`, counted as refused; members not listed
-    are refused for this op only; at approval a host, header or prefix
-    that differs from the held note's is referred again; no access
-    session left is `session_required`, nothing read; a value that is
-    not header-safe is refused after the read, its use counted;
-    `expires_at` is cut to the access session only. (2) Owner decision
-    a (GC #14595): the cached copy of an `item.get`, `item.run` or
-    `item.proxy` answer carries no secret value; an ok answer without
-    `value` means handled, ask again, never an empty secret (§8.2).
+    is added. §10.11: (1) `item.proxy` as built (the lead's calls, GC
+    #14605, and the implementation's own choices, each named): a host
+    the item does not bind is `bad_request`, counted as refused;
+    members not listed are refused for this op only; at approval a
+    host, header or prefix that differs from the held note's is
+    referred again (§6.8 step 4 and `replaces` now say "run or
+    proxy"); no access session left is `session_required`, nothing
+    read; a value that is not header-safe is refused after the read,
+    its use counted; `expires_at` is cut to the access session only.
+    (2) Owner decision a (GC #14595): the cached copy of an
+    `item.get`, `item.run` or `item.proxy` answer carries no secret
+    value (§8.2). **Connectors must now handle:** an `item.run` or
+    `item.proxy` answer without `value` means "handled; ask again as
+    a new request", never an empty secret; a `program` with a `~` in
+    its last element is `bad_request`. Two new open owner points: a
+    cached `item.get` copy cannot be told from an item whose fields
+    hold no value, and `approval.pending` does not carry the proxy's
+    header and prefix.
     (3) Owner decision a (GC #14596) with b (GC #14779, GC #14880):
     launchers and evaluators are flagged `shell` and always referred
     like shells; the full name list, prefixes, the `awk` ending, the
@@ -12229,7 +12237,8 @@ device (`limit` beyond that):
    cached response.
 4. (0.91.0) **Referred again.** The handler of an approved agent
    request may refer it again (an `item.run` whose pin situation
-   changed while it waited, §10.11). The request is held again under a
+   changed while it waited, or (0.91.1) an `item.proxy` whose host,
+   header or prefix changed while it waited, §10.11). The request is held again under a
    new approval, with the same bytes that were approved and the new
    flags. The agent gets `approval.waiting` and no answer yet. The
    approval it ran on was decided once and is gone: deciding it again
@@ -12680,9 +12689,12 @@ would count, record or ask again. When its answer carries a secret value
 in the clear, it is sent with the value and cached as a copy **without**
 it (`call.start`, §10.10; `item.get`, `item.run` and `item.proxy`,
 §10.11). A retransmission gets that copy: it says the request was
-handled. An ok answer without `value` therefore means "handled; ask
-again for the value", never an empty secret; asking again is a new
-request, counted, decided and referred as usual.
+handled, without the value. To get the value, the requester asks again
+with a new request, counted, decided and referred as usual. A
+requester MUST NOT take such a copy for an empty secret. For `item.run`
+and `item.proxy`, whose answers always carry `value`, a missing `value`
+marks the copy; for `item.get` it does not yet (§10.11, "Open
+(owner)", 0.91.1).
 
 Both stores are flushed with the state changes before the ack (§8.3).
 
@@ -13727,7 +13739,7 @@ device belongs to the unlock it ends.
 | `device.session.granted` (to the device) | — | `{session_id, expires_at}` |
 | `device.session.end` (app: `{device_id}`; desktop, agent: `{}`, its own; (0.82.5) either may add `session_id`) | as left | `{}`; (0.82.5) also `{}`, with nothing changed, when `session_id` is not the device's current, unexpired session (a session suspended by the hold, §3.6.3, is current); `bad_request` for a `session_id` that is not a non-empty string (§6.8 "Ending") |
 | `device.session.ended` (to the device) | — | `{reason: "denied" \| "ended"}` |
-| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?, replaces?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history`, (0.85.3) `program_unrecorded`, `program_changed` (with `previous_sha256` and `previous_path`) (§10.11); (0.91.0) `replaces`: the approval a run referred again replaces (§6.8 step 4) |
+| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?, replaces?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history`, (0.85.3) `program_unrecorded`, `program_changed` (with `previous_sha256` and `previous_path`) (§10.11); (0.91.0) `replaces`: the approval a run or (0.91.1) a proxy referred again replaces (§6.8 step 4) |
 | `approval.waiting` (to the requester) | — | `{approval_id, request_id, exp}` |
 | `approval.decide` (app) | `{approval_id, approve: bool}` | `{result}`: `"ok"`, (0.91.0) `"referred"` when the request was referred again (§6.8), or the error code the held request was answered with |
 
@@ -18825,6 +18837,16 @@ agents (§3.5).
   retransmission (§8.2) as `{item_id, name, category, fields}`, each
   field without `value` (`field_id`, `label`, `kind`), and without
   `notes` (owner decision a, GC #14595).
+
+  > Open (owner), 0.91.1: **a cached `item.get` copy looks like an
+  > item whose fields hold no value.** An answer already leaves out
+  > `value` for a field with no stored value, so a connector that
+  > retransmits an `item.get` (AGENT-PLAN §4.3) and gets the copy
+  > passes its agent an item with empty fields, not "ask again".
+  > Options: a member in the copy that marks the values as withheld;
+  > or the connector asks again under a new id whenever a
+  > retransmission's answer has no value in any field. Not
+  > decided.
 - `item.use{item_id, field_id, action: "hmac-sha256", data}` uses a
   field without exposing it (LEASH pattern 2): HMAC-SHA-256 with the
   value's UTF-8 bytes as the key over `data` (1–16,384 bytes, base64),
@@ -19150,15 +19172,18 @@ item's settings allow for its task:
   `item.run` answer is cached as `{item_id, field_id}`, without
   `value` (§8.2): a retransmission of the same request id within 24
   hours gets that copy and is not handled again (no new audit line,
-  no pin; the pin stays as the first handling recorded it). The
-  connector then asks again for the value as a new request.
+  no pin; the pin stays as the first handling recorded it). A
+  connector that gets an `item.run` answer without `value` MUST NOT
+  start the program; it asks again as a new request.
 - `item.proxy{item_id, field_id, host, seconds?}`: `host` one of the
   item's `hosts`; `seconds` 60–3,600, default 900, cut to the access
   session's end. A value that is not visible ASCII and spaces cannot
   go in a header (`bad_request`); an `address` field cannot be used
   (`not_found`). The answer is `{item_id, field_id, value, header,
   prefix, host, expires_at}`. Recorded as `leash.item.proxy`.
-  (0.91.1) As built (vettid/vettid-vault#276):
+  (0.91.1) As built (vettid/vettid-vault#276; the first, third,
+  fourth and fifth points are the lead's calls, GC #14605, the others
+  the implementation's choices):
   - A `host` the item does not bind is `bad_request`, counted as
     refused (with its cooldown). Hosts compare with the default port
     made explicit (`api.example.com` is `api.example.com:443`); the
@@ -19168,7 +19193,11 @@ item's settings allow for its task:
   - The held approval keeps the host, header and prefix the decision
     saw. If any of them differs when an app approves (the header's
     case included), the request is referred again as a new approval
-    (`replaces`), which counts toward the hourly referral cap.
+    (`replaces`, §6.8 step 4), which counts toward the hourly
+    referral cap; past the cap it is `forbidden`. As for a run ("An
+    approval is judged again"), settings that now refuse the proxy
+    give that refusal at approval, never the value, and a held proxy
+    whose note is missing or damaged is `forbidden`.
   - With no access session left when it is answered, it is
     `session_required` and nothing is read. `expires_at` is now plus
     `seconds`, cut to the access session's end only (not to a grant's
@@ -19178,7 +19207,17 @@ item's settings allow for its task:
     as a proxy. An empty value passes and sends `prefix` alone; spaces
     at either end pass, though HTTP drops them.
   - (Owner decision a, GC #14595) The answer is cached for a
-    retransmission without `value` (§8.2).
+    retransmission without `value` (§8.2); a connector that gets an
+    answer without `value` opens no proxy and asks again.
+
+  > Open (owner), 0.91.1: **`approval.pending` carries the held
+  > request's body, not the header and prefix** the decision saw (they
+  > are in the vault's held note only). An app shows them from its own
+  > copy of the item's settings, which may be older than the vault's;
+  > a header changed meanwhile is caught by the re-referral above,
+  > but the screen can show the old one. Option: carry `{host, header,
+  > prefix}` from the note in `approval.pending` (spec, then vault and
+  > apps). Not decided.
 - **The connector holds the value** for a run or a proxy. The vault
   cannot see what it does with it: these ways trust the connector, the
   member's own program on the agent's computer, and not the agent. A
@@ -19267,17 +19306,22 @@ item's settings allow for its task:
     Windows `npm.cmd`, `yarn.cmd` and `pnpm.cmd` are npm, yarn and pnpm
     (owner decision b, GC #14880), while `npx.cmd` is `npx`. So
     `sqlite3` and `emacs` are flagged while `vim` and `sed` are not.
-    Some flagged names are not shells: `javac`, `javap`, `javadoc`,
-    `luac`, `luarocks`, any name ending in `awk`, `time`, `open`,
-    `arch`, `script`, `watch`, `screen`, `perf`, `r`, `nu`, `wt`, `nc`,
-    `sg`, `swift`, `rc`, `es`, `dc` and `at`. That only refers a run
-    that could have run unasked, so it fails safe; an app's warning
-    for the flag does not call these shells. These endings and lists
+    The flag also catches programs that are none of these, which only
+    refers a run that could have run unasked, so it fails safe: by
+    prefix or ending, such as `javac`, `javap`, `javadoc`, `javaws`,
+    `luac`, `luarocks`, `luatex`, `lualatex`, `qemu-img`, `qemu-nbd`,
+    `ubuntu-drivers` and names ending in `awk` that are not awks; and
+    by a short name another program also uses, such as `arch`, `r`,
+    `nu`, `rc`, `es`, `dc`, `nc`, `at`, `wt`, `open`, `cdb` and
+    `swift`. The approval's warning for the flag (AGENT-PLAN §11:
+    "This runs a shell") predates launchers and evaluators; its new
+    wording is owed with the binding-screen warning
+    (vettid/vettid.org#636). These endings and lists
     give flags only; a binding's key compares as above ("Program
     strings"). A `.cmd` or `.bat` run's argv passes through `cmd.exe`
-    a second time, which this flag does not address; AGENT-PLAN's
-    connector refuses such a program (§4.9, "What is refused as a
-    program");
+    a second time, which this flag does not address: the connector
+    refuses any argument of such a run that holds a `cmd.exe`
+    metacharacter (owner decision b, GC #14880; AGENT-PLAN §4.9);
   - `inline_code`: it starts with `python`, `node`, `perl`, `ruby`,
     `php` or `osascript` and an argument is `-c`, `-e`, `-E`, `-r` or
     `--eval`;
@@ -19291,7 +19335,8 @@ item's settings allow for its task:
     `previous_path`, the recorded ones. Approving it records the new
     ones; the old approval never covers a changed or moved file;
   - `history`: an `item.get`;
-  - (0.91.0) an approval of a run referred again (above) also carries
+  - (0.91.0) an approval of a run (0.91.1: or a proxy) referred again
+    (above) also carries
     `replaces`, the id of the approval it replaces.
 
   > Decided (0.91.1), from 0.91.0's open point on **shell and
