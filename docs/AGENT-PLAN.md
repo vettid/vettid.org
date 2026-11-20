@@ -1,9 +1,23 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.12
-date: 2026-11-19
+version: 0.1.13
+date: 2026-11-20
 changelog:
+  - 0.1.13: erratum, 2026-11-20, with VAULT-MESSAGING 0.91.1; text
+    only, no new rule. §4.5 "Marks learned outside the sets": as built
+    in vettid-agent #43 (the lead's later call), only a
+    `leash.status.get` answer marks a grant dead (`not_found`) or the
+    agent suspended (`forbidden`); an `agent.request` `forbidden` names
+    no grant and only asks for a fresh list at once. §7.1 AV1: the
+    `Config.PersistBatch` follow-up (vettid-vault #283), which
+    vettid-agent #46 uses; A2.2's save-before-ack rule says so. AV7 to
+    AV11 carry "Built" notes with their vettid-vault pull requests
+    (AV9 to AV11 are not yet in a staging release). §4.9: the vault's
+    `shell` flag now covers launchers and evaluators, compares names
+    without `.cmd`, `.bat`, `.ps1` and `.com` endings too, and refuses
+    a `~` in a program's last element (owner decisions a, GC #14596,
+    and b, GC #14779 and #14880); one sentence after "the phone shows"
   - 0.1.12: erratum, 2026-11-19, with VAULT-MESSAGING 0.91.0 (AV9 and
     AV10 as built, vettid/vettid-vault#270 to #275). §4.9: a connector
     sends a cleaned absolute path for `program` and `cwd`: no trailing
@@ -584,9 +598,13 @@ The lead's rules for A3.5 (2026-11-05):
   whether it comes in a list or an update, so it can add grants as well
   as remove them. A lower one is ignored. An equal one keeps the set and
   takes only the newer status statements.
-- **Marks learned outside the sets.** A `not_found` or `forbidden` for a
-  grant from `leash.status.get` or an `agent.request` answer marks it
-  dead. The connector keeps its counter `gen` for these marks only.
+- **Marks learned outside the sets.** (0.1.13, as built in
+  vettid-agent #43) Only a `leash.status.get` answer marks: `not_found`
+  marks that grant dead, and `forbidden` marks the agent suspended, so
+  nothing is presented. An `agent.request` answer `forbidden` names no
+  grant: it marks nothing and asks for a fresh list at once (not
+  waiting out the pause after failed lists), whose number says whether
+  the agent was suspended or a grant revoked. The connector keeps its counter `gen` for these marks only.
   A list answered before the revocation can carry a higher number than
   the connector's and would bring the grant back, so a mark is cleared
   only by the answer to a list this process sent after learning it,
@@ -705,7 +723,10 @@ allowed ways, so the agent can choose again.
   Windows `/`, `\` and a volume name (`C:`) each count as one (the
   lead's answer, 2026-11-05). Symbolic links are resolved; the result
   is the `program` the vault checks against the item's `programs` and
-  the phone shows.
+  the phone shows. (0.1.13) The vault refuses a `program` with a `~`
+  in its last element (`bad_request`, VAULT-MESSAGING 0.91.1: on Windows
+  an 8.3 short name), and flags launchers and evaluators `shell`, so
+  they are always referred.
 - **What is refused as a program** (2026-11-05; the owner's decisions
   and the lead's design notes): on Windows a `.bat` or `.cmd` file
   (`cmd.exe` parses its arguments again, so they can run other
@@ -1102,7 +1123,7 @@ recorded as decided in the table and the changelog (0.1.4, 0.1.5).
 | PR | Contents | Acceptance |
 |---|---|---|
 | A2.1 | `vettid-agent pair`: code parsing, name, `client.New` + `Pair`, SAS, wait for `device.paired` / `device.pair.rejected` / 10 minutes, state saved per step | `invite.json`, `handshake.json`; unit tests with recorded messages for paired, rejected and expired; texts of §11 |
-| A2.2 | `internal/vaultconn`, run inside `vettid-agent mcp`: one owning goroutine, long-poll collect, dispatch by `re`, save before ack, token and rekey maintenance, identity rotation, `device.unlinked` and `token_revoked` (AG12) | Unit tests: a crash after save and before ack replays without harm; a crash before save does not lose a rekey (the batch is collected again); `device.unlinked` wipes; `token_revoked` alone stops without wiping |
+| A2.2 | `internal/vaultconn`, run inside `vettid-agent mcp`: one owning goroutine, long-poll collect, dispatch by `re`, save before ack (0.1.13: through vettid-vault's `Config.PersistBatch`, AV1, which hands the save the batch's unsaved responses and events, so the state derived from them is in the same write; vettid-agent #46), token and rekey maintenance, identity rotation, `device.unlinked` and `token_revoked` (AG12) | Unit tests: a crash after save and before ack replays without harm; a crash before save does not lose a rekey (the batch is collected again); `device.unlinked` wipes; `token_revoked` alone stops without wiping |
 | A2.3 | `internal/access`: AG8's policy, `device.session.request`, `.granted`, `.ended`, expiry, `session_required`, `owner_check_required`; `status` | Unit tests for every branch of AG8 (one outstanding, 10-minute quiet period after a denial, 6 an hour) |
 | A2.4 | `internal/devstack` harness (build tag `devstack`): find or start one dev stack, `vaultctl` as the app (§4.8), the relay mapping; `make devstack-test` running with `-p 1` | **Exit A2 test**: enroll a test vault with `vaultctl`, create and unlock its credential, pair the connector with `session_seconds: 600`, compare the SAS on both sides, see `vault.status` answered, end the session from the app, request a new one and approve it, unlink, see the connector wipe itself. A rejected pairing ends with "Rejected on your phone" |
 
@@ -1186,17 +1207,17 @@ AV7 and AV8 change the enclave and ship in a staging release.
 
 | # | Task | Spec | Why | Blocks |
 |---|---|---|---|---|
-| AV1 | **Save before acknowledging**: a `Config.Persist func(state []byte) error` called after a collected batch is handled and before its acks (an error leaves the batch unacknowledged, to be collected again) (0.1.9) **Built:** vettid-vault #111 and #112 (merged 2026-10-18). | §8.3 (the vault's rule; the same reasoning for a device) | `client.Poll` acks each message right after handling it; a crash before the caller's `Save` loses a rekey, a token or `device.paired` that the relay will not deliver again | — (workaround in A2.2) |
+| AV1 | **Save before acknowledging**: a `Config.Persist func(state []byte) error` called after a collected batch is handled and before its acks (an error leaves the batch unacknowledged, to be collected again) (0.1.9) **Built:** vettid-vault #111 and #112 (merged 2026-10-18). (0.1.13) **Follow-up built:** vettid-vault #283 (merged 2026-11-20), `Config.PersistBatch func(state []byte, batch []*envelope.Inner) error`, used instead of `Persist` when set: the same contract, and also given the responses and events handled and not yet saved, oldest first (again after a failed save). Under `Persist` the connector saw a batch's events only after the ack, so state it derives from them (grant sets, `device.session.granted` and `.ended`, `device.unlinked`) could be lost by a crash in between; vettid-agent #46 saves through it. | §8.3 (the vault's rule; the same reasoning for a device) | `client.Poll` acks each message right after handling it; a crash before the caller's `Save` loses a rekey, a token or `device.paired` that the relay will not deliver again | — (workaround in A2.2) |
 | AV2 | **One collecting loop**: `(*Device).Run(ctx)` collects (long poll or WebSocket) and dispatches; `Request`, `Op`, `WaitEvent` and `LeashPresent` wait on it when it runs, instead of collecting themselves (0.1.9) **Built:** vettid-vault #114 (merged 2026-10-18). | §8.1 | Concurrent tool calls in a daemon each collect today, and whichever collects first consumes the others' messages into the shared buffer | — (workaround in A2.2) |
 | AV3 | **Approvals and retries**: `AwaitResponse` extends its wait to `approval.waiting`'s `exp` for its request and exposes the `approval_id`; an optional application retry reusing the inner id, at most twice | §6.8 step 1, §8.1, §8.6 | Today a referred request times out on the caller's deadline and is never retransmitted | — |
 | AV4 | **Wallet out of the import graph**: move `client/wallet.go` (and its `vms/btc` use) to `client/wallet` (0.1.9) **Built:** vettid-vault #110 (merged 2026-10-18). | — | Importers of `client` compile btcsuite and decred secp256k1 for nothing | — |
 | AV5 | **Dev stack for a non-phone app**: document (README "Local dev stack") how `vaultctl` enrolls a second test vault, creates and unlocks its credential and pairs an agent with grants; add a control endpoint only if a step cannot be done with `vaultctl` (0.1.9) **Built:** vettid-vault #116 (merged 2026-10-18). | §6.7, §10.11 | The connector's integration tests need a member's app that can sign grants; the dev stack's peer has no credential | A2.4 |
 | AV6 | **The bound on access-session prompts** (VAULT-MESSAGING 0.40.0, §7.3 Q3): a `device.session.request` within 10 minutes of the device's last accepted one is answered `too_soon` (`{allowed_after}`), notifies no app and records no feed item, and does not replace a pending request; tests for each case. An enclave change: in the next staging release (0.1.9) **Built:** vettid-vault #109 (merged 2026-10-17); it ships in the staging releases from S17 on (S16 was not published). | §6.8, §10.3 | `hSessionRequest` (`vault/access.go`) notifies the apps and records a high-priority feed item for every request; only "newest replaces older" bounded them | — |
-| AV7 | **Grant-set sequence numbers** (VAULT-MESSAGING 0.41.0 §10.11). **Not started.** One counter in the vault's sealed state; every change to an agent's grant set (a grant issued, replaced or revoked, a share rule of the agent set or deleted, a grant revoked with its connection, suspension, resumption, the set a pairing completes with) takes its next value; `leash.grant.updated` and the agent's `leash.grant.list` answer carry it as `grant_seq`; never reset, never reused; tests for each change and for a re-paired agent | §10.11, §8.4 | Without it, a `leash.grant.list` answer sent before a revocation can arrive after it and bring the grant back | A3.5 |
-| AV8 | **The device's own session in `vault.status`** (VAULT-MESSAGING 0.41.0 §10.2). **Not started.** `vault.status` to a desktop or agent also returns `session: {session_id, expires_at}` for the caller's own current access session, or `null`; never another device's | §10.2, §6.8 | An agent has no message that returns its own session; the connector probes with `leash.grant.list` (§4.3 step 4) | — |
-| AV9 | **Ways to use a secret: settings, catalog, reveal off** (VAULT-MESSAGING 0.42.0 §10.11). **Not started.** `leash.item.set` and `.list`, the settings per agent and item, the unlock window to widen, deletion when the item is no longer included, `sync.event{leash.item.changed}`; `ways`, `programs` and `hosts` in `catalog`; `item.get` only with `reveal` (`way_not_allowed`, counted as refused) and always referred; `approval.pending{flags}`; every existing agent item starts with `["use"]`. (0.1.10, VAULT-MESSAGING 0.85.3) `programs` entries are `{program, sha256?, path?, env}`, no two matching one path: the pin (`sha256` and `path`) recorded by the vault, never the app, when the member approves a run flagged `program_unrecorded` or `program_changed`, and kept or dropped (never set) by `leash.item.set`; `env` names checked by the name rule, adding one widens; the catalog's entries with the pinned `path`, never the hash | §10.11, §10.12, §6.8 | `item.get` hands every included item's value to the agent's app, which may keep it in its history | A3.7 |
-| AV10 | **`item.run`** (§10.11). **Not started.** Checks of `program`, `argv`, `cwd`, `how`, `name` and `env`; `programs` binding (`program_not_allowed`); referral when `each`, unbound, or a shell or interpreter; `flags` (`shell`, `inline_code`, `unbound_program`); (0.1.10, VAULT-MESSAGING 0.85.3) `sha256` checked against the matched entry, a missing pin, or a different hash or path, referred with `program_unrecorded` or `program_changed` (with `previous_sha256` and `previous_path`) and recorded on approval; a run whose settings changed while it waited decided again; `env` names only from the matched entry's `env`, none for an unbound item (`env_not_allowed`, counted as refused); the code-loading names refused; the windows and `uses` counted; `leash.item.run` audited and in the feed. Tests for each refusal, each flag and each referral case | §10.11 | The second way needs the value released to the connector for one approved command | A3.8a, A3.8b |
-| AV11 | **`item.proxy`** (§10.11). **Not started.** Always referred; `host` among the item's `hosts`; `seconds` bounded by 3,600 and the access session; a value that is not header-safe refused; `leash.item.proxy` audited and in the feed; tests for each | §10.11 | The third way needs the value released to the connector for one host and a bounded time | A3.9 |
+| AV7 | **Grant-set sequence numbers** (VAULT-MESSAGING 0.41.0 §10.11). (0.1.13) **Built:** vettid-vault #210, with follow-ups #211 and #212 (merged 2026-11-10). One counter in the vault's sealed state; every change to an agent's grant set (a grant issued, replaced or revoked, a share rule of the agent set or deleted, a grant revoked with its connection, suspension, resumption, the set a pairing completes with) takes its next value; `leash.grant.updated` and the agent's `leash.grant.list` answer carry it as `grant_seq`; never reset, never reused; tests for each change and for a re-paired agent | §10.11, §8.4 | Without it, a `leash.grant.list` answer sent before a revocation can arrive after it and bring the grant back | A3.5 |
+| AV8 | **The device's own session in `vault.status`** (VAULT-MESSAGING 0.41.0 §10.2). (0.1.13) **Built:** vettid-vault #183 (merged 2026-11-02, VAULT-MESSAGING 0.82.5). `vault.status` to a desktop or agent also returns `session: {session_id, expires_at}` for the caller's own current access session, or `null`; never another device's | §10.2, §6.8 | An agent has no message that returns its own session; the connector probes with `leash.grant.list` (§4.3 step 4) | — |
+| AV9 | **Ways to use a secret: settings, catalog, reveal off** (VAULT-MESSAGING 0.42.0 §10.11). (0.1.13) **Built:** vettid-vault #270 to #272 (merged 2026-11-19), not yet in a staging release. `leash.item.set` and `.list`, the settings per agent and item, the unlock window to widen, deletion when the item is no longer included, `sync.event{leash.item.changed}`; `ways`, `programs` and `hosts` in `catalog`; `item.get` only with `reveal` (`way_not_allowed`, counted as refused) and always referred; `approval.pending{flags}`; every existing agent item starts with `["use"]`. (0.1.10, VAULT-MESSAGING 0.85.3) `programs` entries are `{program, sha256?, path?, env}`, no two matching one path: the pin (`sha256` and `path`) recorded by the vault, never the app, when the member approves a run flagged `program_unrecorded` or `program_changed`, and kept or dropped (never set) by `leash.item.set`; `env` names checked by the name rule, adding one widens; the catalog's entries with the pinned `path`, never the hash | §10.11, §10.12, §6.8 | `item.get` hands every included item's value to the agent's app, which may keep it in its history | A3.7 |
+| AV10 | **`item.run`** (§10.11). (0.1.13) **Built:** vettid-vault #273 to #275 (merged 2026-11-19), with #278 to #280 (2026-11-20: the answer cached without the value, launchers and evaluators flagged `shell`, no `~` in a program's last element), not yet in a staging release. Checks of `program`, `argv`, `cwd`, `how`, `name` and `env`; `programs` binding (`program_not_allowed`); referral when `each`, unbound, or a shell or interpreter; `flags` (`shell`, `inline_code`, `unbound_program`); (0.1.10, VAULT-MESSAGING 0.85.3) `sha256` checked against the matched entry, a missing pin, or a different hash or path, referred with `program_unrecorded` or `program_changed` (with `previous_sha256` and `previous_path`) and recorded on approval; a run whose settings changed while it waited decided again; `env` names only from the matched entry's `env`, none for an unbound item (`env_not_allowed`, counted as refused); the code-loading names refused; the windows and `uses` counted; `leash.item.run` audited and in the feed. Tests for each refusal, each flag and each referral case | §10.11 | The second way needs the value released to the connector for one approved command | A3.8a, A3.8b |
+| AV11 | **`item.proxy`** (§10.11). (0.1.13) **Built:** vettid-vault #276 (merged 2026-11-19), with #278 (the answer cached without the value), not yet in a staging release; as built in VAULT-MESSAGING 0.91.1. Always referred; `host` among the item's `hosts`; `seconds` bounded by 3,600 and the access session; a value that is not header-safe refused; `leash.item.proxy` audited and in the feed; tests for each | §10.11 | The third way needs the value released to the connector for one host and a bounded time | A3.9 |
 
 ### 7.2 vettid-android (ANDROID-PLAN "Devices & agents", owner approval)
 
