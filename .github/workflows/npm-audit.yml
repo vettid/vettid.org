@@ -1,0 +1,90 @@
+# npm audit (docs/VULN-SCANNING.md).
+#
+# Audits the whole lockfile, devDependencies included: the Lambda code is
+# bundled by esbuild with externalModules: [] (lib/constructs/api-function.ts),
+# and its packages (@aws-sdk/*, pdf-lib, aws-jwt-verify) are devDependencies,
+# so --omit=dev would skip what ships. Fails on a high or critical advisory;
+# moderate and low are listed in the job summary.
+#
+# Weekly (and on demand) on master: a failure opens or updates the issue
+# "npm audit: high or critical advisory"; a clean run closes it.
+#
+# Actions are pinned by commit SHA (tag in the comment).
+name: npm audit
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  schedule:
+    - cron: '41 6 * * 1' # Mondays, 06:41 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  audit:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write # the weekly issue; unused on pull requests
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # npm audit reads package-lock.json; no install needed.
+      - name: Audit
+        id: audit
+        run: |
+          set +e
+          npm audit --json > audit.json
+          set -e
+          {
+            echo '## npm audit (all dependencies)'
+            echo
+            echo '| Package | Severity | Advisory |'
+            echo '|---|---|---|'
+            jq -r '.vulnerabilities // {} | to_entries[]
+              | .key as $n | .value.severity as $s
+              | [.value.via[] | objects | "[\(.title)](\(.url))"] as $v
+              | select($v | length > 0)
+              | "| \($n) | \($s) | \($v | join("<br>")) |"' audit.json
+            echo
+            jq -r '"Totals: " + (.metadata.vulnerabilities | to_entries | map("\(.key) \(.value)") | join(", "))' audit.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          high=$(jq '.metadata.vulnerabilities.high + .metadata.vulnerabilities.critical' audit.json)
+          echo "high=$high" >> "$GITHUB_OUTPUT"
+          if [ "$high" -gt 0 ]; then
+            echo "::error::npm audit: $high high or critical advisories (see the job summary)"
+            exit 1
+          fi
+
+      - name: Weekly issue
+        if: always() && github.ref == 'refs/heads/master' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HIGH: ${{ steps.audit.outputs.high }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='npm audit: high or critical advisory'
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number,title \
+            --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -z "$HIGH" ]; then
+            echo "::error::the audit step produced no result"
+            exit 1
+          elif [ "$HIGH" -gt 0 ]; then
+            body="npm audit found $HIGH high or critical advisories on master: $RUN_URL (the job summary lists them)."
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body "$body"
+            else
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+            fi
+          elif [ -n "$open" ]; then
+            gh issue close "$open" --repo "$GITHUB_REPOSITORY" --comment "Clean on master: $RUN_URL"
+          fi
