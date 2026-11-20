@@ -12248,7 +12248,7 @@ device (`limit` beyond that):
    `replaces`, the id of the approval it replaces. A re-referral is
    audited `approval.referred` (`device_id` = the requester, `ref` =
    the old approval's id) in place of `approval.granted`, after the
-   run's own audit lines. **Order.** On an approval, other devices get
+   request's own audit lines. **Order.** On an approval, other devices get
    `sync.event{approval.decided}` after the answer to the requester,
    and `approval.granted` follows the executed request's own audit
    lines. On a re-referral there is no answer: every app, the deciding
