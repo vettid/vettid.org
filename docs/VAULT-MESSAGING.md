@@ -44,12 +44,13 @@ changelog:
     (2) Owner decision a (GC #14595): the cached copy of an
     `item.get`, `item.run` or `item.proxy` answer carries no secret
     value (§8.2). **Connectors must now handle:** an `item.run` or
-    `item.proxy` answer without `value` means "handled; ask again as
+    `item.proxy` answer without `value`, or an agent's `item.get`
+    answer with a field without `value`, means "handled; ask again as
     a new request", never an empty secret; a `program` with a `~` in
     its last element is `bad_request`. Two new open owner points: a
-    cached `item.get` copy cannot be told from an item whose fields
-    hold no value, and `approval.pending` does not carry the proxy's
-    header and prefix.
+    cached `item.get` copy's withheld `notes` cannot be told from no
+    notes, and `approval.pending` does not carry the proxy's header
+    and prefix.
     (3) Owner decision a (GC #14596) with b (GC #14779, GC #14880):
     launchers and evaluators are flagged `shell` and always referred
     like shells; the full name list, prefixes, the `awk` ending, the
@@ -12240,7 +12241,7 @@ device (`limit` beyond that):
    changed while it waited, or (0.91.1) an `item.proxy` whose host,
    header or prefix changed while it waited, §10.11). The request is held again under a
    new approval, with the same bytes that were approved and the new
-   flags. The agent gets `approval.waiting` and no answer yet. The
+   flags, if any. The agent gets `approval.waiting` and no answer yet. The
    approval it ran on was decided once and is gone: deciding it again
    is `not_found`. `approval.decide` answers `{result: "referred"}`.
    The new `approval.pending` and its `pending.list` entry carry
@@ -12691,10 +12692,11 @@ it (`call.start`, §10.10; `item.get`, `item.run` and `item.proxy`,
 §10.11). A retransmission gets that copy: it says the request was
 handled, without the value. To get the value, the requester asks again
 with a new request, counted, decided and referred as usual. A
-requester MUST NOT take such a copy for an empty secret. For `item.run`
-and `item.proxy`, whose answers always carry `value`, a missing `value`
-marks the copy; for `item.get` it does not yet (§10.11, "Open
-(owner)", 0.91.1).
+requester MUST NOT take such a copy for an empty secret. `item.run`
+and `item.proxy` answers always carry `value`, and so does every field
+of an agent's `item.get` answer (agents never read a critical item), so
+a missing `value` marks the copy; a withheld `notes` does not (§10.11,
+"Open (owner)", 0.91.1).
 
 Both stores are flushed with the state changes before the ack (§8.3).
 
@@ -18838,14 +18840,21 @@ agents (§3.5).
   field without `value` (`field_id`, `label`, `kind`), and without
   `notes` (owner decision a, GC #14595).
 
-  > Open (owner), 0.91.1: **a cached `item.get` copy looks like an
-  > item whose fields hold no value.** An answer already leaves out
-  > `value` for a field with no stored value, so a connector that
-  > retransmits an `item.get` (AGENT-PLAN §4.3) and gets the copy
-  > passes its agent an item with empty fields, not "ask again".
-  > Options: a member in the copy that marks the values as withheld;
-  > or the connector asks again under a new id whenever a
-  > retransmission's answer has no value in any field. Not
+  An agent's `item.get` answer carries `value` for every field it
+  lists: agents never read a critical item (the only kind whose values
+  the vault leaves out), and every other field holds a value (`""` or
+  `{}` at least). So a field without `value` marks the cached copy, and
+  a connector MUST ask again as a new request, never pass the item on
+  with that field empty.
+
+  > Open (owner), 0.91.1: **a cached `item.get` copy's withheld
+  > `notes` cannot be told from no notes.** `notes` is sent only for a
+  > whole-item read of an item with notes, and the copy always drops
+  > it. An item with fields is still marked by its fields; an item
+  > with notes and no fields gives a copy with nothing to mark it, and
+  > a connector would pass its agent an empty item. Options: a member
+  > in the copy that marks values as withheld; or leave it (a
+  > notes-only item is rare, and the agent can ask again). Not
   > decided.
 - `item.use{item_id, field_id, action: "hmac-sha256", data}` uses a
   field without exposing it (LEASH pattern 2): HMAC-SHA-256 with the
@@ -19181,11 +19190,11 @@ item's settings allow for its task:
   go in a header (`bad_request`); an `address` field cannot be used
   (`not_found`). The answer is `{item_id, field_id, value, header,
   prefix, host, expires_at}`. Recorded as `leash.item.proxy`.
-  (0.91.1) As built (vettid/vettid-vault#276). The first, third,
-  fourth and fifth points rest on the lead's calls (GC #14605); their
-  details (the default port, no cut to a grant's expiry, an empty value
-  passing) and the second point are the implementation's choices; the
-  last is the owner's decision:
+  (0.91.1) As built (vettid/vettid-vault#276). The lead's calls (GC
+  #14605) are the unbound host, the re-referral on a changed note,
+  `session_required`, and the header-safe check after the read; the
+  last point is owner decision a (GC #14595); the rest are the
+  implementation's choices:
   - A `host` the item does not bind is `bad_request`, counted as
     refused (with its cooldown). Hosts compare with the default port
     made explicit (`api.example.com` is `api.example.com:443`); the
@@ -19312,8 +19321,7 @@ item's settings allow for its task:
     `sqlite3` and `emacs` are flagged while `vim` and `sed` are not.
     The flag also catches programs that are none of these, which only
     refers a run that could have run unasked, so it fails safe: by
-    prefix or ending, such as `javac`, `javap`, `javadoc`, `javaws`,
-    `luac`, `luarocks`, `luatex`, `lualatex`, `qemu-img`, `qemu-nbd`,
+    prefix or ending, such as `javac`, `javap`, `javadoc`, `luac`, `luarocks`, `luatex`, `lualatex`, `qemu-img`, `qemu-nbd`,
     `ubuntu-drivers` and names ending in `awk` that are not awks; and
     by a short name another program also uses, such as `arch`, `r`,
     `nu`, `rc`, `es`, `wt`, `open`, `cdb` and `swift`. The approval's warning for the flag (AGENT-PLAN §11:

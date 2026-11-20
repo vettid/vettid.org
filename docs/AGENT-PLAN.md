@@ -21,8 +21,9 @@ changelog:
     metacharacters in its arguments refused, fail closed, replacing
     the outright refusal once built (a card after A3.8a). §4.3: an
     `item.get` retransmission can now get a copy without values
-    (VAULT-MESSAGING 0.91.1, an open owner point); `item.run` and
-    `item.proxy` answers without `value` mean "ask again"
+    (VAULT-MESSAGING 0.91.1; withheld notes an open owner point); `item.run` and
+    `item.proxy` answers without `value`, and an `item.get` field
+    without `value`, mean "ask again"
   - 0.1.12: erratum, 2026-11-19, with VAULT-MESSAGING 0.91.0 (AV9 and
     AV10 as built, vettid/vettid-vault#270 to #275). §4.9: a connector
     sends a cleaned absolute path for `program` and `cwd`: no trailing
@@ -556,9 +557,11 @@ connector.
   the inner `id` (at most twice, §8.6), and the vault's dedupe answers
   it. (0.1.13) For `item.get`, `item.run` and `item.proxy` the dedupe's
   answer is a copy without the secret value (VAULT-MESSAGING 0.91.1
-  §8.2): a run or proxy answer without `value` means "ask again as a
-  new request". For `item.get` the copy cannot yet be told from an
-  item whose fields hold no value (an open owner point there).
+  §8.2): a run or proxy answer without `value`, or an `item.get`
+  answer with a field without `value`, means "ask again as a new
+  request" (to be built: today the connector accepts such a field).
+  A withheld `notes` cannot be told from no notes (an open owner point
+  there).
 - **Held vault** (§3.6.3): `owner_check_required` for everything but
   `vault.status` and `device.session.end`; status statements lapse within
   `status_ttl`. The connector reports "Your vault is waiting for your
