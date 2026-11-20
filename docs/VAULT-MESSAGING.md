@@ -19256,11 +19256,11 @@ item's settings allow for its task:
   approval without a well-formed `proxy` is one the app cannot show in
   full: it offers Deny only (the lead's call with this change, matching
   ANDROID-PLAN's rule for approvals an app cannot show). (Before, an
-  app's copy that was already stale when the vault decided could show one header while the value
-  went out with another; a change after the decision was, and still
-  is, referred again.) A request referred again carries the new
-  note's values (§6.8 step 4). `pending.list` carries the same
-  member.
+  app's copy that was already stale when the vault decided could show
+  one header while the value went out with another; a change after the
+  decision was, and still is, referred again.) A request referred again
+  carries the new note's values (§6.8 step 4). `pending.list` carries
+  the same member.
 - **The connector holds the value** for a run or a proxy. The vault
   cannot see what it does with it: these ways trust the connector, the
   member's own program on the agent's computer, and not the agent. A
@@ -19418,7 +19418,8 @@ item's settings allow for its task:
   warning for each flag; for an `item.proxy`: the agent, the item and
   field, the host, the header's name and prefix (never the value),
   (0.92.0) these three taken from `proxy`, and the length (`seconds`
-  from the body, default 900); for an `item.get`: the agent, the item,
+  from the body, default 900; the vault may cut it to the access
+  session's end); for an `item.get`: the agent, the item,
   the fields and
   that the agent's app may keep the value in its history.
 
