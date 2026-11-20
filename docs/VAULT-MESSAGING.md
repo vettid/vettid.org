@@ -12239,9 +12239,9 @@ device (`limit` beyond that):
 4. (0.91.0) **Referred again.** The handler of an approved agent
    request may refer it again (an `item.run` whose pin situation
    changed while it waited, or (0.91.1) an `item.proxy` whose host,
-   header or prefix changed while it waited, §10.11). The request is held again under a
-   new approval, with the same bytes that were approved and the new
-   flags, if any. The agent gets `approval.waiting` and no answer yet. The
+   header or prefix changed while it waited, §10.11). The request is
+   held again under a new approval, with the same bytes that were
+   approved and the new flags, if any. The agent gets `approval.waiting` and no answer yet. The
    approval it ran on was decided once and is gone: deciding it again
    is `not_found`. `approval.decide` answers `{result: "referred"}`.
    The new `approval.pending` and its `pending.list` entry carry
@@ -18944,8 +18944,8 @@ item's settings allow for its task:
     shell checks below. A `~` earlier in the path (`C:\PROGRA~1\…`) is
     accepted. Any other Windows alias of a path (an 8.3 name earlier in
     the path, case) only makes a run differ from its entry or pin, so
-    it is referred or refused, never matched. For the no-two-match rule above, a
-    drive path's `/` counts as `\`, and the trailing dots and spaces of
+    it is referred or refused, never matched. For the no-two-match
+    rule above, a drive path's `/` counts as `\`, and the trailing dots and spaces of
     the last element are dropped. The shell and interpreter checks
     (below) compare the last element as the `shell` flag says (0.91.1:
     without case, without any number of final `.exe`, `.com`, `.cmd`,
@@ -19321,17 +19321,19 @@ item's settings allow for its task:
     `sqlite3` and `emacs` are flagged while `vim` and `sed` are not.
     The flag also catches programs that are none of these, which only
     refers a run that could have run unasked, so it fails safe: by
-    prefix or ending, such as `javac`, `javap`, `javadoc`, `luac`, `luarocks`, `luatex`, `lualatex`, `qemu-img`, `qemu-nbd`,
+    prefix or ending, such as `javac`, `javap`, `javadoc`, `luac`,
+    `luarocks`, `luatex`, `lualatex`, `qemu-img`, `qemu-nbd`,
     `ubuntu-drivers` and names ending in `awk` that are not awks; and
     by a short name another program also uses, such as `arch`, `r`,
-    `nu`, `rc`, `es`, `wt`, `open`, `cdb` and `swift`. The approval's warning for the flag (AGENT-PLAN §11:
+    `nu`, `rc`, `es`, `wt`, `open`, `cdb` and `swift`. The approval's
+    warning for the flag (AGENT-PLAN §11:
     "This runs a shell") predates launchers and evaluators; its new
     wording is owed with the binding-screen warning
     (vettid/vettid.org#636). These endings and lists
     give flags only; a binding's key compares as above ("Program
     strings"). A `.cmd` or `.bat` run's argv passes through `cmd.exe`
-    a second time, which this flag does not address: the connector
-    refuses such a program today, to be replaced by a refusal of any
+    a second time, which this flag does not address: by AGENT-PLAN
+    §4.9 the connector refuses such a program today, to be replaced by a refusal of any
     argument holding a `cmd.exe` metacharacter (owner decision b, GC
     #14880; AGENT-PLAN §4.9);
   - `inline_code`: it starts with `python`, `node`, `perl`, `ruby`,

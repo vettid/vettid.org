@@ -21,7 +21,8 @@ changelog:
     metacharacters in its arguments refused, fail closed, replacing
     the outright refusal once built (a card after A3.8a). §4.3: an
     `item.get` retransmission can now get a copy without values
-    (VAULT-MESSAGING 0.91.1; withheld notes an open owner point); `item.run` and
+    (VAULT-MESSAGING 0.91.1; withheld notes an open owner point);
+    `item.run` and
     `item.proxy` answers without `value`, and an `item.get` field
     without `value`, mean "ask again"
   - 0.1.12: erratum, 2026-11-19, with VAULT-MESSAGING 0.91.0 (AV9 and
@@ -750,8 +751,8 @@ allowed ways, so the agent can choose again.
   commands; (0.1.13) owner decision b, GC #14880: such a run is to be
   allowed, with any argument holding a `cmd.exe` metacharacter
   refused, fail closed (the question listed `&|<>^%!"` and line
-  breaks; the card settles the full set, `(` and `)` included); until the
-  connector builds that check, in a card after A3.8a that also sets
+  breaks; the card settles the full set, `(` and `)` included);
+  until the connector builds that check, in a card after A3.8a that also sets
   its message, the outright refusal stands), a name found with
   another extension than `.exe` or `.com`,
   a UNC path, a stream name (`file:stream`), a drive that is not a
