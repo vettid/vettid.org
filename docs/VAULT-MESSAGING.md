@@ -38,8 +38,9 @@ changelog:
     as a new request" (§8.2, §10.11). (2) Owner decision a, GC #15274:
     `approval.pending` for an agent's `item.proxy` carries `proxy:
     {host, header, prefix}`, the values the vault decided on and will
-    send; an app shows those, not its own copy of the settings (§6.8,
-    §10.11). **Apps and connectors must now handle:** `withheld`;
+    send; an app shows those, not its own copy of the settings, and
+    offers Deny only for a proxy approval without it (the lead's call)
+    (§6.8, §10.11). **Apps and connectors must now handle:** `withheld`;
     `proxy` in `approval.pending` and its `pending.list` entry
   - 0.91.1: 2026-11-20, erratum: AV11 and the owner's decisions on two
     of 0.91.0's open points, as built (vettid/vettid-vault#276, #278,
@@ -12254,7 +12255,9 @@ device (`limit` beyond that):
    changed while it waited, or (0.91.1) an `item.proxy` whose host,
    header or prefix changed while it waited, §10.11). The request is
    held again under a new approval, with the same bytes that were
-   approved and the new flags, if any. The agent gets `approval.waiting` and no answer yet. The
+   approved and the new flags, if any, and (0.92.0) for an
+   `item.proxy` the new note's `proxy`. The agent gets
+   `approval.waiting` and no answer yet. The
    approval it ran on was decided once and is gone: deciding it again
    is `not_found`. `approval.decide` answers `{result: "referred"}`.
    The new `approval.pending` and its `pending.list` entry carry
@@ -12674,7 +12677,7 @@ Both of the following layers are REQUIRED:
    `call.start`'s cached copy carries no TURN credential (§10.10
    "Servers and credentials"). (0.91.1) Nor do the cached copies of an
    agent's `item.get`, `item.run` and `item.proxy` answers carry the
-   secret value (§10.11).
+   secret value (§10.11); (0.92.0) they carry `withheld: true`.
 
 **Exception: responses that carry secret values in the clear.** A type
 may mark its responses volatile: they are never cached and never written to
@@ -12706,11 +12709,18 @@ it (`call.start`, §10.10; `item.get`, `item.run` and `item.proxy`,
 handled, without the value. To get the value, the requester asks again
 with a new request, counted, decided and referred as usual. A
 requester MUST NOT take such a copy for an empty secret. (0.92.0;
-owner decision a, GC #15273) Every such copy carries `withheld: true`,
-and a live answer never does; a requester that gets it asks again. As a
-backstop, `item.run` and `item.proxy` answers always carry `value`, and
-so does every field of an agent's `item.get` answer (agents never read
-a critical item), so a missing `value` also marks the copy.
+owner decision a, GC #15273; not yet built in the vault, card GC
+#15279) Every cached copy of an `item.get`, `item.run` or `item.proxy`
+answer carries `withheld: true`, a member of the answer body; a live
+answer never carries `withheld` (it is absent, never `false`).
+`call.start`'s copy does not carry it: a retransmitted `call.start`
+gets the same call without a TURN server (§10.10). A requester MUST
+treat an answer with `withheld: true` as handled and ask again as a
+new request, whatever else it carries, and MUST NOT use any value in
+it. As a backstop, `item.run` and `item.proxy` answers always carry
+`value`, and so does every field of an agent's `item.get` answer
+(agents never read a critical item), so an answer missing `value` is
+treated the same way.
 
 Both stores are flushed with the state changes before the ack (§8.3).
 
@@ -18858,9 +18868,9 @@ agents (§3.5).
   An agent's `item.get` answer carries `value` for every field it
   lists: agents never read a critical item (the only kind whose values
   the vault leaves out), and every other field holds a value (`""` or
-  `{}` at least). So a field without `value` marks the cached copy, and
-  a connector MUST ask again as a new request, never pass the item on
-  with that field empty.
+  `{}` at least). So `withheld: true` (0.92.0), or a field without
+  `value`, marks the cached copy, and a connector MUST ask again as a
+  new request (§8.2), never pass the item on with that field empty.
 
   > Decided (0.92.0), from 0.91.1's open point on **a cached copy's
   > withheld `notes`**, which could not be told from no notes (an item
@@ -19190,11 +19200,13 @@ item's settings allow for its task:
   of the body that are not listed here are ignored, as in other
   operations (§10.1). (0.91.1; owner decision a, GC #14595) An
   `item.run` answer is cached as `{item_id, field_id}` (0.92.0: with
-  `withheld: true`), without `value` (§8.2): a retransmission of the same request id within 24
+  `withheld: true`), without `value` (§8.2): a retransmission of the
+  same request id within 24
   hours gets that copy and is not handled again (no new audit line,
   no pin; the pin stays as the first handling recorded it). A
-  connector that gets an `item.run` answer without `value` MUST NOT
-  start the program; it asks again as a new request.
+  connector that gets an `item.run` answer with `withheld: true` or
+  without `value` MUST NOT start the program; it asks again as a new
+  request (§8.2).
 - `item.proxy{item_id, field_id, host, seconds?}`: `host` one of the
   item's `hosts`; `seconds` 60–3,600, default 900, cut to the access
   session's end. A value that is not visible ASCII and spaces cannot
@@ -19230,19 +19242,25 @@ item's settings allow for its task:
     at either end pass, though HTTP drops them.
   - (Owner decision a, GC #14595) The answer is cached for a
     retransmission without `value` and (0.92.0) with `withheld: true`
-    (§8.2); a connector that gets such an answer opens no proxy and
-    asks again.
+    (§8.2); a connector that gets an answer with `withheld: true` or
+    without `value` opens no proxy and asks again (§8.2).
 
-  - (0.92.0; owner decision a, GC #15274) **`approval.pending` for an
-    `item.proxy` carries `proxy: {host, header, prefix}`**, from the
-    held note: the host as the settings spell it, and the header and
-    prefix the vault decided on and will send if approved. An app shows
-    these, never its own copy of the item's settings, which may be
-    older than the vault's. (Before, an app's copy that was already
-    stale when the vault decided could show one header while the value
-    went out with another; a change after the decision was, and still
-    is, referred again.) A request referred again carries the new
-    note's values. `pending.list` carries the same member.
+  (0.92.0; owner decision a, GC #15274; not yet built in the vault)
+  **`approval.pending` for an `item.proxy` carries `proxy: {host,
+  header, prefix}`**, from the held note: `host` as the settings spell
+  it (it may differ from the body's `host`, e.g. by an explicit
+  `:443`), `header` the header's name, and `prefix` the prefix (always
+  present, `""` when none), the values the vault decided on and will
+  send if approved. An app shows these, never its own copy of the
+  item's settings, which may be older than the vault's. An `item.proxy`
+  approval without a well-formed `proxy` is one the app cannot show in
+  full: it offers Deny only (the lead's call with this change, matching
+  ANDROID-PLAN's rule for approvals an app cannot show). (Before, an
+  app's copy that was already stale when the vault decided could show one header while the value
+  went out with another; a change after the decision was, and still
+  is, referred again.) A request referred again carries the new
+  note's values (§6.8 step 4). `pending.list` carries the same
+  member.
 - **The connector holds the value** for a run or a proxy. The vault
   cannot see what it does with it: these ways trust the connector, the
   member's own program on the agent's computer, and not the agent. A
@@ -19398,8 +19416,10 @@ item's settings allow for its task:
   shown escaped), the directory, how the secret is passed (with the
   variable's name), the other variables with their values, and a
   warning for each flag; for an `item.proxy`: the agent, the item and
-  field, the host, the header's name and prefix (never the value) and
-  the length, (0.92.0) taken from `proxy`; for an `item.get`: the agent, the item, the fields and
+  field, the host, the header's name and prefix (never the value),
+  (0.92.0) these three taken from `proxy`, and the length (`seconds`
+  from the body, default 900); for an `item.get`: the agent, the item,
+  the fields and
   that the agent's app may keep the value in its history.
 
 **Every grant is a signed delegation** (LEASH §3.5). The member's
@@ -19690,7 +19710,7 @@ grant set carries a `grant_seq`:
 | `leash.grant.updated` (V→D, to the agent) | — | `{grants: [<grant>], suspended, grant_seq}`: all of its grants, after every change and at suspension and resumption; (0.41.0) `grant_seq` is the set's (above) |
 | `leash.agent.resume` (app) | `{agent_id}` | `{}`; `not_found` unless the agent is suspended |
 | `leash.status.get` (agent) | `{grant_id}` | `{grant_id, status, status_sig, rotations?}`; `not_found`, `forbidden` (suspended), `owner_check_required` (the vault is held, §3.6.3) |
-| `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}`; (0.42.0) `{op: "item.run", item_id, field_id, program, sha256 (0.85.3), argv, cwd, how, name?, env?}` or `{op: "item.proxy", item_id, field_id, host, seconds?}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}`; (0.42.0) `{item_id, field_id, value}` or `{item_id, field_id, value, header, prefix, host, expires_at}`; `way_not_allowed` (body `{ways}`), `program_not_allowed`, (0.85.3) `env_not_allowed` (body `{names}`) |
+| `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}`; (0.42.0) `{op: "item.run", item_id, field_id, program, sha256 (0.85.3), argv, cwd, how, name?, env?}` or `{op: "item.proxy", item_id, field_id, host, seconds?}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}`; (0.42.0) `{item_id, field_id, value}` or `{item_id, field_id, value, header, prefix, host, expires_at}`; (0.92.0) a retransmission's cached copy of an `item.get`, `item.run` or `item.proxy` answer carries `withheld: true` and no secret value (§8.2); `way_not_allowed` (body `{ways}`), `program_not_allowed`, (0.85.3) `env_not_allowed` (body `{names}`) |
 | `leash.item.set` (app; widening within the unlock window) | `{agent_id, item_id, version?, ways, run?, proxy?}` (0.42.0); `version` required to replace existing settings (`conflict`) | `<item_ways>`; `not_found` unless a rule of the agent includes the item, with or without a use left (§10.11 "An item with no use left"); `credential_locked` for a widening outside the window; `bad_request` |
 | `leash.item.list` (app, desktop) | `{agent_id, item_id?}` (0.42.0) | `{items: [<item_ways>]}`: each item the agent's rules include, (0.91.0) with or without a use left, with or without settings (shown as `{agent_id, item_id, ways: ["use"]}` when it has none) |
 
