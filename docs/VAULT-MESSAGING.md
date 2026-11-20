@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.91.0
-date: 2026-11-19
+version: 0.91.1
+date: 2026-11-20
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -17,7 +17,7 @@ related:
   - MEMBER-API.md (2.14.0)
   - ANDROID-PLAN.md (0.1.127)
   - IOS-PLAN.md (0.1.71; §9.1 VA1–VA4)
-  - AGENT-PLAN.md (0.1.12; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
+  - AGENT-PLAN.md (0.1.13; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - BALLOT-PROTOCOL.md (0.14.1; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at be57292, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.14.1)
@@ -29,6 +29,38 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.91.1: 2026-11-20, erratum: AV11 and the owner's decisions on two
+    of 0.91.0's open points, as built (vettid/vettid-vault#276, #278,
+    #279, #280, merged). No vault release. A patch: no member or result
+    is added. §10.11: (1) `item.proxy` as built (the lead's calls, GC
+    #14605, and the implementation's own choices, each named): a host
+    the item does not bind is `bad_request`, counted as refused;
+    members not listed are refused for this op only; at approval a
+    host, header or prefix that differs from the held note's is
+    referred again (§6.8 step 4 and `replaces` now say "run or
+    proxy"); no access session left is `session_required`, nothing
+    read; a value that is not header-safe is refused after the read,
+    its use counted; `expires_at` is cut to the access session only.
+    (2) Owner decision a (GC #14595): the cached copy of an
+    `item.get`, `item.run` or `item.proxy` answer carries no secret
+    value (§8.2). **Connectors must now handle:** an `item.run` or
+    `item.proxy` answer without `value`, or an agent's `item.get`
+    answer with a field without `value`, means "handled; ask again as
+    a new request", never an empty secret; a `program` with a `~` in
+    its last element is `bad_request`. Two new open owner points: a
+    cached `item.get` copy's withheld `notes` cannot be told from no
+    notes, and `approval.pending` does not carry the proxy's header
+    and prefix.
+    (3) Owner decision a (GC #14596) with b (GC #14779, GC #14880):
+    launchers and evaluators are flagged `shell` and always referred
+    like shells; the full name list, prefixes, the `awk` ending, the
+    version rule, and the comparison without any number of final
+    `.exe`, `.com`, `.cmd`, `.bat` or `.ps1` endings; tools that can
+    run other commands through their argv stay ordinary programs; the
+    names that are flagged though they are not shells. (4) A `~` in
+    the last element of a `program` is `bad_request` (8.3 short names).
+    Two "Open (owner)" notes of 0.91.0 are marked decided; the
+    `inline_code` and colon notes stay open
   - 0.91.0: 2026-11-19, erratum: AV9 and AV10 as built (AGENT-PLAN
     §4.9; vettid/vettid-vault#270 to #275, merged). As built; no vault
     release. A minor version, because it adds app-facing results and
@@ -12206,16 +12238,17 @@ device (`limit` beyond that):
    cached response.
 4. (0.91.0) **Referred again.** The handler of an approved agent
    request may refer it again (an `item.run` whose pin situation
-   changed while it waited, §10.11). The request is held again under a
-   new approval, with the same bytes that were approved and the new
-   flags. The agent gets `approval.waiting` and no answer yet. The
+   changed while it waited, or (0.91.1) an `item.proxy` whose host,
+   header or prefix changed while it waited, §10.11). The request is
+   held again under a new approval, with the same bytes that were
+   approved and the new flags, if any. The agent gets `approval.waiting` and no answer yet. The
    approval it ran on was decided once and is gone: deciding it again
    is `not_found`. `approval.decide` answers `{result: "referred"}`.
    The new `approval.pending` and its `pending.list` entry carry
    `replaces`, the id of the approval it replaces. A re-referral is
    audited `approval.referred` (`device_id` = the requester, `ref` =
    the old approval's id) in place of `approval.granted`, after the
-   run's own audit lines. **Order.** On an approval, other devices get
+   request's own audit lines. **Order.** On an approval, other devices get
    `sync.event{approval.decided}` after the answer to the requester,
    and `approval.granted` follows the executed request's own audit
    lines. On a re-referral there is no answer: every app, the deciding
@@ -12626,7 +12659,9 @@ Both of the following layers are REQUIRED:
    gets the cached response again and is not re-executed.
    (0.90.15) One type's cached response is not always the one it sent:
    `call.start`'s cached copy carries no TURN credential (§10.10
-   "Servers and credentials").
+   "Servers and credentials"). (0.91.1) Nor do the cached copies of an
+   agent's `item.get`, `item.run` and `item.proxy` answers carry the
+   secret value (§10.11).
 
 **Exception: responses that carry secret values in the clear.** A type
 may mark its responses volatile: they are never cached and never written to
@@ -12648,6 +12683,20 @@ A retransmission of one of them is executed again (a new upload, for
 document needed it: `item.reveal` of a critical item seals the
 values to a one-time reply key instead (§3.5.4), so its response is
 cached normally.
+
+(0.91.1) A type whose request counts uses, records state or is decided
+by an app cannot be volatile, since executing a retransmission again
+would count, record or ask again. When its answer carries a secret value
+in the clear, it is sent with the value and cached as a copy **without**
+it (`call.start`, §10.10; `item.get`, `item.run` and `item.proxy`,
+§10.11). A retransmission gets that copy: it says the request was
+handled, without the value. To get the value, the requester asks again
+with a new request, counted, decided and referred as usual. A
+requester MUST NOT take such a copy for an empty secret. `item.run`
+and `item.proxy` answers always carry `value`, and so does every field
+of an agent's `item.get` answer (agents never read a critical item), so
+a missing `value` marks the copy; a withheld `notes` does not (§10.11,
+"Open (owner)", 0.91.1).
 
 Both stores are flushed with the state changes before the ack (§8.3).
 
@@ -13692,7 +13741,7 @@ device belongs to the unlock it ends.
 | `device.session.granted` (to the device) | — | `{session_id, expires_at}` |
 | `device.session.end` (app: `{device_id}`; desktop, agent: `{}`, its own; (0.82.5) either may add `session_id`) | as left | `{}`; (0.82.5) also `{}`, with nothing changed, when `session_id` is not the device's current, unexpired session (a session suspended by the hold, §3.6.3, is current); `bad_request` for a `session_id` that is not a non-empty string (§6.8 "Ending") |
 | `device.session.ended` (to the device) | — | `{reason: "denied" \| "ended"}` |
-| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?, replaces?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history`, (0.85.3) `program_unrecorded`, `program_changed` (with `previous_sha256` and `previous_path`) (§10.11); (0.91.0) `replaces`: the approval a run referred again replaces (§6.8 step 4) |
+| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?, replaces?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history`, (0.85.3) `program_unrecorded`, `program_changed` (with `previous_sha256` and `previous_path`) (§10.11); (0.91.0) `replaces`: the approval a run or (0.91.1) a proxy referred again replaces (§6.8 step 4) |
 | `approval.waiting` (to the requester) | — | `{approval_id, request_id, exp}` |
 | `approval.decide` (app) | `{approval_id, approve: bool}` | `{result}`: `"ok"`, (0.91.0) `"referred"` when the request was referred again (§6.8), or the error code the held request was answered with |
 
@@ -18786,7 +18835,27 @@ agents (§3.5).
   controlled exposure; `notes` only without `fields`; an unknown field is
   `not_found`), recorded as `leash.item.read` in the audit log and the
   feed (the first per agent and hour; then summarised). (0.42.0) Only
-  for an item whose ways hold `reveal` (below).
+  for an item whose ways hold `reveal` (below). (0.91.1) Cached for a
+  retransmission (§8.2) as `{item_id, name, category, fields}`, each
+  field without `value` (`field_id`, `label`, `kind`), and without
+  `notes` (owner decision a, GC #14595).
+
+  An agent's `item.get` answer carries `value` for every field it
+  lists: agents never read a critical item (the only kind whose values
+  the vault leaves out), and every other field holds a value (`""` or
+  `{}` at least). So a field without `value` marks the cached copy, and
+  a connector MUST ask again as a new request, never pass the item on
+  with that field empty.
+
+  > Open (owner), 0.91.1: **a cached `item.get` copy's withheld
+  > `notes` cannot be told from no notes.** `notes` is sent only for a
+  > whole-item read of an item with notes, and the copy always drops
+  > it. An item with fields is still marked by its fields; an item
+  > with notes and no fields gives a copy with nothing to mark it, and
+  > a connector would pass its agent an empty item. Options: a member
+  > in the copy that marks values as withheld; or leave it (a
+  > notes-only item is rare, and the agent can ask again). Not
+  > decided.
 - `item.use{item_id, field_id, action: "hmac-sha256", data}` uses a
   field without exposing it (LEASH pattern 2): HMAC-SHA-256 with the
   value's UTF-8 bytes as the key over `data` (1–16,384 bytes, base64),
@@ -18868,13 +18937,19 @@ item's settings allow for its task:
     vault needs no knowledge of the connector's system; that also
     refuses a POSIX folder named `a:b` (see "Open (owner)", below).
     The connector sends cleaned paths with no trailing separator
-    (AGENT-PLAN §4.9). A Windows alias of a path (8.3 names, case)
-    only makes a run differ from its entry or pin, so it is referred
-    or refused, never matched. For the no-two-match rule above, a
-    drive path's `/` counts as `\`, and the trailing dots and spaces of
+    (AGENT-PLAN §4.9). (0.91.1; owner decision a, GC #14596) A `~` in
+    the **last element** of a `program` (an entry's or a run's) is
+    `bad_request` on every system: on Windows an 8.3 short name
+    (`BASH~1.EXE`) is another name for a file, and would escape the
+    shell checks below. A `~` earlier in the path (`C:\PROGRA~1\…`) is
+    accepted. Any other Windows alias of a path (an 8.3 name earlier in
+    the path, case) only makes a run differ from its entry or pin, so
+    it is referred or refused, never matched. For the no-two-match
+    rule above, a drive path's `/` counts as `\`, and the trailing dots and spaces of
     the last element are dropped. The shell and interpreter checks
-    (below) compare the last element without case, without a final
-    `.exe` and without trailing dots and spaces.
+    (below) compare the last element as the `shell` flag says (0.91.1:
+    without case, without any number of final `.exe`, `.com`, `.cmd`,
+    `.bat` or `.ps1` endings, and without trailing dots and spaces).
   - (0.85.3; owner decision of 2026-11-05, option b) **The program's
     content is pinned.** An entry's `sha256` (64 lowercase hex digits)
     is the SHA-256 of the program file the member approved, and its
@@ -18990,10 +19065,11 @@ item's settings allow for its task:
   app: an `item.run` when `each` is `true`, `programs` is empty, the
   run does not match the entry's pin (0.85.3: no `sha256` recorded, or
   a different `sha256` or `path`), or `program` is a shell or an
-  interpreter (its last path element, without `.exe` and in any case,
-  is one of the `shell` names below or starts with `python`, `node`,
-  `perl`, `ruby`, `php` or `osascript`), so `each: false` never covers
-  those (owner decision of 2026-10-18); an `item.proxy` always; an
+  interpreter (it is flagged `shell`, below, or its last path element,
+  compared as for that flag, starts with `python`, `node`, `perl`,
+  `ruby`, `php` or `osascript`), so `each: false` never covers those
+  (owner decision of 2026-10-18; 0.91.1: launchers and evaluators too,
+  owner decision a, GC #14596); an `item.proxy` always; an
   `item.get` always, every reveal asked on its own (owner decision of
   2026-10-18; it replaces, for agents' reveals, the 2026-10-03 rule
   that `ask` means one prompt per item, not per read).
@@ -19101,16 +19177,60 @@ item's settings allow for its task:
   answer is `{item_id, field_id, value}`, for the connector to pass to
   that one process only. Recorded as `leash.item.run`. (0.91.0) Members
   of the body that are not listed here are ignored, as in other
-  operations (§10.1). As built, an `item.run` answer is cached as
-  sent (§8.2): a retransmission of the same request id within 24
-  hours gets that answer and is not handled again (no new audit line,
-  no pin).
+  operations (§10.1). (0.91.1; owner decision a, GC #14595) An
+  `item.run` answer is cached as `{item_id, field_id}`, without
+  `value` (§8.2): a retransmission of the same request id within 24
+  hours gets that copy and is not handled again (no new audit line,
+  no pin; the pin stays as the first handling recorded it). A
+  connector that gets an `item.run` answer without `value` MUST NOT
+  start the program; it asks again as a new request.
 - `item.proxy{item_id, field_id, host, seconds?}`: `host` one of the
   item's `hosts`; `seconds` 60–3,600, default 900, cut to the access
   session's end. A value that is not visible ASCII and spaces cannot
   go in a header (`bad_request`); an `address` field cannot be used
   (`not_found`). The answer is `{item_id, field_id, value, header,
   prefix, host, expires_at}`. Recorded as `leash.item.proxy`.
+  (0.91.1) As built (vettid/vettid-vault#276). The lead's calls (GC
+  #14605) are the unbound host, the re-referral on a changed note,
+  `session_required`, and the header-safe check after the read; the
+  last point is owner decision a (GC #14595); the rest are the
+  implementation's choices:
+  - A `host` the item does not bind is `bad_request`, counted as
+    refused (with its cooldown). Hosts compare with the default port
+    made explicit (`api.example.com` is `api.example.com:443`); the
+    answer's `host` is spelled as the settings hold it.
+  - Members of the body that are not listed here are `bad_request`,
+    for this op only (other ops ignore them, §10.1).
+  - The held approval keeps the host, header and prefix the decision
+    saw. If any of them differs when an app approves (the header's
+    case included), the request is referred again as a new approval
+    (`replaces`, §6.8 step 4), which counts toward the hourly
+    referral cap; past the cap it is `forbidden`. As for a run ("An
+    approval is judged again"), settings that now refuse the proxy
+    give that refusal at approval, never the value, and a held proxy
+    whose note is missing or damaged is `forbidden`.
+  - With no access session left when it is answered, it is
+    `session_required` and nothing is read. `expires_at` is now plus
+    `seconds`, cut to the access session's end only (not to a grant's
+    expiry); a cut below 60 seconds is still answered.
+  - The header-safe check is made after the value is read, so a
+    refused value's use is counted, but it is never sent or recorded
+    as a proxy. An empty value passes and sends `prefix` alone; spaces
+    at either end pass, though HTTP drops them.
+  - (Owner decision a, GC #14595) The answer is cached for a
+    retransmission without `value` (§8.2); a connector that gets an
+    answer without `value` opens no proxy and asks again.
+
+  > Open (owner), 0.91.1: **`approval.pending` carries the held
+  > request's body, not the header and prefix** the decision saw (they
+  > are in the vault's held note only). An app shows them from its own
+  > copy of the item's settings, which may be older than the vault's.
+  > A header changed after the vault's decision is caught by the
+  > re-referral above; one changed before it, while the app's copy was
+  > already stale, is not, and the value goes out with a header the
+  > screen did not show. Option: carry `{host, header,
+  > prefix}` from the note in `approval.pending` (spec, then vault and
+  > apps). Not decided.
 - **The connector holds the value** for a run or a proxy. The vault
   cannot see what it does with it: these ways trust the connector, the
   member's own program on the agent's computer, and not the agent. A
@@ -19134,9 +19254,88 @@ item's settings allow for its task:
   batch files, scripts, reparse points, the names above), not all.
 - **The approval** (`approval.pending`, §6.8) carries the held request's
   `body` and, since 0.42.0, `flags`, set by the vault:
-  - `shell`: `program`'s last path element, without `.exe` and in any
-    case, is `sh`, `bash`, `zsh`, `dash`, `ksh`, `mksh`, `fish`, `csh`,
-    `tcsh`, `busybox`, `env`, `cmd`, `powershell` or `pwsh`;
+  - `shell`: `program`'s last path element names a shell, a launcher
+    (it runs another program named in its argv) or an evaluator (it
+    runs code given in its argv). (0.91.1; owner decision a, GC #14596,
+    vettid/vettid-vault#279 and #280) The name is compared in any case,
+    without any number of final `.exe`, `.com`, `.cmd`, `.bat` or
+    `.ps1` endings, with trailing dots and spaces trimmed after each
+    (`bash.exe.cmd`, `npx.cmd`, `bash .cmd`); a name that is empty
+    after that (`.cmd`) is not flagged. It is flagged when it is:
+    - one of these shells: `sh`, `bash`, `zsh`, `dash`, `ksh`, `mksh`,
+      `fish`, `csh`, `tcsh`, `busybox`, `env`, `cmd`, `powershell`,
+      `pwsh`, `toybox`, `ash`, `rbash`, `ksh93`, `yash`, `posh`, `nu`,
+      `xonsh`, `elvish`, `osh`, `ysh`, `oksh`, `pdksh`, `lksh`, `hush`,
+      `sash`, `rc`, `es`;
+    - one of these launchers: `sudo`, `doas`, `xargs`, `nohup`,
+      `timeout`, `nice`, `ssh`, `wsl`, `su`, `runuser`, `pkexec`,
+      `run0`, `sudo-rs`, `gsudo`, `runas`, `psexec`, `psexec64`, `sg`,
+      `newgrp`, `setpriv`, `capsh`, `setsid`, `stdbuf`, `time`,
+      `chroot`, `nsenter`, `unshare`, `ionice`, `taskset`, `chrt`,
+      `prlimit`, `setarch`, `linux32`, `linux64`, `arch`, `numactl`,
+      `cgexec`, `firejail`, `bwrap`, `fakeroot`, `faketime`,
+      `proxychains`, `proxychains4`, `torsocks`, `sshpass`, `unbuffer`,
+      `xvfb-run`, `dbus-run-session`, `dbus-launch`, `chpst`, `flock`,
+      `script`, `watch`, `parallel`, `tmux`, `screen`, `systemd-run`,
+      `systemd-nspawn`, `machinectl`, `flatpak-spawn`,
+      `start-stop-daemon`, `daemonize`, `strace`, `ltrace`, `gdb`,
+      `lldb`, `valgrind`, `perf`, `caffeinate`, `sandbox-exec`, `open`,
+      `launchctl`, `npx`, `pnpx`, `bunx`, `uvx`, `pipx`, `socat`, `nc`,
+      `ncat`, `netcat`, `wine`, `wine64`, `mono`, `mintty`, `rundll32`,
+      `regsvr32`, `msiexec`, `conhost`, `forfiles`, `pcalua`, `wt`,
+      `explorer`, `schtasks`, `wmic`, `ld.so`, `coreutils`, `genv`,
+      `gtimeout`, `gxargs`, `gnice`, `gnohup`, `gstdbuf`, `gchroot`,
+      `gtime`, `wslg`, `git-bash`, `git-cmd`, `debian`, `kali`, `plink`,
+      `winrs`, `mosh`, `autossh`, `rsh`, `ssh-agent`, `cdb`, `ntsd`,
+      `windbg`, `cmstp`, `regasm`, `regsvcs`, `odbcconf`, `msxsl`,
+      `bitsadmin`, `scriptrunner`, `tini`, `dumb-init`, `gosu`,
+      `su-exec`, `runcon`, `rlwrap`, `eatmydata`, `proot`, `ccache`,
+      `xcrun`, `dtrace`, `dtruss`, `systemd-cat`, `systemd-inhibit`,
+      `xterm`, `gnome-terminal`, `konsole`, `alacritty`, `kitty`, `at`,
+      `crontab`;
+    - one of these evaluators: `awk`, `gawk`, `mawk`, `deno`, `bun`,
+      `py`, `pyw`, `cscript`, `wscript`, `mshta`, `ipython`, `bpython`,
+      `jython`, `micropython`, `ts-node`, `tsx`, `irb`, `jruby`,
+      `truffleruby`, `graalpy`, `expect`, `rscript`, `r`, `julia`,
+      `jshell`, `jrunscript`, `jjs`, `groovy`, `scala`, `kotlin`,
+      `clojure`, `swift`, `guile`, `racket`, `sbcl`, `runghc`, `ghci`,
+      `ghc`, `escript`, `erl`, `elixir`, `iex`, `qjs`, `jsc`, `csi`,
+      `fsi`, `msbuild`, `installutil`, `hh`, `bb`, `ocaml`, `raku`,
+      `gjs`, `d8`, `tcc`, `emacs`, `sqlite3`, `dc`;
+    - one of `sh`, `bash`, `zsh`, `dash`, `ksh`, `mksh`, `oksh`,
+      `pdksh`, `lksh`, `fish`, `csh`, `tcsh`, `ash`, `yash`, `pwsh`,
+      `powershell`, `py` or `pyw` with digits and dots appended
+      (`bash5`, `pwsh7`, `py3.12`), and only these;
+    - a name starting with `lua`, `pypy`, `tclsh`, `wish`, `java`,
+      `busybox`, `gawk-`, `bash-`, `mksh-`, `zsh-`, `ksh-`, `dash-`,
+      `pwsh-`, `powershell_`, `powershell-`, `ld-linux`, `ld-musl`,
+      `qemu-` or `ubuntu` (versions and variants: `lua5.4`, `javaw`,
+      `ld-linux-x86-64.so.2`, `ubuntu2204`); or ending in `awk`.
+
+    The list is best-effort. Tools that can also run other commands
+    through their argv (`git`, `npm`, `yarn`, `pnpm`, `uv`, `dotnet`,
+    `make`, `find`, `vim`, `rsync`, `tar`, `sed`) stay ordinary
+    programs, judged by their binding (owner decision b, GC #14779); on
+    Windows `npm.cmd`, `yarn.cmd` and `pnpm.cmd` are npm, yarn and pnpm
+    (owner decision b, GC #14880), while `npx.cmd` is `npx`. So
+    `sqlite3` and `emacs` are flagged while `vim` and `sed` are not.
+    The flag also catches programs that are none of these, which only
+    refers a run that could have run unasked, so it fails safe: by
+    prefix or ending, such as `javac`, `javap`, `javadoc`, `luac`,
+    `luarocks`, `luatex`, `lualatex`, `qemu-img`, `qemu-nbd`,
+    `ubuntu-drivers` and names ending in `awk` that are not awks; and
+    by a short name another program also uses, such as `arch`, `r`,
+    `nu`, `rc`, `es`, `wt`, `open`, `cdb` and `swift`. The approval's
+    warning for the flag (AGENT-PLAN §11:
+    "This runs a shell") predates launchers and evaluators; its new
+    wording is owed with the binding-screen warning
+    (vettid/vettid.org#636). These endings and lists
+    give flags only; a binding's key compares as above ("Program
+    strings"). A `.cmd` or `.bat` run's argv passes through `cmd.exe`
+    a second time, which this flag does not address: by AGENT-PLAN
+    §4.9 the connector refuses such a program today, to be replaced by a refusal of any
+    argument holding a `cmd.exe` metacharacter (owner decision b, GC
+    #14880; AGENT-PLAN §4.9);
   - `inline_code`: it starts with `python`, `node`, `perl`, `ruby`,
     `php` or `osascript` and an argument is `-c`, `-e`, `-E`, `-r` or
     `--eval`;
@@ -19150,16 +19349,16 @@ item's settings allow for its task:
     `previous_path`, the recorded ones. Approving it records the new
     ones; the old approval never covers a changed or moved file;
   - `history`: an `item.get`;
-  - (0.91.0) an approval of a run referred again (above) also carries
+  - (0.91.0) an approval of a run (0.91.1: or a proxy) referred again
+    (above) also carries
     `replaces`, the id of the approval it replaces.
 
-  > Open (owner), 0.91.0: **shell and interpreter detection is by name
-  > only.** Launchers and evaluators such as `sudo`, `doas`, `xargs`,
-  > `nohup`, `timeout`, `ssh`, `wsl`, `awk`, `lua`, `deno`, `bun`, `py`,
-  > `pypy`, `java`, `cscript`, `wscript` and `mshta`, and Windows 8.3
-  > short names, are not flagged. An entry pinned with `each: false`
-  > runs them unasked with any `argv`. Option: extend the lists. Not
-  > decided.
+  > Decided (0.91.1), from 0.91.0's open point on **shell and
+  > interpreter detection by name only**: the owner chose to extend
+  > the lists (decision a, GC #14596) and to keep tools that can run
+  > other commands as ordinary programs (decision b, GC #14779); 8.3
+  > short names are refused ("Program strings"). See the `shell` flag
+  > above.
   >
   > Open (owner), 0.91.0: **`inline_code` matches whole arguments
   > only.** `-Ic`, `-ne`, `-pe`, `--eval=` and `node -p` are not
@@ -19171,15 +19370,10 @@ item's settings allow for its task:
   > POSIX folder named `a:b` (a GVFS mount). Option: refuse it only in
   > drive paths. Not decided.
   >
-  > Open (owner), 0.91.0: **an `item.run` or `item.get` answer is
-  > cached as sent** (§8.2), so the secret value sits in vault state
-  > for 24 hours. 0.90.15 kept a TURN credential out of the cache for
-  > this reason (§8.2 "Exception: responses that carry secret values in
-  > the clear"). A volatile type is not possible, since the request
-  > counts uses and may record a pin. Option: cache a copy without
-  > `value`, as `call.start` does (§10.10). The same question will
-  > apply to `item.proxy` (AV11), whose answer also carries `value`.
-  > Not decided.
+  > Decided (0.91.1), from 0.91.0's open point on **an `item.run` or
+  > `item.get` answer cached as sent**: the owner chose a copy without
+  > `value`, as `call.start` does, for `item.get`, `item.run` and
+  > `item.proxy` (decision a, GC #14595; §8.2).
 
   The app shows, for an `item.run`: the agent, the item and field, the
   program, (0.85.3) its fingerprint (the first 16 hex digits of

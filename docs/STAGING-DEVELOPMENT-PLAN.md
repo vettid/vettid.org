@@ -1,8 +1,8 @@
 ---
 title: STAGING-DEVELOPMENT-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D3 as in ANDROID-PLAN 0.1.36, which replaced 0.1.34's answer the same day)
-version: 0.1.7
-date: 2026-11-17
+version: 0.1.8
+date: 2026-11-20
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-RELEASES.md (0.1.10) §3 releases, §8.6 scaler, §8.9 cost, §11.1 staging, §15 O2
@@ -45,6 +45,10 @@ changelog:
     for the production launch, restoring the vault↔service support
     window that Ground Control rule 3 (owner, 2026-11-17) suspended
     until the first production service
+  - 0.1.8: 2026-11-20, editorial; no rule changes. §4: the
+    `stagingVaultLegacySessionAuth` shortcut is marked removed
+    (vettid.org #634) and §7 action 5 done in the code; §2.3 item 4 no
+    longer names it as a pattern
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -128,8 +132,8 @@ Each rule is a proposal. Those that need the owner's choice are in §6.
 4. **"Switched off" for a member API or portal feature** means: the code
    is deployed, and a route or page that needs a vault feature production
    does not have yet is behind a stage context value that is absent in
-   production (the pattern of `androidAppUrl`, `pushStages`,
-   `<stage>VaultLegacySessionAuth` in `lib/config.ts`). A change that
+   production (the pattern of `androidAppUrl` and `pushStages` in
+   `lib/config.ts`). A change that
    cannot be gated this way does not merge until its production release
    is planned.
 5. Shared stacks (§3 risk 6) are deployed to production in the same
@@ -213,7 +217,7 @@ other open work fits.
 
 | Shortcut | State (2026-10-11) | Decision proposed |
 |---|---|---|
-| `stagingVaultLegacySessionAuth` (portal sessions accepted on app routes) | **On**: not in `cdk.json`, passed at every staging member API deploy as `-c stagingVaultLegacySessionAuth=true`; the staging Vault function has `VAULT_LEGACY_SESSION_AUTH=1` (checked 2026-10-11). The drill's member 1 (S3, old app) needs it | **Remove** after the S3 drill ends (2026-10-13): redeploy without the flag, then delete the context key, the env switch and its test in one PR. Until then a staging member API deploy without the flag breaks member 1 |
+| `stagingVaultLegacySessionAuth` (portal sessions accepted on app routes) | **Removed from the code** (0.1.8) by vettid.org #634 (merged 2026-11-19; staging drops it at its first member API deploy after that): the app routes `GET /api/vault/enclave`, `POST /api/vault/enroll`, `/unlock` and `/recovery/register` accept only signed app requests on every stage, and a deploy that still passes the context key, with any value, stops at synth. Was: on at every staging member API deploy (`-c stagingVaultLegacySessionAuth=true`, `VAULT_LEGACY_SESSION_AUTH=1`) for the S3 drill's old app | **Done** |
 | Automation signing key among staging `android_signers` (second digest, added at S2) | Pinned in every staging image | **Keep for development.** Never in `prod.json` (reviewed in the release commit, W10-READINESS §3 step 1) |
 | Test mail `*@test.staging.vettid.org` (SES inbound, staging account) | Deployed (`VettidOrgStageTestMailStack`) | **Keep.** Never built for production |
 | Canary flags on staging members | None set today (0 of 10 rows) | **Keep the mechanism**, set only for a canary run and cleared in the same session |
@@ -271,7 +275,7 @@ Phases 2–6 run on staging under §2; each reaches production through
 | 2 | Lock the vault still unlocked on S3 after the drill, or accept its host until 2026-10-13 15:30 UTC | owner |
 | 3 | Confirm the S1 (2026-10-12) and S2 (2026-10-13) key deletions; record in W9-REPORT §8 | owner runs, assistant records |
 | 4 | After 2026-10-13: one PR setting S3–S6 `removed` and deleting their stacks, leaving S7–S9; the key list for the owner's batch | assistant, then owner |
-| 5 | Remove the legacy session auth switch (§4) | assistant (2026-10-26: **not done**; the switch is still in `lib/config.ts`, `lambda/member/vault.ts` and `lib/stacks/member-api-stack.ts`) |
+| 5 | Remove the legacy session auth switch (§4) | assistant (0.1.8: **done in the code**, vettid.org #634, merged 2026-11-19; staging drops it at its first member API deploy after that) |
 | 6 | Create `/vettid-org/prod/member/enroll-code-key`; first weekly production deploy | owner, then assistant |
 | 7 | If D4 or D5 is accepted: spec changes in VAULT-MESSAGING / VAULT-RELEASES and vettid-vault, on a staging release. **Done (0.1.2):** VAULT-MESSAGING 0.26.0 and 0.27.0, VAULT-RELEASES 0.1.11 and 0.1.12; vettid-vault #62–#64; staging release S10, published 2026-10-11 (§8.5); the app's `.staging` build (vettid-android #116) | assistant |
 | 8 | Amend the stale text below in one docs PR once §6 is answered | assistant (2026-10-26: partly done, #405 and #422; W10-READINESS §3's "S4" text remains) |
