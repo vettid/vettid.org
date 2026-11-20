@@ -1,9 +1,16 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.13
+version: 0.1.14
 date: 2026-11-20
 changelog:
+  - 0.1.14: 2026-11-20, with VAULT-MESSAGING 0.92.0 (owner decisions a,
+    GC #15273 and #15274). §4.3: a cached copy carries `withheld: true`,
+    which the connector treats as "ask again as a new request"; the
+    field-without-`value` rule stays as a backstop (both to be built).
+    §4.9: a run answer with `withheld: true` starts nothing. AA8 and
+    §11 "Proxy in Approvals": a proxy's approval shows
+    `approval.pending`'s `proxy` member, Deny only without it
   - 0.1.13: erratum, 2026-11-20, with VAULT-MESSAGING 0.91.1. §4.5
     "Marks learned outside the sets": as built in vettid-agent #43 (the
     lead's a2 in GC thread #996, replacing the 2026-11-05 rule), only a
@@ -561,8 +568,10 @@ connector.
   §8.2): a run or proxy answer without `value`, or an `item.get`
   answer with a field without `value`, means "ask again as a new
   request" (to be built: today the connector accepts such a field).
-  A withheld `notes` cannot be told from no notes (an open owner point
-  there).
+  (0.1.14) Every such copy carries `withheld: true` (VAULT-MESSAGING
+  0.92.0, owner decision a, GC #15273; to be built, vault card GC
+  #15279 and connector card GC #15275), which the connector is to
+  check first; the missing `value` stays as a backstop.
 - **Held vault** (§3.6.3): `owner_check_required` for everything but
   `vault.status` and `device.session.end`; status statements lapse within
   `status_ttl`. The connector reports "Your vault is waiting for your
@@ -742,9 +751,10 @@ allowed ways, so the agent can choose again.
   in its last element (`bad_request`, VAULT-MESSAGING 0.91.1: on Windows
   an 8.3 short name), and flags launchers and evaluators `shell`, so
   they are always referred; it compares names without `.exe`, `.com`,
-  `.cmd`, `.bat` or `.ps1` endings for that flag. A run answer without
-  `value` (the vault's cached copy, VAULT-MESSAGING §8.2) starts
-  nothing; the connector asks again as a new request.
+  `.cmd`, `.bat` or `.ps1` endings for that flag. A run answer with
+  `withheld: true` (0.1.14) or without `value` (the vault's cached
+  copy, VAULT-MESSAGING §8.2) starts nothing; the connector asks again
+  as a new request.
 - **What is refused as a program** (2026-11-05; the owner's decisions
   and the lead's design notes): on Windows a `.bat` or `.cmd` file
   (`cmd.exe` parses its arguments again, so they can run other
@@ -1265,7 +1275,7 @@ ones).
 | AA5 | **Approvals for agents**: approve (not only decline) `device.session.pending` with a changeable length, and `approval.pending` for an agent's `agent.request` (say which item, "read" or "use", and which agent) and for delegable owner types; replace "This version of the app does not pair desktops or agents, so it can only decline." | §6.8, §10.3 | decline only |
 | AA6 | **Feed and History**: details for `leash.*` (`leash.rate_limited`, `leash.referrals_limited`, `leash.agent.suspended`, `leash.item.read`, `leash.item.used`, summaries), which today open "Not available in this version of the app" (ANDROID-PLAN §4 feed table); the `agents` History category | §10.9, §10.11 | texts only |
 | AA7 | **How an agent may use an item** (AG13): per agent and included item, the ways (use always; run, proxy, "May be shown to agents", all off by default), the allowed programs and "Ask me before each run", (0.1.10) for each program the variables it may receive (none by default, adding one is a widening) and whether its fingerprint is recorded, with a way to forget it, the API hosts and the header (name and prefix); widening asks for the password (unlock window); `leash.item.set`, `.list`, `sync.event{leash.item.changed}`. Not started. Acceptance: each setting round-trips; widening without the unlock window asks for the password; narrowing does not; the reveal switch shows the history warning before it turns on | §10.11 | none |
-| AA8 | **Approvals for the new ways** (AG13): `approval.pending` for `item.run` (program, every argument unabridged, directory, how the secret is passed, extra variables, the `shell`, `inline_code` and `unbound_program` warnings; (0.1.10) the program's fingerprint, and for `program_unrecorded` that approving lets later runs of this exact file follow the item's settings, for `program_changed` the old fingerprint and path beside the new and that the program changed or moved), `item.proxy` (host, header name and prefix, length) and `item.get` (the history warning). Not started. Acceptance: screenshots for each kind and flag in the PR; a long or non-printable argument is shown in full, escaped, never cut | §6.8, §10.11 | none |
+| AA8 | **Approvals for the new ways** (AG13): `approval.pending` for `item.run` (program, every argument unabridged, directory, how the secret is passed, extra variables, the `shell`, `inline_code` and `unbound_program` warnings; (0.1.10) the program's fingerprint, and for `program_unrecorded` that approving lets later runs of this exact file follow the item's settings, for `program_changed` the old fingerprint and path beside the new and that the program changed or moved), `item.proxy` (host, header name and prefix, (0.1.14) these three from `approval.pending`'s `proxy` member, never the app's own copy of the settings, and Deny only when it is missing; the length from the body's `seconds`, which the vault may cut to the access session's end) and `item.get` (the history warning). Not started. Acceptance: screenshots for each kind and flag in the PR; a long or non-printable argument is shown in full, escaped, never cut | §6.8, §10.11 | none |
 
 IOS-PLAN places devices and agents in its "Later" list, following
 Android; nothing here blocks on iOS.
@@ -1686,7 +1696,9 @@ wording rules apply):
   recognise."
 - **Proxy in Approvals** (AG13): "<agent> wants to use <item> with
   <host> for <length>. The agent will not see it; the key is sent only
-  to <host>."
+  to <host>." (0.1.14) Below it, the header's name and prefix from
+  `approval.pending`'s `proxy` (VAULT-MESSAGING 0.92.0), and Deny only
+  when it is missing; the wording is owed with AA8.
 - **How an agent may use an item** (AG13): "Use without seeing it"
   (always on); "Run programs with it"; "Send it to an API for the
   agent"; "May be shown to agents", with "Off: the agent can use it
