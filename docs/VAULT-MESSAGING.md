@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.92.0
-date: 2026-11-20
+version: 0.92.1
+date: 2026-11-21
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -17,7 +17,7 @@ related:
   - MEMBER-API.md (2.14.0)
   - ANDROID-PLAN.md (0.1.127)
   - IOS-PLAN.md (0.1.71; §9.1 VA1–VA4)
-  - AGENT-PLAN.md (0.1.14; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
+  - AGENT-PLAN.md (0.1.15; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - BALLOT-PROTOCOL.md (0.14.1; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at be57292, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.14.1)
@@ -29,6 +29,12 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.92.1: erratum, 2026-11-21, with AGENT-PLAN 0.1.15. §10.11 "What
+    the pin covers, said plainly": Windows batch files are no longer
+    refused (vettid-agent #42 runs them with checked values, owner
+    decision b, GC #14880), and a batch file's pin covers the batch
+    file only, not the `node` and `node_modules` an npm shim runs. No
+    wire change
   - 0.92.0: 2026-11-20, the owner's answers to 0.91.1's two open
     points; not built yet (vault, connector and app cards follow). A
     minor version: two members are added. (1) Owner decision a, GC
@@ -19280,8 +19286,12 @@ item's settings allow for its task:
   program (on Windows, opening the process; on Linux, `ptrace` where
   allowed). An agent running as the connector's user can use any of
   these to get its code inside the program that receives the secret.
-  The connector refuses some of these ways (AGENT-PLAN §4.9: Windows
-  batch files, scripts, reparse points, the names above), not all.
+  The connector refuses some of these ways (AGENT-PLAN §4.9: scripts,
+  reparse points, the names above, and for a Windows batch file the
+  `cmd.exe` metacharacters in what it is given), not all. (0.92.1) The
+  pin of a batch file covers that file only: an npm shim's `node` and
+  the `node_modules` code it runs are not pinned, so an approved
+  fingerprint means the launcher, not the code it starts.
 - **The approval** (`approval.pending`, §6.8) carries the held request's
   `body` and, since 0.42.0, `flags`, set by the vault:
   - `shell`: `program`'s last path element names a shell, a launcher
