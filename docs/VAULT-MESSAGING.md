@@ -61,8 +61,9 @@ changelog:
     required, and now reads `cwd?`; the vault never could see the
     run's `work/`, which only the connector knows. (5) A run with a
     `cwd`, `inputs` or `output` is always referred, whatever `each`
-    [owner #15848 pending: whether a run with files only, no `cwd`,
-    always goes to the phone]; (6) `approval.pending` for an
+    (owner decision a, GC #15856: also a run with files only; moving
+    files-only runs to the item's own setting later needs no wire
+    change); (6) `approval.pending` for an
     `item.run`, and its `pending.list` entry, carry `folders:
     {cwd?, output?}` (the matched entries; `{}` for an inputs-only
     run) and the flags `member_folder` and `member_files`; (7) from 0.93.0
@@ -72,10 +73,13 @@ changelog:
     `vault.status` member is added: S10 rejected a capability list); (8) adding a folder or turning `write` on
     is a widening, and with no nesting a removal always narrows; **Apps and connectors must now handle:** `folders` in a run
     binding and in the catalog; `cwd_not_allowed`; `inputs`, `output`,
-    `folders` and the two flags in an `item.run` approval. [owner #15847 pending:
-    whether "Read only" is enforced against the per-pairing share, so
-    that the vault's `write: false` is also what the runner account is
-    given; §10.11 "Member folders for runs"]
+    `folders` and the two flags in an `item.run` approval. Owner decision a, GC #15855: "Read only" is
+    enforced for the folder a run starts in, by the connector (the
+    service), which refuses a run whose `cwd` matches an entry with
+    `write: false` while the pairing's share grants that folder write;
+    and a run can reach every folder shared with the computer's
+    pairing, which an item's list does not narrow (§10.11 "Member
+    folders for runs", `write`)
   - 0.92.1: erratum, 2026-11-21, with AGENT-PLAN 0.1.15. §10.11 "What
     the pin covers, said plainly": Windows batch files are no longer
     refused (vettid-agent #42 runs them with checked values, owner
@@ -19035,8 +19039,8 @@ item's settings allow for its task:
     files may be written back (below). Each entry is `{path, write}`.
     `write` is a boolean, default `false`: **read-only is what the app
     offers first**, and the member turns write on for that folder
-    [owner #15847 pending: whether "Read only" is enforced against the
-    per-pairing share]. `path` follows the rules of a run's `cwd`
+    (owner decision a, GC #15855: the connector enforces it, below).
+    `path` follows the rules of a run's `cwd`
     ("Program strings"): at most 4,096 bytes of UTF-8, no control, Cf,
     Zl or Zp character, absolute and clean, no `:` after the root.
     Unlike a `cwd`, it may not be the root itself (`/` or a drive
@@ -19074,10 +19078,21 @@ item's settings allow for its task:
       check and the use. Such a refusal is `cwd_not_allowed` with the
       connector's own text.
     - **`write`** says whether the connector may copy files back into
-      the folder, and what the share's access list gives the runner.
-      The vault cannot stop a program running in a read-only folder
-      from trying to write there; the runner account's access list does
-      [owner #15847 pending].
+      the folder, and what a run that starts there may do (owner
+      decision a, GC #15855). The vault cannot stop a program in a
+      read-only folder from writing there; **the connector (the
+      service) enforces it**: it refuses a run whose `cwd` matches an
+      entry with `write: false` while the pairing's share grants that
+      folder write, with its own NEW text (AGENT-PLAN §11, which names
+      the folder and both ways out). The member makes the share
+      read-only (`vettid-agent share --name <n> <folder>` without
+      `--write`) or turns the entry's `write` on.
+    - **Said plainly: what a run can reach.** A run can reach every
+      folder shared with that computer's pairing. An item's `folders`
+      decides where a run may start (its `cwd`) and where files are
+      copied, not everything a program run there can read. Per-item
+      runner accounts would close that; they are not the design
+      (Q3 a).
     - **An absent `cwd` is the run's `work/`, always allowed**, with no
       binding. The connector omits `cwd` when the agent gave none (or
       gave the run's own `work/`); the vault never sees that path,
@@ -19252,8 +19267,9 @@ item's settings allow for its task:
   (owner decision of 2026-10-18; 0.91.1: launchers and evaluators too,
   owner decision a, GC #14596); (0.93.0) an `item.run` with a `cwd`, `inputs` or `output`, so
   `each: false` never covers a run in a member folder or one that
-  hands files in or out [owner #15848 pending: whether a run with
-  files only, no `cwd`, always goes to the phone] (AGENT-SEPARATE-ACCOUNT §6: a program in a
+  hands files in or out (owner decision a, GC #15856: a run with files
+  only, no `cwd`, is referred too; letting the item's own setting decide
+  such runs later needs no wire change) (AGENT-SEPARATE-ACCOUNT §6: a program in a
   folder the agent can change runs what it finds; hardened profiles
   that may relax this are a later change, GC #15815); an `item.proxy` always; an
   `item.get` always, every reveal asked on its own (owner decision of

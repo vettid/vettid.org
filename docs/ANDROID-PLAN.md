@@ -4,7 +4,7 @@ status: draft
 version: 0.1.135
 date: 2026-11-21
 changelog:
-  - 0.1.135: 2026-11-21 (VAULT-MESSAGING 0.93.0, AGENT-PLAN 0.1.17, IOS-PLAN 0.1.78; AGENT-SEPARATE-ACCOUNT Q1 a and Q9 a; Ground Control #15810). Not built; card #15812. §4 "Devices & agents": a new subsection "Member folders and files on a run (AA9)": the run settings' folders list with read only offered first (adding a folder or turning on write is a widening, so it asks for the password), and a run approval's folder, input files and output folder with their warnings, shown from the approval's `folders` member; deny-only when it is missing. Every text in it is NEW, for the owner's approval. Nothing existing changes: AA7 and AA8 still have no section of their own, and decision 15 (an `item.run` approval is deny-only before AA8) still holds **Fix round after the blind reviews:** `share` applies to a working folder only (files in and out need no share); no nested or case-duplicate entries, with a NEW text; the hint says to type the path exactly as the computer shows it and not to list a whole home folder, and that the connector uses it as typed; sizes are 1,024-based; "Can change files" is the one wording; an inputs-only approval has `folders: {}`; "the section below". [owner #15847 pending] marks where the answer on enforcing "Read only" against the per-pairing share goes
+  - 0.1.135: 2026-11-21 (VAULT-MESSAGING 0.93.0, AGENT-PLAN 0.1.17, IOS-PLAN 0.1.78; AGENT-SEPARATE-ACCOUNT Q1 a and Q9 a; Ground Control #15810). Not built; card #15812. §4 "Devices & agents": a new subsection "Member folders and files on a run (AA9)": the run settings' folders list with read only offered first (adding a folder or turning on write is a widening, so it asks for the password), and a run approval's folder, input files and output folder with their warnings, shown from the approval's `folders` member; deny-only when it is missing. Every text in it is NEW, for the owner's approval. Nothing existing changes: AA7 and AA8 still have no section of their own, and decision 15 (an `item.run` approval is deny-only before AA8) still holds **Fix round after the blind reviews:** `share` applies to a working folder only (files in and out need no share); no nested or case-duplicate entries, with a NEW text; the hint says to type the path exactly as the computer shows it and not to list a whole home folder, and that the connector uses it as typed; sizes are 1,024-based; "Can change files" is the one wording; an inputs-only approval has `folders: {}`; "the section below". The owner's decision a (GC #15855) is in: "Read only" is enforced for the folder a run starts in, the switch line loses its "until then" wording, and the help says a run can reach every folder shared with the pairing; a run with files only is also referred to the phone (owner decision a, GC #15856)
   - 0.1.134: erratum, 2026-11-18 (owner rule 3 as amended, Ground Control #r60; owner decisions a, 2026-11-18, #13774; lead decisions #13781, #13821; IOS-PLAN 0.1.77). Notification modes 7: a new paragraph "While the vault's release is checked": the release gate's three states (checking, a failed check included; behind; over); what is held (events, arrivals and the waiting-asks replay), dropped while the owner check is due or held, released after the feed's reads (arrivals, then events), and what notifies on release (an arrival or a replay as the feed lists it now; a covered held event only if its message came at or after the vault's opening, judged on the vault's clock from the first answer of this opening; a push-started process's events whatever their time). Built today by vettid-android #407 except: the opening's moment from an answer of this opening, the push wake limited to a push-started process, the replay against the first `pending.list` after the check and kept as a fresh arrival, no repeat within the opening, and a failed incremental read: Ground Control #13822. The 0.1.133 notes cite #r58; #r60 amends it (upgrades from the previous release must work), which changes none of them.
   - 0.1.133: erratum, 2026-11-17 (owner rule 3, Ground Control #r58; VAULT-MESSAGING 0.90.17). §4 "Transfer (new phone)": a transfer's `device.paired` without `transfer: true` and a valid `user_guid` is refused and dropped (the app no longer completes and warns); a dated note on the row, text kept. §4 "Release capabilities": a dated note that without `recovery_r` the app will refuse before anything is sent and `Path.EARLIER` goes (text to be set, owner approval). iOS has no such rule in IOS-PLAN, so no change there.
   - 0.1.132: erratum, 2026-11-15 (owner decisions of 2026-11-15: choice a, and choice a on its scope). Notifications 7 and 11, Notification modes 3 and 11, Approvals indicator 12: when a passed check ends the held or due state, except the check an unlock makes, each ask still waiting of exactly three kinds (`connection.authenticate.requested`, `device.session.pending`, `approval.pending`) is notified once; nothing else missed while held or due is replayed, pairings are left out, and an unlock (one that also passes the check included) replays nothing. Why: an ask that came while the vault was held or due went by unseen even after the check passed.
@@ -6458,7 +6458,10 @@ connector newer than the vault cannot send them) is deny-only.
   and can read and save files only in them. To run a program in a
   folder, you also have to share that folder on your computer with
   `vettid-agent share`; reading and saving files needs no sharing.
-  Nothing is listed until you add a folder." (NEW).
+  A program run there can reach every folder shared with this
+  computer's connector, not only the ones listed here: this list
+  decides where it starts and where files are copied. Nothing is
+  listed until you add a folder." (NEW).
   Each entry is a row: its path as typed, "Read only" or "Can change
   files" (NEW), a **Remove** button and, on tapping the row, its page.
 - **Add a folder** (NEW): the field "Folder path on your computer", with
@@ -6480,10 +6483,10 @@ connector newer than the vault cannot send them) is deny-only.
   switch "Let the agent change files in this folder" (NEW), off, with the
   line "A program run here could change or delete files in this folder
   and everything below it. Turn this on only if the agent needs to save
-  files here." (NEW). [owner #15847 pending: whether "Read only" is also
-  enforced on the computer against the per-pairing share; until then
-  this switch decides the files copied back, and the line says what the
-  program could do if the share allows it.] Everything below the folder is covered (the vault
+  files here." (NEW). "Read only" is enforced for the folder a run starts in (owner
+  decision a, GC #15855): the connector refuses a run there while the
+  computer's share lets that folder be changed, and says so with its
+  own text. Everything below the folder is covered (the vault
   compares the folder and its subfolders), and the page says so: "Also
   covers every folder inside it." (NEW).
 - **Saving:** adding a folder or turning the switch on is a widening, so
