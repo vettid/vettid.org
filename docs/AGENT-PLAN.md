@@ -1,9 +1,28 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.14
-date: 2026-11-20
+version: 0.1.15
+date: 2026-11-21
 changelog:
+  - 0.1.15: erratum, 2026-11-21, with VAULT-MESSAGING 0.92.1: as built
+    in vettid-agent #48 (ask again after a withheld answer) and #42
+    (A3.8a). §4.1: the connector's codes `withheld` and
+    `argument_not_allowed`. §4.4 (0.1.13 and 0.1.14 said §4.3): the
+    marker is checked first for every op, `withheld` other than `true`
+    is `protocol_error`, a `null` value is no longer "no stored value",
+    the connector asks again once (`AskAgain = 1`, chosen) and a second
+    copy ends with `withheld`. §4.9: Windows batch files run through
+    `cmd.exe` with the settled refused set (owner decision b, GC
+    #14880), held and bound to the file; an extensionless path with a
+    `.cmd` beside it runs that `.cmd`; the Linux cap and ELF-only
+    rule; the pin of a batch file covers the batch file only, not the
+    `node` and `node_modules` an npm shim runs (the lead's a on GC
+    #15388; the owner sees it at this erratum's merge). A3 status and
+    A3.8a's acceptance. §11: two NEW texts replace "Batch file", NEW
+    "Answer lost", and "Not a program" names .cmd and .bat. Also as
+    built in vettid-agent #51 (owner decisions b, a and a, GC #15715,
+    #15728, #15742): non-ASCII account folders are allowed unless this
+    system's code page turns a character into a refused one
   - 0.1.14: 2026-11-20, with VAULT-MESSAGING 0.92.0 (owner decisions a,
     GC #15273 and #15274). §4.3: a cached copy carries `withheld: true`,
     which the connector treats as "ask again as a new request"; the
@@ -425,14 +444,18 @@ Names follow LEASH §3.3 where it has one; VAULT-MESSAGING §10.11 gives
 the mapping. Every tool returns MCP tool errors with a stable `code`
 (the vault's error code, or the connector's own: `not_paired`,
 `access_requested`, `access_denied`, `vault_unreachable`,
-`owner_check_required`, `suspended`, `rate_limited_local`, and
+`owner_check_required`, `suspended`, `rate_limited_local`,
 `superseded`: another copy of the request under the same request id
-took its place, so its answer cannot be returned here, AG9). With AG13
+took its place, so its answer cannot be returned here, AG9; and
+(0.1.15, vettid-agent #48) `withheld`: the vault's answer with the
+value was lost twice, §4.4). With AG13
 the vault adds `way_not_allowed` (body `{ways}`) and
 `program_not_allowed`, and the connector `program_not_found`,
-`run_failed`, `proxy_limit` and `proxy_not_found` (§4.9). With
+`run_failed`, `proxy_limit`, `proxy_not_found` and (0.1.15, vettid-agent
+#42) `argument_not_allowed` (§4.9). With
 VAULT-MESSAGING 0.85.3 the vault adds `env_not_allowed` (body
-`{names}`), and the connector `vault_too_old` (§4.5).
+`{names}`), which the connector also returns itself before sending
+(§4.9), and the connector `vault_too_old` (§4.5).
 
 | Tool | Vault request | Input | Result |
 |---|---|---|---|
@@ -567,11 +590,36 @@ connector.
   answer is a copy without the secret value (VAULT-MESSAGING 0.91.1
   §8.2): a run or proxy answer without `value`, or an `item.get`
   answer with a field without `value`, means "ask again as a new
-  request" (to be built: today the connector accepts such a field).
-  (0.1.14) Every such copy carries `withheld: true` (VAULT-MESSAGING
-  0.92.0, owner decision a, GC #15273; to be built, vault card GC
-  #15279 and connector card GC #15275), which the connector is to
-  check first; the missing `value` stays as a backstop.
+  request". (0.1.14) Every such copy carries `withheld: true`
+  (VAULT-MESSAGING 0.92.0, owner decision a, GC #15273; vault card GC
+  #15279), which the connector checks first; the missing `value` stays
+  as a backstop. (0.1.15) As built in vettid-agent #48:
+  - The marker is checked first, for every op, before anything else in
+    the answer is read, so stale values a copy may still carry never
+    reach the result or the log. `withheld` with any other value
+    (`false`, `null`, a string, a number) is `protocol_error`: a live
+    answer never carries the member.
+  - The backstop is `item.get`'s: a field without `value` means a copy.
+    A `null` `value` is no longer read as "no stored value"; it is
+    `protocol_error`.
+  - The connector asks again **once** (`AskAgain = 1`; chosen, not in
+    the spec, since each new request may prompt the member again), as a
+    new request under a new inner id. The tool's `request_id` stays, so
+    `leash.check_status` keeps working; `approval.waiting` naming the
+    old inner id is ignored. Asking again renews no access session.
+  - A second copy ends the request with `withheld` (§11 "Answer lost").
+    A refusal of the new request is the outcome; the agent never gets
+    an empty item.
+  - Nothing is asked again when the tool call ended without its
+    `request_id` (nobody waits for it), when the agent is suspended
+    (`suspended`) or when the vault is known held
+    (`owner_check_required`).
+  - A notes-only item's copy from a vault without the marker is not
+    caught (it arrives as an item without fields); the vault side
+    (vettid-vault #285) ships first or together.
+  - `item.run` and `item.proxy`: the marker check covers them already;
+    their "without `value` starts nothing" backstop is built with A3.8b
+    and A3.9, which start processes and proxies.
 - **Held vault** (§3.6.3): `owner_check_required` for everything but
   `vault.status` and `device.session.end`; status statements lapse within
   `status_ttl`. The connector reports "Your vault is waiting for your
@@ -754,23 +802,101 @@ allowed ways, so the agent can choose again.
   `.cmd`, `.bat` or `.ps1` endings for that flag. A run answer with
   `withheld: true` (0.1.14) or without `value` (the vault's cached
   copy, VAULT-MESSAGING §8.2) starts nothing; the connector asks again
-  as a new request.
+  as a new request (§4.4; the marker check is built, vettid-agent #48;
+  the missing-`value` backstop for runs is built with A3.8b).
 - **What is refused as a program** (2026-11-05; the owner's decisions
-  and the lead's design notes): on Windows a `.bat` or `.cmd` file
-  (`cmd.exe` parses its arguments again, so they can run other
-  commands; (0.1.13) owner decision b, GC #14880: such a run is to be
-  allowed, with any argument holding a `cmd.exe` metacharacter
-  refused, fail closed (the question listed `&|<>^%!"` and line
-  breaks; the card settles the full set, `(` and `)` included);
-  until the connector builds that check, in a card after A3.8a that also sets
-  its message, the outright refusal stands), a name found with
-  another extension than `.exe` or `.com`,
+  and the lead's design notes): on Windows a program without one of
+  the extensions `.exe`, `.com`, `.cmd` or `.bat` (a bare name is
+  looked up as `.exe`, then `.com`, only; a batch file is found only
+  when named with its extension),
   a UNC path, a stream name (`file:stream`), a drive that is not a
-  fixed local NTFS or ReFS drive (owner decision 2026-11-05), and a junction or
-  other reparse point anywhere in the resolved path; on every platform,
+  fixed local NTFS or ReFS drive (owner decision 2026-11-05; NTFS only
+  for a batch file, below), and a junction or
+  other reparse point anywhere in the resolved path (also caught at the
+  hold: the held file's final name must equal the resolved path); on every platform,
   a path that is not a regular file the operator may run, and a script
   (`#!`, below, (owner decision 2026-11-05)). Each is `program_not_found`, with the
   reason in the log.
+- **Windows batch files** (`.cmd`, `.bat`; owner decision b, GC #14880;
+  as built in vettid-agent #42). `cmd.exe` parses a batch file's
+  arguments again, so a batch run is allowed only with every value it
+  sees checked, fail closed (`argument_not_allowed`, §11):
+  - **Refused in an argument, the value of a variable the request
+    sets, and the secret:** any of `% & | < > ^ ( ) ! "`, a control
+    character (below U+0020, and DEL), and any character outside ASCII.
+    Why: `%` expands even inside quotes; `& | < >` run or redirect once
+    `%~1` strips the quotes; `( )` end a block early; `^` is dropped by
+    `%~1`; `!` expands under delayed expansion; `"` cannot be escaped;
+    a line break ends the command; a non-ASCII character can be
+    converted by best fit to `"` or `\` (U+FF02, `¥`).
+  - **The batch file's path, its working folder and the account
+    folders it is given** (vettid-agent #51; owner decisions b, a and a,
+    GC #15715, #15728, #15742; measured on Windows 11, GC #15712):
+    `cmd.exe` passes non-ASCII unchanged, and the risk is a child that
+    reads its command line in the ANSI code page, where Windows' best fit
+    turns some characters into metacharacters. So these may hold
+    non-ASCII characters, but the ASCII refused set and control
+    characters stay refused, and so does any non-ASCII character that
+    `WideCharToMultiByte` with the system's code page (`GetACP`, read at
+    each run; best fit on) turns into a byte in the refused set, a `\`,
+    `/` or `:`, a control byte or DEL, a DBCS second byte included (on
+    cp932, for example, タ ends in `^`); a character that becomes `?` is
+    allowed, and a failed conversion refuses. A path such as
+    `C:\Program Files (x86)\…` still cannot hold a batch file that runs
+    with a secret.
+    - The account folders are the variables copied from the connector's
+      own environment, `USERPROFILE`, `USERNAME`, `HOMEDRIVE`,
+      `HOMEPATH`, `APPDATA` and `LOCALAPPDATA` (which neither the request
+      nor `--run-env` can set). They also may not end in a backslash,
+      except exactly `HOMEPATH=\` (a mapped home drive's root, GC
+      #15742; a batch file that quotes `"%HOMEDRIVE%%HOMEPATH%"` then
+      hands a C-runtime child `"H:\"`, an accepted residual).
+    - `PATH`, `TEMP` and `TMP`, which the connector sets, get the
+      non-ASCII part only and no trailing backslash: the ASCII part
+      would refuse a `--run-path` under `C:\Program Files (x86)`. A
+      drive's or share's root is refused as a `--run-path` at startup.
+    - The check relies on the connector having no UTF-8
+      `activeCodePage` manifest (`GetACP` would then report 65001); a
+      test fails and the release-binary check refuses if one appears.
+  - **Also refused:** an argument or variable value that ends in a
+    backslash (`\"` would become an escaped quote for a program that
+    follows C-runtime rules); a working folder that is a drive's root;
+    a variable named as one `cmd.exe` sets itself (`CD`, `DATE`,
+    `TIME`, `RANDOM`, `ERRORLEVEL`, `CMDEXTVERSION`, `CMDCMDLINE`,
+    `HIGHESTNUMANODENUMBER`, `__CD__`, `__APPDIR__`, any case), even a
+    trusted one; and a secret given in an environment variable whose
+    bytes break any of these rules (§11 "Secret not for a batch
+    file": use `file` instead). The connector's own variables
+    (`SystemRoot`, `windir`, `SystemDrive`, `PATHEXT`, `TEMP`, `TMP`,
+    `PATH`, `NoDefaultCurrentDirectoryInExePath`) are exempt.
+  - **Allowed:** space and every other printable ASCII character, so a
+    batch file that uses `%~1` bare (`if %~1==x`) can still be steered
+    by spaces. The rule protects batch files that quote what they are
+    given (`"%~1"`) or pass `%*` on, as npm's shims do.
+  - **How it runs:** `"<System32>\cmd.exe" /d /e:on /v:off /s /c
+    ""<bat>" "a1" …"`, with `cmd.exe` from `GetSystemDirectory` (never
+    `ComSpec`), resolved, checked and held like any program; `/d` skips
+    AutoRun, `/e:on` forces command extensions on (npm's shims need
+    `%~dp0` and `setlocal`), `/v:off` turns off `!` expansion. A batch
+    command line over 8,191 characters is `bad_request`.
+  - **The file:** held (below) and hashed through the hold; it must not
+    start with `MZ`, and `#!` is refused as for any program. Only on
+    NTFS (renaming a folder above a held file was shown refused on NTFS
+    only). `cmd.exe` reopens the file by path for each command, so
+    before the process is resumed the path is reopened and must name
+    the held file (final name and identity, no reparse point), or the
+    process is ended. The hold lasts until the process ends.
+  - **Symbolic links:** a batch file that only an administrator can
+    change may run; any other (a pinned one included) runs only if the
+    connector's user cannot make symbolic links (Developer Mode off and
+    no `SeCreateSymbolicLinkPrivilege`), since a link set on the held
+    leaf while `cmd.exe` runs could redirect the run; a failed check
+    counts as "can". So with Developer Mode on, a pinned npm shim in
+    `%APPDATA%\npm` is refused (`program_not_found`).
+  - **npm shims by name:** an absolute path without an extension that
+    names a regular non-`MZ` file with `<path>.cmd` beside it is run as
+    that `.cmd`, which is what is hashed, sent as `program` and pinned
+    (only `.cmd` is tried).
 - **The program's content** (VAULT-MESSAGING 0.85.3; owner decision of
   2026-11-05, option b). The connector reads the resolved file once,
   computes its SHA-256 as it reads, and sends it as `item.run`'s
@@ -791,11 +917,16 @@ allowed ways, so the agent can choose again.
 - **Run exactly what was hashed** (the lead's design note,
   2026-11-05). Never hash by path and then start by path: the file
   could be swapped in between, or, on Linux and macOS, written in
-  place. (chosen; not in the spec, to be confirmed by A3.8a's tests)
+  place. (chosen; not in the spec. (0.1.15) A3.8a's tests showed, on
+  NTFS as a standard user, that renaming the program's folder and the
+  folder above it is refused while the program is held; ReFS was not
+  tested.)
   - **Windows** (NTFS or ReFS volumes only, others refused, (owner decision 2026-11-05)): the
     connector opens the file with sharing that refuses writing and
-    deleting (an open that fails because another process has it open
-    for writing refuses the run), hashes it through that handle, and
+    deleting (`FILE_SHARE_READ` only, not following a reparse point; an
+    open that fails because another process has it open
+    for writing refuses the run; the final name must equal the resolved
+    path), hashes it through that handle, and
     holds the handle until the process has started. It starts the
     process suspended from the same resolved path (as
     `lpApplicationName`), checks that the started image is the held
@@ -813,7 +944,9 @@ allowed ways, so the agent can choose again.
     Linux 6.3 or later: on `EINVAL` it retries without `MFD_EXEC`; then
     `F_SEAL_WRITE`, `F_SEAL_GROW`, `F_SEAL_SHRINK`, `F_SEAL_SEAL`)
     while hashing it, and starts that (through its `/proc/self/fd/<n>`
-    path, which Go's process start can use). No one can change sealed
+    path, which Go's process start can use). (0.1.15) Only an ELF file
+    is run this way (so nothing runs through binfmt_misc), and one over
+    512 MiB is refused (chosen; not in the spec). No one can change sealed
     content. A program that finds its own files beside itself (through
     `/proc/self/exe`) may then fail. Where the system refuses to run a
     memory file (`vm.memfd_noexec` = 2), the run is refused
@@ -850,6 +983,20 @@ allowed ways, so the agent can choose again.
   administrator can change it is safer, but not safe, against an agent
   that runs as the connector's user. The README says so, and that the
   connector must not run as an administrator or root.
+  (0.1.15, the lead's a on GC #15388) **A batch file's pin covers the
+  batch file only.** An npm shim (`.cmd`) runs `node` and the
+  `node_modules\…\*.js` it names; neither is pinned, and the "only an
+  administrator can change" rule covers the `.cmd`'s folder and those
+  above it, not `node_modules` below it (a pinned path gets the path
+  rules alone). So "this program's fingerprint was approved" means the
+  launcher, not the code it runs; AA8's approval wording says so. Known
+  limits, as built: an agent can put a `node.exe` beside a pinned shim
+  in `%APPDATA%\npm`, which the shim then runs with the secret,
+  unreferred; a DosDevices `C:` link made by the same user can
+  redirect `cmd.exe`'s per-command reopen; the fixed-path folders on
+  the child's `PATH` are not checked as administrator-only; batch
+  files are refused on ReFS. The separate account (below) is the full
+  answer.
 - **A separate account is the only full protection** (0.1.10). An
   agent that runs as the same operating-system account as the
   connector can, while a run lasts, open the `file` secret, read the
@@ -1163,7 +1310,7 @@ recorded as decided in the table and the changelog (0.1.4, 0.1.5).
 
 ### A3 — LEASH and the MCP server
 
-*Status: A3.1 #26, A3.2 #27, A3.3 #28, A3.4 #32, A3.5 #43 (0.1.13) and A3.6 #36 are done (follow-ups #30, #34). A3.7 to A3.9 are not built; A3.8a is in progress (vettid-agent #42, draft).*
+*Status: A3.1 #26, A3.2 #27, A3.3 #28, A3.4 #32, A3.5 #43 (0.1.13) and A3.6 #36 are done (follow-ups #30, #34). A3.8a #42 is done, with #51 (0.1.15; the ask-again rule of §4.4 is #48). A3.7, A3.8b and A3.9 are not built.*
 
 | PR | Contents | Acceptance |
 |---|---|---|
@@ -1174,7 +1321,7 @@ recorded as decided in the table and the changelog (0.1.4, 0.1.5).
 | A3.5 | Grant-set sequence numbers (§4.5; after AV7): the highest `grant_seq` kept in the state file; a higher one replaces the set; a lower one ignored; an equal one gives only fresher statements; `gen` kept for marks learned outside the sets; the `leash` state member at `"v": 2` | Unit tests: a list sent before a revocation and received after it does not bring the grant back; a higher-numbered update adds a grant; an equal number keeps the set and refreshes statements; a grant marked `not_found` stays dead under an equal or higher number until this process's own list answers; the pairing batch's number is not recorded; a re-paired state starts with none; a list or update without `grant_seq`, or with 0, is ignored and paced as a failed list, with `vault_too_old`; a `"v": 1` state member reads as number unknown |
 | A3.6 | **README note now** (AG13; before any vault change): the note of §11 "README note" in vettid-agent's README, in the MCP section. **Done** in vettid-agent #36 (`5cd72fe`), with the text as merged | The README carries the text exactly |
 | A3.7 | **Reveal as the last resort** (§4.9 "Reveal"; after AV9): `leash.request_secret`, and `leash.check_status` for an `item.get`, answer in one text block, no `structuredContent`, no output schema; descriptions in AG13's order; `ways`, `programs` and `hosts` in `leash.list_available`; `way_not_allowed` with the allowed ways | Golden files: `tools/list` shows no output schema for `leash.request_secret`, and its answer has exactly one content block and no `structuredContent`; the value appears once in the serialized answer; `way_not_allowed` gives its text with the ways; dev stack: an item without `reveal` refuses `leash.request_secret`, one with it is referred every time and returns the value once approved |
-| A3.8a | **`leash.run_with_secret`, part 1** (§4.9 "Run"; after AV9, AV10): resolution and what is refused as a program; the hash, and running exactly what was hashed; the run's own directory; the minimal environment, the `env` allowlist and the code-loading refusals; the three ways to pass the secret; the operator's flags and their startup checks | Unit tests: the child's environment is exactly the minimal set plus the request's (a test program prints it); `LD_PRELOAD`, `NODE_OPTIONS` and `PATH` in `env` refused by the connector's own name rule (a fake vault's binding lists `NODE_OPTIONS`, which the real vault refuses in `leash.item.set`); a program the user can change refused while its entry has no pin; a name the binding does not list refused; a bare name is resolved on the fixed path only; a relative path with a separator refused (on Windows also `\` and a volume); `.bat` and `.cmd` refused; a junction in the path refused; the `sha256` sent is the file's; a file renamed, replaced or written in place between the hash and the start does not run (Windows: the write and the rename fail while held, and a started image that is not the held file is ended; Linux: the sealed copy runs; macOS: the copy runs, the remaining gap stated); a `#!` script refused, and a volume that is neither NTFS nor ReFS refused; the secret file is owner-only and gone after the run, and `run/` is emptied at start after a simulated crash; `--run-path` refuses a missing, relative or changeable directory or one below a changeable one, and more than 16; `--run-env` refuses a bad name and more than 32. Dev stack: a bound program's first run is referred with `program_unrecorded`, a matching later one runs without a prompt with `each: false`, a changed file, or a copy of the pinned file run from another folder, is referred with `program_changed`; a bound shell or interpreter is still referred; an unbound one is referred and the approval shows argv, directory and how; a shell is flagged |
+| A3.8a | **`leash.run_with_secret`, part 1** (§4.9 "Run"; after AV9, AV10): resolution and what is refused as a program; the hash, and running exactly what was hashed; the run's own directory; the minimal environment, the `env` allowlist and the code-loading refusals; the three ways to pass the secret; the operator's flags and their startup checks | Unit tests: the child's environment is exactly the minimal set plus the request's (a test program prints it); `LD_PRELOAD`, `NODE_OPTIONS` and `PATH` in `env` refused by the connector's own name rule (a fake vault's binding lists `NODE_OPTIONS`, which the real vault refuses in `leash.item.set`); a program the user can change refused while its entry has no pin; a name the binding does not list refused; a bare name is resolved on the fixed path only; a relative path with a separator refused (on Windows also `\` and a volume); `.bat` and `.cmd` run through `cmd.exe`, with an argument, variable, path or working folder holding a refused character refused (0.1.15); a junction in the path refused; the `sha256` sent is the file's; a file renamed, replaced or written in place between the hash and the start does not run (Windows: the write and the rename fail while held, and a started image that is not the held file is ended; Linux: the sealed copy runs; macOS: the copy runs, the remaining gap stated); a `#!` script refused, and a volume that is neither NTFS nor ReFS refused; the secret file is owner-only and gone after the run, and `run/` is emptied at start after a simulated crash; `--run-path` refuses a missing, relative or changeable directory or one below a changeable one, and more than 16; `--run-env` refuses a bad name and more than 32. Dev stack: a bound program's first run is referred with `program_unrecorded`, a matching later one runs without a prompt with `each: false`, a changed file, or a copy of the pinned file run from another folder, is referred with `program_changed`; a bound shell or interpreter is still referred; an unbound one is referred and the approval shows argv, directory and how; a shell is flagged |
 | A3.8b | **`leash.run_with_secret`, part 2** (§4.9 "Run" and "Redaction"): output redaction, process group or job and its kill, the time, size and concurrency limits, `truncated`, referred runs started at once | Unit tests: each of the redacted forms of §4.9 is replaced, also when split across reads and in standard error; a value never appears in the answer, the logs or the run directory after the run; the time limit kills the whole process group; output past 1 MiB is truncated and flagged, and so is output cut at 64 KiB; a third run is `rate_limited_local` and no `item.run` is sent for it; a referred run starts when the approval arrives and its redacted answer is kept for `check_status`; runs are killed when the connector exits |
 | A3.9 | **`leash.open_proxy`, `leash.close_proxy`** (§4.9 "Proxy"; after AV9, AV11) | Unit tests against a local TLS test server with a test root: the header is added only to the bound host; an incoming copy of the header is dropped; a wrong token, a wrong `Host`, an `Origin` header, an absolute-form or `CONNECT` request get 403 or 405 and reach nothing; a redirect to another host becomes 502 `redirect_refused`, one to the same host is rewritten; the value and its encodings in response headers and body (also across chunk boundaries) are replaced; a compressed response is refused; a certificate not valid for the host fails; the proxy closes at `expires_at`, at `leash.close_proxy` and when the session ends. Dev stack: opening is referred and the approval shows host, header name and length |
 
@@ -1485,8 +1632,31 @@ approval, each marked NEW except where the owner already chose it:
 - **Variables not allowed** (`env_not_allowed`), NEW: "Your vault does
   not let this program receive these variables: <names>. You can allow
   them for this program on your phone."
-- **Batch file** (`program_not_found`), NEW: "Batch files (.bat, .cmd)
-  cannot be run with a secret. Run the program itself instead."
+- **Batch file argument** (`argument_not_allowed`, 0.1.15, replacing
+  "Batch file"; as in vettid-agent #51), NEW, followed by a detail in
+  parentheses that names the part and the kind of character or its code
+  point, never an argument's value (for example "(argument 2 holds
+  &)"): "This program is a Windows batch file (.cmd or .bat), which
+  runs through cmd.exe. Its arguments and the environment variables the
+  request sets can't hold any of % & | < > ^ ( ) ! " or a control
+  character, or any character outside ASCII, and can't end in a
+  backslash. Its path, its working folder and the folders from your
+  account it is given (such as APPDATA) can't hold those ASCII
+  characters or a control character, and none of the folders it gets,
+  the PATH it searches included, can hold a character this system turns
+  into one of them or into a slash, backslash or colon (such as a
+  full-width quotation mark). A variable can't be named as one cmd.exe
+  sets itself, such as CD or ERRORLEVEL. Pass a value in a file
+  instead, or move the program to another folder."
+- **Secret not for a batch file** (`argument_not_allowed`, 0.1.15),
+  NEW: "This program is a Windows batch file (.cmd or .bat), and the
+  secret's value can't be given to it in an environment variable:
+  cmd.exe would read some of its characters as commands. Give it to
+  this program as a file (how: file) instead."
+- **Answer lost** (`withheld`, 0.1.15, vettid-agent #48), NEW: "Your
+  vault handled this request, but its answer with the value was lost
+  on the way, and asking again went the same way. Make the request
+  again."
 - **Program moved** (`program_not_found`, the path changed before the
   start), NEW: "The program changed while it was being started, so it
   was not run. Try again."
@@ -1495,9 +1665,9 @@ approval, each marked NEW except where the owner already chose it:
   file stream, so it cannot be run with a secret. Give the program's
   own path on a local drive."
 - **Not a program** (`program_not_found`: not a regular file, or on
-  Windows an extension other than .exe or .com), NEW: "This is not a
-  program that can be run with a secret. Give the path of a program
-  file (on Windows, an .exe or .com file)."
+  Windows an extension other than .exe, .com, .cmd or .bat), NEW: "This
+  is not a program that can be run with a secret. Give the path of a
+  program file (on Windows, an .exe, .com, .cmd or .bat file)."
 - **Script** (`program_not_found`), NEW: "This program is a script, so
   it cannot be run with a secret directly. Run its interpreter with the
   script as an argument instead."
