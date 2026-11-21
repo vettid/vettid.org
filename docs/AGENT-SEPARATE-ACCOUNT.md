@@ -198,8 +198,8 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
     without a TPM 2.0, `install` stops with a clear message unless
     `--no-tpm` is given; then the credential is sealed to systemd's host
     key, which root can read and which is not bound to hardware, and
-    `install` and `status` say so. `--no-tpm` on a machine that has a
-    TPM 2.0 is refused.
+    `install` and `status` say so. (The lead's call, 2026-11-21) `--no-tpm`
+    on a machine that has a TPM 2.0 is refused.
   - The accounts are fixed system users made at install, not systemd's
     `DynamicUser=` (whose uids change, which breaks ACL-based shares).
 - **One instance per pairing.** AG1a's "one pairing per MCP client"
@@ -265,7 +265,8 @@ elevated administrator, or root, is also admitted, only for `pair`,
 `forget` and `status`, never for tools: on Windows by the client's
 token (the Administrators group enabled, high integrity or above,
 System included), on Linux and macOS by peer uid 0. The service refuses
-those operations from the member's normal process. Every failed check refuses the connection,
+`pair` and `forget` from the member's normal process (`status` needs no
+elevation, §5). Every failed check refuses the connection,
 and the service never takes another name.
 
 - **Windows**: a named pipe `\\.\pipe\vettid-agent-<n>-<random>`.
