@@ -1,8 +1,8 @@
 ---
 title: PQC-MIGRATION
 status: draft
-version: 0.4.0
-date: 2026-11-17
+version: 0.4.1
+date: 2026-11-21
 owner: Al Liebl (Mesmer)
 component: cross-cutting (vettid-agent, relay, vault manager, credential format)
 related:
@@ -13,6 +13,14 @@ related:
   - CALLS-PLAN.md
   - VAULT-MESSAGING.md
 changelog:
+  - 0.4.1: §4 row 14, §3 and §9: the clients' side of TLS to the relay,
+    checked on 2026-11-21. The desktop (rustls) now uses the aws-lc-rs
+    provider with `prefer-post-quantum` and negotiates X25519MLKEM768 in a
+    live test of its own configuration (vettid-desktop #142; before, it used
+    ring, whose provider has no ML-KEM). vettid-agent uses Go crypto/tls
+    defaults (code read), and a Go-defaults client on its pinned go1.26.11
+    negotiates X25519MLKEM768 with the relay. Android and iOS platform TLS
+    remain to confirm. The rule in row 14 now covers rustls as well as Go
   - 0.4.0: after NIST IR 8547 (final, October 2026): new §2.1 with the NIST
     timeline and a dated target (every VettID-controlled signing key trusted
     for longer than an online check is on a PQ or hybrid suite by
@@ -177,7 +185,7 @@ Plan statement (for the owner's approval):
 | P-256 ECDH (iPhone Secure Enclave) | Unlock secret and seed wrap (VAULT-MESSAGING §11.14.1 "On an iPhone") | Local only; Secure Enclave ML-KEM-768 exists from iOS 26 (to confirm) |
 | P-256 (Android Keystore/StrongBox, Secure Enclave) | App key and Android device key (VAULT-MESSAGING §11.7, §11.12.2) | Hardware-bound; platform timeline |
 | Android app signing certificate | Pinned by vault releases (`android_signers`) | Hybrid possible from Android 17 (APK Signature Scheme v3.2) |
-| TLS 1.3 key exchange; ECDSA/RSA certificates | VettID endpoints (CloudFront, push gateway, relay) | The 8 hosts checked accept hybrid (apps' TLS to confirm). Certificates: WebPKI timeline |
+| TLS 1.3 key exchange; ECDSA/RSA certificates | VettID endpoints (CloudFront, push gateway, relay) | The 8 hosts checked accept hybrid; the desktop negotiates X25519MLKEM768 with the relay, and vettid-agent uses Go defaults that do (2026-11-21); Android and iOS TLS to confirm. Certificates: WebPKI timeline |
 | secp256k1 ECDSA/Schnorr | Wallet (bitcoin) | Outside NIST; follows the Bitcoin protocol |
 | Short-lived or third-party (one group) | APNs ES256 and FCM RS256 provider JWTs (minutes to an hour; vettid-push); service-vault pinned P-256 TLS identity; Sigstore TSA and Rekor roots pinned in the vault; GitHub/Sigstore build provenance (`actions/attest-build-provenance` in vettid-vault `release.yml`; Fulcio certificate algorithm to confirm); Cognito tokens; WebPKI leaves (RSA-2048 on all 8 hosts checked); Android key attestation and iOS App Attest roots (with Nitro); iOS code signing; the admin tunnel (Headscale/WireGuard X25519, `lib/stacks/admin-access-stack.ts`; the inner TLS is hybrid where the client offers it) | External or short-lived; tracked |
 | Local key protectors (TPM, Keychain, DPAPI) | vettid-agent and desktop (AGENT-PLAN AG3) | Local platform; follows the OS timeline |
@@ -200,7 +208,7 @@ Plan statement (for the owner's approval):
 | 11 | Ballot (votes) site key | Ed25519, non-exportable KMS key; signs the service list (label ‖ SHA-256(list)) | **Hybrid Ed25519 + ML-DSA-65**: a second `ML_DSA_65` KMS key, two Sign calls, both signatures required | 2 (by 2030-12-31) | Long-lived, identity-like key. KMS offers ML-DSA; the constraint is the verifiers (§10 item 5). |
 | 12 | Service-list anchor key | ECDSA P-256 in KMS; each list is logged in Rekor (Sigstore hashedrekord) | **Sigstore/Rekor PQ timeline** | external (track) | Depends on the algorithms Rekor accepts, like Nitro (#9). Tracked each review cycle. |
 | 13 | Release manifest signing keys A and B | A: KMS `ECC_NIST_P256` (`lib/config.ts`). B: YubiKey PIV slot 9c, P-256 (`lib/config.ts`) | A: **hybrid ECDSA P-256 + ML-DSA-65** (a second `ML_DSA_65` KMS key, both signatures required). B: a new offline token or an accepted software offline key (PIV has no PQ algorithm) | 2 (by 2030-12-31) | Manifests are verified by every app; high value, long-lived. Hybrid keeps §1 and §5.2's AND policy. Key B is hardware-bound (§10 item 5). |
-| 14 | TLS on VettID endpoints (CloudFront, push gateway, relay) | TLS 1.3 | **No VettID change for key exchange; certificates follow the WebPKI** | external | **Checked 2026-11-17 with OpenSSL 3.5:** staging.vettid.org, vettid.org, account.vettid.org, account.staging.vettid.org, relay.vettid.org, push.staging.vettid.org, calls.staging.vettid.org and votes.staging.vettid.org accept X25519MLKEM768 in TLS 1.3 when it is offered. Not covered: turn.staging.vettid.org gave no TLS answer on 443; push.vettid.org and relay.staging.vettid.org did not connect. Whether the apps' TLS stacks (Android and iOS platform TLS) offer it is to confirm per platform. Certificates (ECDSA/RSA) follow the WebPKI's own timeline. **Rule:** never set `CurvePreferences` without X25519MLKEM768 (the enclave's egress uses Go defaults, which include it). |
+| 14 | TLS on VettID endpoints (CloudFront, push gateway, relay) | TLS 1.3 | **No endpoint change for key exchange; clients must offer X25519MLKEM768; certificates follow the WebPKI** | external | **Checked 2026-11-17 with OpenSSL 3.5:** staging.vettid.org, vettid.org, account.vettid.org, account.staging.vettid.org, relay.vettid.org, push.staging.vettid.org, calls.staging.vettid.org and votes.staging.vettid.org accept X25519MLKEM768 in TLS 1.3 when it is offered. Not covered: turn.staging.vettid.org gave no TLS answer on 443; push.vettid.org and relay.staging.vettid.org did not connect. **Clients, checked against relay.vettid.org on 2026-11-21:** the desktop (vettid-desktop, rustls on the aws-lc-rs provider with `prefer-post-quantum` and its default groups, X25519MLKEM768 first; vettid-desktop #142) negotiates X25519MLKEM768 in a live test of its own configuration. Before #142 it used rustls's ring provider, which has no ML-KEM. vettid-agent reaches the relay with Go `crypto/tls` defaults through the vettid-vault `client` package (code read: no `CurvePreferences`, no `tlsmlkem` GODEBUG, `go` line 1.26), and a client with Go's defaults on its pinned go1.26.11 negotiates X25519MLKEM768 live; the agent binary itself was not probed. Not yet confirmed: Android and iOS platform TLS. Inside desktop calls builds, DTLS (dtls 0.17) stays classical and is not relied upon (row 5a). Certificates (ECDSA/RSA) follow the WebPKI's own timeline. **Rule** (shipped clients' TLS to VettID endpoints): never set a group list without X25519MLKEM768, in Go `CurvePreferences` (the enclave's egress uses Go defaults, which include it) or rustls `kx_groups`; don't turn it off with GODEBUG `tlsmlkem=0` or a go.mod `go` line below 1.24; a rustls client uses a provider that offers it first (for example aws-lc-rs with `prefer-post-quantum`; ring's provider has no ML-KEM). Tests that narrow a server's groups to check classical fallback are outside the rule. |
 | 15 | Release tag signing (vettid-vault) | SSH Ed25519 tag signatures | **With #5** | 2 (by 2030-12-31) | Long-lived signatures on release tags. |
 | 16 | Wallet (bitcoin) | secp256k1 ECDSA/Schnorr | **Out of scope** | — | Outside NIST's list; follows Bitcoin protocol changes. Listed for completeness. |
 | 17 | Recovery request key | ECDSA P-256 in KMS (`lib/stacks/data-stack.ts`) | **Hybrid ECDSA P-256 + ML-DSA-65** (a second `ML_DSA_65` KMS key, both signatures required) | 2 (by 2030-12-31) | Signs `recovery` and `recovery_cancel`; pinned in releases (VAULT-MESSAGING §11.14.8), so a change is a release change. |
@@ -366,7 +374,9 @@ no new external agentic/crypto frameworks.
   the exceptions are in §3 (recovery code seal, KMS Recipient transport,
   platform hardware). Call media secrecy no longer depends on a classical
   key exchange (`k_call` comes from suite 2). The 8 hosts checked accept
-  X25519MLKEM768 in TLS (2026-11-17; the apps' TLS stacks to confirm).
+  X25519MLKEM768 in TLS (2026-11-17); the desktop negotiates it with the
+  relay, and vettid-agent uses Go defaults that do (2026-11-21); Android and
+  iOS TLS remain to confirm.
 - **Phase 2 (starts no later than 2027-06-30, an owner decision; done by
   2030-12-31):** Hybrid Ed25519+ML-DSA-65 credentials via rotation-carried
   migration (suite 3); salted-hash selective disclosure; SLH-DSA-128s
