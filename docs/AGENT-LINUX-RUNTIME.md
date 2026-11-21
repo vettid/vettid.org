@@ -516,30 +516,20 @@ else.
       no privilege (and many programs that handle secrets do it on
       purpose). Then a piped handler runs as root, outside the run's
       sandbox. So the limit protects only runs that leave it alone.
-    - **The handler** `[owner #15995 pending]`. `install`, the helper
-      at each start, and the helper before each `start` read
-      `/proc/sys/kernel/core_pattern`. Only a `|` handler or a plain file
-      pattern is accepted; the socket forms of Linux 6.16 and later
-      (`@`, `@@`) are refused until measured. A plain file pattern
-      writes nothing for a run, whose hard limit is 1. Unknown handlers
-      are refused under either answer.
-      - **If a (recommended by the lead and both reviewers):** `install`
-        refuses a computer whose handler is apport, and says how to turn
-        it off: `sudo systemctl disable --now apport`, which sets
-        `core_pattern` back to the plain `core` (measured on Ubuntu
-        24.04). systemd-coredump and a plain file pattern are accepted.
-        The helper refuses a `start` while the handler is one `install`
+    - **The handler** (owner a, GC #15995). `install`, the helper at
+      each start, and the helper before each `start` read
+      `/proc/sys/kernel/core_pattern`:
+      - accepted: systemd-coredump, and a plain file pattern, which
+        writes nothing for a run, whose hard limit is 1;
+      - refused: apport, and any handler `install` doesn't know, as are
+        the socket forms of Linux 6.16 and later (`@`, `@@`) until
+        measured. `install` says how to turn apport off: `sudo
+        systemctl disable --now apport`, which sets `core_pattern` back
+        to the plain `core` (measured on Ubuntu 24.04). The cost, said
+        plainly: a stock Ubuntu desktop needs that one command first.
+      - The helper refuses a `start` while the handler is one `install`
         would refuse.
-      - **If b:** apport stays on, and:
-        - the slot cleanup below finds what it wrote, and the helper
-          scans again before each `start` of that slot;
-        - a crash handler still running for one of the runner's
-          processes (one is, while the core is being piped) is waited
-          for, up to 30 s, and past that the slot stays out of use;
-        - `install` requires automatic crash reporting off (whoopsie
-          and apport's own upload), or, if the owner allows it on, says
-          plainly that a run's core may leave the computer.
-    - **Under either answer**, slot cleanup (§9 step 4) looks in
+    - **As a backstop**, slot cleanup (§9 step 4) looks in
       `/var/crash` and `/var/lib/systemd/coredump` for files the runner
       owns or that name its uid, and keeps the slot out of use, with
       `status` naming them, until an administrator removes them. The
@@ -1102,8 +1092,8 @@ owner's go:
    - its capability set and its sandbox options (with `PrivateIPC`, a
      private `/dev/shm`, `PrivateDevices`, a system-call filter failing
      with `EPERM`, `LimitCORE=1`, `noswap` where the kernel has it), a
-     session keyring per run, the `core_pattern` check and crash-report
-     sweep (the handler's rule pending the owner, #15995),
+     session keyring per run, the `core_pattern` check (apport refused,
+     owner a, GC #15995) and the crash-report sweep as a backstop,
      `InaccessiblePaths=` for a home outside `/home`;
    - no `RestrictNamespaces=`, for `clone3`'s sake;
    - the per-run limits;
@@ -1168,10 +1158,12 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     and its `pids.max` and `memory.max` hold;
   - a crashed run leaves no core dump, no apport report and no journal
     entry with its environment, with apport and with systemd-coredump;
-  - a run that lowers its own core limit to 0 and then crashes: under
-    the owner's answer to #15995, `install` has refused apport (a), or
-    the report it leaves keeps the slot out of use (b); systemd-coredump
-    at a limit of 0 is measured on Fedora, its journal entry included;
+  - `install` and the helper refuse apport and an unknown handler, and
+    accept systemd-coredump and a file pattern (owner a, GC #15995);
+  - a run that lowers its own core limit to 0 and then crashes leaves no
+    core and no journal entry with its environment under
+    systemd-coredump (measured on Fedora) or a file pattern, and a
+    report the backstop finds keeps the slot out of use;
   - a `core_pattern` socket handler (`@`, `@@`) is refused;
   - the helper's tmpfs with and without `noswap`, and the helper's
     refusal to start under a kernel older than its unit, with the
