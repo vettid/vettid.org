@@ -229,9 +229,9 @@ KeyringMode=private
   those the socket makes included, not only restarts after a crash.
   Since the service stays up while clients come and go and stops only
   after its idle time, a client that reconnects often doesn't reach it;
-  a crash loop does, and then §4's "can't start" applies (said plainly). The idle stop of AGENT-PLAN §4.9 is the
-  service exiting 0; the socket stays, and the next client starts it
-  again.
+  a crash loop does, and then §4's "can't start" applies (said
+  plainly). The idle stop of AGENT-PLAN §4.9 is the service exiting 0;
+  the socket stays, and the next client starts it again.
 - **When the service can't start** (its credential can't be unsealed,
   §5), systemd stops trying after the start limit and marks the
   socket failed too (`service-start-limit-hit`). `RemoveOnStop` then
@@ -388,7 +388,8 @@ separate-account mode", Linux), reviewed here before code.
     is given. With one, `--no-tpm` is refused (the lead's call, §11).
   - The choice is recorded in the configuration. `pair` checks again,
     and a pairing installed with a TPM whose TPM is gone is refused
-    rather than sealed to the host key. `forget` can't seal a
+    rather than sealed to the host key. `+driver -firmware` counts as
+    there for `pair` too, by the same trial seal. `forget` can't seal a
     `host+tpm2` placeholder then either. `status` says the way out:
     uninstall, then `install --no-tpm` (chosen).
   - `install` says, and `status` shows, when the key is sealed to the
@@ -502,7 +503,9 @@ else.
     It doesn't stop the helper's own `setuid`, which is a capability,
     not a new privilege.
   - **Core dumps.** A crashed run's core holds its secret.
-    - **The limit is 1** (`LimitCORE=1`; chosen, measured). At a limit
+    - **The limit is 1** (`LimitCORE=1`, which sets the hard limit too,
+      so a run can lower it but never raise it; chosen, measured). At a
+      limit
       of 0 the kernel still hands the core to a piped `core_pattern`
       handler, and on Ubuntu 24.04 apport then wrote a report with it to
       `/var/crash` (measured). At 1 the kernel aborts the dump before any
@@ -513,17 +516,29 @@ else.
       no privilege (and many programs that handle secrets do it on
       purpose). Then a piped handler runs as root, outside the run's
       sandbox. So the limit protects only runs that leave it alone.
-    - **The handler** `[owner #15995 pending]`. `install`, and the
-      helper at each start, read `/proc/sys/kernel/core_pattern`. Only a
-      `|` handler or a plain file pattern is accepted; the socket forms
-      of Linux 6.16 and later (`@`, `@@`) are refused until measured.
-      - **If a:** `install` refuses a computer whose handler is apport,
-        or any handler it doesn't know, and says how to turn apport off
-        (`sudo systemctl disable --now apport`). systemd-coredump and a
-        plain file pattern are accepted. The helper refuses to start
-        when the handler has changed to one `install` would refuse.
-      - **If b:** apport stays on, and the slot cleanup below finds what
-        it wrote.
+    - **The handler** `[owner #15995 pending]`. `install`, the helper
+      at each start, and the helper before each `start` read
+      `/proc/sys/kernel/core_pattern`. Only a `|` handler or a plain file
+      pattern is accepted; the socket forms of Linux 6.16 and later
+      (`@`, `@@`) are refused until measured. A plain file pattern
+      writes nothing for a run, whose hard limit is 1. Unknown handlers
+      are refused under either answer.
+      - **If a (recommended by the lead and both reviewers):** `install`
+        refuses a computer whose handler is apport, and says how to turn
+        it off: `sudo systemctl disable --now apport`, which sets
+        `core_pattern` back to the plain `core` (measured on Ubuntu
+        24.04). systemd-coredump and a plain file pattern are accepted.
+        The helper refuses a `start` while the handler is one `install`
+        would refuse.
+      - **If b:** apport stays on, and:
+        - the slot cleanup below finds what it wrote, and the helper
+          scans again before each `start` of that slot;
+        - a crash handler still running for one of the runner's
+          processes (one is, while the core is being piped) is waited
+          for, up to 30 s, and past that the slot stays out of use;
+        - `install` requires automatic crash reporting off (whoopsie
+          and apport's own upload), or, if the owner allows it on, says
+          plainly that a run's core may leave the computer.
     - **Under either answer**, slot cleanup (§9 step 4) looks in
       `/var/crash` and `/var/lib/systemd/coredump` for files the runner
       owns or that name its uid, and keeps the slot out of use, with
@@ -543,9 +558,10 @@ else.
     nothing (the mount goes with the helper's namespace), and no other
     process on the computer sees it. Said plainly: a tmpfs can be
     swapped out, so a secret can reach the swap device as any
-    process's memory can. On Linux 6.4 and later `install` adds
-    `noswap` to the mount, and the secret stays in RAM; on an older
-    kernel it leaves it out. `install --upgrade` writes the unit again
+    process's memory can. `install` probes whether the kernel takes
+    `noswap` by mounting a small tmpfs with it (measured to work on
+    6.8), adds it to the mount if so, and the secret stays in RAM;
+    otherwise it leaves it out. `install --upgrade` writes the unit again
     for the running kernel. Booted into an older kernel than the unit
     was written for, the helper's mount fails and it doesn't start; the
     elevated `status` says so and that `install --upgrade` fixes it
@@ -678,10 +694,10 @@ is another slot's, is refused (chosen). Descriptors travel with
   - `run` matches `^[0-9a-f]{32}$`, and no folder of that name exists;
   - the program's descriptor is a memory file whose `F_GET_SEALS`
     succeeds with all four seals, and on Linux 6.3 and later with
-    `F_SEAL_EXEC` too, so its mode can't change (AGENT-PLAN 0.1.18 §4.9
-    adds it to the connector's seals where the kernel has it), at most 512 MiB, starting
-    with the ELF magic. The `/memfd:` name in its link is chosen by
-    the connector, so it proves nothing;
+    `F_SEAL_EXEC` too, so its mode can't change (AGENT-PLAN 0.1.18
+    §4.9 adds it to the connector's seals where the kernel has it); at
+    most 512 MiB; starting with the ELF magic. The `/memfd:` name in its
+    link is chosen by the connector, so it proves nothing;
   - the program's memory file can be executed by the runner (its mode
     has `S_IXOTH`, since the runner is "other" to it; one made with
     `MFD_NOEXEC_SEAL` can't be);
@@ -821,8 +837,9 @@ the root-owned program folder, as the slot's runner:
   first, since Linux keeps `no_new_privs` and the session keyring per
   thread; the steps below and the `execve` all run on it):
   1. `prctl(PR_SET_NO_NEW_PRIVS)` (the unit set it already; setting it
-     again costs nothing, and step 5 checks it on this thread); then `keyctl(KEYCTL_JOIN_SESSION_KEYRING, NULL)`, so the
-     run has a session keyring of its own (§6). A failed join (for
+     again costs nothing, and step 5 checks it on this thread); then
+     `keyctl(KEYCTL_JOIN_SESSION_KEYRING, NULL)`, so the run has a
+     session keyring of its own (§6). A failed join (for
      example `EDQUOT` on the runner's key quota) fails the run.
   2. Receives `cwd` (or `work/`'s path), `argv` and `env` from the
      helper. It checks that the member's home, if `install` made it
