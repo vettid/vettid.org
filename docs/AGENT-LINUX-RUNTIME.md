@@ -92,6 +92,8 @@ group.
   - no runner is in `vettid-c-<h>` or `vettid-m-<h>`;
   - the connector's account isn't in `vettid-m-<h>`;
   - the member isn't in `vettid-c-<h>`;
+  - each runner's own group has no members and is no other user's
+    primary group (a run's inputs are readable through it, §7);
   - the member isn't uid 0.
 
 ## 3. The channel's Unix-socket end
@@ -307,16 +309,15 @@ separate-account mode", Linux), reviewed here before code.
      vettid-agent-<n>.socket vettid-agent-<n>.service`), so no stub can
      start the service again with the old key while `pair` works. A
      run in flight ends, which discarding a pairing or making the first
-     one may do. It records the service's `InvocationID` (empty when
-     stopped).
+     one may do.
   4. With `--restart`, overwrites and deletes the old state file itself,
      as root.
   5. Checks the TPM (below), generates the key (`getrandom`), seals it
      as above, and zeroes it in its memory.
-  6. `systemctl reset-failed` on both units, then starts the service
-     (which starts its socket too), and checks that the service's
-     `InvocationID` is a new one: the running service is the one that
-     loaded the new key. Otherwise it stops and says so.
+  6. `systemctl reset-failed` on both units, then `systemctl restart`
+     on the service (which starts its socket too). A restart, not a
+     start: even if something started the service while `pair` worked,
+     the one running afterwards is a new one that loaded the new key.
   7. Connects and sends the pairing code (A3.10a's console exchange).
      If the pairing then fails, the new key stays unused, and the next
      `pair` replaces it.
@@ -338,12 +339,18 @@ separate-account mode", Linux), reviewed here before code.
   never reads the `.cred` file, and takes no key or key path from
   anywhere else.
 - **The TPM check.** `install` runs `systemd-creds has-tpm2` and reads
-  its `+`/`-` lines, not only its exit code:
-  - exit 0 is a usable TPM 2.0;
-  - `+firmware` and `+driver` with `-libraries` (or `-system`) is a TPM
-    that systemd can't use yet: `install` stops and says to install
-    the TPM 2.0 libraries, and `--no-tpm` is refused there too;
-  - `-firmware` and `-driver` is none.
+  its first line (`yes`, `no` or `partial`) and its `+`/`-` lines, not
+  only its exit code, which is a bitmask:
+  - `yes` (exit 0) is a usable TPM 2.0;
+  - `+firmware` and `+driver` with `-libraries` is a TPM that systemd
+    can't use yet: `install` stops and says to install the TPM 2.0
+    libraries;
+  - `+firmware` and `+driver` with `-system` is a TPM this systemd was
+    built without support for: `install` stops and says so;
+  - in both, `--no-tpm` is refused, since a TPM is there;
+  - `-firmware` and `-driver` is none;
+  - output it can't read (an older systemd prints fewer lines) stops
+    `install` with a plain message rather than counting as none.
   - Without one, `install` stops with a plain message unless `--no-tpm`
     is given. With one, `--no-tpm` is refused (the lead's call, §11).
   - The choice is recorded in the configuration. `pair` checks again,
@@ -422,7 +429,7 @@ else.
   LimitCORE=0
   PrivateTmp=yes
   PrivateIPC=yes
-  TemporaryFileSystem=/dev/shm:mode=1777
+  TemporaryFileSystem=/dev/shm:mode=1777,size=256M
   ProtectSystem=strict
   ReadWritePaths=/var/lib/vettid-agent-run/<n>
   ProtectHome=yes
@@ -462,8 +469,10 @@ else.
     ("until then runs use `work/` only"). A member whose home is
     elsewhere (`/var/home` on Fedora's image-based systems, `/srv`, an
     NFS mount) would be readable, so `install` adds
-    `InaccessiblePaths=` for the member's home from `/etc/passwd`
-    whenever it is outside those (chosen).
+    `InaccessiblePaths=-<home>` for the member's home from
+    `/etc/passwd` whenever it is outside those (chosen; the `-` so an
+    absent NFS or autofs home doesn't stop the helper).
+    `install --upgrade` reads the home again.
 
   The `share` card will need to lift `ProtectHome`, and
   `ProtectSystem`'s read-only view, for exactly the shared folders: a
@@ -529,12 +538,13 @@ travel with `SCM_RIGHTS` only on `start` (connector to helper) and
     succeeds with all four seals, at most 512 MiB, starting with the
     ELF magic (the `/memfd:` name in its link is chosen by the
     connector, so it proves nothing);
-  - the program's memory file can be executed (its mode has an execute
-    bit: one made with `MFD_NOEXEC_SEAL` can't);
+  - the program's memory file can be executed by the runner (its mode
+    has `S_IXOTH`, since the runner is "other" to it; one made with
+    `MFD_NOEXEC_SEAL` can't be);
   - the secret's and each input's descriptor is a sealed memory file:
     the secret at most 64 KiB (chosen), the inputs within A3.10d's caps;
-  - each input and output name is **one path element**: not empty, not
-    `.` or `..`, and with no `/` or NUL (A3.10d's flat names; the
+  - each input and output name is **one path element** of at most 255
+    bytes: not empty, not `.` or `..`, and with no `/` or NUL (A3.10d's flat names; the
     helper checks them itself, as it trusts no path from the
     connector);
   - the standard streams are pipes, or `/dev/null` (character device
@@ -551,28 +561,35 @@ travel with `SCM_RIGHTS` only on `start` (connector to helper) and
   meaning or adds to them. It never logs a frame, `argv`, `env`, `cwd`
   or a name, since `env` carries the secret for the `env` way (note
   §3).
-- **What the helper makes.** All of it through `openat2` with
-  `RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS|RESOLVE_NO_MAGICLINKS`, relative
-  to a descriptor of the run root it holds, and `mkdirat` and
-  `unlinkat` likewise; each new file or folder with `O_EXCL` (chosen).
-  Nothing is reached by a path a run could change, and no name can
-  climb out. The run's folder is `<run root>/<slot>-<run>/` (chosen),
-  **owned by root, group the slot's runner, 0750**, so the runner can
-  enter it but can't rename or replace what root put there. It holds:
-  - `home/` (for `HOME`) and `tmp/` (for `TMPDIR`), owned by the
-    runner, 0700;
-  - `work/`, the default `cwd`, owned by the runner, 0700, with
-    `work/in/` (root:runner, 0750) and its files written from the input
-    descriptors (root:runner, 0440), and `work/out/` (owned by the
-    runner, 0700). The run can read its inputs but not change them.
-    Since it owns `work/`, it can rename `in/` and put another folder
-    there, which only changes what it reads itself (said plainly).
-    `in/` isn't world-readable, since a run's command line, which
-    every user can read, names its folder;
-  - `secret/` (root:runner, 0750), and with `secret_file`,
-    `secret/value` (root:runner, 0440), written from the descriptor.
-    The helper keeps that file's descriptor, and overwrites it through
-    the descriptor at the end, never by opening the name again.
+- **How the helper reaches files** (chosen). It holds a descriptor of
+  the run root. To reach anything below it, it opens the parent folder
+  with `openat2(O_PATH|O_DIRECTORY, RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS|
+  RESOLVE_NO_MAGICLINKS)`, then:
+  - makes a file with `openat` (`O_CREAT|O_EXCL|O_NOFOLLOW`) on that
+    descriptor, and a folder with `mkdirat` (which fails with `EEXIST`
+    by itself);
+  - removes with `unlinkat` (`AT_REMOVEDIR` for a folder).
+
+  Each name is one element, and neither call follows a final link. It
+  sets owners and modes with `fchown` and `fchmod` on a descriptor it
+  opened that way, never by name. Nothing is reached by a path a run
+  could change, and no name can climb out.
+- **What the helper makes**, as AGENT-PLAN §4.9 and note §3 have it:
+  the run's folder `<run root>/<slot>-<run>/` (chosen name), owned by
+  the slot's runner, 0700, holding:
+  - `home/` (for `HOME`) and `tmp/` (for `TMPDIR`);
+  - `work/`, the default `cwd`, with `work/in/` (root:runner, 0750) and
+    its files written from the input descriptors (root:runner, 0440),
+    and `work/out/` (0700). The run can read its inputs but not change
+    them. Since it owns `work/`, it can rename `in/` and put another
+    folder there, which only changes what it reads itself (said
+    plainly). `in/` isn't world-readable, though the run's folder
+    already isn't;
+  - `secret/` (0700), and with `secret_file`, `secret/value` (0600),
+    written from the descriptor. The helper keeps that file's
+    descriptor and overwrites the file through it at the end, never by
+    opening the name again. So wherever a run moved or linked it, the
+    contents are overwritten.
 
   The paths follow from `<n>`, the slot and `run`, so the connector
   builds `HOME`, `TMPDIR`, `VETTID_IN`, `VETTID_OUT`, the secret's
@@ -593,7 +610,10 @@ travel with `SCM_RIGHTS` only on `start` (connector to helper) and
      `O_RDONLY|O_NONBLOCK|O_NOFOLLOW|O_NOCTTY`, so a FIFO or a device
      the run left there can't block it. It `fstat`s the descriptor and
      keeps only regular files owned by the slot's runner with a link
-     count of 1, within the caps, then clears `O_NONBLOCK`. It sends
+     count of 1, within the caps, then clears `O_NONBLOCK`. A FIFO, a
+     socket or a device is dropped with a new reason, `type`, which
+     A3.10d's set (`size`, `link`, `owner`, `binding`, `missing`) needs
+     (§12). It sends
      their descriptors in `outputs`, with the dropped ones and why
      (AGENT-PLAN §4.9, files in and out). With no `output`, `files` is
      empty. If step 2 of §9 failed, every output is dropped.
@@ -624,10 +644,12 @@ the root-owned program folder, as the slot's runner:
   socket pair to the helper (4). `NoNewPrivileges` already holds,
   inherited from the helper's unit (§6).
 - **The launcher, in order** (on one OS thread: `runtime.LockOSThread`
-  first, since Linux keeps `no_new_privs` per thread):
+  first, since Linux keeps `no_new_privs` and the session keyring per
+  thread; the steps below and the `execve` all run on it):
   1. `prctl(PR_SET_NO_NEW_PRIVS)`, a second time on this thread, after
      the unit's; then `keyctl(KEYCTL_JOIN_SESSION_KEYRING, NULL)`, so the
-     run has a session keyring of its own (§6).
+     run has a session keyring of its own (§6). A failed join (for
+     example `EDQUOT` on the runner's key quota) fails the run.
   2. Receives `cwd` (or `work/`'s path) and `env` from the helper.
   3. Opens the folder **as the runner**, one element at a time from
      `/`: `openat(…, O_PATH|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC)`. A link
@@ -691,8 +713,10 @@ the root-owned program folder, as the slot's runner:
   uid's SysV IPC objects need `CAP_SYS_ADMIN`, which the helper doesn't
   hold, and a user keyring belongs to its uid. So the helper starts
   `vettid-agent run-sweeper` as the slot's runner, the same way it
-  starts the launcher, in a fresh cgroup of its own (chosen). It joins
-  a new session keyring and sets `PR_SET_DUMPABLE` to 0 first. It has
+  starts the launcher, in a fresh cgroup of its own (chosen). On one
+  locked OS thread, as the launcher does, it joins a new session
+  keyring and sets `PR_SET_DUMPABLE` to 0 first; a failed join keeps
+  the slot out of use. It has
   30 s (chosen); if it hasn't exited 0 by then, it is killed and the
   slot stays out of use. The helper never trusts its exit code alone:
   each step below is confirmed by the helper's own reading.
@@ -732,7 +756,10 @@ the root-owned program folder, as the slot's runner:
      runner owns in the helper's `/tmp`, `/var/tmp` and `/dev/shm` (§6)
      is removed, by a walk that opens only folders
      (`O_DIRECTORY|O_NOFOLLOW`) and removes files with `unlinkat`,
-     never opening one, so a FIFO can't block it. These
+     never opening one, so a FIFO can't block it. The other slot's run
+     shares that `/tmp` and could move such a file behind the walk, so
+     the walk runs again, and a file of the runner still found keeps
+     the slot out of use. These
      are the only places outside its folder a run can write (§6).
   5. **Jobs:** a check only. A run can't make a cron or `at` job: the
      spools are read-only to it, `crontab` and `at` are setgid or
@@ -835,6 +862,9 @@ owner as such:
 - `USER` and `LOGNAME` are the runner's name, where AGENT-PLAN §4.9
   copies them from the connector's environment (§7).
 
+A3.10d's set of reasons for a dropped output also needs a new one,
+`type`, for a FIFO, a socket or a device (§7); that is A3.10d's to add.
+
 The rest are "(chosen; not in the spec)" until the review and the
 owner's go:
 
@@ -854,7 +884,7 @@ owner's go:
      `.new` and a rename;
    - the elevated commands working without the service, under a lock;
    - the order of `pair`'s and `forget`'s steps, stopping the socket too,
-     and the `InvocationID` check;
+     and the restart rather than a start;
    - reading `has-tpm2`'s lines; the way out when the TPM is gone;
    - the text for a key that can't be unsealed (NEW text).
 6. For the helper (§6):
@@ -871,10 +901,10 @@ owner's go:
    - the checks on `start`, including the refusal of a `cwd` under
      `/tmp`, `/var/tmp` or `/dev/shm`;
    - the 64 KiB cap on a secret file;
-   - the run folder's name and layout: root-owned, with `in/` and
-     `secret/` root-owned too;
-   - all file work through `openat2` beneath a held descriptor, and
-     names of one element;
+   - the run folder's name; `in/` and its files owned by root;
+   - all file work from parents opened with `openat2` beneath a held
+     descriptor, owners and modes set through descriptors, and names of
+     one element of at most 255 bytes;
    - outputs opened without blocking;
    - outputs handed over as descriptors before cleanup.
 8. The launcher's thread lock and second `no_new_privs`, its `O_PATH`
