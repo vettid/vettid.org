@@ -21,8 +21,14 @@ changelog:
     A3.8a's acceptance. §11: two NEW texts replace "Batch file", NEW
     "Answer lost", and "Not a program" names .cmd and .bat. Also as
     built in vettid-agent #51 (owner decisions b, a and a, GC #15715,
-    #15728, #15742): non-ASCII account folders are allowed unless this
-    system's code page turns a character into a refused one
+    #15728, #15742): the batch file's path and working folder and the
+    copied account variables may hold non-ASCII unless this system's
+    code page turns a character into a refused byte, `\`, `/` or `:`;
+    `HOMEPATH=\` allowed; `PATH`/`TEMP`/`TMP` get the code-page part;
+    a drive root refused as a run path; the manifest guard. A3.8a is
+    the `internal/run` package; the tool, its flags, the `item.run` send
+    and A3.8a's dev-stack checks move to A3.8b. NTFS rename result
+    recorded; AA8's launcher wording is owed
   - 0.1.14: 2026-11-20, with VAULT-MESSAGING 0.92.0 (owner decisions a,
     GC #15273 and #15274). §4.3: a cached copy carries `withheld: true`,
     which the connector treats as "ask again as a new request"; the
@@ -455,7 +461,7 @@ the vault adds `way_not_allowed` (body `{ways}`) and
 #42) `argument_not_allowed` (§4.9). With
 VAULT-MESSAGING 0.85.3 the vault adds `env_not_allowed` (body
 `{names}`), which the connector also returns itself before sending
-(§4.9), and the connector `vault_too_old` (§4.5).
+once A3.8b wires runs (§4.9), and the connector `vault_too_old` (§4.5).
 
 | Tool | Vault request | Input | Result |
 |---|---|---|---|
@@ -609,7 +615,7 @@ connector.
     old inner id is ignored. Asking again renews no access session.
   - A second copy ends the request with `withheld` (§11 "Answer lost").
     A refusal of the new request is the outcome; the agent never gets
-    an empty item.
+    an empty item (except the notes-only case below).
   - Nothing is asked again when the tool call ended without its
     `request_id` (nobody waits for it), when the agent is suspended
     (`suspended`) or when the vault is known held
@@ -617,9 +623,9 @@ connector.
   - A notes-only item's copy from a vault without the marker is not
     caught (it arrives as an item without fields); the vault side
     (vettid-vault #285) ships first or together.
-  - `item.run` and `item.proxy`: the marker check covers them already;
-    their "without `value` starts nothing" backstop is built with A3.8b
-    and A3.9, which start processes and proxies.
+  - `item.run` and `item.proxy`: the marker check sits before the op
+    switch, so it will apply once A3.8b and A3.9 add those ops; their
+    "without `value` starts nothing" backstop is built with them.
 - **Held vault** (§3.6.3): `owner_check_required` for everything but
   `vault.status` and `device.session.end`; status statements lapse within
   `status_ttl`. The connector reports "Your vault is waiting for your
@@ -802,8 +808,8 @@ allowed ways, so the agent can choose again.
   `.cmd`, `.bat` or `.ps1` endings for that flag. A run answer with
   `withheld: true` (0.1.14) or without `value` (the vault's cached
   copy, VAULT-MESSAGING §8.2) starts nothing; the connector asks again
-  as a new request (§4.4; the marker check is built, vettid-agent #48;
-  the missing-`value` backstop for runs is built with A3.8b).
+  as a new request (§4.4; the marker check is built, vettid-agent #48,
+  and applies once A3.8b adds runs, with the missing-`value` backstop).
 - **What is refused as a program** (2026-11-05; the owner's decisions
   and the lead's design notes): on Windows a program without one of
   the extensions `.exe`, `.com`, `.cmd` or `.bat` (a bare name is
@@ -822,7 +828,7 @@ allowed ways, so the agent can choose again.
   arguments again, so a batch run is allowed only with every value it
   sees checked, fail closed (`argument_not_allowed`, §11):
   - **Refused in an argument, the value of a variable the request
-    sets, and the secret:** any of `% & | < > ^ ( ) ! "`, a control
+    sets, and the secret when given in a variable:** any of `% & | < > ^ ( ) ! "`, a control
     character (below U+0020, and DEL), and any character outside ASCII.
     Why: `%` expands even inside quotes; `& | < >` run or redirect once
     `%~1` strips the quotes; `( )` end a block early; `^` is dropped by
@@ -830,7 +836,7 @@ allowed ways, so the agent can choose again.
     a line break ends the command; a non-ASCII character can be
     converted by best fit to `"` or `\` (U+FF02, `¥`).
   - **The batch file's path, its working folder and the account
-    folders it is given** (vettid-agent #51; owner decisions b, a and a,
+    variables it is given** (vettid-agent #51; owner decisions b, a and a,
     GC #15715, #15728, #15742; measured on Windows 11, GC #15712):
     `cmd.exe` passes non-ASCII unchanged, and the risk is a child that
     reads its command line in the ANSI code page, where Windows' best fit
@@ -841,20 +847,21 @@ allowed ways, so the agent can choose again.
     each run; best fit on) turns into a byte in the refused set, a `\`,
     `/` or `:`, a control byte or DEL, a DBCS second byte included (on
     cp932, for example, タ ends in `^`); a character that becomes `?` is
-    allowed, and a failed conversion refuses. A path such as
+    allowed, and a failed conversion, or bytes that aren't UTF-8, refuse. A path such as
     `C:\Program Files (x86)\…` still cannot hold a batch file that runs
     with a secret.
-    - The account folders are the variables copied from the connector's
+    - The account variables are those copied from the connector's
       own environment, `USERPROFILE`, `USERNAME`, `HOMEDRIVE`,
       `HOMEPATH`, `APPDATA` and `LOCALAPPDATA` (which neither the request
       nor `--run-env` can set). They also may not end in a backslash,
       except exactly `HOMEPATH=\` (a mapped home drive's root, GC
       #15742; a batch file that quotes `"%HOMEDRIVE%%HOMEPATH%"` then
       hands a C-runtime child `"H:\"`, an accepted residual).
-    - `PATH`, `TEMP` and `TMP`, which the connector sets, get the
-      non-ASCII part only and no trailing backslash: the ASCII part
+    - `PATH`, `TEMP` and `TMP`, which the connector sets, get only the
+      code-page check and may not end in a backslash: the ASCII part
       would refuse a `--run-path` under `C:\Program Files (x86)`. A
-      drive's or share's root is refused as a `--run-path` at startup.
+      drive's or share's root is refused as a `--run-path`
+      (`CheckRunPaths`; the flag itself comes with A3.8b).
     - The check relies on the connector having no UTF-8
       `activeCodePage` manifest (`GetACP` would then report 65001); a
       test fails and the release-binary check refuses if one appears.
@@ -864,11 +871,13 @@ allowed ways, so the agent can choose again.
     a variable named as one `cmd.exe` sets itself (`CD`, `DATE`,
     `TIME`, `RANDOM`, `ERRORLEVEL`, `CMDEXTVERSION`, `CMDCMDLINE`,
     `HIGHESTNUMANODENUMBER`, `__CD__`, `__APPDIR__`, any case), even a
-    trusted one; and a secret given in an environment variable whose
+    `--run-env` one (the secret's own variable name is not yet checked
+    against this list: A3.8b); and a secret given in an environment variable whose
     bytes break any of these rules (§11 "Secret not for a batch
-    file": use `file` instead). The connector's own variables
-    (`SystemRoot`, `windir`, `SystemDrive`, `PATHEXT`, `TEMP`, `TMP`,
-    `PATH`, `NoDefaultCurrentDirectoryInExePath`) are exempt.
+    file": use `file` instead). The connector's own `SystemRoot`,
+    `windir`, `SystemDrive`, `PATHEXT` and
+    `NoDefaultCurrentDirectoryInExePath` are exempt; its `PATH`, `TEMP`
+    and `TMP` get the code-page check below.
   - **Allowed:** space and every other printable ASCII character, so a
     batch file that uses `%~1` bare (`if %~1==x`) can still be steered
     by spaces. The rule protects batch files that quote what they are
@@ -895,8 +904,8 @@ allowed ways, so the agent can choose again.
     `%APPDATA%\npm` is refused (`program_not_found`).
   - **npm shims by name:** an absolute path without an extension that
     names a regular non-`MZ` file with `<path>.cmd` beside it is run as
-    that `.cmd`, which is what is hashed, sent as `program` and pinned
-    (only `.cmd` is tried).
+    that `.cmd`, which is what is hashed and, once A3.8b sends runs,
+    sent as `program` and pinned (only `.cmd` is tried).
 - **The program's content** (VAULT-MESSAGING 0.85.3; owner decision of
   2026-11-05, option b). The connector reads the resolved file once,
   computes its SHA-256 as it reads, and sends it as `item.run`'s
@@ -989,10 +998,11 @@ allowed ways, so the agent can choose again.
   administrator can change" rule covers the `.cmd`'s folder and those
   above it, not `node_modules` below it (a pinned path gets the path
   rules alone). So "this program's fingerprint was approved" means the
-  launcher, not the code it runs; AA8's approval wording says so. Known
-  limits, as built: an agent can put a `node.exe` beside a pinned shim
-  in `%APPDATA%\npm`, which the shim then runs with the secret,
-  unreferred; a DosDevices `C:` link made by the same user can
+  launcher, not the code it runs; AA8's approval wording is to say so
+  (owed with AA8). Known limits, from #42's review (analysis, not
+  demonstrated): an agent can put a `node.exe` beside a pinned shim in
+  `%APPDATA%\npm`, which the shim would then run with the secret,
+  unreferred; a DosDevices `C:` link made by the same user could
   redirect `cmd.exe`'s per-command reopen; the fixed-path folders on
   the child's `PATH` are not checked as administrator-only; batch
   files are refused on ReFS. The separate account (below) is the full
@@ -1310,7 +1320,7 @@ recorded as decided in the table and the changelog (0.1.4, 0.1.5).
 
 ### A3 — LEASH and the MCP server
 
-*Status: A3.1 #26, A3.2 #27, A3.3 #28, A3.4 #32, A3.5 #43 (0.1.13) and A3.6 #36 are done (follow-ups #30, #34). A3.8a #42 is done, with #51 (0.1.15; the ask-again rule of §4.4 is #48). A3.7, A3.8b and A3.9 are not built.*
+*Status: A3.1 #26, A3.2 #27, A3.3 #28, A3.4 #32, A3.5 #43 (0.1.13) and A3.6 #36 are done (follow-ups #30, #34). A3.8a's `internal/run` package is done (#42, #51; 0.1.15; the ask-again rule of §4.4 is #48); the tool, its flags, the `item.run` send and A3.8a's dev-stack checks come with A3.8b. A3.7, A3.8b and A3.9 are not built.*
 
 | PR | Contents | Acceptance |
 |---|---|---|
@@ -1322,7 +1332,7 @@ recorded as decided in the table and the changelog (0.1.4, 0.1.5).
 | A3.6 | **README note now** (AG13; before any vault change): the note of §11 "README note" in vettid-agent's README, in the MCP section. **Done** in vettid-agent #36 (`5cd72fe`), with the text as merged | The README carries the text exactly |
 | A3.7 | **Reveal as the last resort** (§4.9 "Reveal"; after AV9): `leash.request_secret`, and `leash.check_status` for an `item.get`, answer in one text block, no `structuredContent`, no output schema; descriptions in AG13's order; `ways`, `programs` and `hosts` in `leash.list_available`; `way_not_allowed` with the allowed ways | Golden files: `tools/list` shows no output schema for `leash.request_secret`, and its answer has exactly one content block and no `structuredContent`; the value appears once in the serialized answer; `way_not_allowed` gives its text with the ways; dev stack: an item without `reveal` refuses `leash.request_secret`, one with it is referred every time and returns the value once approved |
 | A3.8a | **`leash.run_with_secret`, part 1** (§4.9 "Run"; after AV9, AV10): resolution and what is refused as a program; the hash, and running exactly what was hashed; the run's own directory; the minimal environment, the `env` allowlist and the code-loading refusals; the three ways to pass the secret; the operator's flags and their startup checks | Unit tests: the child's environment is exactly the minimal set plus the request's (a test program prints it); `LD_PRELOAD`, `NODE_OPTIONS` and `PATH` in `env` refused by the connector's own name rule (a fake vault's binding lists `NODE_OPTIONS`, which the real vault refuses in `leash.item.set`); a program the user can change refused while its entry has no pin; a name the binding does not list refused; a bare name is resolved on the fixed path only; a relative path with a separator refused (on Windows also `\` and a volume); `.bat` and `.cmd` run through `cmd.exe`, with an argument, variable, path or working folder holding a refused character refused (0.1.15); a junction in the path refused; the `sha256` sent is the file's; a file renamed, replaced or written in place between the hash and the start does not run (Windows: the write and the rename fail while held, and a started image that is not the held file is ended; Linux: the sealed copy runs; macOS: the copy runs, the remaining gap stated); a `#!` script refused, and a volume that is neither NTFS nor ReFS refused; the secret file is owner-only and gone after the run, and `run/` is emptied at start after a simulated crash; `--run-path` refuses a missing, relative or changeable directory or one below a changeable one, and more than 16; `--run-env` refuses a bad name and more than 32. Dev stack: a bound program's first run is referred with `program_unrecorded`, a matching later one runs without a prompt with `each: false`, a changed file, or a copy of the pinned file run from another folder, is referred with `program_changed`; a bound shell or interpreter is still referred; an unbound one is referred and the approval shows argv, directory and how; a shell is flagged |
-| A3.8b | **`leash.run_with_secret`, part 2** (§4.9 "Run" and "Redaction"): output redaction, process group or job and its kill, the time, size and concurrency limits, `truncated`, referred runs started at once | Unit tests: each of the redacted forms of §4.9 is replaced, also when split across reads and in standard error; a value never appears in the answer, the logs or the run directory after the run; the time limit kills the whole process group; output past 1 MiB is truncated and flagged, and so is output cut at 64 KiB; a third run is `rate_limited_local` and no `item.run` is sent for it; a referred run starts when the approval arrives and its redacted answer is kept for `check_status`; runs are killed when the connector exits |
+| A3.8b | **`leash.run_with_secret`, part 2** (§4.9 "Run" and "Redaction"): output redaction, process group or job and its kill, the time, size and concurrency limits, `truncated`, referred runs started at once ; (0.1.15) also, moved from A3.8a: the `leash.run_with_secret` tool, the `--run-path` and `--run-env` flags with their startup checks, the `item.run` send, the run/proxy missing-`value` backstop, a check of the secret's variable name against `cmd.exe`'s own names, and A3.8a's dev-stack acceptance | Unit tests: each of the redacted forms of §4.9 is replaced, also when split across reads and in standard error; a value never appears in the answer, the logs or the run directory after the run; the time limit kills the whole process group; output past 1 MiB is truncated and flagged, and so is output cut at 64 KiB; a third run is `rate_limited_local` and no `item.run` is sent for it; a referred run starts when the approval arrives and its redacted answer is kept for `check_status`; runs are killed when the connector exits |
 | A3.9 | **`leash.open_proxy`, `leash.close_proxy`** (§4.9 "Proxy"; after AV9, AV11) | Unit tests against a local TLS test server with a test root: the header is added only to the bound host; an incoming copy of the header is dropped; a wrong token, a wrong `Host`, an `Origin` header, an absolute-form or `CONNECT` request get 403 or 405 and reach nothing; a redirect to another host becomes 502 `redirect_refused`, one to the same host is rewritten; the value and its encodings in response headers and body (also across chunk boundaries) are replaced; a compressed response is refused; a certificate not valid for the host fails; the proxy closes at `expires_at`, at `leash.close_proxy` and when the session ends. Dev stack: opening is referred and the approval shows host, header name and length |
 
 ### A4 — Delegable owner types (v1.1, after the owner confirms AG5)

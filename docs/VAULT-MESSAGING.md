@@ -17,7 +17,7 @@ related:
   - MEMBER-API.md (2.14.0)
   - ANDROID-PLAN.md (0.1.127)
   - IOS-PLAN.md (0.1.71; §9.1 VA1–VA4)
-  - AGENT-PLAN.md (0.1.14; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
+  - AGENT-PLAN.md (0.1.15; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - BALLOT-PROTOCOL.md (0.14.1; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at be57292, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.14.1)
