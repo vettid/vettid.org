@@ -1,9 +1,13 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.17
+version: 0.1.18
 date: 2026-11-21
 changelog:
+  - 0.1.18: 2026-11-21. Pointers only: the A5.6 row and the related list
+    name AGENT-LINUX-RUNTIME (draft), the Linux design of the
+    separate-account mode, reviewed before the run helper's and the key
+    sealing's code. Nothing else changes
   - 0.1.17: 2026-11-21, with VAULT-MESSAGING 0.93.0, ANDROID-PLAN
     0.1.135 and IOS-PLAN 0.1.78. Nothing here is built. The wire and
     plan side of AGENT-SEPARATE-ACCOUNT §6 for the owner's Q1 a and
