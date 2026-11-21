@@ -1,6 +1,6 @@
 ---
 title: AGENT-LINUX-RUNTIME
-status: draft design note; the run helper and the key sealing get their independent reviews (AGENT-PLAN §9 rule 6) from it, before their code. Nothing here is built but the channel's Unix-socket end (vettid-agent, A5.6)
+status: draft design note; the run helper and the key sealing get their independent reviews (AGENT-PLAN §9 rule 6) from it, before their code. Nothing here is built; the channel's Unix-socket end is in review (vettid/vettid-agent#55)
 version: 0.1.0
 date: 2026-11-21
 owner: Al Liebl (Mesmer)
@@ -46,13 +46,14 @@ silent it chooses, marks the choice "(chosen)", and lists it in §12.
   `install` refuses a member it can't find there, and the channel
   refuses a member holding a group it can't name (§11).
 - **cgroup v2 only** (the unified hierarchy).
-- **systemd 251 or later:** encrypted credentials came in 250, and
-  `systemd-creds has-tpm2` in 251.
+- **systemd 252 or later:** encrypted credentials came in 250,
+  `systemd-creds has-tpm2` in 251, and `--tpm2-public-key=` in 252 (§5).
 
 `install` checks the kernel, the cgroup hierarchy and systemd's version
 itself, and stops with a plain message naming what is missing; it
 never judges a system by its name. Ubuntu 24.04, Debian 12 and Fedora
-37 or later meet it. Ubuntu 22.04 (systemd 249) does not.
+38 or later meet it. Ubuntu 22.04 (systemd 249) and Fedora 37 (251) do
+not.
 
 ## 2. Names, files and units
 
@@ -210,7 +211,7 @@ RestrictRealtime=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
-LimitCORE=0
+LimitCORE=1
 KeyringMode=private
 ```
 
@@ -308,13 +309,12 @@ separate-account mode", Linux), reviewed here before code.
   as today.
   1. Takes the lock.
   2. **Is there a pairing?** If the service runs, `pair` asks it over the
-     channel; if not, it looks for the state file itself. Without
-     `--restart`, an existing pairing is refused before any key is
-     touched. A state file that can't be opened with the current key
-     (for example after the TPM was cleared) counts as an existing
-     pairing, and the refusal says to use `--restart`. To tell, `pair`
-     decrypts the credential with `systemd-creds decrypt` to a pipe it
-     reads, never to a file, and zeroes what it read.
+     channel; if not, it asks `vettid-agent state-wipe --check` (run as
+     the connector's account, step 4) whether a state file is there;
+     root never looks in the state folder. Without `--restart`, an
+     existing pairing is refused before any key is touched, whether or
+     not the key still opens it (after the TPM was cleared, say), and
+     the refusal says to use `--restart`. `pair` never decrypts the key.
   3. Stops the socket and the service together (`systemctl stop
      vettid-agent-<n>.socket vettid-agent-<n>.service`), so no stub can
      start the service again with the old key while `pair` works. A
@@ -373,7 +373,9 @@ separate-account mode", Linux), reviewed here before code.
   - `+firmware` and `+driver` with `-system` is a TPM this systemd was
     built without support for: `install` stops and says so;
   - in both, `--no-tpm` is refused, since a TPM is there;
-  - `-firmware` and `-driver` is none;
+  - `-firmware` and `-driver` is none; `+driver` with `-firmware` (a
+    driver but no TPM the firmware reports) is none too, but `install`
+    says what it saw;
   - a TPM that `has-tpm2` reports usable but that then fails to seal
     stops `install` with systemd's error. `--no-tpm` stays refused,
     since a TPM is there. The way out is to repair or clear the TPM in
@@ -469,13 +471,14 @@ else.
   ProtectClock=yes
   ProtectHostname=yes
   SystemCallFilter=~@mount @module @reboot @swap @raw-io @clock
+  SystemCallErrorNumber=EPERM
   PrivateDevices=yes
   KeyringMode=private
-  LimitCORE=0
+  LimitCORE=1
   PrivateTmp=yes
   PrivateIPC=yes
   TemporaryFileSystem=/dev/shm:mode=1777,size=256M
-  TemporaryFileSystem=/var/lib/vettid-agent-run/<n>:mode=0711,size=1G
+  TemporaryFileSystem=/var/lib/vettid-agent-run/<n>:mode=0711,size=1G,noswap
   ProtectSystem=strict
   ProtectHome=yes
   CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_KILL
@@ -496,23 +499,20 @@ else.
     the launcher's own `exec` and every program a run starts included.
     It doesn't stop the helper's own `setuid`, which is a capability,
     not a new privilege.
-  - **Core dumps.** `LimitCORE=0` stops the kernel writing a crashed
-    run's core file, which holds its secret. It doesn't stop a piped
-    `core_pattern` handler on its own: systemd-coredump skips a process
-    whose limit is 0, but apport writes a report with the core into
-    `/var/crash`. So `install` reads `/proc/sys/kernel/core_pattern`:
-    no handler or systemd-coredump is accepted; apport, or a handler it
-    doesn't know, stops `install` with a plain message saying how to
-    turn it off for the pairing's runners (chosen). The code PR measures
-    each on Ubuntu (apport) and Fedora (systemd-coredump), and §13 tests
-    that a crashed run leaves no core anywhere.
-  - **Keyrings.** `KeyringMode=private` gives the helper an anonymous
-    session keyring of its own, which every child would inherit and
-    share. So the launcher and the sweeper each join a new anonymous
-    session keyring (`KEYCTL_JOIN_SESSION_KEYRING` with no name) as
-    their first step after the uid change (§8). A run's `@s` is then
-    its own, and goes with its last process; §9 clears `@u`, `@us` and
-    the persistent keyring.
+  - **Core dumps: `LimitCORE=1`** (chosen, measured). A crashed run's
+    core holds its secret. At a limit of 0 the kernel still hands the
+    core to a piped `core_pattern` handler, and on Ubuntu 24.04 apport
+    then wrote a report with it to `/var/crash` (measured). At a limit
+    of 1 the kernel aborts the dump before any handler runs ("has
+    RLIMIT_CORE set to 1, Aborting core"): apport wrote nothing, and
+    with a plain file pattern no core file was written either (both
+    measured on Ubuntu 24.04). Since no handler runs, systemd-coredump
+    can't log the run's environment (`COREDUMP_ENVIRON`, which for the
+    `env` way is the secret) to the journal either; the code PR measures
+    that on Fedora too, checking the journal and not only for a core
+    file (§13). So `install` needs no `core_pattern` refusal. At each
+    start the helper checks that its own core limit is 1, which every
+    run inherits, and stops otherwise.
   - **Devices.** `PrivateDevices=yes` gives runs only the pseudo-devices
     (`/dev/null`, `/dev/zero`, `/dev/full`, `/dev/random`,
     `/dev/urandom`, `/dev/tty` and the pseudo-terminals): a program
@@ -525,14 +525,15 @@ else.
     nothing (the mount goes with the helper's namespace), and no other
     process on the computer sees it. Said plainly: a tmpfs can be
     swapped out, so a secret can reach the swap device as any
-    process's memory can.
+    process's memory can; on Linux 6.4 and later the tmpfs is mounted
+    `noswap`, and the secret stays in RAM.
   - **`PrivateTmp=yes`** and **`TemporaryFileSystem=/dev/shm`** give
     every run of this pairing the helper's own `/tmp`, `/var/tmp` and
     `/dev/shm`, not the system's, so a run can't leave a file where the
     member's processes look. **`PrivateIPC=yes`** does the same for
     SysV IPC and POSIX message queues. The two slots share them (§9).
     Measured on systemd 255 (a fresh `/dev/mqueue`, private SysV
-    objects); the code PR measures it on 251 too, the minimum, and
+    objects); the code PR measures it on 252 too, the minimum, and
     `install` refuses a systemd where `/dev/mqueue` isn't private.
   - **`ProtectSystem=strict`** leaves runs only these writable places:
     the helper's `/tmp` and `/var/tmp`, `/dev/shm`, `/dev/mqueue`, and
@@ -562,17 +563,28 @@ else.
   helper, which ends its runs. Under `ProtectSystem` a read-only
   folder gives `EROFS` to `faccessat2`'s `W_OK`, which that card must
   read as "not writable".
-- **User namespaces stay open to runs** (chosen: no
-  `RestrictNamespaces`). Tools that run programs in a sandbox of their
-  own (bubblewrap, rootless podman) need them. Said plainly: a run can
-  then reach more of the kernel than it otherwise could.
+- **No `RestrictNamespaces=`** (chosen, measured). systemd's filter for
+  it can't inspect `clone3`'s flags, so it blocks `clone3` outright:
+  under `RestrictNamespaces=yes` a `clone3` call got `ENOSYS`, which
+  would break `CLONE_INTO_CGROUP` (§8). The unit's own filter and
+  `SystemCallErrorNumber=EPERM` leave `clone3` working (measured), and
+  make a blocked call fail with `EPERM` rather than kill the program.
+  Said plainly: a run can still create user namespaces, which reach
+  more of the kernel; and with `@mount` blocked and `PrivateDevices`,
+  sandboxing tools of their own (bubblewrap, rootless podman) don't run
+  in a run.
 - **What a run shares with the member's processes, said plainly.** The
   network namespace, so loopback ports and abstract Unix sockets, and
   the system D-Bus. The two slots can reach each other the same ways,
   and pass descriptors over a Unix socket.
 - **Per-run limits** (chosen): each run's cgroup gets `pids.max` 512 and
-  `memory.max` 2 GiB; a run past them is killed by the kernel, and its
-  slot is cleaned as for any end.
+  `memory.max` 2 GiB. Past `pids.max`, `fork` fails with `EAGAIN`; past
+  `memory.max`, the kernel's out-of-memory killer ends a process in
+  that cgroup. Either way the slot is cleaned as for any end.
+- **Shared space, said plainly:** the run root's 1 GiB tmpfs and the
+  helper's `/tmp` are shared by both slots, so one run can fill them.
+  The other slot's next run then fails to start (its folder or input
+  can't be written) and is refused with `run_failed`.
 - **If the helper is compromised, said plainly:** it is root, and root
   can unseal the pairing's key (§5). Its small size, its own review and
   its sandbox are what stand between a run and that.
@@ -597,9 +609,9 @@ else.
   descriptor from `LISTEN_FDS` and `LISTEN_PID`, a listening `AF_UNIX`
   stream socket bound to `/run/vettid-runhelper/<n>.sock`.
 - **At its start** it first ends every process of both runners (§9,
-  steps 1 and 2), and only then removes everything under the run root
-  and runs the rest of the cleanup, so nothing still running can write
-  again behind it. A crash then leaves nothing past the next start
+  steps 1 and 2), and only then runs the rest of the cleanup, so
+  nothing still running can write again behind it. Its run root is a
+  fresh tmpfs at each start, so nothing a crash left is there
   (AGENT-PLAN §4.9, the run's own directory). Only then does it take a
   connection.
 
@@ -642,8 +654,9 @@ is another slot's, is refused (chosen). Descriptors travel with
     `clean` true);
   - `run` matches `^[0-9a-f]{32}$`, and no folder of that name exists;
   - the program's descriptor is a memory file whose `F_GET_SEALS`
-    succeeds with all four seals (and `F_SEAL_EXEC` too on Linux 6.3
-    and later, so its mode can't change), at most 512 MiB, starting
+    succeeds with all four seals, and on Linux 6.3 and later with
+    `F_SEAL_EXEC` too, so its mode can't change (AGENT-PLAN 0.1.18
+    §4.9 adds it to the connector's seals where the kernel has it), at most 512 MiB, starting
     with the ELF magic. The `/memfd:` name in its link is chosen by
     the connector, so it proves nothing;
   - the program's memory file can be executed by the runner (its mode
@@ -693,8 +706,10 @@ is another slot's, is refused (chosen). Descriptors travel with
     folder there, which only changes what it reads itself (said
     plainly);
   - `secret/` (0700), and with `secret_file`, `secret/value` (0600),
-    written from the descriptor. It is removed with the run's folder.
-    Being on a tmpfs, it never reaches the disk (but see §6 on swap).
+    written from the descriptor. The helper keeps that file's
+    descriptor, overwrites the file through it at the end (wherever a
+    run moved or linked it), and then removes the run's folder. On the
+    tmpfs it never reaches the disk (see §6 on swap).
 
   The paths follow from `<n>`, the slot and `run`, so the connector
   builds `HOME`, `TMPDIR`, `VETTID_IN`, `VETTID_OUT`, the secret's
@@ -872,7 +887,7 @@ the root-owned program folder, as the slot's runner:
      reaches a process whose real or saved uid is the runner's, not one
      that has it only as its effective or file-system uid. A run can't
      make such a process (`no_new_privs` keeps setuid programs from
-     running), so one found there is another program's doing: the
+     gaining their uid), so one found there is another program's doing: the
      helper doesn't kill it as root, and the slot stays out of use,
      with `status` naming it. Any targeted kill uses a pidfd, never a
      bare pid.
@@ -902,9 +917,9 @@ the root-owned program folder, as the slot's runner:
      the slot out of use. These are the only places outside its folder
      a run can write (§6).
   5. **Jobs:** a check only. A run can't make a cron or `at` job: the
-     spools are read-only to it, `crontab` and `at` are setgid or
-     setuid programs that `no_new_privs` keeps from gaining their
-     group, and `cron.deny` and `at.deny` list the runner as well
+     spools are read-only to it, and `crontab` and `at` are setgid or
+     setuid programs that run under `no_new_privs` but gain no group or
+     uid, and `cron.deny` and `at.deny` list the runner as well
      (`install`; a `cron.allow` that exists overrides them). It can't
      make a systemd user timer either, since a runner never has a user
      manager: no login, and no linger.
@@ -962,8 +977,10 @@ The member is an administrator if any of these holds:
 - **groups that give root in all but name** (the lead's call adds the
   last four): `docker`, `lxd`, `incus-admin`, `libvirt`, `libvirtd`,
   `microk8s` (a container or VM manager can mount the host's disk),
-  `disk` (raw access to it), `shadow` (the password hashes), and the
-  `root` group, gid 0, whatever its name;
+  `disk` (raw access to it), `shadow` (the password hashes), `adm` and
+  `systemd-journal` (every log, a crashed program's included), and the
+  `root` group, gid 0, whatever its name: groups that read what root
+  reads;
 - **sudo rules:** `sudo -l -U <member>`, run as root, shows any rule
   for it;
 - **polkit:** the member, or one of its groups, is among polkit's
@@ -1012,7 +1029,7 @@ A3.10d's set of reasons for a dropped output also needs a new one,
 The rest are "(chosen; not in the spec)" until the review and the
 owner's go:
 
-1. Linux 5.14, cgroup v2 and systemd 251 as the minimum, checked by
+1. Linux 5.14, cgroup v2 and systemd 252 as the minimum, checked by
    version; local accounts only (§1).
 2. The member group `vettid-m-<h>`; the configuration's path, owner
    and mode; the lock; the run root `/var/lib/vettid-agent-run/<n>/` as
@@ -1041,10 +1058,10 @@ owner's go:
    - one helper per pairing, started on demand and exiting when idle;
    - the rule that its unit's options are chosen for runs;
    - its capability set and its sandbox options (with `PrivateIPC`, a
-     private `/dev/shm`, `PrivateDevices` and a system-call filter), a
-     session keyring per run, `InaccessiblePaths=` for a home outside
-     `/home`, the `core_pattern` check;
-   - user namespaces left open to runs;
+     private `/dev/shm`, `PrivateDevices`, a system-call filter failing
+     with `EPERM`, and `LimitCORE=1`), a session keyring per run,
+     `InaccessiblePaths=` for a home outside `/home`;
+   - no `RestrictNamespaces=`, for `clone3`'s sake;
    - the per-run limits;
    - the `share` card's unit change for shared folders;
    - one connection at a time;
@@ -1052,6 +1069,8 @@ owner's go:
 7. For the protocol (§7):
    - the frames and messages, `run` on every one, and `go` naming the
      folder it approves;
+   - `F_SEAL_EXEC` required on Linux 6.3 and later, with the plan's
+     matching change;
    - the checks on `start`, including the refusal of a `cwd` under
      `/tmp`, `/var/tmp` or `/dev/shm`;
    - the 64 KiB cap on a secret file;
@@ -1077,6 +1096,11 @@ owner's go:
 The code PRs carry these. They run in a Linux VM and on the ubuntu CI
 runner under `sudo`, with throwaway users and units removed in cleanup.
 
+- **Owed by the code PRs: the final units measured as written**, with
+  every option above: the cgroup made, placed and killed under
+  `ProtectKernelTunables=yes`; `/dev/shm` and `/dev/mqueue` private;
+  the run root's tmpfs writable under `ProtectSystem=strict`; `clone3`
+  and `CLONE_INTO_CGROUP` working under the system-call filter.
 - **The channel** (in review, vettid/vettid-agent#55):
   - another user is refused;
   - root gets `status`, `pair` and `forget` but no tool;
@@ -1098,8 +1122,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
   - a run can resolve a name (DNS) and open a TCP connection;
   - a run's cgroup is the one the helper made for it before the go,
     and its `pids.max` and `memory.max` hold;
-  - a crashed run leaves no core dump, with apport and with
-    systemd-coredump;
+  - a crashed run leaves no core dump, no apport report and no journal
+    entry with its environment, with apport and with systemd-coredump;
   - two slots at once: a `refuse` for one and a `go` for the other
     start only the other, and a `go` whose `final` doesn't match, or
     that names the other slot's run, starts nothing;
@@ -1161,8 +1185,10 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
   - `install` and uninstall leave nothing behind. Uninstall removes the
     users, the groups, the `.deny` entries, the run root,
     `/etc/vettid-agent/<n>/`, the credential and the four units. It
-    overwrites the state file before deleting it, removes the run root
-    without following links, runs the sweeper for both slots first,
-    and takes the lock.
+    overwrites the state file before deleting it and removes the state
+    folder as the connector's account (`state-wipe`, never root
+    following its contents), runs the sweeper for both slots first,
+    and takes the lock. The run root needs no removal: it is a tmpfs
+    that goes with the helper.
   - `install --upgrade` keeps the state, regenerates the units and
     restarts the helper (ending its runs).

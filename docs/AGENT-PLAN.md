@@ -4,10 +4,13 @@ status: draft
 version: 0.1.18
 date: 2026-11-21
 changelog:
-  - 0.1.18: 2026-11-21. Pointers only: the A5.6 row and the related list
-    name AGENT-LINUX-RUNTIME (draft), the Linux design of the
-    separate-account mode, reviewed before the run helper's and the key
-    sealing's code. Nothing else changes
+  - 0.1.18: 2026-11-21. The A5.6 row and the related list name
+    AGENT-LINUX-RUNTIME (draft), the Linux design of the separate-account
+    mode, reviewed before the run helper's and the key sealing's code.
+    §4.9: on Linux 6.3 and later the connector also seals the program's
+    memory file with `F_SEAL_EXEC` before `F_SEAL_SEAL` (the lead's call),
+    which the run helper requires there (AGENT-LINUX-RUNTIME §7). Nothing
+    else changes
   - 0.1.17: 2026-11-21, with VAULT-MESSAGING 0.93.0, ANDROID-PLAN
     0.1.135 and IOS-PLAN 0.1.78. Nothing here is built. The wire and
     plan side of AGENT-SEPARATE-ACCOUNT §6 for the owner's Q1 a and
@@ -1225,7 +1228,8 @@ allowed ways, so the agent can choose again.
   - **Linux**: the connector copies the file into a sealed memory file
     (`memfd_create` with `MFD_ALLOW_SEALING` and `MFD_EXEC`, which needs
     Linux 6.3 or later: on `EINVAL` it retries without `MFD_EXEC`; then
-    `F_SEAL_WRITE`, `F_SEAL_GROW`, `F_SEAL_SHRINK`, `F_SEAL_SEAL`)
+    `F_SEAL_WRITE`, `F_SEAL_GROW`, `F_SEAL_SHRINK`, (0.1.18) on Linux 6.3
+    and later `F_SEAL_EXEC`, then `F_SEAL_SEAL`)
     while hashing it, and starts that (through its `/proc/self/fd/<n>`
     path, which Go's process start can use). (0.1.15) Only an ELF file
     is run this way (so nothing runs through binfmt_misc), and one over
