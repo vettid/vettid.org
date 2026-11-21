@@ -162,6 +162,21 @@ the Windows token. It is in review (vettid/vettid-agent#55, A5.6's first PR).
 
   The stub answers both `ErrNoService` and `ErrNotService` with the
   "No service" text.
+- **Sandboxed clients** (the lead's call). The Windows end refuses an
+  AppContainer client, since its token says it is sandboxed (A3.10a).
+  Linux has no such mark on a connection, and the channel makes no
+  check for one:
+  - **Flatpak** apps run with a `/run` of their own, in which the host's
+    `/run/vettid-agent/` isn't mounted unless the app is granted it
+    (`--filesystem=/run/vettid-agent` or a host-wide permission), so
+    they can't reach the socket;
+  - **strict snaps** see the host's `/run`, but their AppArmor profile
+    doesn't allow connecting to the socket, so they can't reach it
+    either;
+  - a sandbox that does expose the socket is the member's choice, and
+    its client, which has the member's uid, **is the member**;
+  - so is **any other process with the member's uid**: the uid is the
+    only identity the channel reads.
 - **Nothing else crosses**: no descriptor, no path, no configuration
   from the client (note §4). Files in and out (A3.10d) are framed
   messages of their own, as on Windows.
