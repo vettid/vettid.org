@@ -1230,8 +1230,9 @@ allowed ways, so the agent can choose again.
   service removes and a restarted service ends). A run whose stub has
   left goes on to its own time limit and its redacted answer is kept
   for AG9's 10 minutes; proxies close when the stub that opened them
-  leaves. How long the on-demand service stays up for a run still in
-  flight is (0.1.16, the lead's call) the service does not stop while a run is in flight or a run's answer is still kept for `check_status` (10 minutes); its idle stop counts from then.
+  leaves. (0.1.16, the lead's call) The on-demand service does not stop
+  while a run is in flight or a run's answer is still kept for
+  `check_status` (10 minutes); its idle stop counts from then.
 - **The output.** Standard output and standard error are each read up
   to 1 MiB; beyond that the rest is read and discarded and `truncated`
   is true. Each is redacted (below) and then returned up to 64 KiB, as
