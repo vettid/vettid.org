@@ -19082,7 +19082,13 @@ item's settings allow for its task:
       service's go does the process start in the held folder:** `fchdir` on the
       descriptor before `exec` on POSIX; on Windows the handle is held, still
       without `FILE_SHARE_DELETE`, until the process has started. So nothing
-      can be swapped between the check and the use (the lead's call). Such a refusal is `cwd_not_allowed` with the
+      can be swapped between the check and the use (the lead's call). **On Windows the launcher also refuses a `cwd` with a reparse point
+      anywhere in the path as given** (each element opened with
+      `FILE_FLAG_OPEN_REPARSE_POINT` and checked, as `O_NOFOLLOW` does on
+      POSIX), **and a `cwd` whose final path from the handle differs from the
+      path given beyond case and separators**; and it starts the process with
+      the **final path from the handle** as its working folder, never the path
+      as given (the lead's call). Such a refusal is `cwd_not_allowed` with the
       connector's own text.
     - **`write`** says whether the connector may copy files back into
       the folder, and what a run that starts there may do (owner
@@ -19099,8 +19105,8 @@ item's settings allow for its task:
       **the runner's token is granted any write or delete right on the
       `cwd` folder itself** (on Windows, by `AccessCheck` on the
       runner's token for `FILE_ADD_FILE`, `FILE_ADD_SUBDIRECTORY`,
-      `FILE_WRITE_ATTRIBUTES`, `FILE_DELETE_CHILD`, `DELETE`,
-      `WRITE_DAC` and `WRITE_OWNER`; on POSIX, `faccessat(…, W_OK)` as
+      `FILE_WRITE_ATTRIBUTES`, `FILE_WRITE_EA`, `FILE_DELETE_CHILD`,
+      `DELETE`, `WRITE_DAC` and `WRITE_OWNER`; on POSIX, `faccessat(…, W_OK)` as
       the runner), the same NEW text, same ways out. Write access deeper
       inside the folder is not checked; `share` without `--write`
       removes inherited write for the runner accounts (AGENT-PLAN A5.5a).
@@ -19404,7 +19410,9 @@ item's settings allow for its task:
   answer is `{item_id, field_id, value}`, for the connector to pass to
   that one process only. Recorded as `leash.item.run`. (0.91.0) Members
   of the body that are not listed here are ignored, as in other
-  operations (§10.1). (0.93.0; Q9 a, GC #15810; not built yet) **`inputs` and
+  operations (§10.1).
+
+  (0.93.0; Q9 a, GC #15810; not built yet) **`inputs` and
   `output`.** Both are optional.
   - `inputs` (0–16) lists files copied, read-only, into the run's
     `work/in/` before it starts: each `{path, size}`. `path` is a
