@@ -373,9 +373,11 @@ separate-account mode", Linux), reviewed here before code.
   - `+firmware` and `+driver` with `-system` is a TPM this systemd was
     built without support for: `install` stops and says so;
   - in both, `--no-tpm` is refused, since a TPM is there;
-  - `-firmware` and `-driver` is none; `+driver` with `-firmware` (a
-    driver but no TPM the firmware reports) is none too, but `install`
-    says what it saw;
+  - `-firmware` and `-driver` is none;
+  - `+driver` with `-firmware` (a TPM that works but that the firmware
+    doesn't report, after a legacy-BIOS boot) isn't taken as none:
+    `install` tries a seal with the TPM, and allows `--no-tpm` only if
+    that seal fails (the lead's call);
   - a TPM that `has-tpm2` reports usable but that then fails to seal
     stops `install` with systemd's error. `--no-tpm` stays refused,
     since a TPM is there. The way out is to repair or clear the TPM in
@@ -499,20 +501,36 @@ else.
     the launcher's own `exec` and every program a run starts included.
     It doesn't stop the helper's own `setuid`, which is a capability,
     not a new privilege.
-  - **Core dumps: `LimitCORE=1`** (chosen, measured). A crashed run's
-    core holds its secret. At a limit of 0 the kernel still hands the
-    core to a piped `core_pattern` handler, and on Ubuntu 24.04 apport
-    then wrote a report with it to `/var/crash` (measured). At a limit
-    of 1 the kernel aborts the dump before any handler runs ("has
-    RLIMIT_CORE set to 1, Aborting core"): apport wrote nothing, and
-    with a plain file pattern no core file was written either (both
-    measured on Ubuntu 24.04). Since no handler runs, systemd-coredump
-    can't log the run's environment (`COREDUMP_ENVIRON`, which for the
-    `env` way is the secret) to the journal either; the code PR measures
-    that on Fedora too, checking the journal and not only for a core
-    file (§13). So `install` needs no `core_pattern` refusal. At each
-    start the helper checks that its own core limit is 1, which every
-    run inherits, and stops otherwise.
+  - **Core dumps.** A crashed run's core holds its secret.
+    - **The limit is 1** (`LimitCORE=1`; chosen, measured). At a limit
+      of 0 the kernel still hands the core to a piped `core_pattern`
+      handler, and on Ubuntu 24.04 apport then wrote a report with it to
+      `/var/crash` (measured). At 1 the kernel aborts the dump before any
+      handler runs ("has RLIMIT_CORE set to 1, Aborting core"): apport
+      wrote nothing, and with a plain file pattern no core file was
+      written either (both measured).
+    - **Said plainly: a run can lower its own limit to 0**, which needs
+      no privilege (and many programs that handle secrets do it on
+      purpose). Then a piped handler runs as root, outside the run's
+      sandbox. So the limit protects only runs that leave it alone.
+    - **The handler** `[owner #15995 pending]`. `install`, and the
+      helper at each start, read `/proc/sys/kernel/core_pattern`. Only a
+      `|` handler or a plain file pattern is accepted; the socket forms
+      of Linux 6.16 and later (`@`, `@@`) are refused until measured.
+      - **If a:** `install` refuses a computer whose handler is apport,
+        or any handler it doesn't know, and says how to turn apport off
+        (`sudo systemctl disable --now apport`). systemd-coredump and a
+        plain file pattern are accepted. The helper refuses to start
+        when the handler has changed to one `install` would refuse.
+      - **If b:** apport stays on, and the slot cleanup below finds what
+        it wrote.
+    - **Under either answer**, slot cleanup (§9 step 4) looks in
+      `/var/crash` and `/var/lib/systemd/coredump` for files the runner
+      owns or that name its uid, and keeps the slot out of use, with
+      `status` naming them, until an administrator removes them. The
+      code PR measures systemd-coredump at a limit of 0 on Fedora,
+      checking its journal entry (`COREDUMP_ENVIRON`, which for the
+      `env` way is the secret) and not only the core file (§13).
   - **Devices.** `PrivateDevices=yes` gives runs only the pseudo-devices
     (`/dev/null`, `/dev/zero`, `/dev/full`, `/dev/random`,
     `/dev/urandom`, `/dev/tty` and the pseudo-terminals): a program
@@ -525,8 +543,13 @@ else.
     nothing (the mount goes with the helper's namespace), and no other
     process on the computer sees it. Said plainly: a tmpfs can be
     swapped out, so a secret can reach the swap device as any
-    process's memory can; on Linux 6.4 and later the tmpfs is mounted
-    `noswap`, and the secret stays in RAM.
+    process's memory can. On Linux 6.4 and later `install` adds
+    `noswap` to the mount, and the secret stays in RAM; on an older
+    kernel it leaves it out. `install --upgrade` writes the unit again
+    for the running kernel. Booted into an older kernel than the unit
+    was written for, the helper's mount fails and it doesn't start; the
+    elevated `status` says so and that `install --upgrade` fixes it
+    (chosen).
   - **`PrivateTmp=yes`** and **`TemporaryFileSystem=/dev/shm`** give
     every run of this pairing the helper's own `/tmp`, `/var/tmp` and
     `/dev/shm`, not the system's, so a run can't leave a file where the
@@ -655,8 +678,8 @@ is another slot's, is refused (chosen). Descriptors travel with
   - `run` matches `^[0-9a-f]{32}$`, and no folder of that name exists;
   - the program's descriptor is a memory file whose `F_GET_SEALS`
     succeeds with all four seals, and on Linux 6.3 and later with
-    `F_SEAL_EXEC` too, so its mode can't change (AGENT-PLAN 0.1.18
-    §4.9 adds it to the connector's seals where the kernel has it), at most 512 MiB, starting
+    `F_SEAL_EXEC` too, so its mode can't change (AGENT-PLAN 0.1.18 §4.9
+    adds it to the connector's seals where the kernel has it), at most 512 MiB, starting
     with the ELF magic. The `/memfd:` name in its link is chosen by
     the connector, so it proves nothing;
   - the program's memory file can be executed by the runner (its mode
@@ -915,7 +938,9 @@ the root-owned program folder, as the slot's runner:
      shares that `/tmp` and could move such a file behind the walk, so
      the walk runs again, and a file of the runner still found keeps
      the slot out of use. These are the only places outside its folder
-     a run can write (§6).
+     a run can write (§6). It also looks in `/var/crash` and
+     `/var/lib/systemd/coredump` for a crash report or core of the
+     runner (§6, "Core dumps"), which keeps the slot out of use.
   5. **Jobs:** a check only. A run can't make a cron or `at` job: the
      spools are read-only to it, and `crontab` and `at` are setgid or
      setuid programs that run under `no_new_privs` but gain no group or
@@ -1050,8 +1075,8 @@ owner's go:
    - the state file touched only as the connector's account;
    - the order of `pair`'s and `forget`'s steps, stopping the socket
      too, and the restart rather than a start;
-   - reading `has-tpm2`'s lines; the way out when the TPM is gone or
-     fails to seal;
+   - reading `has-tpm2`'s lines, and a trial seal for `+driver
+     -firmware`; the way out when the TPM is gone or fails to seal;
    - rotation only as `pair --restart` in v1;
    - the text for a key that can't be unsealed (NEW text).
 6. For the helper (§6):
@@ -1059,7 +1084,9 @@ owner's go:
    - the rule that its unit's options are chosen for runs;
    - its capability set and its sandbox options (with `PrivateIPC`, a
      private `/dev/shm`, `PrivateDevices`, a system-call filter failing
-     with `EPERM`, and `LimitCORE=1`), a session keyring per run,
+     with `EPERM`, `LimitCORE=1`, `noswap` where the kernel has it), a
+     session keyring per run, the `core_pattern` check and crash-report
+     sweep (the handler's rule pending the owner, #15995),
      `InaccessiblePaths=` for a home outside `/home`;
    - no `RestrictNamespaces=`, for `clone3`'s sake;
    - the per-run limits;
@@ -1124,6 +1151,14 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     and its `pids.max` and `memory.max` hold;
   - a crashed run leaves no core dump, no apport report and no journal
     entry with its environment, with apport and with systemd-coredump;
+  - a run that lowers its own core limit to 0 and then crashes: under
+    the owner's answer to #15995, `install` has refused apport (a), or
+    the report it leaves keeps the slot out of use (b); systemd-coredump
+    at a limit of 0 is measured on Fedora, its journal entry included;
+  - a `core_pattern` socket handler (`@`, `@@`) is refused;
+  - the helper's tmpfs with and without `noswap`, and the helper's
+    refusal to start under a kernel older than its unit, with the
+    elevated `status`'s text;
   - two slots at once: a `refuse` for one and a `go` for the other
     start only the other, and a `go` whose `final` doesn't match, or
     that names the other slot's run, starts nothing;
