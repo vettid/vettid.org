@@ -520,7 +520,10 @@ else.
       each start, and the helper before each `start` read
       `/proc/sys/kernel/core_pattern`:
       - accepted: systemd-coredump, and a plain file pattern, which
-        writes nothing for a run, whose hard limit is 1;
+        writes nothing for a run, whose hard limit is 1. If the code
+        PR's measurement shows systemd-coredump putting
+        `COREDUMP_ENVIRON` in the journal for a run at a limit of 0,
+        systemd-coredump is refused like apport;
       - refused: apport, and any handler `install` doesn't know, as are
         the socket forms of Linux 6.16 and later (`@`, `@@`) until
         measured. `install` says how to turn apport off: `sudo
@@ -1162,8 +1165,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     accept systemd-coredump and a file pattern (owner a, GC #15995);
   - a run that lowers its own core limit to 0 and then crashes leaves no
     core and no journal entry with its environment under
-    systemd-coredump (measured on Fedora) or a file pattern, and a
-    report the backstop finds keeps the slot out of use;
+    systemd-coredump or a file pattern (to be measured on Fedora in the
+    code PR), and a report the backstop finds keeps the slot out of use;
   - a `core_pattern` socket handler (`@`, `@@`) is refused;
   - the helper's tmpfs with and without `noswap`, and the helper's
     refusal to start under a kernel older than its unit, with the
