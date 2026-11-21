@@ -531,6 +531,9 @@ else.
     `/dev/shm`, not the system's, so a run can't leave a file where the
     member's processes look. **`PrivateIPC=yes`** does the same for
     SysV IPC and POSIX message queues. The two slots share them (§9).
+    Measured on systemd 255 (a fresh `/dev/mqueue`, private SysV
+    objects); the code PR measures it on 251 too, the minimum, and
+    `install` refuses a systemd where `/dev/mqueue` isn't private.
   - **`ProtectSystem=strict`** leaves runs only these writable places:
     the helper's `/tmp` and `/var/tmp`, `/dev/shm`, `/dev/mqueue`, and
     their own run folder. Everything else is read-only to them,
