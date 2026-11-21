@@ -19,7 +19,10 @@ changelog:
     `node` and `node_modules` an npm shim runs (the lead's a on GC
     #15388; the owner sees it at this erratum's merge). A3 status and
     A3.8a's acceptance. §11: two NEW texts replace "Batch file", NEW
-    "Answer lost", and "Not a program" names .cmd and .bat
+    "Answer lost", and "Not a program" names .cmd and .bat. Also as
+    built in vettid-agent #51 (owner decisions b, a and a, GC #15715,
+    #15728, #15742): non-ASCII account folders are allowed unless this
+    system's code page turns a character into a refused one
   - 0.1.14: 2026-11-20, with VAULT-MESSAGING 0.92.0 (owner decisions a,
     GC #15273 and #15274). §4.3: a cached copy carries `withheld: true`,
     which the connector treats as "ask again as a new request"; the
@@ -818,25 +821,43 @@ allowed ways, so the agent can choose again.
   as built in vettid-agent #42). `cmd.exe` parses a batch file's
   arguments again, so a batch run is allowed only with every value it
   sees checked, fail closed (`argument_not_allowed`, §11):
-  - **Refused** in an argument, the value of an environment variable
-    the request or the connector's run sets, the batch file's path and
-    its working folder: any of `% & | < > ^ ( ) ! "`, a control
+  - **Refused in an argument, the value of a variable the request
+    sets, and the secret:** any of `% & | < > ^ ( ) ! "`, a control
     character (below U+0020, and DEL), and any character outside ASCII.
     Why: `%` expands even inside quotes; `& | < >` run or redirect once
     `%~1` strips the quotes; `( )` end a block early; `^` is dropped by
     `%~1`; `!` expands under delayed expansion; `"` cannot be escaped;
     a line break ends the command; a non-ASCII character can be
-    converted by best fit to `"` or `\` (U+FF02, `¥`). So a path such as
-    `C:\Program Files (x86)\…`, or a profile path outside ASCII, cannot
-    hold a batch file that runs with a secret. **The cost, as built:**
-    npm installs its tools as `.cmd` shims in
-    `C:\Users\<name>\AppData\Roaming\npm`, so a member whose Windows
-    account name holds a character outside ASCII (José, Zoë) cannot run
-    any npm-installed tool with a secret, nor any batch file from a
-    working folder in their profile. Whether the path and the working
-    folder may hold non-ASCII characters that cannot be converted to a
-    refused one is an open owner point (below the arguments' rule,
-    which stays).
+    converted by best fit to `"` or `\` (U+FF02, `¥`).
+  - **The batch file's path, its working folder and the account
+    folders it is given** (vettid-agent #51; owner decisions b, a and a,
+    GC #15715, #15728, #15742; measured on Windows 11, GC #15712):
+    `cmd.exe` passes non-ASCII unchanged, and the risk is a child that
+    reads its command line in the ANSI code page, where Windows' best fit
+    turns some characters into metacharacters. So these may hold
+    non-ASCII characters, but the ASCII refused set and control
+    characters stay refused, and so does any non-ASCII character that
+    `WideCharToMultiByte` with the system's code page (`GetACP`, read at
+    each run; best fit on) turns into a byte in the refused set, a `\`,
+    `/` or `:`, a control byte or DEL, a DBCS second byte included (on
+    cp932, for example, タ ends in `^`); a character that becomes `?` is
+    allowed, and a failed conversion refuses. A path such as
+    `C:\Program Files (x86)\…` still cannot hold a batch file that runs
+    with a secret.
+    - The account folders are the variables copied from the connector's
+      own environment, `USERPROFILE`, `USERNAME`, `HOMEDRIVE`,
+      `HOMEPATH`, `APPDATA` and `LOCALAPPDATA` (which neither the request
+      nor `--run-env` can set). They also may not end in a backslash,
+      except exactly `HOMEPATH=\` (a mapped home drive's root, GC
+      #15742; a batch file that quotes `"%HOMEDRIVE%%HOMEPATH%"` then
+      hands a C-runtime child `"H:\"`, an accepted residual).
+    - `PATH`, `TEMP` and `TMP`, which the connector sets, get the
+      non-ASCII part only and no trailing backslash: the ASCII part
+      would refuse a `--run-path` under `C:\Program Files (x86)`. A
+      drive's or share's root is refused as a `--run-path` at startup.
+    - The check relies on the connector having no UTF-8
+      `activeCodePage` manifest (`GetACP` would then report 65001); a
+      test fails and the release-binary check refuses if one appears.
   - **Also refused:** an argument or variable value that ends in a
     backslash (`\"` would become an escaped quote for a program that
     follows C-runtime rules); a working folder that is a drive's root;
@@ -1289,7 +1310,7 @@ recorded as decided in the table and the changelog (0.1.4, 0.1.5).
 
 ### A3 — LEASH and the MCP server
 
-*Status: A3.1 #26, A3.2 #27, A3.3 #28, A3.4 #32, A3.5 #43 (0.1.13) and A3.6 #36 are done (follow-ups #30, #34). A3.8a #42 is done (0.1.15; the ask-again rule of §4.4 is #48). A3.7, A3.8b and A3.9 are not built.*
+*Status: A3.1 #26, A3.2 #27, A3.3 #28, A3.4 #32, A3.5 #43 (0.1.13) and A3.6 #36 are done (follow-ups #30, #34). A3.8a #42 is done, with #51 (0.1.15; the ask-again rule of §4.4 is #48). A3.7, A3.8b and A3.9 are not built.*
 
 | PR | Contents | Acceptance |
 |---|---|---|
@@ -1612,17 +1633,21 @@ approval, each marked NEW except where the owner already chose it:
   not let this program receive these variables: <names>. You can allow
   them for this program on your phone."
 - **Batch file argument** (`argument_not_allowed`, 0.1.15, replacing
-  "Batch file"), NEW, followed by a detail in parentheses that names
-  the part and the kind of character, never the value (for example
-  "(argument 2 holds &)"): "This program is a Windows batch file (.cmd
-  or .bat), which runs through cmd.exe. Its arguments, the environment
-  variables the request sets, its path and its working folder can't
-  hold any of % & | < > ^ ( ) ! " or a control character, or any
-  character outside ASCII (so a file name in another alphabet can't be
-  passed to it), and an argument or variable can't end in a backslash:
-  cmd.exe would read them as commands. A variable can't be named as one
-  cmd.exe sets itself, such as CD or ERRORLEVEL. Pass the value in a
-  file instead."
+  "Batch file"; as in vettid-agent #51), NEW, followed by a detail in
+  parentheses that names the part and the kind of character or its code
+  point, never an argument's value (for example "(argument 2 holds
+  &)"): "This program is a Windows batch file (.cmd or .bat), which
+  runs through cmd.exe. Its arguments and the environment variables the
+  request sets can't hold any of % & | < > ^ ( ) ! " or a control
+  character, or any character outside ASCII, and can't end in a
+  backslash. Its path, its working folder and the folders from your
+  account it is given (such as APPDATA) can't hold those ASCII
+  characters or a control character, and none of the folders it gets,
+  the PATH it searches included, can hold a character this system turns
+  into one of them or into a slash, backslash or colon (such as a
+  full-width quotation mark). A variable can't be named as one cmd.exe
+  sets itself, such as CD or ERRORLEVEL. Pass a value in a file
+  instead, or move the program to another folder."
 - **Secret not for a batch file** (`argument_not_allowed`, 0.1.15),
   NEW: "This program is a Windows batch file (.cmd or .bat), and the
   secret's value can't be given to it in an environment variable:
