@@ -1,6 +1,6 @@
 ---
 title: AGENT-LINUX-RUNTIME
-status: draft design note for review (blind pair, then the owner's merge go) before any code for the run helper or the key sealing; nothing here is built but the channel's Unix-socket end (vettid-agent, A5.6 PR 1)
+status: draft design note; the run helper and the key sealing get their independent reviews (AGENT-PLAN §9 rule 6) from it, before their code. Nothing here is built but the channel's Unix-socket end (vettid-agent, A5.6)
 version: 0.1.0
 date: 2026-11-21
 owner: Al Liebl (Mesmer)
@@ -91,7 +91,7 @@ group.
 
 It follows A3.10a as merged (vettid-agent 311d86b): the same hellos,
 `Op`s, refusal codes and `Admit` rules, with the peer's uid in place of
-the Windows token. It is built (A5.6 PR 1).
+the Windows token. It is built (A5.6, the first PR).
 
 - **The socket is made by systemd** (`vettid-agent-<n>.socket`):
 
@@ -714,7 +714,7 @@ administrator is there.
   (`SO_PEERGROUPS`). The service can't read `sudoers`. A member who is
   an administrator gets `member_is_admin` for every tool, as on Windows.
 
-  The channel's code (A5.6 PR 1) does this already, failing closed,
+  The channel's code (A5.6) does this already, failing closed,
   until the owner decides.
 - **The cost, said plainly:** most desktop Linux users are in `sudo`
   (the first user made on Ubuntu and Fedora is). They'd need a separate
@@ -780,7 +780,7 @@ Each is "(chosen; not in the spec)" until the review and the owner's go:
 The code PRs carry these. They run in a Linux VM and on the ubuntu CI
 runner under `sudo`, with throwaway users and units removed in cleanup.
 
-- **The channel** (built, A5.6 PR 1):
+- **The channel** (built, A5.6's first PR):
   - another user is refused;
   - root gets `status`, `pair` and `forget` but no tool;
   - the member's normal process can't `pair` or `forget`;
