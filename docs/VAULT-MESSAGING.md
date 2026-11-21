@@ -37,30 +37,45 @@ changelog:
     read-only offered first) and Q9 a (files handed in and out, with
     the hardened copy-back of the note's §6), both of 2026-11-05. Not
     built yet; vault, app and connector cards follow (GC
-    #15811–#15816). A minor version: members and a code are added.
-    §10.11 "Ways to use a secret": (1) an item's `run` binding gains
-    `folders` (0–16 entries `{path, write}`), the member folders a run
-    may use as `cwd`, set on the phone, `write` false by default;
-    (2) a run's `cwd` is checked against `folders` as its `program` is
-    checked against `programs`: exact folder or a subfolder, and
-    `cwd_not_allowed` (new code, body `{where, path}`) otherwise,
-    counted as refused; (3) `item.run` gains `inputs` (0–16 files,
-    16 MiB each, 64 MiB in all, copied read-only into the run's
+    #15811–#15816). A minor version, as members and a code are added,
+    **but one old behavior is withdrawn:** a `cwd` outside the item's
+    `folders`, accepted by 0.92.1, is refused by a 0.93.0 vault, so a
+    connector that sends the run's own `work/` as `cwd` must stop once
+    its catalog shows `folders` (§10.11 "Member folders for runs",
+    "How a connector knows"). §10.11 "Ways to use a
+    secret": (1) an item's `run` binding gains `folders` (0–16 entries
+    `{path, write}`), the member folders a run may use as `cwd`, set on
+    the phone, `write` false by default; no entry may be equal to,
+    under or above another (the lead's call after review); (2) a run's
+    `cwd` is checked against `folders` as its `program` is checked
+    against `programs`: the exact folder or a subfolder (the lead's
+    choice, to be confirmed by the owner), and `cwd_not_allowed` (new
+    code, body `{where, path}`) otherwise, counted as refused; (3)
+    `item.run` gains `inputs` (0–16 files, 16 MiB each, 64 MiB and
+    16 KiB of paths in all, copied read-only into the run's
     `work/in/`) and `output` (a folder with `write`, and the names to
-    copy back from `work/out/`); (4) `cwd` becomes optional: absent
-    means the run's `work/`, always allowed. **Changed from 0.92.1:**
-    the `item.run` member list read `cwd` as required, and now reads
-    `cwd?`; the vault never could see the run's `work/`, which only
-    the connector knows. (5) A run with a `cwd`, `inputs` or `output`
-    is always referred, whatever `each`; (6) `approval.pending` for
-    an `item.run` carries `folders: {cwd?, output?}` (the matched
-    entries) and the flags `member_folder` and `member_files`; (7) the
-    catalog gives `folders`; (8) adding a folder or turning `write` on
-    is a widening. A new capability name, `run_folders`, will be
-    listed with the release that implements it. **Apps and connectors
-    must now handle:** `folders` in a run binding and in the catalog;
-    `cwd_not_allowed`; `inputs`, `output`, `folders` and the two flags
-    in an `item.run` approval
+    copy back from `work/out/`); the connector's checks of both, and
+    `VETTID_IN` and `VETTID_OUT`, are in the section; (4) `cwd`
+    becomes optional: absent means the run's `work/`, always allowed.
+    **Changed from 0.92.1:** the `item.run` member list read `cwd` as
+    required, and now reads `cwd?`; the vault never could see the
+    run's `work/`, which only the connector knows. (5) A run with a
+    `cwd`, `inputs` or `output` is always referred, whatever `each`
+    [owner #15848 pending: whether a run with files only, no `cwd`,
+    always goes to the phone]; (6) `approval.pending` for an
+    `item.run`, and its `pending.list` entry, carry `folders:
+    {cwd?, output?}` (the matched entries; `{}` for an inputs-only
+    run) and the flags `member_folder` and `member_files`; (7) from 0.93.0
+    every catalog entry for an item with a run way carries `folders`
+    (an empty list when none), which is also how a connector and an
+    app learn that the vault is 0.93.0 or later (no capability name or
+    `vault.status` member is added: S10 rejected a capability list); (8) adding a folder or turning `write` on
+    is a widening, and with no nesting a removal always narrows; **Apps and connectors must now handle:** `folders` in a run
+    binding and in the catalog; `cwd_not_allowed`; `inputs`, `output`,
+    `folders` and the two flags in an `item.run` approval. [owner #15847 pending:
+    whether "Read only" is enforced against the per-pairing share, so
+    that the vault's `write: false` is also what the runner account is
+    given; §10.11 "Member folders for runs"]
   - 0.92.1: erratum, 2026-11-21, with AGENT-PLAN 0.1.15. §10.11 "What
     the pin covers, said plainly": Windows batch files are no longer
     refused (vettid-agent #42 runs them with checked values, owner
@@ -13806,7 +13821,7 @@ device belongs to the unlock it ends.
 | `device.session.granted` (to the device) | — | `{session_id, expires_at}` |
 | `device.session.end` (app: `{device_id}`; desktop, agent: `{}`, its own; (0.82.5) either may add `session_id`) | as left | `{}`; (0.82.5) also `{}`, with nothing changed, when `session_id` is not the device's current, unexpired session (a session suspended by the hold, §3.6.3, is current); `bad_request` for a `session_id` that is not a non-empty string (§6.8 "Ending") |
 | `device.session.ended` (to the device) | — | `{reason: "denied" \| "ended"}` |
-| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?, replaces?, proxy?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history`, (0.85.3) `program_unrecorded`, `program_changed` (with `previous_sha256` and `previous_path`) (§10.11); (0.91.0) `replaces`: the approval a run or (0.91.1) a proxy referred again replaces (§6.8 step 4); (0.92.0) `proxy`: `{host, header, prefix}` for an agent's `item.proxy`, the values the vault will send (§10.11) |
+| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?, replaces?, proxy?, folders?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history`, (0.85.3) `program_unrecorded`, `program_changed` (with `previous_sha256` and `previous_path`) (§10.11); (0.91.0) `replaces`: the approval a run or (0.91.1) a proxy referred again replaces (§6.8 step 4); (0.92.0) `proxy`: `{host, header, prefix}` for an agent's `item.proxy`, the values the vault will send (§10.11); (0.93.0) `flags` also `member_folder` and `member_files`, and `folders: {cwd?, output?}` for an `item.run` (§10.11) |
 | `approval.waiting` (to the requester) | — | `{approval_id, request_id, exp}` |
 | `approval.decide` (app) | `{approval_id, approve: bool}` | `{result}`: `"ok"`, (0.91.0) `"referred"` when the request was referred again (§6.8), or the error code the held request was answered with |
 
@@ -15048,7 +15063,7 @@ which are not asks). Five kinds arrived only as events and were lost;
 |---|---|---|
 | `authenticate` | `connection.authenticate.pending`: `{connection_id, request_id, context?, purpose?, match_code?, document_sha256?, document_size?, document_required?, exp}` (a valid `match_code`, 0.79.0; `document_*`, 0.89.0: never the document itself, which `connection.authenticate.document` fetches) | §10.4 |
 | `session` | `device.session.pending`: `{request_id, device_id, role, name, seconds, exp}` | §6.8 |
-| `approval` | `approval.pending`: `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?, replaces?, proxy?}` | §6.8 |
+| `approval` | `approval.pending`: `{approval_id, device_id, role, name, type, body, exp, flags?, previous_sha256?, previous_path?, replaces?, proxy?, folders?}` | §6.8 |
 | `action` | `action.pending`: `{invocation_id, connection_id, action_id, sensitivity, params, exp}` | §10.14 |
 | `location` | `location.request.pending`: `{request_id, connection_id, note?, exp}` | §10.16 |
 | `pairing` (0.83.0; not yet built in the vault) | `device.pair.pending`: `{pairing_id, role, exp, pending_id?, name?, sas?}` | §6.7 |
@@ -19017,57 +19032,91 @@ item's settings allow for its task:
     §6, GC #15810; not built yet) **Member folders for runs.** An
     item's `run` may also hold `folders` (0–16 entries, default none):
     the member folders a run of this item may use as `cwd`, and where
-    its files may be read or written (below). Each entry is `{path,
-    write}`. `write` is a boolean, default `false`: **read-only is
-    what the app offers first**, and the member turns write on for
-    that folder. `path` follows the rules of a run's `cwd` ("Program
-    strings"): at most 4,096 bytes of UTF-8, no control, Cf, Zl or Zp
-    character, absolute and clean, no `:` after the root. Unlike a
-    `cwd`, it may not be the root itself (`/` or a drive root), which
-    would put every file in reach; and no two entries may be the same
-    path, compared as an entry's `program` is (without case, a drive
-    path's `/` as `\`, trailing dots and spaces dropped). Otherwise
-    `bad_request`. Entries may be nested: the entry with the
-    longest matching path decides `write` for a path. A `folders`
-    that is empty or absent means no member folder: a run then uses
-    `work/` only, and the binding is as narrow as it can be.
-    - **How the vault compares** (the lead will confirm; AGENT-SEPARATE-ACCOUNT
-      says only "per item"). A `cwd` is allowed when it **equals an
-      entry's path or lies under it**: compared element by element
-      (`/` and `\` both separate), exactly, case-sensitive, never as a
-      text prefix (`/home/al/work2` is not under `/home/al/work`).
-      The vault compares the text only and knows nothing of the
-      computer: it follows no link and knows no case rule. A case or
-      alias that differs only gets `cwd_not_allowed`, which fails
-      safe; the connector resolves the folder it will use and refuses
-      one whose real location is outside the entry (same code, its
-      own text). An entry is not a share: what the runner account can
-      reach is set by the administrator's `share` on the computer
-      (AGENT-PLAN AG14), and the vault cannot tell what is shared. A
-      binding lets a folder be used; `share` makes it reachable.
-    - **`write` is for the files the connector moves**, and for the
-      share's access list. The vault cannot stop a program that is
-      running in a read-only folder from trying to write there; the
-      runner account's access list does.
+    files may be written back (below). Each entry is `{path, write}`.
+    `write` is a boolean, default `false`: **read-only is what the app
+    offers first**, and the member turns write on for that folder
+    [owner #15847 pending: whether "Read only" is enforced against the
+    per-pairing share]. `path` follows the rules of a run's `cwd`
+    ("Program strings"): at most 4,096 bytes of UTF-8, no control, Cf,
+    Zl or Zp character, absolute and clean, no `:` after the root.
+    Unlike a `cwd`, it may not be the root itself (`/` or a drive
+    root), which would put every file in reach.
+    - **No entry may be equal to, under or above another.** Entries are compared **folded**, on every system, as
+      an entry's `program` is for the no-two-match rule: without case,
+      a drive path's `/` as `\`, and trailing dots and spaces dropped
+      from each element. So `/home/al/Work` and `/home/al/work` cannot
+      both be listed, even on Linux, where they are two folders. A
+      binding that breaks the rule is `bad_request`. With no nesting,
+      every `write` applies to exactly one entry, and removing an
+      entry always narrows.
+    - **How the vault compares.** A `cwd` is allowed when it **equals
+      an entry's path or lies under it**: element by element (`/` and
+      `\` both separate), exactly and case-sensitively, never as a text
+      prefix (`/home/al/work2` is not under `/home/al/work`). The
+      vault compares text only and knows nothing of the computer: it
+      follows no link and knows no case rule. A case or alias that
+      differs only gets `cwd_not_allowed`, which fails safe, so the
+      member must type a path exactly as the computer shows it,
+      capitals included. **The connector sends `cwd` as the agent or
+      member gave it, cleaned, never resolved**, so the vault's check
+      is on the text the member approved.
+    - **What the connector adds** (AGENT-PLAN §4.9; it is the
+      connector, not the vault, that sees the computer): (a) the
+      binding is also checked against the shared folders on the
+      computer, for `cwd` only (`vettid-agent share`); (b) on POSIX it
+      refuses a `\` in a `cwd`, an input or an output path, which the
+      vault accepts as a separator; (c) it opens the folder and
+      resolves its **final path from the open handle**
+      (`GetFinalPathNameByHandle`, `realpath`), refuses the run if, by
+      the system's own rules (case, short names, links, junctions),
+      that path is not under the approved entry, and runs the process
+      in that same handle's path, so nothing can be swapped between the
+      check and the use. Such a refusal is `cwd_not_allowed` with the
+      connector's own text.
+    - **`write`** says whether the connector may copy files back into
+      the folder, and what the share's access list gives the runner.
+      The vault cannot stop a program running in a read-only folder
+      from trying to write there; the runner account's access list does
+      [owner #15847 pending].
     - **An absent `cwd` is the run's `work/`, always allowed**, with no
       binding. The connector omits `cwd` when the agent gave none (or
-      gave the run's own `work/`); the vault never sees that path, which
-      is made per run.
+      gave the run's own `work/`); the vault never sees that path,
+      which is made per run.
     - **A binding change.** `folders` changes are `leash.item.set`
       changes, announced and audited as `leash.item.changed`, like the
       rest of `run`. They are **widenings**: adding an entry (or
       changing an entry's `path`, which is adding one) and turning
       `write` on. They need the credential's unlock window
       (`credential_locked` outside it). Removing an entry, turning
-      `write` off, and emptying `folders` only narrow. A run held at
-      a change is judged again when it is approved (below).
+      `write` off, and emptying `folders` only narrow. A run held at a
+      change is judged again when it is approved (below).
+    - **How a connector knows, and the transition.** There is no
+      capability name: S10 rejected a capability list, and this does not
+      reopen it. From 0.93.0 **every catalog entry for an item with a
+      run way carries `folders`**, an empty list when the binding has
+      none; a vault before 0.93.0 never does. A connector sends
+      `inputs`, `output`, a member-folder `cwd`, or no `cwd` for the
+      run's `work/`, **only for an item whose catalog entry has
+      `folders`**. For an item whose entry lacks it, the vault predates
+      0.93.0: the connector answers `vault_too_old` to a request that
+      needs those members (AGENT-PLAN §11) and keeps sending the cleaned
+      absolute `work/` path as `cwd`, as today. Once an entry has
+      `folders` it **stops sending a `cwd` for its own `work/`**
+      (it omits the member), because a 0.93.0 vault refuses a `cwd` the
+      binding does not cover. A vault before 0.93.0 ignores unknown
+      members of `leash.item.set` (§10.1), so an app shows the folders
+      settings only after a vault answer for a run binding
+      (`leash.item.list` or `leash.item.set`) holds `run.folders`
+      (0.93.0 returns it, an empty list when none).
   - (0.93.0; owner decision Q9 a, GC #15810; not built yet) **Files
     handed in and out.** An agent that works on documents needs no
-    shared folder: the connector's stub, which runs as the member,
-    reads the files and the connector writes them as the runner's
-    copies, and the other way round (AGENT-SEPARATE-ACCOUNT §6, which
-    also defines the copy-back; AGENT-PLAN §4.9). The vault sees only
-    names and sizes, and decides on them (see `item.run` below).
+    shared folder for them: the connector's stub, which runs as the
+    member, reads and writes the member's files, and the service gives
+    the run copies (AGENT-SEPARATE-ACCOUNT §6, which also defines the
+    copy-back; AGENT-PLAN §4.9). **They need a `folders` entry, not a
+    share:** nothing is shared by access list for files. The vault
+    sees only names and sizes, and decides on them (see `item.run`
+    below).
   - (0.85.3; owner decision of 2026-11-05, option b) **The program's
     content is pinned.** An entry's `sha256` (64 lowercase hex digits)
     is the SHA-256 of the program file the member approved, and its
@@ -19169,7 +19218,7 @@ item's settings allow for its task:
   shipped breaks. Staging agents, and tests that read values with the
   reference client, set `reveal` first.
 - **The catalog** gives, per item, `ways` and, when present,
-  `programs`, (0.93.0) `folders` (`[{path, write}]`) and `hosts` (never `header` or `prefix`), so the agent can
+  `programs`, (0.93.0) `folders` (`[{path, write}]`; **present, an empty list if none, for every item with a run way**) and `hosts` (never `header` or `prefix`), so the agent can
   choose a way the item allows and a folder it may use. (0.85.3) Its `programs` entries are
   `{program, env, path?}`: `path` is the pinned path when there is a
   pin, never the hash, so the connector knows which file needs no
@@ -19203,7 +19252,8 @@ item's settings allow for its task:
   (owner decision of 2026-10-18; 0.91.1: launchers and evaluators too,
   owner decision a, GC #14596); (0.93.0) an `item.run` with a `cwd`, `inputs` or `output`, so
   `each: false` never covers a run in a member folder or one that
-  hands files in or out (AGENT-SEPARATE-ACCOUNT §6: a program in a
+  hands files in or out [owner #15848 pending: whether a run with
+  files only, no `cwd`, always goes to the phone] (AGENT-SEPARATE-ACCOUNT §6: a program in a
   folder the agent can change runs what it finds; hardened profiles
   that may relax this are a later change, GC #15815); an `item.proxy` always; an
   `item.get` always, every reveal asked on its own (owner decision of
@@ -19318,31 +19368,57 @@ item's settings allow for its task:
   - `inputs` (0–16) lists files copied, read-only, into the run's
     `work/in/` before it starts: each `{path, size}`. `path` is a
     clean absolute path as for `cwd`, and **must lie under a `folders`
-    entry**, whether or not it has `write`. `size` is an integer from
-    0 to 16,777,216 (16 MiB), and all sizes together at most
-    67,108,864 (64 MiB); a larger one is `bad_request`. The file's
-    name in `work/in/` is its last path element, which must be a **flat
-    name**: 1–255 bytes of UTF-8, no control, Cf, Zl or Zp character, no
-    `/`, `\` or `:`, not `.` or `..`, no trailing dot or space, and no
-    reserved Windows name (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to
-    `COM9`, `LPT1` to `LPT9`, with or without an extension, any
-    case). Two inputs with the same name (compared without case) are
-    `bad_request`.
+    entry**, whether or not it has `write`. `size` is a non-negative
+    JSON integer (a fraction, an exponent form or a negative number is
+    `bad_request`) of at most 16,777,216 (16 MiB), and all sizes
+    together at most 67,108,864 (64 MiB). **The paths together are at
+    most 16,384 bytes** (UTF-8; chosen so that the new members add at
+    most 16 KiB to a request, with `output` at most 8 KiB more; §10.1
+    states no limit for a request's body that I could find, and
+    `argv` and `env` are already larger). Any of these over is
+    `bad_request`. The file's name in `work/in/` is its last path
+    element, which must be a **flat name**: 1–255 bytes of UTF-8, no
+    control, Cf, Zl or Zp character, no `/`, `\` or `:`, not `.` or
+    `..`, no trailing dot or space, and no reserved Windows name
+    (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`,
+    with or without an extension, any case). Two inputs with the same
+    name (compared without case) are `bad_request`.
   - `output` is `{folder, names}`. `folder` is a clean absolute path
     **equal to or under a `folders` entry with `write: true`**. `names`
-    (1–16) are flat names (as above), unique without case: the files
-    of the run's `work/out/` the connector copies back to `folder`
-    when the run ends, and no others.
-  - The sizes are those the connector states; the vault cannot read
-    the files, and the connector enforces them on the bytes it reads
-    and writes (AGENT-PLAN §4.9). A file past a cap is dropped and the
-    run's answer says so. The copy-back is the note's: only regular
-    files the runner made, each created new and never overwritten (a
-    numbered suffix if the name is taken), never through a link, and
-    each file redacted as standard output is (AGENT-PLAN §4.9).
-  - Neither changes what the vault sends: the answer is still `{item_id,
-    field_id, value}`. They change the decision: they refer the run
-    (above) and are shown on the approval (below).
+    (1–16, so 0 or 17 is `bad_request`) are flat names (as above),
+    unique without case: the files of the run's `work/out/` the
+    connector copies back to `folder` when the run ends, and no
+    others.
+  - **Which process checks what.** The vault checks the request's
+    form, the folders and the approved sizes; it cannot read a file.
+    The **service** (AGENT-PLAN §4.9), not the stub, which is the
+    member's process, enforces the caps and each approved `size` on
+    the bytes it receives: an input whose real size differs from its
+    approved `size` stops the run before it starts. Reading an input
+    through a link is hygiene only (the agent, as the member, can read
+    the file anyway). The service checks an output on the opened
+    handle: opened with no-follow at each element (`openat` with
+    `O_NOFOLLOW`; on Windows directory handles opened with
+    `FILE_FLAG_OPEN_REPARSE_POINT`), a regular file owned by the slot's
+    runner, link count 1, never a reparse point, and **only after every
+    process of the runner is gone**. **At copy-back the binding is
+    checked again, against the current one**: a folder no longer in
+    `folders`, or no longer `write`, means nothing is copied back, and
+    the run's answer says so. A file past a cap is dropped and the
+    answer says so. Each file is created new, never overwritten (a
+    numbered suffix if the name is taken), never through a link in the
+    destination, and each is redacted as standard output is, over its
+    bytes, before it leaves the service (AGENT-PLAN §4.9).
+  - **How a program finds them.** When a run has `inputs` or `output`,
+    the connector sets two variables in the program's environment:
+    **`VETTID_IN`**, the absolute path of the run's `work/in/`, and
+    **`VETTID_OUT`**, that of `work/out/` (the run's `cwd` may be a
+    member folder, so a relative `in/` would not do). The connector's
+    own variables, they are refused as `name` and in `env`
+    (`bad_request`), as `PATH` is.
+  - Neither member changes what the vault sends: the answer is still
+    `{item_id, field_id, value}`. They change the decision: they refer
+    the run (above) and are shown on the approval (below).
   - A binding with no `folders` refuses any `inputs` or `output`
     with `cwd_not_allowed` (`where` `"input"` or `"output"`).
 
@@ -19414,13 +19490,20 @@ item's settings allow for its task:
   - `leash.item.set`: `folders` up to 16 accepted, 17 refused; a root,
     a relative, a trailing-separator, a `..`, a `:`, a control-character
     or an over-long path refused; two equal entries (also differing in
-    case or by `/` and `\`) refused; nested entries accepted and the
-    longest decides `write`; a missing `write` is `false`; a non-boolean
+    case, as `/home/al/Work` and `/home/al/work`, or by `/` and `\`,
+    or by a trailing dot or space) refused; an entry under or above
+    another refused (`bad_request`), whatever the order; a missing
+    `write` is `false`; a non-boolean
     `write` refused; `folders` without `run`, or with `ways` lacking
     `run`, refused as `run` is.
   - Widening: adding an entry, changing a `path` and turning `write` on
     need the unlock window (`credential_locked` outside it); removing
     an entry, turning `write` off and emptying `folders` do not.
+  - A `cwd` under an entry with `\` as the separator is decided as
+    with `/`; on POSIX the connector refuses it (AGENT-PLAN tests).
+  - A run held when the matched entry's `write` changes, or the entry
+    is removed, is refused or referred again at approval (the
+    approval's `folders` changed).
   - `item.run`: no `cwd` is allowed with empty `folders`; a `cwd` equal
     to an entry, and one under it, are decided; `/home/al/work2`
     against `/home/al/work`, a different case, and a sibling are
@@ -19429,7 +19512,13 @@ item's settings allow for its task:
     `false`; the approval carries `member_folder`, and `folders.cwd`
     from the held settings.
   - Files: 16 inputs accepted, 17 refused; 16 MiB accepted, one byte
-    more refused; 64 MiB in all accepted, more refused; a name with a
+    more refused; 64 MiB in all accepted, more refused; paths of
+    16,384 bytes in all accepted, one more refused; a `size` of `-1`,
+    `1.5` or `1e3` refused; 0 `names` or 17 refused, 1 and 16
+    accepted; an input under a read-only entry accepted; an output
+    folder equal to its entry accepted, one under it accepted, one in
+    a read-only entry refused; `VETTID_IN` and `VETTID_OUT` refused as
+    `name` and in `env`; a name with a
     `/`, `\`, `:`, `..`, a reserved Windows name, a trailing dot, or
     two names equal without case refused (`bad_request`); an input
     outside every entry, or an output folder in a read-only entry or
@@ -19570,8 +19659,9 @@ item's settings allow for its task:
   - (0.93.0) `member_folder`: an `item.run` with a `cwd`;
     `member_files`: an `item.run` with `inputs` or `output`. Such an
     approval also carries `folders: {cwd?, output?}`, each member the
-    matched `folders` entry `{path, write}` from the held settings (the
-    longest match), for the same reason `proxy` is carried: an app
+    matched `folders` entry `{path, write}` from the held settings
+    (`{}` for a run with inputs only), for the same reason `proxy` is
+    carried, and `pending.list` carries the same members: an app
     shows what the vault decided on, never its own copy of the
     binding, which may be older. An app that cannot show a run
     approval's `folders` when it has `member_folder` or `member_files`
@@ -19607,8 +19697,8 @@ item's settings allow for its task:
   it "moved to <path>", stressed, every argument unabridged (characters that are not printable
   shown escaped), the directory, how the secret is passed (with the
   variable's name), the other variables with their values, (0.93.0) the folder
-  (`cwd`) and whether the matched entry is "read only" or "can be
-  changed by this run", the input files (name and size, with the
+  (`cwd`) and whether the matched entry is "Read only" or "Can change
+  files", the input files (name and size, with the
   folder they come from), the output folder and the names to be
   copied back to it, and a warning for each flag; for an `item.proxy`: the agent, the item and
   field, the host, the header's name and prefix (never the value),
