@@ -1,14 +1,21 @@
 ---
 title: AGENT-SEPARATE-ACCOUNT
 status: approved by the owner 2026-11-05 (§9); design note. Nothing here is built; AGENT-PLAN and the code follow
-version: 0.1.1
-date: 2026-11-05
+version: 0.1.2
+date: 2026-11-21
 owner: Al Liebl (Mesmer)
 component: vettid-agent (the agent connector): install, process model, keys at rest, runs and proxies
 related:
   - AGENT-PLAN.md (0.1.9; 0.1.10 in vettid.org #538) AG1a, AG3, AG4, AG11, §4.2, §4.6, §4.7, §4.9, A3.8, A3.9, A5
   - VAULT-MESSAGING.md (0.84.0; 0.85.0 in #538) §10.11 "Ways to use a secret"
 changelog:
+  - 0.1.2: 2026-11-21, erratum with AGENT-PLAN 0.1.16. §4: an elevated
+    administrator or root is also admitted to the channel, only for
+    `pair`, `forget` and `status` (the lead's call). §3 "Keys at rest":
+    Linux without a TPM 2.0 only with `--no-tpm` (the owner's c, GC
+    #15786). §3 "The operator's flags" and §6 "The pin": in this mode
+    every program, pinned or not, must be in an administrator-only
+    folder (the owner's a, GC #15787). Nothing else changes
   - 0.1.1: 2026-11-05, with AGENT-PLAN 0.1.11 (A5.4). §5: the elevated
     commands' absolute path per platform (macOS: inside the app, a path
     with a space). §4: on macOS the socket's parent is a persistent
@@ -187,7 +194,12 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   - Linux: a system service cannot prompt. Prefer
     `LoadCredentialEncrypted=` sealed to the TPM2 (systemd-creds) over
     putting the service user in the `tss` group; never a passphrase
-    typed at start.
+    typed at start. (0.1.2, the owner's c, GC #15786) On a machine
+    without a TPM 2.0, `install` stops with a clear message unless
+    `--no-tpm` is given; then the credential is sealed to systemd's host
+    key, which root can read and which is not bound to hardware, and
+    `install` and `status` say so. `--no-tpm` on a machine that has a
+    TPM 2.0 is refused.
   - The accounts are fixed system users made at install, not systemd's
     `DynamicUser=` (whose uids change, which breaks ACL-based shares).
 - **One instance per pairing.** AG1a's "one pairing per MCP client"
@@ -200,7 +212,8 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
 - **Bound to one member user.** Under UAC the user who ran the
   installer is the administrator, so the member is named explicitly
   (`--member`) and confirmed. Only that user's processes may use the
-  channel.
+  channel. (0.1.2: plus an elevated administrator or root, only for
+  `pair`, `forget` and `status`; §4.)
 - **The operator's flags.** `--run-path` and `--run-env` are no longer
   the stub's: an agent could set them by editing its own MCP
   configuration. They live in the service's configuration file, which
@@ -208,7 +221,10 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   AGENT-PLAN §4.9 tests whether the **member's** account, the runner
   accounts, or any non-administrator can change the folder. So does the
   "unchangeable program" fallback of AGENT-PLAN 0.1.10 for a program
-  with no pin yet. `--run-env` values come from that configuration too,
+  with no pin yet. (0.1.2, the owner's a, GC #15787) In this mode the
+  fallback's exemption for a pinned program is gone: every program,
+  pinned or not, must be in an administrator-only folder, each folder
+  up its path checked the same way. `--run-env` values come from that configuration too,
   never from the service's own environment.
 - **Uninstall** stops and removes the service, the connector and runner
   accounts and their processes, the logon rights granted, the shares'
@@ -244,7 +260,12 @@ AG1a rejected a socket because "every process of the operator's user
 can reach the socket". That stays true, and is accepted: those
 processes include the agent, which may use the tools anyway. What the
 channel must stop is any other user reaching the tools, and anyone
-standing in for either end. Every failed check refuses the connection,
+standing in for either end. (0.1.2, the lead's call of 2026-11-21) An
+elevated administrator, or root, is also admitted, only for `pair`,
+`forget` and `status`, never for tools: on Windows by the client's
+token (the Administrators group enabled, high integrity or above,
+System included), on Linux and macOS by peer uid 0. The service refuses
+those operations from the member's normal process. Every failed check refuses the connection,
 and the service never takes another name.
 
 - **Windows**: a named pipe `\\.\pipe\vettid-agent-<n>-<random>`.
@@ -537,6 +558,9 @@ cannot read the member's files**. This is the main cost.
 - **The pin** (VAULT-MESSAGING 0.85.0) still applies, and is stronger
   here. A program in an administrator-only folder, run under an account
   the agent cannot touch, can no longer be attached to or read.
+  (0.1.2, the owner's a, GC #15787) In this mode the pin no longer
+  stands in for the folder check: a program, pinned or not, runs only
+  from an administrator-only folder.
 
 ## 7. Proxies
 
