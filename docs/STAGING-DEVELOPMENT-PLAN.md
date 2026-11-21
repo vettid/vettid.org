@@ -1,8 +1,8 @@
 ---
 title: STAGING-DEVELOPMENT-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D3 as in ANDROID-PLAN 0.1.36, which replaced 0.1.34's answer the same day)
-version: 0.1.8
-date: 2026-11-20
+version: 0.1.9
+date: 2026-11-21
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-RELEASES.md (0.1.10) §3 releases, §8.6 scaler, §8.9 cost, §11.1 staging, §15 O2
@@ -49,6 +49,11 @@ changelog:
     `stagingVaultLegacySessionAuth` shortcut is marked removed
     (vettid.org #634) and §7 action 5 done in the code; §2.3 item 4 no
     longer names it as a pattern
+  - 0.1.9: 2026-11-21, editorial (status as of 2026-11-21); no rule
+    changes. §5 status column brought forward from 2026-10-23/26 (every
+    row but 0a); §7 actions 2, 3, 4, 6, 8 and 10 say where they stand;
+    §8.5's status note says staging is at release 32, with three
+    releases not `removed`
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -230,21 +235,21 @@ other open work fits.
 
 "Vault code exists" means the feature is in `vettid-vault` `main`
 (`features/…`) and so in current staging images; it does not mean it was
-ever used from a phone. (Written 2026-10-11: no app code existed for any row from 2 on. The last column is the status of 2026-10-23.)
+ever used from a phone. (Written 2026-10-11: no app code existed for any row from 2 on. The last column is the status of 2026-11-21, from the repositories; nothing in it was measured in AWS.)
 
-| # | Phase | State today | Repos | Needs a vault release? | Depends on | Owner input needed | Status (2026-10-23; rows 0 and I 2026-10-26) |
+| # | Phase | State today | Repos | Needs a vault release? | Depends on | Owner input needed | Status (2026-11-21) |
 |---|---|---|---|---|---|---|---|
-| 0 | Finish v1 on staging: A6 hardening, S3 retirement drill, cleanup to three releases | A6 open (ANDROID-PLAN §6); S3 ends 2026-10-13 | android, vettid.org | No (staging manifest changes only) | — | Key deletions (S1 due 10-12, S2 due 10-13, then the batch) | Partly: the S3 retirement drill ran 2026-10-13 (S3 to S6 removed, manifest serial 13, vettid.org #260; key deletions scheduled, due 2026-10-20; deletion not recorded); the S1 and S2 keys are deleted; A6 is partly done (ANDROID-PLAN §6); staging lists 15 releases (7–15 and 17–22, S22 active; 1–6 removed; manifest serial 24 on 2026-10-24): not yet down to three. (2026-10-26) The A6 audit's findings N1 to N3 are merged (vettid-android #185 to #187) |
+| 0 | Finish v1 on staging: A6 hardening, S3 retirement drill, cleanup to three releases | A6 open (ANDROID-PLAN §6); S3 ends 2026-10-13 | android, vettid.org | No (staging manifest changes only) | — | Key deletions (S1 due 10-12, S2 due 10-13, then the batch) | Partly. **Cleanup done:** release 32 is `active` (published 2026-11-18, manifest serial 33, vettid.org #628), 30 and 31 are `deprecated`, and every other release is `removed` (3 to 6 by #260, 2026-10-13; 7 to 15 and 17 to 27 by #625, 2026-11-17; candidates 28 and 29 were never published), so three are not `removed` and rule §2.1.2 holds. The S1 and S2 keys are deleted; the deletion of the keys of 7 to 27 and of candidates 28 and 29 is not recorded in this repository. **A6** is still partly done (ANDROID-PLAN 0.1.134 §6: the audit's fixes and N1 to N3, vettid-android #185 to #187, are merged; the accessibility pass, offline behaviour and the Play pre-launch report are not recorded as done) |
 | 0a | F-Droid `foss` build | Branch `build/fdroid-foss` (2026-10-11); merged 2026-10-11 as vettid-android #111 (full and foss distributions) | android | No: it is signed with VettID's own key, already pinned (D3) | Reproducible build | F-Droid submission | Done: vettid-android #111 (merged 2026-10-11) |
-| 0b | Push N4 (Google push) | Gateway deployed for staging without platforms; app side merged (vettid-android #109); vault side in S9 | vettid.org, push | No | A Firebase project | Firebase project (owner: hold) | App side merged (#109, #129); vault side merged (vettid-vault push N3, 2026-10-10); the staging gateway is deployed; no platform enabled (Firebase on hold) |
-| 1 | **Production release 1** | Not blocked on Google Play (0.1.1, D3): it pins only VettID's own key (W10-READINESS 0.1.7 P9). 0.1.2: the feature allowlist, the per-channel package and the signer binding are in vettid-vault `main` and proven on S10; what still blocks it is in W10-READINESS 0.1.8 §2 | vault, vettid.org, android | It is one | Phase 0; §2.4; the production backend deploy | D2, D4; the tester list; the signer binding of VAULT-MESSAGING 0.27.0 §11.7.1 (W10-READINESS P9a) | Not released; what blocks it is the checklist in W10-READINESS |
-| 2 | Calls (1:1) | Vault code exists (`features/calls`, `vms/callwire`; VAULT-MESSAGING §10.10). Calling service **specified in CALLING-SERVICE 0.1.1**; its code was built later (vettid-calls `main`, committed 2026-10-17; see the status column). App code was not started on 2026-10-11 | android, vault, a new calling-service repo, vettid.org (stacks), relay if `call.*` needs relay work (not established) | Very likely: the vault issues ICE credentials and its egress list would gain the calling service; not established in detail | A wake for the callee: the on-phone service works today, FCM needs 0b | Own TURN fleet or a managed one (CALLING-SERVICE §8); its §10 open questions | Partly: the calling service is built (vettid-calls `main`, committed 2026-10-17, follow-ups #1 to #3 to 2026-10-20); the app's C1 is partly built (vettid-android #124 to #126, #175, #178; #128 open); no vault work; see CALLS-PLAN §7 |
-| 3 | Devices, agents, LEASH | Vault code exists (`features/leash`, 0.12.0 format, in S4 and later). Connector rebuilt since 2026-10-11 as `vettid-agent` (see the status column; on 2026-10-11 it was not rebuilt, LEASH-IMPLEMENTATION "Connector", and `vettid-agent` and `vettid-desktop` had last changed 2026-05 and did not work with this vault) | android, agent, desktop, vault (fixes) | Only for fixes found | — | Whether desktop or agent comes first | Partly: `vettid-agent` A0 to A3 and A5 are built (vettid-agent #7 to #40, 2026-10-17 to 2026-10-20); the app's devices and agents section (AA1 to AA5) is specified, not built; `vettid-desktop` #8 and #10 are open |
-| 4 | Wallet | Vault code exists (`features/wallet`; §10.18). No app code | android, vault | For fixes | — | Networks to support (decided 2026-10-17, ANDROID-PLAN D8: signet and testnet4 on staging, mainnet for production later) | Not started in the app; networks decided |
-| 5 | Location | Vault code exists (`features/location`; §10.16). No app code | android, vault | For fixes | Background location policy on Play and F-Droid | — | Not started |
-| 6 | Presence | Vault code exists (`features/presence`; §10.17). No app code | android, vault | For fixes | — | — | Not started |
-| S | Service vault | **No specification in this repository**; `vettid-service-vault` last changed 2026-04 (the first implementation). Named as the place services come from (PUSH-GATEWAY §12) | spec first | Not known | Proposal: specify during phase 2, build after phase 3 (it reuses grants and delegations) | Scope ("soon", owner 2026-10-10): confirm the slot | No change found |
-| I | iOS | `vettid-ios` last changed 2026-05 (first implementation) when this row was written; the rewrite started 2026-10-17 (IOS-PLAN). App Attest in the enclave was not built (VAULT-PLAN §7 risk 6) | ios, vault, push | Yes: the iOS app ID and Apple roots are pinned per release (C6) | APNs; proposal: after phase 3 | Apple developer account; when | Under way: `vettid-ios` I0 to I3.3 and I3.4a are merged, with release L's L1 and L2 (#138, #140) and the no-erase rule (#139) (IOS-PLAN; status 2026-10-26); the enclave pins Apple's App Attest root and the iOS app id per release (vettid-vault `enclave/config.go`; #104, #118, #119) and VA4, the signer continuity across an iOS app, in vettid-vault #142 |
+| 0b | Push N4 (Google push) | Gateway deployed for staging without platforms; app side merged (vettid-android #109); vault side in S9 | vettid.org, push | No | A Firebase project | Firebase project (owner: hold) | App side merged (#109, #129); vault side merged (vettid-vault push N3, 2026-10-10); the staging gateway is deployed with no platform enabled: `cdk.json` sets no `stagingPushPlatforms` (PUSH-GATEWAY 0.5.4 says the same), and the Firebase project is still on hold. vettid-push has had only toolchain and CI changes since 2026-10-20 (#8, #9, 2026-11-20) |
+| 1 | **Production release 1** | Not blocked on Google Play (0.1.1, D3): it pins only VettID's own key (W10-READINESS 0.1.7 P9). 0.1.2: the feature allowlist, the per-channel package and the signer binding are in vettid-vault `main` and proven on S10; what still blocks it is in W10-READINESS 0.1.8 §2 | vault, vettid.org, android | It is one | Phase 0; §2.4; the production backend deploy | D2, D4; the tester list; the signer binding of VAULT-MESSAGING 0.27.0 §11.7.1 (W10-READINESS P9a) | Not released: `vault/releases/prod.json` lists no release (serial 0). W10-READINESS 0.1.14 §2 still lists B11 (the production backend rollout and the missing enroll-code key) and B8 (the owner-signed canary app build). The production drift check fails daily (`drift.yml`, every run from 2026-11-16 to 2026-11-20): the member API, account site and admin API stacks were last deployed 2026-10-06 |
+| 2 | Calls (1:1) | Vault code exists (`features/calls`, `vms/callwire`; VAULT-MESSAGING §10.10). Calling service **specified in CALLING-SERVICE 0.1.1**; its code was built later (vettid-calls `main`, committed 2026-10-17; see the status column). App code was not started on 2026-10-11 | android, vault, a new calling-service repo, vettid.org (stacks), relay if `call.*` needs relay work (not established) | Very likely: the vault issues ICE credentials and its egress list would gain the calling service; not established in detail | A wake for the callee: the on-phone service works today, FCM needs 0b | Own TURN fleet or a managed one (CALLING-SERVICE §8); its §10 open questions | Partly. **C1** is built in the app (vettid-android #124 to #126, #175, #178, and #128, merged 2026-10-27), and its two-phone exit test ran on 2026-11-18 (CALLS-PLAN 0.1.13). **C2** is under way: the app's parts 1, 2a and 2b (#351, #354, #355, 2026-11-12) and calls in every build (#365, 2026-11-14); the vault side is merged (vettid-vault #222 to #226, #235, #260 to #264, 2026-11-11 to 2026-11-16) and in staging releases from 31 (#266, `calls_url`). The calling service is built (vettid-calls #1 to #5) and its staging stacks (vettid.org #454, #613) were deployed on 2026-11-16: TURN at `turn.staging.vettid.org` and the issuer at `calls.staging.vettid.org`, both answering on 2026-11-21 |
+| 3 | Devices, agents, LEASH | Vault code exists (`features/leash`, 0.12.0 format, in S4 and later). Connector rebuilt since 2026-10-11 as `vettid-agent` (see the status column; on 2026-10-11 it was not rebuilt, LEASH-IMPLEMENTATION "Connector", and `vettid-agent` and `vettid-desktop` had last changed 2026-05 and did not work with this vault) | android, agent, desktop, vault (fixes) | Only for fixes found | — | Whether desktop or agent comes first | Partly. **Connector:** `vettid-agent` A0 to A3 and A5 are built (#7 to #40, 2026-10-17 to 2026-10-20), then A3.5 (#43, 2026-11-20) and A3.8a (#42, 2026-11-21); A3.7 (#45) is open; A3.8b and A3.9 are not built. **Vault:** AV7 and AV9 to AV11 are merged (vettid-vault #210 to #214, #270 to #276, 2026-11-10 to 2026-11-19). **App:** the devices and agents section AA1 to AA6 is merged (vettid-android #196, #199, #261, #262, #267, #269, 2026-10-26 to 2026-11-03), with desktop pairing (#291). **Desktop:** `vettid-desktop` runs over the relay (#50 to #64, NATS removed in #64, 2026-11-04); #8 and #10 merged 2026-11-01 |
+| 4 | Wallet | Vault code exists (`features/wallet`; §10.18). No app code | android, vault | For fixes | — | Networks to support (decided 2026-10-17, ANDROID-PLAN D8: signet and testnet4 on staging, mainnet for production later) | Built in the app: W1 (vettid-android #223 to #248, 2026-10-29 to 2026-11-01) and W2, sending and transactions (#252, #254, #257, 2026-11-02), with follow-ups to 2026-11-19; networks decided (D8) |
+| 5 | Location | Vault code exists (`features/location`; §10.16). No app code | android, vault | For fixes | Background location policy on Play and F-Droid | — | Built in the app: L1a (sharing in a foreground service, no background location), L1b and L2 (the map) (vettid-android #276, #289, #290, 2026-11-04 to 2026-11-05) |
+| 6 | Presence | Vault code exists (`features/presence`; §10.17). No app code | android, vault | For fixes | — | — | Built in the app: P1, status and who can see it (vettid-android #274, 2026-11-04) |
+| S | Service vault | **No specification in this repository**; `vettid-service-vault` last changed 2026-04 (the first implementation). Named as the place services come from (PUSH-GATEWAY §12) | spec first | Not known | Proposal: specify during phase 2, build after phase 3 (it reuses grants and delegations) | Scope ("soon", owner 2026-10-10): confirm the slot | Under way, in its own repositories. `vettid/service-vault` (first PR 2026-10-26, newest #199 on 2026-11-20; phase 1 in progress; SERVICE-VAULT.md, BALLOT-PROTOCOL 0.15.0) replaces `vettid-service-vault`, now archived; this repository has VAULT-SERVICE-CONTRACT 1.0.1 and VAULT-SERVICE-INDEPENDENCE 0.2.3 (drafts). On staging: the `ServiceVault-staging` stack (from 2026-10-27 at the latest, service-vault #31), the votes site (votes.staging.vettid.org, 2026-10-29, `votes` README) and the member service (`member-service`); none is in production |
+| I | iOS | `vettid-ios` last changed 2026-05 (first implementation) when this row was written; the rewrite started 2026-10-17 (IOS-PLAN). App Attest in the enclave was not built (VAULT-PLAN §7 risk 6) | ios, vault, push | Yes: the iOS app ID and Apple roots are pinned per release (C6) | APNs; proposal: after phase 3 | Apple developer account; when | Under way. `vettid-ios` I0 to I3 are merged (I3.4b and I3.4c by #155, 2026-10-28), and most of I4, the hardening (audit, TestFlight gate, accessibility, error states, network, performance, store readiness: #168 to #226, 2026-10-29 to 2026-11-07); then calls, votes and approval documents (newest #326 to #328, 2026-11-21). The I4 exit is not recorded. Apple push is not set up: no APNs on the staging gateway (IOS-PLAN 0.1.77 §6.7). Vault side: the App Attest root and iOS app id per release (vettid-vault #104, #118, #119) and VA4 (#142) are merged; the real-iPhone App Attest test (VA1) is not built |
 
 Phases 2–6 run on staging under §2; each reaches production through
 §2.4 on the next monthly train after it passes.
@@ -272,15 +277,15 @@ Phases 2–6 run on staging under §2; each reaches production through
 | # | Action | Who |
 |---|---|---|
 | 1 | Answer §6 | owner |
-| 2 | Lock the vault still unlocked on S3 after the drill, or accept its host until 2026-10-13 15:30 UTC | owner |
-| 3 | Confirm the S1 (2026-10-12) and S2 (2026-10-13) key deletions; record in W9-REPORT §8 | owner runs, assistant records |
-| 4 | After 2026-10-13: one PR setting S3–S6 `removed` and deleting their stacks, leaving S7–S9; the key list for the owner's batch | assistant, then owner |
+| 2 | Lock the vault still unlocked on S3 after the drill, or accept its host until 2026-10-13 15:30 UTC | owner (0.1.9: overtaken; S3 is `removed`, vettid.org #260) |
+| 3 | Confirm the S1 (2026-10-12) and S2 (2026-10-13) key deletions; record in W9-REPORT §8 | owner runs, assistant records (0.1.9: the keys are deleted, §5 row 0; W9-REPORT §8 still says TBD) |
+| 4 | After 2026-10-13: one PR setting S3–S6 `removed` and deleting their stacks, leaving S7–S9; the key list for the owner's batch | assistant, then owner (0.1.9: **done**, #260; the cleanup to three releases followed in #625, 2026-11-17) |
 | 5 | Remove the legacy session auth switch (§4) | assistant (0.1.8: **done in the code**, vettid.org #634, merged 2026-11-19; staging drops it at its first member API deploy after that) |
-| 6 | Create `/vettid-org/prod/member/enroll-code-key`; first weekly production deploy | owner, then assistant |
+| 6 | Create `/vettid-org/prod/member/enroll-code-key`; first weekly production deploy | owner, then assistant (0.1.9: not recorded as done; the production drift check fails daily, §5 row 1) |
 | 7 | If D4 or D5 is accepted: spec changes in VAULT-MESSAGING / VAULT-RELEASES and vettid-vault, on a staging release. **Done (0.1.2):** VAULT-MESSAGING 0.26.0 and 0.27.0, VAULT-RELEASES 0.1.11 and 0.1.12; vettid-vault #62–#64; staging release S10, published 2026-10-11 (§8.5); the app's `.staging` build (vettid-android #116) | assistant |
-| 8 | Amend the stale text below in one docs PR once §6 is answered | assistant (2026-10-26: partly done, #405 and #422; W10-READINESS §3's "S4" text remains) |
+| 8 | Amend the stale text below in one docs PR once §6 is answered | assistant (2026-10-26: partly done, #405 and #422. 0.1.9: #532 fixed W10-READINESS §3's "S4" text and VAULT-RELEASES on key lifetimes and the relay; #634 removed RUNBOOK's "staging switch-over"; W9-REPORT §11's first bullet remains) |
 | 9 | Play account and the Play certificate's digest (after release 1, D3); Firebase project; Apple account when iOS is scheduled | owner |
-| 10 | (0.1.2) Move the remaining staging vaults to the `com.vettid.app.staging` app while S10 is the newest release: the staging release after S10 refuses a vault with no recorded signer (VAULT-MESSAGING §11.7.1). Done on 2026-10-11 for test member 4's vault and the owner's (§8.5); the others by transfer, recovery or a new enrollment | owner, on the phones |
+| 10 | (0.1.2) Move the remaining staging vaults to the `com.vettid.app.staging` app while S10 is the newest release: the staging release after S10 refuses a vault with no recorded signer (VAULT-MESSAGING §11.7.1). Done on 2026-10-11 for test member 4's vault and the owner's (§8.5); the others by transfer, recovery or a new enrollment | owner, on the phones (0.1.9: releases 10 to 27 are all `removed`, #625; whether every vault moved is not recorded) |
 
 Text this plan makes stale (not edited here):
 
@@ -410,13 +415,11 @@ mailboxes; the HTTP action that needs enclave egress is not offered
 
 ### 8.5 After S10 (0.1.2)
 
-*Status note (2026-10-23; updated 2026-10-26): this section is the record of 2026-10-11 and
-its counts are not current. Staging release S22 was published on 2026-10-24 (manifest serial 24,
-vettid.org #416; S21 and earlier deprecated; staging is at S22), and
-S23 is the release that carries release L (vettid-vault #144 to #147;
-the member API's side is MEMBER-API 2.5.0, vettid.org #407) and the durable app
-key writes (vettid-vault #148, #149). It is not yet cut (2026-10-26). The
-"eight are now" count below was true on 2026-10-11 only.*
+*Status note (2026-11-21; first written 2026-10-23): this section is the record of 2026-10-11
+and its counts are not current. Staging is at release 32, `active` since 2026-11-18 (manifest
+serial 33, vettid.org #628); 30 and 31 are `deprecated` and every other release is `removed`
+(#260, #625), so three releases are not `removed` (§2.1.2, §5 row 0). The "eight are now"
+count below was true on 2026-10-11 only.*
 
 State of 2026-10-11, about 23:00 UTC. From the repositories unless
 marked; nothing here was measured again in AWS.
