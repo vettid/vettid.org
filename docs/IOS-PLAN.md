@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.77
-date: 2026-11-18
+version: 0.1.78
+date: 2026-11-21
 changelog:
+  - 0.1.78: 2026-11-21 (ANDROID-PLAN 0.1.135, VAULT-MESSAGING 0.93.0, AGENT-PLAN 0.1.17; AGENT-SEPARATE-ACCOUNT Q1 a and Q9 a; Ground Control #15810). Not built; card #15813. A new §4.19 "Member folders and files on a run": the iPhone shows what ANDROID-PLAN's AA9 subsection specifies, identically, and its path field turns off the keyboard helpers of §6.5. "Later" gains the pointer. Nothing existing changes
   - 0.1.77: erratum, 2026-11-18 (ANDROID-PLAN 0.1.134; owner rule 3, #r60; owner decisions a, 2026-11-18, #13774; lead decisions #13781, #13821). §6.7: a new point "While the vault's release is checked", summarizing ANDROID-PLAN 0.1.134, which governs both apps, with the push-wake rule for when phase P brings Apple push. Built by vettid-ios #307 except the opening's moment from an answer of this opening (Ground Control #13823).
   - 0.1.76: erratum, 2026-11-15 (ANDROID-PLAN 0.1.132; owner decisions a, 2026-11-15). §6.7 "Local notifications for feed items before phase P": the one exception to "never a full read" is ANDROID-PLAN's: when a passed check, not an unlock's own, ends the held or due state, each ask still waiting of its three kinds is notified once (pairings left out; nothing at an unlock); before phase P this is a banner while VettID is in front.
   - 0.1.75: erratum, 2026-11-15 (ANDROID-PLAN 0.1.131; owner decision a, 2026-11-15). §4.2 point 5: a pointer only, since the iPhone does not build the member API's `410` state yet: when it does, its pre-bound text and the time at which **Remove from this phone** comes are ANDROID-PLAN 0.1.131's, not Android #192's. Point 4 is unchanged: on Android 0.1.131 also shows "still finishing" at `until` on its own timer, without waiting for a read; the iPhone keeps showing it after the read at `until`, since its pre-bound screen names no time (taking Android's timing is for a later change).
@@ -1957,6 +1958,26 @@ relay keys (VAULT-MESSAGING 0.90.0 §3.4.2).
   the vault's follow, §3.4.2 RK14): `message.delivery_unconfirmed`, its
   approved text of §8.3, unchanged.
 
+### 4.19 Member folders and files on a run (0.1.78)
+
+*Not built (card #15813). The same as ANDROID-PLAN §4 "Devices & agents",
+"Member folders and files on a run (AA9)" (0.1.135; VAULT-MESSAGING
+0.93.0 §10.11; owner decisions Q1 a and Q9 a, AGENT-SEPARATE-ACCOUNT §9;
+Ground Control #15810). ANDROID-PLAN governs, and the two must stay
+identical. It comes with "Later" item "devices and agents", after AA7
+and AA8 (the run settings and the run approvals) are done on Android.
+Every NEW text there is for the owner's approval, and the iPhone shows
+exactly those texts, once approved.*
+
+The iPhone adds nothing and leaves out nothing: the folders list in the
+run settings, read only first, with the password asked for adding a
+folder or turning on write; the folder, the input files, the output
+folder and their warnings in a run's approval, taken from the
+approval's `folders` member; deny-only when it is missing; nothing shown
+for a vault that does not list `run_folders`. The member types the
+folder paths, since the app cannot see the agent's computer; the field
+turns off autocorrection, smart punctuation and autofill (§6.5).
+
 ## 5. Architecture
 
 One Xcode project (`VettID.xcodeproj`) with the app target and local
@@ -2886,7 +2907,7 @@ ANDROID-PLAN 0.1.120 §4: presence's "last seen" wording and card text
 (owner, 2026-11-03), location's distances in miles or kilometers by
 the phone's region, with Settings → Units (owner, 2026-11-05), and,
 for devices and agents, **Pair a desktop** beside Pair an agent (owner
-decision a, 2026-11-05; vettid-android #291, in review).
+decision a, 2026-11-05; vettid-android #291, in review). (0.1.78) Devices and agents also include §4.19, the folders and files of a run.
 
 ### What blocks what
 

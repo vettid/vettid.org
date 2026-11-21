@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.92.1
+version: 0.93.0
 date: 2026-11-21
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -15,11 +15,12 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md (0.3.0)
   - MEMBER-API.md (2.14.0)
-  - ANDROID-PLAN.md (0.1.127)
-  - IOS-PLAN.md (0.1.71; §9.1 VA1–VA4)
-  - AGENT-PLAN.md (0.1.15; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
+  - ANDROID-PLAN.md (0.1.135)
+  - IOS-PLAN.md (0.1.78; §9.1 VA1–VA4)
+  - AGENT-PLAN.md (0.1.17; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, AG14, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
+  - AGENT-SEPARATE-ACCOUNT.md (0.1.2; §6, §9 Q1 a and Q9 a)
   - BALLOT-PROTOCOL.md (0.14.1; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at be57292, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.14.1)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.34; 0.1.6 approved 2026-10-04)
@@ -29,6 +30,37 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.93.0: 2026-11-21, with AGENT-PLAN 0.1.17, ANDROID-PLAN 0.1.135
+    and IOS-PLAN 0.1.78. Owner-approved card GC #15810, from
+    AGENT-SEPARATE-ACCOUNT 0.1.2 §6 and the owner's decisions Q1 a
+    (member folders per item, through an administrator-only `share`,
+    read-only offered first) and Q9 a (files handed in and out, with
+    the hardened copy-back of the note's §6), both of 2026-11-05. Not
+    built yet; vault, app and connector cards follow (GC
+    #15811–#15816). A minor version: members and a code are added.
+    §10.11 "Ways to use a secret": (1) an item's `run` binding gains
+    `folders` (0–16 entries `{path, write}`), the member folders a run
+    may use as `cwd`, set on the phone, `write` false by default;
+    (2) a run's `cwd` is checked against `folders` as its `program` is
+    checked against `programs`: exact folder or a subfolder, and
+    `cwd_not_allowed` (new code, body `{where, path}`) otherwise,
+    counted as refused; (3) `item.run` gains `inputs` (0–16 files,
+    16 MiB each, 64 MiB in all, copied read-only into the run's
+    `work/in/`) and `output` (a folder with `write`, and the names to
+    copy back from `work/out/`); (4) `cwd` becomes optional: absent
+    means the run's `work/`, always allowed. **Changed from 0.92.1:**
+    the `item.run` member list read `cwd` as required, and now reads
+    `cwd?`; the vault never could see the run's `work/`, which only
+    the connector knows. (5) A run with a `cwd`, `inputs` or `output`
+    is always referred, whatever `each`; (6) `approval.pending` for
+    an `item.run` carries `folders: {cwd?, output?}` (the matched
+    entries) and the flags `member_folder` and `member_files`; (7) the
+    catalog gives `folders`; (8) adding a folder or turning `write` on
+    is a widening. A new capability name, `run_folders`, will be
+    listed with the release that implements it. **Apps and connectors
+    must now handle:** `folders` in a run binding and in the catalog;
+    `cwd_not_allowed`; `inputs`, `output`, `folders` and the two flags
+    in an `item.run` approval
   - 0.92.1: erratum, 2026-11-21, with AGENT-PLAN 0.1.15. §10.11 "What
     the pin covers, said plainly": Windows batch files are no longer
     refused (vettid-agent #42 runs them with checked values, owner
@@ -13489,7 +13521,10 @@ an answer to an unknown or expired id is dropped.
     the item is not bound to (§10.11 "Ways to use a secret");
     (0.85.3) `env_not_allowed`: an `item.run` with an `env` name the
     matched program entry does not list, with body `{names}` (the
-    refused names);
+    refused names); (0.93.0) `cwd_not_allowed`: an `item.run` whose
+    `cwd`, an input file or its output folder is not covered by the
+    item's `folders` (§10.11 "Ways to use a secret"), with body
+    `{where, path}`;
   - `bad_password`, `backoff`, `stale_credential`, `utk_invalid`: §3.5.3,
     §3.5.4. Since 0.17.0 a `backoff` error response's body is
     `{retry_after}`: the whole seconds, rounded up and at least 1, until
@@ -18858,7 +18893,7 @@ agents (§3.5).
 
 - `catalog` lists the included items' metadata: `{items: [{item_id,
   name, category, labels: [{field_id, label, kind}], ways, programs?,
-  hosts?}]}` (`ways` and the bindings since 0.42.0, below), never tags,
+  (0.93.0) folders?, hosts?}]}` (`ways` and the bindings since 0.42.0, below), never tags,
   rules or values.
 - `item.get{item_id, fields?}` returns `{item_id, name, category,
   fields: [{field_id, label, kind, value}], notes?}` (LEASH pattern 1,
@@ -18921,7 +18956,8 @@ item's settings allow for its task:
                           { "program": "/usr/bin/git", "sha256": "<64 hex>",
                             "path": "/usr/bin/git", "env": [] },
                           { "program": "gh", "env": ["GH_HOST"] } ],
-                        "each": true },
+                        "each": true,
+                        "folders": [ { "path": "/home/al/work/site", "write": false } ] },
                "proxy": { "hosts": ["api.example.com"], "header": "Authorization", "prefix": "Bearer " },
                "updated_at": "<ts>" }
   ```
@@ -18977,6 +19013,61 @@ item's settings allow for its task:
     (below) compare the last element as the `shell` flag says (0.91.1:
     without case, without any number of final `.exe`, `.com`, `.cmd`,
     `.bat` or `.ps1` endings, and without trailing dots and spaces).
+  - (0.93.0; owner decision Q1 a of 2026-11-05, AGENT-SEPARATE-ACCOUNT
+    §6, GC #15810; not built yet) **Member folders for runs.** An
+    item's `run` may also hold `folders` (0–16 entries, default none):
+    the member folders a run of this item may use as `cwd`, and where
+    its files may be read or written (below). Each entry is `{path,
+    write}`. `write` is a boolean, default `false`: **read-only is
+    what the app offers first**, and the member turns write on for
+    that folder. `path` follows the rules of a run's `cwd` ("Program
+    strings"): at most 4,096 bytes of UTF-8, no control, Cf, Zl or Zp
+    character, absolute and clean, no `:` after the root. Unlike a
+    `cwd`, it may not be the root itself (`/` or a drive root), which
+    would put every file in reach; and no two entries may be the same
+    path, compared as an entry's `program` is (without case, a drive
+    path's `/` as `\`, trailing dots and spaces dropped). Otherwise
+    `bad_request`. Entries may be nested: the entry with the
+    longest matching path decides `write` for a path. A `folders`
+    that is empty or absent means no member folder: a run then uses
+    `work/` only, and the binding is as narrow as it can be.
+    - **How the vault compares** (the lead will confirm; AGENT-SEPARATE-ACCOUNT
+      says only "per item"). A `cwd` is allowed when it **equals an
+      entry's path or lies under it**: compared element by element
+      (`/` and `\` both separate), exactly, case-sensitive, never as a
+      text prefix (`/home/al/work2` is not under `/home/al/work`).
+      The vault compares the text only and knows nothing of the
+      computer: it follows no link and knows no case rule. A case or
+      alias that differs only gets `cwd_not_allowed`, which fails
+      safe; the connector resolves the folder it will use and refuses
+      one whose real location is outside the entry (same code, its
+      own text). An entry is not a share: what the runner account can
+      reach is set by the administrator's `share` on the computer
+      (AGENT-PLAN AG14), and the vault cannot tell what is shared. A
+      binding lets a folder be used; `share` makes it reachable.
+    - **`write` is for the files the connector moves**, and for the
+      share's access list. The vault cannot stop a program that is
+      running in a read-only folder from trying to write there; the
+      runner account's access list does.
+    - **An absent `cwd` is the run's `work/`, always allowed**, with no
+      binding. The connector omits `cwd` when the agent gave none (or
+      gave the run's own `work/`); the vault never sees that path, which
+      is made per run.
+    - **A binding change.** `folders` changes are `leash.item.set`
+      changes, announced and audited as `leash.item.changed`, like the
+      rest of `run`. They are **widenings**: adding an entry (or
+      changing an entry's `path`, which is adding one) and turning
+      `write` on. They need the credential's unlock window
+      (`credential_locked` outside it). Removing an entry, turning
+      `write` off, and emptying `folders` only narrow. A run held at
+      a change is judged again when it is approved (below).
+  - (0.93.0; owner decision Q9 a, GC #15810; not built yet) **Files
+    handed in and out.** An agent that works on documents needs no
+    shared folder: the connector's stub, which runs as the member,
+    reads the files and the connector writes them as the runner's
+    copies, and the other way round (AGENT-SEPARATE-ACCOUNT §6, which
+    also defines the copy-back; AGENT-PLAN §4.9). The vault sees only
+    names and sizes, and decides on them (see `item.run` below).
   - (0.85.3; owner decision of 2026-11-05, option b) **The program's
     content is pinned.** An entry's `sha256` (64 lowercase hex digits)
     is the SHA-256 of the program file the member approved, and its
@@ -19010,7 +19101,12 @@ item's settings allow for its task:
     recorded (another approval recorded a different one meanwhile) is
     referred again as a new approval; the value is never sent on the
     old one. (0.91.0: judged again whatever the `version`; see the rule
-    "An approval is judged again", below.)
+    "An approval is judged again", below.) (0.93.0) The judgment
+    includes `cwd_not_allowed`: a run whose folder, input or output
+    the settings no longer cover gets that refusal at approval, never
+    the value; and a run whose matched entry's `write` changed (a
+    different `folders` entry in the approval's `folders`) is referred
+    again as a new approval.
   - (0.85.3; owner decision of 2026-11-05, option a) **The variables
     a program may receive.** An entry's `env` (0–32 names, default
     empty) lists the names a run of that program may set in its `env`.
@@ -19073,8 +19169,8 @@ item's settings allow for its task:
   shipped breaks. Staging agents, and tests that read values with the
   reference client, set `reveal` first.
 - **The catalog** gives, per item, `ways` and, when present,
-  `programs` and `hosts` (never `header` or `prefix`), so the agent can
-  choose a way the item allows. (0.85.3) Its `programs` entries are
+  `programs`, (0.93.0) `folders` (`[{path, write}]`) and `hosts` (never `header` or `prefix`), so the agent can
+  choose a way the item allows and a folder it may use. (0.85.3) Its `programs` entries are
   `{program, env, path?}`: `path` is the pinned path when there is a
   pin, never the hash, so the connector knows which file needs no
   further check (above).
@@ -19086,7 +19182,16 @@ item's settings allow for its task:
   as refused. (0.85.3) An `item.run` with an `env` name that the
   matched entry's `env` does not list, or with any `env` when
   `programs` is empty, is answered `env_not_allowed` (body `{names}`),
-  also counted as refused. Otherwise each is decided as an
+  also counted as refused. (0.93.0) An `item.run` whose `cwd`, an
+  `inputs` path or `output.folder` is not covered by `folders` as
+  "Member folders for runs" says (an input under any entry; the
+  `cwd` under any entry; the output folder under an entry that has
+  `write`) is answered `cwd_not_allowed`, body `{where, path}`
+  (`where` is `"cwd"`, `"input"` or `"output"`, `path` the one that
+  failed, as sent), also counted as refused. The checks run in
+  this order: the form (`bad_request`), `way_not_allowed`,
+  `program_not_allowed`, `env_not_allowed`, then `cwd_not_allowed`
+  (`cwd`, then each input in order, then the output). Otherwise each is decided as an
   `items.read` request (above: the windows and `uses` of every
   including rule count it), and in addition it is **referred** to an
   app: an `item.run` when `each` is `true`, `programs` is empty, the
@@ -19096,7 +19201,11 @@ item's settings allow for its task:
   compared as for that flag, starts with `python`, `node`, `perl`,
   `ruby`, `php` or `osascript`), so `each: false` never covers those
   (owner decision of 2026-10-18; 0.91.1: launchers and evaluators too,
-  owner decision a, GC #14596); an `item.proxy` always; an
+  owner decision a, GC #14596); (0.93.0) an `item.run` with a `cwd`, `inputs` or `output`, so
+  `each: false` never covers a run in a member folder or one that
+  hands files in or out (AGENT-SEPARATE-ACCOUNT §6: a program in a
+  folder the agent can change runs what it finds; hardened profiles
+  that may relax this are a later change, GC #15815); an `item.proxy` always; an
   `item.get` always, every reveal asked on its own (owner decision of
   2026-10-18; it replaces, for agents' reveals, the 2026-10-03 rule
   that `ask` means one prompt per item, not per read).
@@ -19129,13 +19238,13 @@ item's settings allow for its task:
     `approval.decide` then answers `{result: "forbidden"}`.
   - The new hold is a new approval (§6.8): the agent gets
     `approval.waiting` and no answer yet.
-- `item.run{item_id, field_id, program, sha256, argv, cwd, how, name?, env?}`:
+- `item.run{item_id, field_id, program, sha256, argv, cwd?, how, name?, env?, inputs?, output?}`:
   `program` is the absolute path the connector resolved for `argv[0]`;
   (0.85.3) `sha256` is the SHA-256 of that file as the connector
   read it, 64 lowercase hex digits; the connector runs exactly the
   bytes it hashed (AGENT-PLAN §4.9);
   `argv` 1–64 strings, each at most 4,096 bytes and 32,768 in all;
-  `cwd` an absolute path; `how` is `env` (the value in the variable
+  `cwd` an absolute path ((0.93.0) optional: absent is the run's `work/`, always allowed, and a present one must be covered by the binding's `folders`); `how` is `env` (the value in the variable
   `name`), `stdin` (written to standard input) or `file` (an owner-only
   temporary file whose path is in `name` and in each argument that is
   exactly `{secret_file}`); `name` matches `^[A-Z_][A-Z0-9_]{0,63}$`,
@@ -19204,7 +19313,40 @@ item's settings allow for its task:
   answer is `{item_id, field_id, value}`, for the connector to pass to
   that one process only. Recorded as `leash.item.run`. (0.91.0) Members
   of the body that are not listed here are ignored, as in other
-  operations (§10.1). (0.91.1; owner decision a, GC #14595) An
+  operations (§10.1). (0.93.0; Q9 a, GC #15810; not built yet) **`inputs` and
+  `output`.** Both are optional.
+  - `inputs` (0–16) lists files copied, read-only, into the run's
+    `work/in/` before it starts: each `{path, size}`. `path` is a
+    clean absolute path as for `cwd`, and **must lie under a `folders`
+    entry**, whether or not it has `write`. `size` is an integer from
+    0 to 16,777,216 (16 MiB), and all sizes together at most
+    67,108,864 (64 MiB); a larger one is `bad_request`. The file's
+    name in `work/in/` is its last path element, which must be a **flat
+    name**: 1–255 bytes of UTF-8, no control, Cf, Zl or Zp character, no
+    `/`, `\` or `:`, not `.` or `..`, no trailing dot or space, and no
+    reserved Windows name (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to
+    `COM9`, `LPT1` to `LPT9`, with or without an extension, any
+    case). Two inputs with the same name (compared without case) are
+    `bad_request`.
+  - `output` is `{folder, names}`. `folder` is a clean absolute path
+    **equal to or under a `folders` entry with `write: true`**. `names`
+    (1–16) are flat names (as above), unique without case: the files
+    of the run's `work/out/` the connector copies back to `folder`
+    when the run ends, and no others.
+  - The sizes are those the connector states; the vault cannot read
+    the files, and the connector enforces them on the bytes it reads
+    and writes (AGENT-PLAN §4.9). A file past a cap is dropped and the
+    run's answer says so. The copy-back is the note's: only regular
+    files the runner made, each created new and never overwritten (a
+    numbered suffix if the name is taken), never through a link, and
+    each file redacted as standard output is (AGENT-PLAN §4.9).
+  - Neither changes what the vault sends: the answer is still `{item_id,
+    field_id, value}`. They change the decision: they refer the run
+    (above) and are shown on the approval (below).
+  - A binding with no `folders` refuses any `inputs` or `output`
+    with `cwd_not_allowed` (`where` `"input"` or `"output"`).
+
+  (0.91.1; owner decision a, GC #14595) An
   `item.run` answer is cached as `{item_id, field_id}` (0.92.0: with
   `withheld: true`), without `value` (§8.2): a retransmission of the
   same request id within 24
@@ -19267,6 +19409,37 @@ item's settings allow for its task:
   decision was, and still is, referred again.) A request referred again
   carries the new note's values (§6.8 step 4). `pending.list` carries
   the same member.
+- (0.93.0) **Tests required** for `folders`, `inputs` and `output`
+  (not built yet):
+  - `leash.item.set`: `folders` up to 16 accepted, 17 refused; a root,
+    a relative, a trailing-separator, a `..`, a `:`, a control-character
+    or an over-long path refused; two equal entries (also differing in
+    case or by `/` and `\`) refused; nested entries accepted and the
+    longest decides `write`; a missing `write` is `false`; a non-boolean
+    `write` refused; `folders` without `run`, or with `ways` lacking
+    `run`, refused as `run` is.
+  - Widening: adding an entry, changing a `path` and turning `write` on
+    need the unlock window (`credential_locked` outside it); removing
+    an entry, turning `write` off and emptying `folders` do not.
+  - `item.run`: no `cwd` is allowed with empty `folders`; a `cwd` equal
+    to an entry, and one under it, are decided; `/home/al/work2`
+    against `/home/al/work`, a different case, and a sibling are
+    `cwd_not_allowed` with body `{where: "cwd", path}`, counted as
+    refused; a run in a member folder is referred when `each` is
+    `false`; the approval carries `member_folder`, and `folders.cwd`
+    from the held settings.
+  - Files: 16 inputs accepted, 17 refused; 16 MiB accepted, one byte
+    more refused; 64 MiB in all accepted, more refused; a name with a
+    `/`, `\`, `:`, `..`, a reserved Windows name, a trailing dot, or
+    two names equal without case refused (`bad_request`); an input
+    outside every entry, or an output folder in a read-only entry or
+    outside every entry, `cwd_not_allowed` with `where` `"input"` or
+    `"output"`; the approval carries `member_files` and shows names,
+    sizes and the output names; a run whose settings change while it
+    waits (an entry removed, `write` turned off) is refused or referred
+    again at approval, never answered with the value.
+  - A retransmission of an `item.run` with these members is answered
+    as before (cached, `withheld: true`).
 - **The connector holds the value** for a run or a proxy. The vault
   cannot see what it does with it: these ways trust the connector, the
   member's own program on the agent's computer, and not the agent. A
@@ -19393,7 +19566,16 @@ item's settings allow for its task:
     (above) also carries
     `replaces`, the id of the approval it replaces;
   - (0.92.0) an approval of an `item.proxy` also carries `proxy:
-    {host, header, prefix}` (above).
+    {host, header, prefix}` (above);
+  - (0.93.0) `member_folder`: an `item.run` with a `cwd`;
+    `member_files`: an `item.run` with `inputs` or `output`. Such an
+    approval also carries `folders: {cwd?, output?}`, each member the
+    matched `folders` entry `{path, write}` from the held settings (the
+    longest match), for the same reason `proxy` is carried: an app
+    shows what the vault decided on, never its own copy of the
+    binding, which may be older. An app that cannot show a run
+    approval's `folders` when it has `member_folder` or `member_files`
+    offers Deny only.
 
   > Decided (0.91.1), from 0.91.0's open point on **shell and
   > interpreter detection by name only**: the owner chose to extend
@@ -19424,8 +19606,11 @@ item's settings allow for its task:
   the member last approved it, or, when `previous_path` differs, that
   it "moved to <path>", stressed, every argument unabridged (characters that are not printable
   shown escaped), the directory, how the secret is passed (with the
-  variable's name), the other variables with their values, and a
-  warning for each flag; for an `item.proxy`: the agent, the item and
+  variable's name), the other variables with their values, (0.93.0) the folder
+  (`cwd`) and whether the matched entry is "read only" or "can be
+  changed by this run", the input files (name and size, with the
+  folder they come from), the output folder and the names to be
+  copied back to it, and a warning for each flag; for an `item.proxy`: the agent, the item and
   field, the host, the header's name and prefix (never the value),
   (0.92.0) these three taken from `proxy`, and the length (`seconds`
   from the body, default 900; the vault may cut it to the access
@@ -19721,8 +19906,8 @@ grant set carries a `grant_seq`:
 | `leash.grant.updated` (V→D, to the agent) | — | `{grants: [<grant>], suspended, grant_seq}`: all of its grants, after every change and at suspension and resumption; (0.41.0) `grant_seq` is the set's (above) |
 | `leash.agent.resume` (app) | `{agent_id}` | `{}`; `not_found` unless the agent is suspended |
 | `leash.status.get` (agent) | `{grant_id}` | `{grant_id, status, status_sig, rotations?}`; `not_found`, `forbidden` (suspended), `owner_check_required` (the vault is held, §3.6.3) |
-| `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}`; (0.42.0) `{op: "item.run", item_id, field_id, program, sha256 (0.85.3), argv, cwd, how, name?, env?}` or `{op: "item.proxy", item_id, field_id, host, seconds?}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}`; (0.42.0) `{item_id, field_id, value}` or `{item_id, field_id, value, header, prefix, host, expires_at}`; (0.92.0) a retransmission's cached copy of an `item.get`, `item.run` or `item.proxy` answer carries `withheld: true` and no secret value (§8.2); `way_not_allowed` (body `{ways}`), `program_not_allowed`, (0.85.3) `env_not_allowed` (body `{names}`) |
-| `leash.item.set` (app; widening within the unlock window) | `{agent_id, item_id, version?, ways, run?, proxy?}` (0.42.0); `version` required to replace existing settings (`conflict`) | `<item_ways>`; `not_found` unless a rule of the agent includes the item, with or without a use left (§10.11 "An item with no use left"); `credential_locked` for a widening outside the window; `bad_request` |
+| `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}`; (0.42.0) `{op: "item.run", item_id, field_id, program, sha256 (0.85.3), argv, cwd (0.93.0: optional), how, name?, env?, inputs? (0.93.0), output? (0.93.0)}` or `{op: "item.proxy", item_id, field_id, host, seconds?}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}`; (0.42.0) `{item_id, field_id, value}` or `{item_id, field_id, value, header, prefix, host, expires_at}`; (0.92.0) a retransmission's cached copy of an `item.get`, `item.run` or `item.proxy` answer carries `withheld: true` and no secret value (§8.2); `way_not_allowed` (body `{ways}`), `program_not_allowed`, (0.85.3) `env_not_allowed` (body `{names}`), (0.93.0) `cwd_not_allowed` (body `{where, path}`) |
+| `leash.item.set` (app; widening within the unlock window) | `{agent_id, item_id, version?, ways, run?, proxy?}` (0.42.0; (0.93.0) `run` may hold `folders`); `version` required to replace existing settings (`conflict`) | `<item_ways>`; `not_found` unless a rule of the agent includes the item, with or without a use left (§10.11 "An item with no use left"); `credential_locked` for a widening outside the window; `bad_request` |
 | `leash.item.list` (app, desktop) | `{agent_id, item_id?}` (0.42.0) | `{items: [<item_ways>]}`: each item the agent's rules include, (0.91.0) with or without a use left, with or without settings (shown as `{agent_id, item_id, ways: ["use"]}` when it has none) |
 
 - `agent_id` names an active device of role `agent` (`not_found`
