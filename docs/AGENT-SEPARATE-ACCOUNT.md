@@ -1,7 +1,7 @@
 ---
 title: AGENT-SEPARATE-ACCOUNT
 status: approved by the owner 2026-11-05 (§9); design note. Nothing here is built; AGENT-PLAN and the code follow
-version: 0.1.2
+version: 0.1.3
 date: 2026-11-21
 owner: Al Liebl (Mesmer)
 component: vettid-agent (the agent connector): install, process model, keys at rest, runs and proxies
@@ -9,6 +9,33 @@ related:
   - AGENT-PLAN.md (0.1.9; 0.1.10 in vettid.org #538) AG1a, AG3, AG4, AG11, §4.2, §4.6, §4.7, §4.9, A3.8, A3.9, A5
   - VAULT-MESSAGING.md (0.84.0; 0.85.0 in #538) §10.11 "Ways to use a secret"
 changelog:
+  - 0.1.3: 2026-11-21, erratum with AGENT-PLAN 0.1.19, the owner's
+    decision (GC #15936), with the facts measured by the CI probe on
+    windows-2025 (vettid/vettid-agent#53 at 1842446). §3: the
+    connector's account on Windows is always the virtual service
+    account; the local-user fallback is removed. The service's
+    required-privileges list is cut to `SeChangeNotifyPrivilege` only,
+    with no LSA grant (route A, granting `SeAssignPrimaryTokenPrivilege`,
+    is rejected: that privilege alone is widely treated as enough to
+    reach SYSTEM), and the service refuses to run if its token holds any
+    other privilege. Runs start through the secondary-logon service
+    (`CreateProcessWithLogonW`). The runner accounts are allowed console
+    interactive logon and denied RDP and network logon, with no batch
+    logon right. The plain statements about Interactive users, a leaked
+    runner password and the logon audit are added. **Fix round after two
+    blind reviews (the lead's calls):** runs start in two stages (the
+    service starts a launcher with `CreateProcessWithLogonW`; the
+    launcher, as the runner, builds a restricted token and starts the
+    program with `CreateProcessAsUser`, in the same job); a per-run
+    desktop in place of a claimed per-run window station; INTERACTIVE and
+    the leaked-password statement made accurate; the runners' rights,
+    password and lockout stated; the service's self-check also refuses
+    membership in Administrators or any group beyond the defaults;
+    handles are non-inheritable; unmeasured claims (INTERACTIVE, LOCAL
+    and no BATCH, type 2 audits, `STARTF_USESTDHANDLES`, breakaway,
+    the errno mapping, the no-batch shape, the client SKUs) are marked to
+    be measured by the probe's step 2 (GC #15957) or documented. Nothing
+    else changes
   - 0.1.2: 2026-11-21, erratum with AGENT-PLAN 0.1.16. §4: an elevated
     administrator or root is also admitted to the channel, only for
     `pair`, `forget` and `status` (the lead's call). §3 "Keys at rest":
@@ -116,34 +143,110 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
 
 | Platform | Connector account | Runner account | Started by | State |
 |---|---|---|---|---|
-| Windows | `NT SERVICE\vettid-agent-<n>` (a virtual service account) | local users `vettid-run-<n>-1` and `-2`: the batch logon right only, interactive and remote logon denied, hidden from the sign-in screen, a random password kept under the connector's DPAPI | a Windows service | `%ProgramData%\VettID\agent\<n>\`, owner the service SID only |
+| Windows | `NT SERVICE\vettid-agent-<n>` (a virtual service account) | local users `vtdr-<8 hex>-1` and `-2`: console interactive logon allowed, RDP and network logon denied, no batch logon right, hidden from the sign-in screen, a random password kept only under the connector's DPAPI | a Windows service | `%ProgramData%\VettID\agent\<n>\`, owner the service SID only |
 | macOS | a hidden user `_vettid<n>` | hidden users `_vettidrun<n>a` and `b` | a launchd daemon | `/Library/Application Support/VettID/agent/<n>/`, 0700 |
 | Linux | a system user `vettid-agent-<n>` | system users `vettid-run-<n>-1` and `-2` | a systemd system service | `/var/lib/vettid-agent/<n>/`, 0700 |
 
 - **Windows privileges.** Services get `SeImpersonatePrivilege` by
   default, and code holding it has known ways to SYSTEM. The service is
-  installed with its privileges cut to `SeChangeNotifyPrivilege` and
-  the two that `CreateProcessAsUser` needs (`SeAssignPrimaryTokenPrivilege`,
-  `SeIncreaseQuotaPrivilege`), and every run starts
-  under the runner account with a restricted token, in a job object.
-  Identifying the pipe's client does not need the impersonation
-  privilege. Whether a virtual service account can hold
-  `SeAssignPrimaryTokenPrivilege` is checked on Windows here first; if
-  not, the connector's account becomes a local user with the
-  service logon right, like the runners.
-- **Starting a run as the runner.** Windows: `CreateProcessAsUser` with
-  the runner's token, the handle list limited to the run's standard
-  handles (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), suspended, then the
-  image check of AGENT-PLAN §4.9. The runner's token comes from
-  `LogonUser` (batch logon, `SeBatchLogonRight` granted to the runners
-  only) with the password the connector keeps. Its profile is never
+  installed with its privileges cut to `SeChangeNotifyPrivilege` only,
+  and every run starts under the runner account through the
+  secondary-logon service, in a job object. Identifying the pipe's
+  client does not need the impersonation privilege. The connector's
+  account is always the virtual service account (0.1.3, the owner's
+  decision, GC #15936; measured on windows-2025,
+  vettid/vettid-agent#53). By default it holds `SeImpersonatePrivilege`
+  and lacks `SeAssignPrimaryTokenPrivilege` and
+  `SeIncreaseQuotaPrivilege`, so the installer sets the service's
+  required-privileges list to exactly `SeChangeNotifyPrivilege`, with no
+  LSA grant, and sets `SidType` unrestricted. Measured: the service then
+  starts holding only that privilege, and `CreateProcessAsUser` is
+  refused (error 1314). It must hold no `SeImpersonatePrivilege`,
+  `SeAssignPrimaryTokenPrivilege`, `SeIncreaseQuotaPrivilege` or
+  `SeTcbPrivilege`; the service checks its own token at start and
+  refuses to run, with an Event Log entry and `status` saying why, if it
+  holds any privilege beyond `SeChangeNotifyPrivilege`, or if its account is in Administrators or any group beyond the defaults (the lead's call, 0.1.3 fix round). When the service refused to start, the stub answers `status`: it reads the service's state and the Event Log entry. **Route A is
+  rejected:** granting `SeAssignPrimaryTokenPrivilege` to the service
+  SID through LSA works (it alone is enough; `SeIncreaseQuotaPrivilege`
+  is not needed), but that privilege alone is widely treated as enough
+  to reach SYSTEM (the public potato-family tools), so a compromised
+  connector could likely become SYSTEM.
+- **Starting a run as the runner.** Windows, in two stages (the lead's
+  call, 0.1.3 fix round). (a) The service starts the **launcher** (in an
+  administrator-only folder) through the secondary-logon service:
+  `CreateProcessWithLogonW` with the runner's name and password (the
+  password the connector keeps under its DPAPI), `dwLogonFlags` exactly 0
+  (never `LOGON_NETCREDENTIALS_ONLY`, which would run as the connector;
+  no profile), a non-null `lpDesktop`, suspended, assigned to the slot's
+  kill-on-close job (breakaway not allowed; UI limits
+  `JOB_OBJECT_UILIMIT_HANDLES`, `GLOBALATOMS`, `DESKTOP`, `READCLIPBOARD`
+  and `WRITECLIPBOARD`), then resumed. (b) The launcher, as the runner,
+  opens and holds `cwd` (AGENT-PLAN §4.9) and builds a restricted token
+  from its own token: every privilege removed but
+  `SeChangeNotifyPrivilege`, and INTERACTIVE deny-only (LOCAL deny-only
+  too, if measured to work). (c) It starts the program with
+  `CreateProcessAsUser` on that token, suspended, with
+  `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` limited to the standard handles, in
+  the held folder, inside the same job. (d) It checks the program's image
+  with `QueryFullProcessImageNameW` against the pinned file and reports
+  it to the service; on the service's go it resumes the program. Whether
+  the service can also check the image itself is to be measured (to be measured by the probe's step 2, GC #15957).
+  (e) The read-only folder check (`AccessCheck`) uses the program's
+  token, not the launcher's. Every handle the connector creates is
+  non-inheritable. Measured from a service in session 0, with and without
+  the profile (the probe started the program itself, not a launcher): the
+  child runs as exactly the runner and exits 0, and closing the job kills
+  it. Whether a runner's launcher can build the restricted token and
+  start the program on it is to be measured (to be measured by the probe's step 2, GC #15957). The call starts
+  `seclogon` on demand, so the installer leaves it alone (Manual is its
+  default), and its default access list lets the virtual account start it
+  (`OpenService(SERVICE_START)` succeeded in the probe; client
+  `StartService` and a trigger start were not told apart). If the
+  service cannot be started (Disabled, or an access list that does not
+  allow the connector's service account, `vettid-agent-<n>`), runs are
+  refused with a text telling the member's administrator to set it to
+  Manual and check who may start it, and `install` warns. A runner that
+  cannot sign in is refused with a text naming the reason by Windows
+  error number (1385 the right is missing, 1330 the password expired,
+  1909 locked, 1326 the password is wrong, 1058 the secondary logon
+  service is disabled, others by number; documented, not measured). The
+  runner accounts are granted `SeInteractiveLogonRight` explicitly
+  (`install` checks the effective right), denied RDP logon
+  (`SeDenyRemoteInteractiveLogonRight`) and network logon
+  (`SeDenyNetworkLogonRight`), re-checked by `status` and at each run, not
+  denied interactive logon (a runner also denied it was refused in the
+  probe, error 1385) and not granted the batch logon right (the probe's
+  runner still held it, so B's exact no-batch shape is to be measured
+  (to be measured by the probe's step 2, GC #15957)). Their passwords are random, meet the local complexity policy
+  (`install` checks it) and never expire. A process that guesses a
+  password can lock a runner, a denial of service only; `status` says the
+  runner is locked. **Said plainly:** the launcher's token carries
+  INTERACTIVE and LOCAL and, as a requirement, not BATCH (to be read back
+  by a test). The program gets INTERACTIVE as deny-only, which closes
+  Windows' default DCOM launch for "Interactive User" servers (a
+  cross-session path to the member's session) and anything else granted
+  to Interactive users; no VettID access list uses Interactive users to
+  mean the member. A console or `runas` session as a runner (a leaked
+  password) reaches what any standard local account reaches, the
+  pairing's shares, and the secrets and processes of runs in progress for
+  that account; it does not reach the connector's keys, and keeping the
+  runner's processes alive keeps the slot out of use (it fails secure).
+  Denying network logon blocks loopback NTLM as the runner (`\\localhost`
+  shares, WMI over the network). The logon audit is documented to show
+  type 2 logons for runs (not measured). Its profile is never
   loaded: resetting a profile and its registry hive needs an
   administrator. Instead `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`,
   `TEMP` and `TMP` point at fresh folders of that run, removed after
-  it. The run gets access to a window station and desktop of its own
-  (without it, programs that load user32 fail at start, 0xC0000142).
-  The service SID holds `SeAssignPrimaryTokenPrivilege`, granted at
-  install. Without a loaded profile, the run's `HKEY_CURRENT_USER`
+  it. Each run gets its own **desktop**, with an access entry for the
+  runner's user SID (the logon SID is not known before the call),
+  removed after the run; a per-run window station only if the probe shows
+  the unprivileged connector can create one (to be measured by the probe's step 2, GC #15957), otherwise the runs
+  share the service's window station and the job's UI limits stop
+  clipboard, atom and handle sharing. Without a desktop, programs that
+  load user32 fail at start (0xC0000142). `lpDesktop` is never null; a
+  null desktop is documented to add the run's logon SID to the
+  connector's desktop access list (documented, not measured). Without a
+  loaded profile, the run's `HKEY_CURRENT_USER`
   falls back to `.DEFAULT`, and programs that ask Windows for their
   known folders (rather than reading the variables) may fail; such
   programs are noted as unsupported until a profile mechanism is
@@ -226,10 +329,12 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   pinned or not, must be in an administrator-only folder, each folder
   up its path checked the same way. `--run-env` values come from that configuration too,
   never from the service's own environment.
-- **Uninstall** stops and removes the service, the connector and runner
-  accounts and their processes, the logon rights granted, the shares'
-  ACL entries and the state directory, after overwriting the state
-  file. What is left
+- **Uninstall** stops and removes the service, the runner accounts and
+  their processes, the logon-right entries, the shares' ACL entries and
+  the state directory, after overwriting the state file. The virtual
+  account's profile stays "in use" for over a minute after the service
+  is deleted, so the uninstaller retries its removal later or says it is
+  left. What is left
   behind is checked on Windows here and listed in the README.
 - **Program files** go in an administrator-only place: `Program Files`
   on Windows (the service's `ImagePath` quoted), `/usr/local/libexec`
@@ -707,3 +812,4 @@ The questions as they were asked follow, for the record.
   - A run cannot read the connector's state or open its process.
   - The service holds no impersonation privilege.
   - Sleep, a second Windows user, and Defender or SmartScreen on the service.
+  - The full Windows test list is in AGENT-PLAN's A3.10b, A3.10c and A5.5 rows (Tests cells); this list defers to them.
