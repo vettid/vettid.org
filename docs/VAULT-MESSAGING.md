@@ -49,7 +49,7 @@ changelog:
     under or above another (the lead's call after review); (2) a run's
     `cwd` is checked against `folders` as its `program` is checked
     against `programs`: the exact folder or a subfolder (the lead's
-    choice, to be confirmed by the owner), and `cwd_not_allowed` (new
+    call), and `cwd_not_allowed` (new
     code, body `{where, path}`) otherwise, counted as refused; (3)
     `item.run` gains `inputs` (0–16 files, 16 MiB each, 64 MiB and
     16 KiB of paths in all, copied read-only into the run's
@@ -71,7 +71,7 @@ changelog:
     (an empty list when none), which is also how a connector and an
     app learn that the vault is 0.93.0 or later (no capability name or
     `vault.status` member is added: S10 rejected a capability list); (8) adding a folder or turning `write` on
-    is a widening, and with no nesting a removal always narrows; **Apps and connectors must now handle:** `folders` in a run
+    is a widening, and with no nesting a removal always narrows; The connector's catalog rule, its runner-opened folder check and the read-only access check are in AGENT-PLAN §4.9 (the lead's calls after the last re-checks). **Apps and connectors must now handle:** `folders` in a run
     binding and in the catalog; `cwd_not_allowed`; `inputs`, `output`,
     `folders` and the two flags in an `item.run` approval. Owner decision a, GC #15855: "Read only" is
     enforced for the folder a run starts in, by the connector (the
@@ -19069,13 +19069,20 @@ item's settings allow for its task:
       binding is also checked against the shared folders on the
       computer, for `cwd` only (`vettid-agent share`); (b) on POSIX it
       refuses a `\` in a `cwd`, an input or an output path, which the
-      vault accepts as a separator; (c) it opens the folder and
-      resolves its **final path from the open handle**
-      (`GetFinalPathNameByHandle`, `realpath`), refuses the run if, by
-      the system's own rules (case, short names, links, junctions),
-      that path is not under the approved entry, and runs the process
-      in that same handle's path, so nothing can be swapped between the
-      check and the use. Such a refusal is `cwd_not_allowed` with the
+      vault accepts as a separator; (c) the connector's runner opens and checks the folder:
+      the run starter (A3.10c's launcher, running as the runner account) opens
+      `cwd` **as the runner**, because the service never opens a member folder
+      and the share grants nothing to the service's own account: on Windows a
+      directory handle, opened without `FILE_SHARE_DELETE`; on POSIX
+      `O_DIRECTORY|O_NOFOLLOW` at each element. It resolves the **final path
+      from that handle** (`GetFinalPathNameByHandle`; on POSIX the path of the
+      descriptor, not `realpath` on the name) and reports it to the service,
+      which checks it against the approved entry by the operating system's own
+      rules for case, short names, links and junctions. **Only on the
+      service's go does the process start in the held folder:** `fchdir` on the
+      descriptor before `exec` on POSIX; on Windows the handle is held, still
+      without `FILE_SHARE_DELETE`, until the process has started. So nothing
+      can be swapped between the check and the use (the lead's call). Such a refusal is `cwd_not_allowed` with the
       connector's own text.
     - **`write`** says whether the connector may copy files back into
       the folder, and what a run that starts there may do (owner
@@ -19086,7 +19093,17 @@ item's settings allow for its task:
       folder write, with its own NEW text (AGENT-PLAN §11, which names
       the folder and both ways out). The member makes the share
       read-only (`vettid-agent share --name <n> <folder>` without
-      `--write`) or turns the entry's `write` on.
+      `--write`) or turns the entry's `write` on. (The lead's call,
+      fail secure.) The refusal also holds when the share is not what
+      grants it: for an entry with `write: false` the run is refused if
+      **the runner's token is granted any write or delete right on the
+      `cwd` folder itself** (on Windows, by `AccessCheck` on the
+      runner's token for `FILE_ADD_FILE`, `FILE_ADD_SUBDIRECTORY`,
+      `FILE_WRITE_ATTRIBUTES`, `FILE_DELETE_CHILD`, `DELETE`,
+      `WRITE_DAC` and `WRITE_OWNER`; on POSIX, `faccessat(…, W_OK)` as
+      the runner), the same NEW text, same ways out. Write access deeper
+      inside the folder is not checked; `share` without `--write`
+      removes inherited write for the runner accounts (AGENT-PLAN A5.5a).
     - **Said plainly: what a run can reach.** A run can reach every
       folder shared with that computer's pairing. An item's `folders`
       decides where a run may start (its `cwd`) and where files are
@@ -19109,20 +19126,26 @@ item's settings allow for its task:
       capability name: S10 rejected a capability list, and this does not
       reopen it. From 0.93.0 **every catalog entry for an item with a
       run way carries `folders`**, an empty list when the binding has
-      none; a vault before 0.93.0 never does. A connector sends
+      none; a vault before 0.93.0 never does. The connector decides
+      only from a catalog read **in the current vault session** (never
+      from its state file, and again after a reconnect), and reads the
+      catalog before a run when it has no entry for the item. It sends
       `inputs`, `output`, a member-folder `cwd`, or no `cwd` for the
-      run's `work/`, **only for an item whose catalog entry has
-      `folders`**. For an item whose entry lacks it, the vault predates
-      0.93.0: the connector answers `vault_too_old` to a request that
-      needs those members (AGENT-PLAN §11) and keeps sending the cleaned
-      absolute `work/` path as `cwd`, as today. Once an entry has
-      `folders` it **stops sending a `cwd` for its own `work/`**
-      (it omits the member), because a 0.93.0 vault refuses a `cwd` the
-      binding does not cover. A vault before 0.93.0 ignores unknown
-      members of `leash.item.set` (§10.1), so an app shows the folders
-      settings only after a vault answer for a run binding
-      (`leash.item.list` or `leash.item.set`) holds `run.folders`
-      (0.93.0 returns it, an empty list when none).
+      run's `work/`, **only for an item whose entry has `folders`**.
+      For an item whose entry lacks it, the vault predates 0.93.0: the
+      connector answers `vault_too_old` to a request that needs those
+      members (AGENT-PLAN §11) and keeps sending the cleaned absolute
+      `work/` path as `cwd`, as today. Once an entry has `folders` it
+      stops sending a `cwd` for its own `work/`; if a `cwd` for its own
+      `work/` is nevertheless refused (`cwd_not_allowed`, `where:
+      "cwd"`), it reads the catalog again and retries once without
+      `cwd`. A vault before 0.93.0 ignores unknown members of
+      `leash.item.set` (§10.1), so an app shows the folders settings
+      only after a vault answer for a run binding (`leash.item.list` or
+      `leash.item.set`) holds `run.folders` (0.93.0 returns it, an empty
+      list when none); the step that first creates a run binding
+      cannot set folders, since the app learns `run.folders` from the
+      answer.
   - (0.93.0; owner decision Q9 a, GC #15810; not built yet) **Files
     handed in and out.** An agent that works on documents needs no
     shared folder for them: the connector's stub, which runs as the
@@ -19175,7 +19198,9 @@ item's settings allow for its task:
     a program may receive.** An entry's `env` (0–32 names, default
     empty) lists the names a run of that program may set in its `env`.
     Each name follows the rule given for `item.run` (below), so no
-    code-loading name can be listed. Adding a name widens the
+    code-loading name can be listed; (0.93.0) `VETTID_IN` and
+    `VETTID_OUT`, which the connector sets, are refused in the list too
+    (`bad_request`). Adding a name widens the
     settings.
   - `proxy` is present exactly when `ways` holds `proxy`. `hosts` (1–8):
     lowercase DNS names, each with an optional `:port` (default 443);
@@ -19388,10 +19413,9 @@ item's settings allow for its task:
     JSON integer (a fraction, an exponent form or a negative number is
     `bad_request`) of at most 16,777,216 (16 MiB), and all sizes
     together at most 67,108,864 (64 MiB). **The paths together are at
-    most 16,384 bytes** (UTF-8; chosen so that the new members add at
-    most 16 KiB to a request, with `output` at most 8 KiB more; §10.1
-    states no limit for a request's body that I could find, and
-    `argv` and `env` are already larger). Any of these over is
+    most 16,384 bytes** (UTF-8; the cap bounds the work per run, and with
+    `output` at most 8 KiB more the new members stay well under the
+    message size; `argv` and `env` are already larger). Any of these over is
     `bad_request`. The file's name in `work/in/` is its last path
     element, which must be a **flat name**: 1–255 bytes of UTF-8, no
     control, Cf, Zl or Zp character, no `/`, `\` or `:`, not `.` or
@@ -19534,7 +19558,8 @@ item's settings allow for its task:
     accepted; an input under a read-only entry accepted; an output
     folder equal to its entry accepted, one under it accepted, one in
     a read-only entry refused; `VETTID_IN` and `VETTID_OUT` refused as
-    `name` and in `env`; a name with a
+    `name`, in `env` and in a binding's `env` list (`leash.item.set`,
+    `bad_request`); a name with a
     `/`, `\`, `:`, `..`, a reserved Windows name, a trailing dot, or
     two names equal without case refused (`bad_request`); an input
     outside every entry, or an output folder in a read-only entry or

@@ -6479,6 +6479,7 @@ connector newer than the vault cannot send them) is deny-only.
   vault refuses nested entries, and compares without regard to capitals,
   so `Work` and `work` also count as the same). The vault's `bad_request` is shown with
   its error text.
+- **A new run binding has no folders yet:** in the step that first creates a run binding (`leash.item.set` with `run`), the folders list is not shown; the app learns `run.folders` from the vault's answer and then shows it (a vault before 0.93.0 never returns it).
 - **Read only first:** a new folder is **Read only**. Its page has a
   switch "Let the agent change files in this folder" (NEW), off, with the
   line "A program run here could change or delete files in this folder
