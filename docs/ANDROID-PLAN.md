@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.136
+version: 0.1.137
 date: 2026-11-22
 changelog:
+  - 0.1.137: 2026-11-22 (AGENT-PLAN AA7 and AA8; VAULT-MESSAGING §6.8 and §10.11 "Ways to use a secret", 0.42.0 to 0.93.0; IOS-PLAN 0.1.79; owner-approved card, Ground Control #16365). Not built; cards #16366 (Android), #16367 (iOS). §4 "Devices & agents": two new subsections before AA9. "How an agent may use an item (AA7)": per agent and included item, shown only with a vault that lists `item_ways`, the ways (use always; run, proxy and "May be shown to agents", off by default), the programs (a full path or a name, checked by §10.11 "Program strings"), Ask me before each run (`each`), per program the variables it may receive (none by default) and its recorded fingerprint with Forget fingerprint, the folders by reference to AA9, and the proxy's hosts, header name and prefix; `leash.item.set`, `leash.item.list`, `sync.event{leash.item.changed}`; a widening asks for the password every time (decision 4's rule, with its own prompt text), a narrowing does not, and a save the app cannot judge counts as widening; the reveal switch shows the history warning before it turns on; settings with anything unknown are read only. "Approvals for runs, proxies and reveals (AA8)": `item.run` (program, fingerprint, every argument in full and escaped, where it runs, how the secret is passed, the other variables, a warning per flag, `program_unrecorded` and `program_changed` with the old fingerprint and path beside the new, a batch file's fingerprint covering the file only, AA9's lines), `item.proxy` (host, header and prefix only from `approval.pending`'s `proxy`, Deny only without it; the length from `seconds`, which may end sooner with the access session), `item.get` (AA5's row with the history warning, unchanged); approving and the pin; a request referred again (`replaces`, `result: "referred"`); the refusal texts and an expired approval; the fail-closed cases. Each has an acceptance list. Changed to match, from the app version with AA8 (card #16366): decision 15 (deny-only for `item.run` and `item.proxy` holds only before it), AA5's table (the deny-only row before AA8, the new row from it) and its tests; AA4's "until AA7 is built" point; AA9's opening ("have no section of their own yet"); the section's opening and its PRs paragraph; the unlock window prompt's uses. Every text marked NEW is for the owner's approval; AGENT-PLAN §11's drafts are marked as such. **Open (owner):** (1) the `shell` warning, reworded for launchers and evaluators ("This program can run other programs or code given to it, so the command can do anything with your secret.", replacing AGENT-PLAN §11's "This runs a shell…", owed by VAULT-MESSAGING §10.11 with vettid/vettid.org#636); (2) the batch-file line ("This is a Windows batch file. Its fingerprint covers this file only…", AGENT-PLAN §4.9's owed launcher wording); (3) the proxy's "Sent as: <header>: <prefix>••••••••" line (AGENT-PLAN §11's owed proxy wording); (4) the binding-screen advice for programs that can run other commands (vettid/vettid.org#636: its list of names and its text); (5) "Runs in" as the run's directory label, where AGENT-PLAN §11's draft says "Folder" (AA9 uses "Folder:" for the folder entry); (6) "Authorization" and "Bearer " as the app's suggested header and prefix.
   - 0.1.136: erratum, 2026-11-22 (lead decisions of 2026-11-22, Ground Control #16263; built by vettid/vettid-android#429). Notification modes 7, "While the vault's release is checked", **Released**: an event or arrival that only waits for the feed's read (it came while the feed was not loaded with nothing the check held ahead of it, or it is queued behind only such) is not held in this sense, and a push wake while the feed is not loaded does not wait behind it, except an event of the push's own item as new as its copy or newer; and with a push wake waiting in any of the queues (held by the check, behind what it held, behind a newer change of its own item, or a copy the opening already covered, kept for the list), a read that fails and leaves the feed not loaded makes one catch-up after a short wait, once per failure run, instead of none. **Tests** gain both. IOS-PLAN is unchanged: the iPhone app has no push wake before phase P, and this paragraph governs both apps' order when it does.
   - 0.1.135: 2026-11-21 (VAULT-MESSAGING 0.93.0, AGENT-PLAN 0.1.17, IOS-PLAN 0.1.78; AGENT-SEPARATE-ACCOUNT Q1 a and Q9 a; Ground Control #15810). Not built; card #15812. §4 "Devices & agents": a new subsection "Member folders and files on a run (AA9)": the run settings' folders list with read only offered first (adding a folder or turning on write is a widening, so it asks for the password), and a run approval's folder, input files and output folder with their warnings, shown from the approval's `folders` member; deny-only when it is missing. Every text in it is NEW, for the owner's approval. Nothing existing changes: AA7 and AA8 still have no section of their own, and decision 15 (an `item.run` approval is deny-only before AA8) still holds **Fix round after the blind reviews:** `share` applies to a working folder only (files in and out need no share); no nested or case-duplicate entries, with a NEW text; the hint says to type the path exactly as the computer shows it and not to list a whole home folder, and that the connector uses it as typed; sizes are 1,024-based; "Can change files" is the one wording; an inputs-only approval has `folders: {}`; "the section below". The owner's decision a (GC #15855) is in: "Read only" is enforced for the folder a run starts in, the switch line loses its "until then" wording, and the help says a run can reach every folder shared with the pairing; a run with files only is also referred to the phone (owner decision a, GC #15856)
   - 0.1.134: erratum, 2026-11-18 (owner rule 3 as amended, Ground Control #r60; owner decisions a, 2026-11-18, #13774; lead decisions #13781, #13821; IOS-PLAN 0.1.77). Notification modes 7: a new paragraph "While the vault's release is checked": the release gate's three states (checking, a failed check included; behind; over); what is held (events, arrivals and the waiting-asks replay), dropped while the owner check is due or held, released after the feed's reads (arrivals, then events), and what notifies on release (an arrival or a replay as the feed lists it now; a covered held event only if its message came at or after the vault's opening, judged on the vault's clock from the first answer of this opening; a push-started process's events whatever their time). Built today by vettid-android #407 except: the opening's moment from an answer of this opening, the push wake limited to a push-started process, the replay against the first `pending.list` after the check and kept as a fresh arrival, no repeat within the opening, and a failed incremental read: Ground Control #13822. The 0.1.133 notes cite #r58; #r60 amends it (upgrades from the previous release must work), which changes none of them.
@@ -5838,7 +5839,8 @@ Read against VAULT-MESSAGING 0.50.0 §6.7, §6.8, §10.1, §10.3, §10.9,
 §10.11 and §10.12, AGENT-PLAN 0.1.7 and vettid-android master
 `bfefaab4`. The agent connector's staging phase (AGENT-PLAN A6) waits
 for AA1–AA5 on staging. The ways to use a secret (AA7, AA8) and the
-History and feed details (AA6) are separate sections, later; where an
+History and feed details (AA6) are separate sections, later ((0.1.137)
+AA7 and AA8 are now specified, before AA9, below); where an
 AA1–AA5 screen meets them, this section says what it does until then.
 Every question the specification left open is in "Decisions" at the
 end, each decided by the owner on 2026-10-20 as recommended; the text
@@ -6236,7 +6238,10 @@ differences:
   decline warning for an item already shared: "<name> can use it now
   through your *id* rule. Not allowing it stops that too."
 - **How the agent may use each item** (the ways of AG13,
-  `leash.item.set`) is AA7: until it is built, a rule's items have
+  `leash.item.set`) is AA7 ((0.1.137) "How an agent may use an item",
+  below; from the app version with card #16366, and only with a vault
+  that lists `item_ways`, each included item has its own page there,
+  and the warning at the end of this point goes). Until then, a rule's items have
   `["use"]` only (VAULT-MESSAGING 0.42.0's migration), so, on a vault
   that implements 0.42.0 (AGENT-PLAN AV9), an agent may use an included
   item without seeing it and every reveal is refused
@@ -6299,7 +6304,8 @@ no longer have" and offers only **Deny**.
 | `agent.request`, `op: "item.use"` | "<name> wants to use <item> without seeing it" | "Field: <label>. Your vault uses the value for the agent and gives it only the result. For a short or guessable value, such as a PIN or a common password, the agent could work the value out from that result." Then the data the result is computed over (`data`, decoded; shown as text when it is printable UTF-8, else as hex), under "Data from the agent" (decision 18) | Approve, Deny |
 | `agent.request`, `op: "item.get"` | "<name> wants to see <item>" | "Fields: <labels>" (or "All fields and notes"). Then, always (with or without the `history` flag): "The agent's app may keep the value in its history." | Approve, Deny |
 | `agent.request`, `op: "catalog"` | "<name> wants to list the items it may use" | "It sees their names and field labels, never their values." | Approve, Deny |
-| `agent.request`, `op: "item.run"` or `"item.proxy"` | "<name> wants to use <item> in a way this version of VettID can't show" | "Update VettID to see the details. Until then you can only deny it." | Deny |
+| `agent.request`, `op: "item.run"` or `"item.proxy"`, before the app version with AA8 (0.1.137; card #16366) | "<name> wants to use <item> in a way this version of VettID can't show" | "Update VettID to see the details. Until then you can only deny it." | Deny |
+| `agent.request`, `op: "item.run"` or `"item.proxy"`, from the app version with AA8 (0.1.137) | as "Approvals for runs, proxies and reveals (AA8)" says | as AA8 says | Approve, Deny (Deny only where AA8 says) |
 | A delegable owner type (after decision 3) | "<name> wants to <scope label, lower case>" | the body's connection as "First Last" where it names one; for `message.send`: "Message to <First Last>:" and the text in full | Approve, Deny |
 | A desktop's step-up request | "<name> asks to approve a request" | "Desktop requests can't be shown in this version of VettID, so you can only deny them." | Deny (decision 9) |
 | Any other `type` or `op` | "<name> asks to approve a request" | "This version of VettID can't show this request, so you can only deny it." | Deny |
@@ -6331,8 +6337,9 @@ this phone can no longer show. Deny it, or let it expire." with
 
 #### The unlock window prompt
 
-Used before `leash.grant.issue`, an agent's `share.rule.set` and (0.1.102)
-`vote.cast`, and after any `credential_locked`:
+Used before `leash.grant.issue`, an agent's `share.rule.set`, (0.1.102)
+`vote.cast` and (0.1.137) a `leash.item.set` that widens (AA7, with its
+own body text there), and after any `credential_locked`:
 
 - A sheet titled "Confirm with your credential password"; body "Giving
   <name> a permission is signed with your credential, so only you can
@@ -6420,7 +6427,7 @@ specification is silent, decision 14 lists it.
   every rule without it (decision 17); the `item.use` limit text on
   every agent rule.
 - Unit (Approvals): every row of the table, including the deny-only
-  rows (`item.run`, `item.proxy`, desktops' requests, unknown types, an
+  rows (`item.run`, `item.proxy` before AA8, desktops' requests, unknown types, an
   unresolvable item, an entry without its body); `item.use`'s data
   shown as text and as hex, and its short-value line; an access request
   known only from its feed item; a pairing known only from its feed
@@ -6454,7 +6461,404 @@ specification is silent, decision 14 lists it.
 **PRs** (vettid-android, each with its tests): AA1 (list, page, end
 access, remove; drawer); AA2 (pairing); AA5 (Approvals; it only needs
 AA1); AA4 (agent rules); AA3 (permissions list, resume; the owner-type
-editor behind decision 3). AA6–AA8 follow in their own sections. (0.1.135) AA9, the folders and files of a run, is the section below; it needs AA7 and AA8.
+editor behind decision 3). AA6–AA8 follow in their own sections. (0.1.135) AA9, the folders and files of a run, is the section below; it needs AA7 and AA8. (0.1.137) AA7 and AA8 are the two sections below (card #16366), and AA9 follows them.
+
+#### How an agent may use an item (AA7, 0.1.137)
+
+*Owner-approved card (Ground Control #16365); AGENT-PLAN AA7 and AG13;
+VAULT-MESSAGING §10.11 "Ways to use a secret" (0.42.0, with 0.85.3,
+0.91.0, 0.91.1, 0.92.0 and 0.93.0). Not built: vettid-android's card is
+#16366 (iOS: #16367, IOS-PLAN §4.20). Every text marked NEW is for the
+owner's approval; where it is AGENT-PLAN §11's draft, it says so. The
+folders of a run are AA9's (the section after AA8), not repeated here.*
+
+**Shown only with a vault that lists `item_ways`** (§11.10.9; decision
+17). Without it, nothing of this section is shown, an included item has
+no settings page, and AA4's warning stays on every agent rule. With it,
+that warning goes, because a reveal is then refused unless the member
+turns it on here.
+
+**Where.** On the agent's page, under **What it may use**, after the
+rules: the heading "Items it may use" (NEW) and one row per item that
+the agent's rules include (`leash.item.list{agent_id}`, read with the
+page, again after `sync.event{leash.item.changed}` whose `agent_id` is
+this agent, and after the `share.rule.*` events that make AA3 read
+again). A row: the item's name from the item cache ("An item you no
+longer have", NEW, when it does not resolve) and, under it, the ways
+it allows, joined by " · ": "Use without seeing it", "Run programs",
+"Send to an API", "May be shown" (NEW; `use` is always listed). Tap:
+the item's page. The list is held in memory only and cleared at lock,
+like the device list.
+
+**The item's page** (title "How <agent> may use <item>", NEW). It
+shows one `item_ways` as `leash.item.list{agent_id, item_id}` returned
+it, and changes it with **Save** in the top bar (one `leash.item.set`
+for everything changed; nothing is sent while the member edits). The
+switches, each off by default except the first:
+
+- **Use without seeing it** (`use`; AGENT-PLAN §11's draft), always on
+  and not changeable, with "Your vault uses the value for the agent and
+  gives it only the result." (NEW).
+- **Run programs with it** (`run`; AGENT-PLAN §11's draft). On, it
+  shows the run settings (below). Turning it off asks first: "Stop
+  runs with <item>?" / "The programs you listed, their variables and
+  their recorded fingerprints are removed." (NEW), **Turn off** and
+  **Cancel**.
+- **Send it to an API for the agent** (`proxy`; AGENT-PLAN §11's
+  draft). On, it shows the API settings (below). Turning it off asks
+  first: "Stop sending <item> to an API?" / "The hosts and the header
+  you set are removed." (NEW), **Turn off** and **Cancel**.
+- **May be shown to agents** (`reveal`; AGENT-PLAN §11's draft), with
+  "Off: the agent can use it without seeing it. On: the agent's app
+  may keep the value in its history." (AGENT-PLAN §11's draft).
+  **Turning it on shows the history warning first**, before the switch
+  moves: "Let <agent> see <item>?" / "You are asked before each time
+  it sees the value. Once you approve, the value goes to the agent's
+  app, which may keep it in its history or logs, and VettID can't
+  remove it from there." (NEW), **Turn on** and **Cancel**. Cancel
+  leaves it off. Turning it off asks nothing.
+
+**Run settings** (`run`; present exactly when `run` is on):
+
+- **Programs** (`run.programs`, 0–16), heading "Programs it may run"
+  (NEW). With none: "No programs listed. The agent may ask to run any
+  program, and every run asks you." (NEW). Each program is a row: the
+  program as typed, its variables ("No variables" or the names, NEW),
+  and its fingerprint state (below); tap: the program's page.
+- **Add a program** (NEW): the field "Program" with the hint "A full
+  path, such as /usr/bin/git or C:\Program Files\Git\cmd\git.exe, or
+  a program name the connector finds on its own search path, such as
+  git (on Windows, git.exe)." (NEW). The app checks VAULT-MESSAGING
+  §10.11 "Program strings" before saving, with these texts (NEW):
+  "Give a full path or a program name." (a relative path with a
+  separator, or a name made only of dots and spaces) / "This can't
+  hold a control or invisible character." / "At most 4,096 bytes." /
+  "A path can't hold an empty part, . or .., or a colon after the
+  drive." / "A network path (\\server\…) can't be used." / "Remove the
+  ~ from the program's name; on Windows, give its full long name." /
+  "This program is already in the list." (the no-two-match rule:
+  compared without case, without a final .exe, a drive path's / as \,
+  trailing dots and spaces dropped, and a name equal to a full path's
+  last part) / "You can add at most 16 programs." The vault's
+  `bad_request` is shown with its error text.
+- **The program's page**: the program; **Variables it may receive**
+  (`env`, 0–32 names, **none by default**): "None. The agent can't
+  give this program any other variables." (NEW) or the names, each
+  with **Remove**; **Add a variable** (NEW): the field "Variable name",
+  with "The agent can then give this program any value it chooses in
+  this variable." (NEW). The app checks the form
+  `^[A-Z_][A-Z0-9_]{0,63}$` ("Capital letters, digits and _ only, not
+  starting with a digit, at most 64.", NEW) and at most 32 ("At most
+  32 variables.", NEW); the names the vault refuses (§10.11 `item.run`:
+  the code-loading and traffic names, `VETTID_IN`, `VETTID_OUT`) come
+  back as `bad_request` and show its error text. The app does not keep
+  its own copy of that list. **Remove program** (NEW), no
+  confirmation: it narrows. Editing the program's text is removing it
+  and adding another: "Changing the program forgets its fingerprint."
+  (NEW).
+- **Its fingerprint** (`sha256` and `path`, recorded by the vault, never
+  by the app): "Fingerprint recorded: 1a2b 3c4d 5e6f 7a8b, at <path>"
+  (NEW; the first 16 hex digits of `sha256` in groups of four, as in
+  AA8) with **Forget fingerprint** (NEW), or "No fingerprint yet. The
+  first run asks you, and approving it records that file." (NEW).
+  Forget asks: "Forget this fingerprint?" / "The next run of
+  <program> asks you again, and approving it records the file then."
+  (NEW), **Forget** and **Cancel**; it saves the entry without `sha256`
+  and `path`, which narrows. The app never sends any other `sha256` or
+  `path` than the ones it read (§10.11: anything else is
+  `bad_request`).
+- **Ask me before each run** (`each`, on by default; NEW). It can be
+  turned off only with at least one program listed; with none it is
+  on and disabled, with "List a program to turn this off." (NEW). Off,
+  under it: "A run of a listed program goes ahead without asking when
+  its file matches the recorded fingerprint. Shells, interpreters and
+  programs that start other programs, a first or changed program, and
+  runs in your folders or with files still ask you every time." (NEW).
+  Emptying the program list turns it back on.
+- **Programs that can run other commands** (vettid/vettid.org#636;
+  draft, Open (owner)): with **Ask me before each run** off, a listed
+  program whose last part, compared as the vault's `shell` flag
+  compares names (any case, without final `.exe`, `.com`, `.cmd`,
+  `.bat` or `.ps1`), is `git`, `rsync`, `tar`, `sed`, `npm`, `yarn`,
+  `pnpm`, `uv`, `dotnet`, `make`, `find`, `vim`, `nvim`, `vi` or `ex`
+  shows on its row and page: "<program> can run other commands given
+  in its arguments, so the agent could use it to run any command with
+  your secret. Asking before each run is safer for it." (NEW). It is
+  advice only: it blocks nothing and the vault still decides.
+- **Folders this program may use**: AA9.
+
+**API settings** (`proxy`; present exactly when `proxy` is on):
+
+- **API hosts** (`proxy.hosts`, 1–8), heading "Hosts it may be sent to"
+  (NEW), each a row with **Remove** (the last one cannot be removed;
+  turn the switch off instead). **Add a host**: the field "Host" with
+  the hint "A host name, such as api.example.com, with :port if it is
+  not 443." (NEW). The app lowercases it and checks §10.11: "Give a
+  host name, such as api.example.com." / "An IP address can't be used;
+  give the host's name." / "localhost and names without a dot can't be
+  used." / "Wildcards can't be used." / "This host is already in the
+  list." / "You can add at most 8 hosts." (all NEW). Turning the switch
+  on opens Add a host at once: `proxy` needs one.
+- **Header** (`proxy.header`): the field "Header name", "Authorization"
+  filled in when the switch is turned on (NEW; the app's suggestion,
+  not a vault default). Refused, with "This header can't carry the
+  key." (NEW): not a token of 1–64 characters, a hop-by-hop field,
+  `Host`, `Content-Length`, `Transfer-Encoding` or `Cookie`.
+- **Before the key** (`proxy.prefix`, 0–32 printable ASCII): the field
+  "Before the key", "Bearer " filled in when the switch is turned on
+  (NEW; a space at its end is shown as a visible mark). Refused, with
+  "At most 32 plain characters: letters, digits, spaces and
+  punctuation." (NEW).
+- Under them the preview "Sent as: <header>: <prefix>••••••••" (NEW;
+  never the value) and "The key is sent only to these hosts, over a
+  verified connection. The agent never sees it." (NEW).
+
+**Saving** (`leash.item.set{agent_id, item_id, version?, ways, run?,
+proxy?}`; `version` as read, absent when the item had none):
+
+- **Widening asks for the password; narrowing does not.** The app
+  compares the save with the settings it read, by §10.11 "Widening
+  needs the member": adding a way, a program or a host; emptying
+  `programs`; adding a variable name; turning **Ask me before each
+  run** off; changing the header's name (not only its case); and AA9's
+  folder widenings. Binding an unbound item narrows unless a program
+  lists a variable or Ask me before each run is off; a full path that
+  replaces a name narrows only when its last part is exactly that name
+  and it adds no variable. When the save widens, the unlock window
+  prompt ("The unlock window prompt", above, with its own body text)
+  comes first, every time, as decision 4 says for permissions, and
+  `credential.lock` follows when the prompt opened the window. When the app cannot tell that a save
+  only narrows, it treats it as a widening. A narrowing save is sent
+  without the prompt.
+- The prompt's body for these settings, in place of "Giving <name> a
+  permission is signed with your credential…": "Letting <agent> use
+  <item> in more ways needs your credential password, so only you can
+  do it. Enter your credential password." (NEW).
+- Answers: `<item_ways>` → "Saved" (NEW) and the page shows the answer
+  (never the app's own copy). `credential_locked` → the unlock window
+  prompt, then the same request once; a second `credential_locked`:
+  "Your credential locked again before the settings were saved. Try
+  again." (NEW). `conflict` → "Another device changed these settings.
+  Here are the current ones." (NEW) and the page reloads them.
+  `not_found` → "<agent> can no longer use this item: none of its rules
+  includes it." (NEW) and back. `bad_request` → "These settings could
+  not be saved. Your vault answered: <error text>." (NEW).
+  `owner_check_required` → the owner-check screen. During a credential
+  alarm, as AA3 says, with "Settings can't be widened while a
+  credential alarm is open" (NEW); narrowing still works.
+- **While the page is open**, a `sync.event{leash.item.changed}` for
+  this agent and item reads it again; with unsaved changes the page
+  keeps them and shows "Another device changed these settings." with
+  **Show the current ones** (NEW), and a save then gets `conflict`
+  anyway. An event without `version` means the settings were deleted
+  (the item left every rule): the page shows "<agent> can no longer use
+  this item: none of its rules includes it." and saves nothing.
+
+**Fail closed.** `item_ways` is shown only when the app understands all
+of it: a way other than `use`, `run`, `proxy` and `reveal`, a member of
+`run`, `proxy` or a program entry this version does not know, `run`
+without `run` in `ways` (or the reverse), or a malformed value make
+the page read only, with "This item has settings this version of
+VettID can't show. Update VettID to change them." (NEW), and no save.
+A version of the app with AA7 but without AA9 treats a non-empty
+`run.folders` so too, and sends back an empty one as read.
+
+**Acceptance (AA7):**
+
+- Each setting round-trips: every switch, each program (a full path and
+  a name), its variables, Ask me before each run, the hosts, the header
+  and the prefix (with a trailing space) are saved and read back equal;
+  a fingerprint recorded by an approval shows after the
+  `leash.item.changed` event, and Forget fingerprint removes it.
+- Widening without the unlock window asks for the password (each
+  widening of the list above); narrowing does not (removing a way, a
+  program, a host or a variable, forgetting a fingerprint, Ask me
+  before each run on, binding an unbound item); a `credential_locked`
+  after a save the app judged narrowing gives the prompt and one
+  resend.
+- The reveal switch shows the history warning before it turns on, and
+  Cancel leaves it off.
+- Every refusal text of the program, variable, host, header and prefix
+  checks; `conflict` reloads; an unknown member makes the page read
+  only; no page without `item_ways`.
+- Screenshots: the list, a page with all ways on, each confirmation,
+  each refusal; both themes, TalkBack, the largest font scale.
+
+#### Approvals for runs, proxies and reveals (AA8, 0.1.137)
+
+*Owner-approved card (Ground Control #16365); AGENT-PLAN AA8 and AG13;
+VAULT-MESSAGING §6.8 and §10.11 "The approval". Not built:
+vettid-android's card is #16366 (iOS: #16367, IOS-PLAN §4.21). From the
+app version that builds it, these replace AA5's deny-only row for
+`item.run` and `item.proxy` (decision 15, as updated). Every text
+marked NEW is for the owner's approval. The folder and file lines of a
+run are AA9's, after this section.*
+
+Each is an Approvals entry as AA5 says (the agent's name, "Waiting for
+4 more minutes", **Approve** and **Deny**, `<item>` from the item cache),
+with the detail on its own screen. Everything shown comes from
+`approval.pending` (its `body`, `flags`, `previous_sha256`,
+`previous_path`, `replaces`, `proxy` and `folders`), never from the
+app's copy of the item's settings. Long content scrolls; it is never
+cut, and the buttons stay at the bottom.
+
+**How a string is shown** (arguments, variable values, paths): in full,
+in a monospace box per string, so its start and end are visible,
+wrapped and never cut or ellipsized. A character that is not printable
+(categories Cc, Cf, Zl, Zp, Co, Cs and Cn, and any space other than
+U+0020) is shown as its code point, such as `U+202E`, in a highlighted
+box that cannot be taken for typed text. An empty string shows "(empty)"
+(NEW) in such a box. TalkBack reads an escaped character as "character
+U+202E" (NEW).
+
+**A run** (`agent.request`, `op: "item.run"`):
+
+- Title "<agent> wants to run a program with <item>" (AGENT-PLAN §11's
+  draft), then "Field: <label>".
+- "Program" (AGENT-PLAN §11's draft): `body.program`; under it
+  "Fingerprint: 1a2b 3c4d 5e6f 7a8b" (NEW; the first 16 hex digits of
+  `sha256` in groups of four). When `argv[0]` differs from `program`:
+  "Asked for as: <argv[0]>" (NEW).
+- "Arguments" (AGENT-PLAN §11's draft), `argv[1]` onward, each in full,
+  numbered; "No arguments" (NEW) when there are none. An argument that
+  is exactly `{secret_file}` is followed by "(the secret file's path)"
+  (NEW).
+- "Runs in" (NEW; AGENT-PLAN §11's draft says "Folder", which AA9 uses
+  for the folder entry): `body.cwd`, or without `cwd` "A new, empty
+  folder of its own" (NEW). Then AA9's folder and file lines and their
+  warnings, when the flags are there.
+- "Secret given as" (AGENT-PLAN §11's draft): "variable <NAME>",
+  "standard input" or "a temporary file, its path in variable <NAME>"
+  (AGENT-PLAN §11's drafts, the last with its variable, NEW).
+- "Other variables" (AGENT-PLAN §11's draft): each `NAME` and its value
+  from `env`, in full; "None" (NEW) when there are none.
+- The warnings, each in the warning style, above the buttons, one per
+  flag:
+  - `shell`: "This program can run other programs or code given to it,
+    so the command can do anything with your secret." (NEW; replaces
+    AGENT-PLAN §11's "This runs a shell. The command can do anything
+    with your secret.", since the flag also covers launchers and
+    evaluators, VAULT-MESSAGING 0.91.1; Open (owner)).
+  - `inline_code`: "This runs code given on the command line. It can do
+    anything with your secret." (AGENT-PLAN §11's draft).
+  - `unbound_program`: "Any program could be asked for. Approve only a
+    command you recognize." (AGENT-PLAN §11's draft, in American
+    spelling).
+  - `program_unrecorded`: "First run of this program with this item.
+    Fingerprint: <fp>. If you approve, later runs of this exact file
+    may run without asking, as this item's settings allow."
+    (AGENT-PLAN §11's draft).
+  - `program_changed`, `previous_path` equal to `program`: "This
+    program has changed since you approved it. Before: <old fp>. Now:
+    <fp>. If you did not update it, deny." (AGENT-PLAN §11's draft).
+  - `program_changed`, another path: "This program moved to <path>. It
+    was approved at <old path>. Before: <old fp>. Now: <fp>. If you did
+    not move or update it, deny." (AGENT-PLAN §11's draft), with "moved
+    to <path>" stressed (bold). In both, the old fingerprint and path
+    are shown beside the new, as two labeled rows "Approved before" and
+    "Now" (NEW).
+  - **A batch file's fingerprint** (AGENT-PLAN §4.9 "A batch file's pin
+    covers the batch file only"; the launcher wording owed with AA8):
+    when `program`'s last part ends in `.cmd` or `.bat` (any case,
+    trailing dots and spaces dropped), under the fingerprint: "This is
+    a Windows batch file. Its fingerprint covers this file only, not
+    the programs it starts, such as node and the packages it runs."
+    (NEW; Open (owner)).
+  - `member_folder`, `member_files`: AA9.
+- **Approving and the pin.** Approving a run flagged
+  `program_unrecorded` or `program_changed` records its fingerprint and
+  path for the item (the vault does it; no unlock window). On
+  `{result: "ok"}` the app says "Approved. This program's fingerprint
+  is now recorded for <item>." (NEW) and reads the item's settings again
+  on the `leash.item.changed` that follows.
+
+**A proxy** (`agent.request`, `op: "item.proxy"`):
+
+- Shown only from a well-formed `proxy` member (`host` a host as
+  §10.11's `hosts` allows, `header` a token of 1–64 characters,
+  `prefix` 0–32 printable ASCII characters, `""` included). Without it,
+  or with it malformed, the entry is **Deny** only, with AA5's "This
+  version of VettID can't show this request, so you can only deny it."
+- Title and body "<agent> wants to use <item> with <host> for <length>.
+  The agent will not see it; the key is sent only to <host>."
+  (AGENT-PLAN §11's draft), with `<host>` from `proxy.host`, then
+  "Field: <label>".
+- Under it: "Sent as: <header>: <prefix>••••••••" (NEW; `proxy.header`
+  and `proxy.prefix`, a trailing space of the prefix shown as a visible
+  mark, never the value). This settles the wording AGENT-PLAN §11 owes
+  with AA8.
+- `<length>` is `body.seconds` (60–3,600; 900 when absent), in minutes
+  and seconds ("15 minutes", "1 minute 30 seconds"). A value outside
+  60–3,600 makes the entry deny-only. Under the body: "It may end
+  sooner, when <agent>'s access ends." (NEW; the vault cuts it to the
+  access session's end).
+
+**A reveal** (`agent.request`, `op: "item.get"`): AA5's row, unchanged:
+"<agent> wants to see <item>", the fields, and always "The agent's app
+may keep the value in its history." (with or without `history`).
+
+**Fail closed.** An entry is **Deny** only, with AA5's "This version of
+VettID can't show this request, so you can only deny it.", when:
+
+- `flags` holds a flag this version does not know, or one that does not
+  fit the op (`history` on a run, a run flag on a reveal);
+- a run's `body` lacks `program`, `sha256` or `argv`, `how` is not
+  `env`, `stdin` or `file`, `name` is missing for `env` or `file`, or
+  the body holds a member this version does not know;
+- `program_changed` comes without `previous_sha256` or
+  `previous_path`;
+- `member_folder` or `member_files` comes without a well-formed
+  `folders` (AA9);
+- the item or the field does not resolve (AA5's "an item you no longer
+  have").
+
+**Referred again** (`replaces`; §6.8 step 4). `approval.decide` may
+answer `{result: "referred"}`: the app does not say Approved; it says
+"Not done yet: something changed while you were deciding, so you are
+asked again." (NEW). A new `approval.pending` with `replaces` removes
+the entry it names (whichever of the two arrives first) and is shown as
+a new decision with, at its top, for a run: "Asked again. This item's
+settings or its recorded program changed while you were deciding.
+Check the details again." (NEW); for a proxy: "Asked again. This item's
+API settings changed while you were deciding. Check the details
+again." (NEW). A `replaces` that names no entry the app holds is shown
+the same way.
+
+**Refused or expired.** Answers to `approval.decide` as AA5 says, plus,
+for these ops, `"program_not_allowed"` → "Approved, but this item no
+longer allows that program, so nothing was done." (NEW);
+`"env_not_allowed"` → "Approved, but this program may no longer receive
+those variables, so nothing was done." (NEW); `"cwd_not_allowed"` →
+"Approved, but that folder or file is no longer allowed for this item,
+so nothing was done." (NEW); `{result: "not_found"}` (the field was
+removed meanwhile; a pin is still recorded, §10.11 "Pins, as built") →
+"Approved, but the item or its field is gone, so nothing was done."
+(NEW). A deny shows "Denied".
+At `exp` the entry leaves Approvals; an open detail screen shows "This
+request expired, so nothing was done." (NEW) and its buttons go. A
+decision after that is answered `not_found` ("This request is no longer
+waiting.", AA5).
+
+**Acceptance (AA8):**
+
+- Screenshots in the PR for each kind (run, proxy, reveal) and each
+  flag (`shell`, `inline_code`, `unbound_program`,
+  `program_unrecorded`, `program_changed` at the same path and at
+  another, a batch file, `history`, and AA9's two), a re-referral, and
+  each deny-only case.
+- A long or non-printable argument is shown in full, escaped, never
+  cut: a 4,096-byte argument, 64 arguments of 32,768 bytes in all, an
+  argument with U+202E, U+200B, a tab and a line break, an empty one, and
+  one with spaces at both ends, each checked character by character
+  against `argv`; the same for `env` values.
+- A proxy shows `proxy`'s host, header and prefix even when the app's
+  copy of the settings differs; without `proxy` it is Deny only; the
+  length follows `seconds` and 900 without it.
+- Every `result` text; a `referred` answer before and after the new
+  `approval.pending`; an expired entry; approving `program_unrecorded`
+  then shows the recorded fingerprint in AA7.
+- Both themes, TalkBack (an escaped character read by its code point),
+  the largest font scale.
 
 #### Member folders and files on a run (AA9, 0.1.135)
 
@@ -6462,11 +6866,13 @@ editor behind decision 3). AA6–AA8 follow in their own sections. (0.1.135) AA9
 §9) and specified in VAULT-MESSAGING 0.93.0 §10.11 "Member folders for
 runs" and "Files handed in and out" (Ground Control #15810). Not built:
 vettid-android's card is #15812 (iOS: #15813, IOS-PLAN §4.19), and the
-vault's #15811. AA7 and AA8, the run settings and the run approvals, have
-no section of their own yet; this one adds only the folder and file
-parts, and where it says "the run settings" or "a run's approval" it
-means those. Until AA8, every `item.run` approval is deny-only
-(decision 15). Every text marked NEW is for the owner's approval.*
+vault's #15811. (0.1.137) AA7 and AA8, the run settings and the run
+approvals, are the two sections above ("How an agent may use an item"
+and "Approvals for runs, proxies and reveals"); this one adds only the
+folder and file parts, and where it says "the run settings" or "a run's
+approval" it means those. Until the app version with AA8 (card #16366),
+every `item.run` approval is deny-only (decision 15). Every text marked
+NEW is for the owner's approval.*
 
 **Shown only with a vault whose answers carry `run.folders`** (VAULT-MESSAGING
 0.93.0: `leash.item.list` and `leash.item.set` answer with it, an empty list when none; no capability name is used, S10). Without it, the run settings show no folders section, and an
@@ -6559,7 +6965,7 @@ connector newer than the vault cannot send them) is deny-only.
 | 12 | Confirm "End access"? | (a) confirm; (b) no confirmation | **(a)**: it declines the device's waiting requests, and the connector waits before asking again (AGENT-PLAN AG8) |
 | 13 | Drawer position | (a) after Vault; (b) after History; (c) in Settings | **(a)**: agents act on the vault's items |
 | 14 | Specification gaps (a VAULT-MESSAGING follow-up) | **a.** No list of pending pairings, access requests or held approvals; feed items carry only `ref`, so a restarted app loses the SAS and the request's `body`. **b.** `device.pair.approve` answers `{}`, so the approving app does not learn the new `device_id`. **c.** No code named for approving or denying an ended pairing, access request or approval. **d.** `device.list`'s `kind` and `state` values are not listed. **e.** `audit.list` has no device filter. **f.** `leash.item.changed` (§10.11) is missing from §10.1's `sync.event` table, and whether resumption sends `leash.agent.suspended{suspended: false}` is not said. **g.** `item.use` returns HMAC-SHA-256 keyed by the value over data the agent chooses, so a short or guessable value (a PIN, a dictionary password) can be found offline from one result; an `auto` rule allows it without asking, within the rate limits. §10.11 does not say so. **h.** §11.10.9 has no capability for the ways to use a secret, so an app cannot tell a vault that refuses reveals from one that answers `item.get` without asking (decision 17). **i.** Whether `share.rule.set{dry_run: true}` for an agent subject needs the unlock window (vettid-vault answers it without) | **One small spec PR** for a–d and f–i: `device.pending.list` (pairings with `sas`, access requests, approvals with `body` and `flags`), and until then the `device.pair.pending` feed item's `ref` = the `pairing_id` (so a lost pairing can be rejected) and its name; `device_id` in the approval's answer (vettid-vault already records it on the `device.paired` feed item, which the app uses meanwhile); `not_found` for an ended one; the `kind` and `state` values; the table fixed; g stated in §10.11 with the advice to share only long random values; the capability `item_ways`; dry runs need no window. e stays (search by name works). The app works as written above until then |
-| 15 | `item.run` and `item.proxy` asks before AA8 | (a) deny-only with "Update VettID"; (b) hide | **(a)**, as 10 |
+| 15 | `item.run` and `item.proxy` asks before AA8 | (a) deny-only with "Update VettID"; (b) hide | **(a)**, as 10. (0.1.137; card GC #16365) **Until the app version with AA8 only** (card #16366): from that version, AA8 ("Approvals for runs, proxies and reveals") shows them with Approve and Deny, and keeps Deny only for what it cannot show in full (its "Fail closed" list) |
 | 16 | Channel for an agent paused or asking too often | (a) Security alarms; (b) Vault activity (today) | **(a)**: both mean an agent misbehaves. §4 Notification modes, 7 (the mapping) is changed with it |
 | 17 | The vault without the ways to use a secret (AGENT-PLAN AV9 not started): today's staging vault answers an included item's `item.get` within the rule's limits without asking, so every agent rule hands values to the agent's app once an item is included: an `auto` rule at once, an `ask` rule after the member allows the item; the app cannot tell which vault it has (14h) | (a) the A6 checklist, or only its `auto` step, waits until AV9 is in a staging release; (b) the app hides `auto` until it knows the vault has the ways; (c) the history warning on every agent rule until then; (d) the capability `item_ways` in §11.10.9, listed by the release that ships AV9 | **(d) with (b) and (c), and (a) for the `auto` step**: the app offers **Include tagged items automatically** only when the vault lists `item_ways`; without it, every agent rule is ask-only and its editor and row carry "On this vault, the agent may receive the values of the items it uses, and its app may keep them in its history."; A6's `auto` step runs once AV9 is on staging |
 | 18 | Show `item.use`'s data in the approval | (a) show it, decoded (text when printable, else hex); (b) show only the item and field | **(a)**: the data is what the agent has the vault compute over the secret; seeing it lets the member notice a guessing attempt or a stranger's challenge |
