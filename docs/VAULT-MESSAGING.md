@@ -15,12 +15,12 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md (0.3.0)
   - MEMBER-API.md (2.14.0)
-  - ANDROID-PLAN.md (0.1.135)
-  - IOS-PLAN.md (0.1.78; §9.1 VA1–VA4)
-  - AGENT-PLAN.md (0.1.17; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, AG14, §4.9, AV9–AV11)
+  - ANDROID-PLAN.md (0.1.138)
+  - IOS-PLAN.md (0.1.80; §9.1 VA1–VA4)
+  - AGENT-PLAN.md (0.1.21; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, AG14, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
-  - AGENT-SEPARATE-ACCOUNT.md (0.1.2; §6, §9 Q1 a and Q9 a)
+  - AGENT-SEPARATE-ACCOUNT.md (0.1.5; §6, §9 Q1 a and Q9 a)
   - BALLOT-PROTOCOL.md (0.14.1; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at be57292, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.14.1)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.34; 0.1.6 approved 2026-10-04)
@@ -19698,7 +19698,7 @@ item's settings allow for its task:
     `name`, in `env` and in a binding's `env` list (`leash.item.set`,
     `bad_request`); a name with a
     `/`, `\`, `:`, `..`, a reserved Windows name, a trailing dot, or
-    two names equal without case refused (`bad_request`); an input
+    two names equal on the key (0.93.1) refused (`bad_request`); an input
     outside every entry, or an output folder in a read-only entry or
     outside every entry, `cwd_not_allowed` with `where` `"input"` or
     `"output"`; the approval carries `member_files` and shows names,
