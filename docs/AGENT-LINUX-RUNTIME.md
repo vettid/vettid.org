@@ -1509,7 +1509,13 @@ this note):
   makes them ask (owner a, GC #16381; the lead's call, #16397).
   `class-edit` stays: its check falls through to the printer check only
   for a name that isn't a class, so it can't reach that method on its
-  own;
+  own (renaming a class re-adds a printer only for a name that is no
+  longer a class, and then from the temporary PPD the helper itself
+  fetched, never a path the caller gives). `server-settings` stays too,
+  though it lets the member replace `cupsd.conf` (read with the
+  caller's ids, sent as root): that is `lpadmin`'s power, and the
+  directives that would give root live in `cups-files.conf`, which it
+  can't change (the lead's call, GC #16260);
 - `hostname1`'s `set-hostname` and `set-static-hostname`, **only with
   §11.1's rule that a `NOPASSWD` rule for any host counts** (the lead's
   condition, GC #16332): otherwise setting the host name could make a
@@ -1637,7 +1643,8 @@ as root, the system bus under its sandbox) is measured in the helper PR
 and added there by exactly what is needed, said in that PR (§13).
 
 **The elevated commands drop the member's sudo ticket.** `pair`,
-`forget` and the elevated `status` make the member type the `sudo`
+`forget`, `rules-file --write` and the elevated `status` make the member
+type the `sudo`
 password, which opens sudo's caching window for that terminal. They
 remove the invoking member's time stamp when they start and again before
 they exit, as a best effort (chosen): the name comes from
@@ -2032,7 +2039,11 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     `sudo`, `wheel`, `admin`, a refusing group or a group §2 keeps
     apart, or given a sudo, `doas` or polkit grant, refuses runs and
     proxies;
-  - `install` and uninstall leave nothing behind. Uninstall removes the
+  - `rules-file --write` leaves the file root-owned, 0644, and the
+    granted actions then ask for the password (the four printer actions
+    on Ubuntu, the package and firewall actions on Fedora);
+  - `install` and uninstall leave nothing behind but the rules file,
+    which uninstall leaves (§2). Uninstall removes the
     users, the groups, the `.deny` entries, the run root,
     `/etc/vettid-agent/<n>/`, the credential and the pairing's four
     units, and the last pairing's uninstall the two shared policy-check
