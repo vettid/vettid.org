@@ -39,10 +39,11 @@ changelog:
     step, `NFD(fold(upper(NFD(e))))`, where `upper` maps each rune by
     its Unicode simple upper-case mapping (Go `unicode.ToUpper`), so
     the dotless `ı` (U+0131) merges with `I` and `i`: Unicode's simple
-    upper case maps `ı` to `I`. File systems differ here: NTFS's
-    default `$UpCase` table from Windows XP to Windows 7 keeps `ı` and
-    `I` apart, while exFAT's recommended up-case table merges them.
-    Merging only refuses more. In Unicode 15.0 (Go's tables) U+0131 is
+    upper case maps `ı` to `I`. NTFS's default `$UpCase` table (Windows
+    XP to 7) and exFAT's recommended up-case table both keep `ı` and
+    `I` apart; the step merges them anyway, because merging only
+    refuses more. The reserved Windows names are also compared
+    upper-cased (Go `strings.ToUpper`), so `CONıN$` is reserved. In Unicode 15.0 (Go's tables) U+0131 is
     the only rune whose simple upper case lies outside its `SimpleFold`
     orbit, so no other key changes; and the review's check
     (vettid/vettid.org#653, on that table rebuilt from ntfs-3g's) found
@@ -19150,10 +19151,10 @@ item's settings allow for its task:
       (0.93.2) the dotless `ı` (U+0131) keys as `I`, so it merges with
       `I` and `i`. (0.93.2) That is the `upper` step: Unicode's simple
       upper case maps `ı` to `I`, while `ı` is alone in its `SimpleFold`
-      orbit, so `fold` alone kept it apart. File systems differ here:
-      NTFS's default `$UpCase` table from Windows XP to Windows 7 keeps
-      `ı` and `I` apart, while exFAT's recommended up-case table merges
-      them. Merging only refuses more. A check of that Windows 7 table
+      orbit, so `fold` alone kept it apart. NTFS's default `$UpCase`
+      table (Windows XP to 7) and exFAT's recommended up-case table both
+      keep `ı` and `I` apart; the step merges them anyway, because
+      merging only refuses more. A check of that Windows 7 table
       (rebuilt from ntfs-3g's) found that the 0.93.1 key already merges
       every pair the table upper-cases. In Unicode 15.0 (Go's tables)
       U+0131 is the only rune
@@ -19366,8 +19367,8 @@ item's settings allow for its task:
     `error.message` (§5.3), so that the app can say which setting the
     vault refused: printable ASCII only, at most 200 bytes, in the form
     `<member>: <rule>`, where `<member>` is the member's path in the
-    body (`ways`, `run.each`, `run.programs[1].program`,
-    `run.programs[0].env[2]`, `run.folders[3].path`, `proxy.hosts[0]`,
+    body (`ways`, `run.programs[1].program`,
+    `run.programs[0].env[2]`, `run.each`, `run.folders[3].path`, `proxy.hosts[0]`,
     `proxy.header`, `proxy.prefix`), indexes from 0, and `<rule>` a short
     English phrase for the rule broken (`not absolute`, `too long`,
     `holds a control or format character`, `holds a ~ in the last
