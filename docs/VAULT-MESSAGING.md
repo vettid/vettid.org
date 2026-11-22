@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.93.1
+version: 0.93.2
 date: 2026-11-22
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -15,12 +15,12 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md (0.3.0)
   - MEMBER-API.md (2.14.0)
-  - ANDROID-PLAN.md (0.1.135)
-  - IOS-PLAN.md (0.1.78; §9.1 VA1–VA4)
-  - AGENT-PLAN.md (0.1.17; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, AG14, §4.9, AV9–AV11)
+  - ANDROID-PLAN.md (0.1.138)
+  - IOS-PLAN.md (0.1.80; §9.1 VA1–VA4)
+  - AGENT-PLAN.md (0.1.21; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, AG14, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
-  - AGENT-SEPARATE-ACCOUNT.md (0.1.2; §6, §9 Q1 a and Q9 a)
+  - AGENT-SEPARATE-ACCOUNT.md (0.1.5; §6, §9 Q1 a and Q9 a)
   - BALLOT-PROTOCOL.md (0.14.1; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at be57292, not in this repository: the vote protocol §10.19 follows; the vectors of §16 are those of 0.14.1)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.34; 0.1.6 approved 2026-10-04)
@@ -30,6 +30,41 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.93.2: 2026-11-22, erratum to 0.93.1. Owner-approved card GC
+    #16477, from the reviews of ANDROID-PLAN 0.1.137 (AA7, AA8,
+    vettid/vettid.org#652) and vettid/vettid-android#430. Every rule
+    here only clarifies or refuses more, except that (5) adds an
+    optional message. (1) §10.11 "No entry may be
+    equal to, under or above another": the key gains an upper-case
+    step, `NFD(fold(upper(NFD(e))))`, where `upper` maps each rune by
+    its Unicode simple upper-case mapping (Go `unicode.ToUpper`), so
+    the dotless `ı` (U+0131) merges with `I` and `i`: Unicode's simple
+    upper case maps `ı` to `I`. NTFS's default `$UpCase` table (Windows
+    XP to 7) and exFAT's recommended up-case table both keep `ı` and
+    `I` apart; the step merges them anyway, because merging only
+    refuses more. The reserved Windows names are also compared
+    upper-cased (Go `strings.ToUpper`), so `CONıN$` is reserved. In Unicode 15.0 (Go's tables) U+0131 is
+    the only rune whose simple upper case lies outside its `SimpleFold`
+    orbit, so no other key changes; and the review's check
+    (vettid/vettid.org#653, on that table rebuilt from ntfs-3g's) found
+    that the 0.93.1 key already merges every pair the Windows 7 table
+    upper-cases. `İ` (U+0130) stays distinct from `i`. The U+0345 note
+    still holds, re-derived. Tests added. (2) §10.11 "The approval": an app
+    shows **at least** the first 16 hex digits of `sha256` (it may show
+    more, all 64 included). (3) §11.3: `vault.enroll.confirm` is
+    idempotent: a repeat answers `{}` and changes nothing; the vault
+    already behaves so, so the card owes at most a test. (4) §6.8
+    step 1 lists `folders?`, as the wire table does, and §6.8 says that
+    an app treats an unknown top-level member of an agent's
+    `approval.pending` as Deny only, so a new member ships only after
+    the apps that know it. (5) `leash.item.set`'s `bad_request` adds an
+    optional short reason in `error.message`, naming the member and the
+    rule, never a value; apps show a fallback text when it is absent,
+    empty, longer than 200 bytes or not printable ASCII. Not built:
+    vault card to follow, for (1) and (5), and a test for (3). **Open (lead):** a `leash.item.list`
+    member that marks an item with no use left (§10.11 "An item with no
+    use left"; ANDROID-PLAN AA7 cannot show it) is left for a later
+    change: it is a new member, not a clarification.
   - 0.93.1: 2026-11-22, erratum to 0.93.0, from the blind review of
     vettid/vettid-vault#292 (the vault's side of §10.11 "Member folders
     for runs" and "Files handed in and out"; the lead's calls, Ground
@@ -12324,12 +12359,29 @@ device (`limit` beyond that):
 
 1. The vault sends the owner's apps `approval.pending{approval_id,
    device_id, role, name, type, body, exp, flags?, previous_sha256?,
-   previous_path?, replaces?, proxy?}` (`flags`, 0.42.0:
+   previous_path?, replaces?, proxy?, folders?}` (`flags`, 0.42.0:
    warnings for an agent's way of using a secret, §10.11; `proxy`,
-   0.92.0: an `item.proxy`'s host, header and prefix, §10.11) and the requester
+   0.92.0: an `item.proxy`'s host, header and prefix, §10.11;
+   `folders`, 0.93.0: a run's folder entries, §10.11) and the requester
    `approval.waiting{approval_id, request_id, exp}`; a requester that
    receives it waits up to `exp` for the response instead of the usual
-   30 s (§8.1).
+   30 s (§8.1). (0.93.2) **New members ship after the apps.** For an
+   agent's `item.run`, `item.proxy` and `item.get` (ANDROID-PLAN AA8
+   "Fail closed", IOS-PLAN §4.21), an app shows an approval only when it
+   knows every top-level member of `approval.pending` (and of its
+   `pending.list` entry); one it does not know makes it Deny only,
+   against §10.1's "unknown members are ignored", because a member it
+   cannot show may change what approving means. Other approval types
+   (an agent's `item.use` and `catalog`, the delegable owner types, a
+   desktop's step-up request) follow §10.1 and ignore an unknown
+   member; a member that would change what approving one of them means
+   needs the apps to adopt this rule for it first. So a vault release
+   that adds a member to an agent's approval ships only after the app
+   versions that know it, or members see Deny only. Those app versions
+   must still work with a vault that does not send the member yet
+   (absent means what it meant before), so this makes no ordering knot
+   with "apps require the current vault release" (§10.4.2). This only
+   clarifies.
 2. An app answers `approval.decide{approval_id, approve}`. On approval the
    vault executes the request then, as the requester's (its access
    session must still be valid), and answers the requester as usual; on
@@ -19085,14 +19137,37 @@ item's settings allow for its task:
     also refuses a POSIX folder really named `...` or ` `.
     - **No entry may be equal to, under or above another.** Entries are compared **folded**, on every system, on
       this key: a drive path's `/` as `\`, and for each element
-      (0.93.1) `NFD(fold(NFD(e)))`, where `fold` maps **each rune to
+      (0.93.1) `NFD(fold(NFD(e)))`, which (0.93.2) becomes
+      `NFD(fold(upper(NFD(e))))`,
+      where `upper` maps each rune by its **Unicode simple upper-case
+      mapping** (UnicodeData.txt field 12; Go `unicode.ToUpper`) and `fold` maps **each rune to
       the smallest rune of its `unicode.SimpleFold` orbit** (simple case
       folding, CaseFolding.txt statuses C and S, as for ballot labels);
       this is normative. It is Unicode's canonical caseless match (D145)
-      with simple folding, except that the orbit of U+0345 (combining
+      with simple folding, with two exceptions, each of which only
+      refuses more: the orbit of U+0345 (combining
       ypogegrammeni, with U+0399, U+03B9 and U+1FBE) folds to the
-      combining mark, so a few Greek names with an iota merge more,
-      which only refuses more. Then the element's trailing dots and
+      combining mark, so a few Greek names with an iota merge more; and
+      (0.93.2) the dotless `ı` (U+0131) keys as `I`, so it merges with
+      `I` and `i`. (0.93.2) That is the `upper` step: Unicode's simple
+      upper case maps `ı` to `I`, while `ı` is alone in its `SimpleFold`
+      orbit, so `fold` alone kept it apart. NTFS's default `$UpCase`
+      table (Windows XP to 7) and exFAT's recommended up-case table both
+      keep `ı` and `I` apart; the step merges them anyway, because
+      merging only refuses more. A check of that Windows 7 table
+      (rebuilt from ntfs-3g's) found that the 0.93.1 key already merges
+      every pair the table upper-cases. In Unicode 15.0 (Go's tables)
+      U+0131 is the only rune
+      whose simple upper case lies outside its orbit; for every other
+      rune `upper` stays in the orbit and `fold` gives what it gave
+      before, so the step only refuses more. `İ` (U+0130) stays
+      distinct from `i`: the first `NFD` makes it `I` +
+      U+0307, which keys as `I` + U+0307, never as `I` (it merges with
+      `i` + U+0307, which only refuses more). The U+0345 note above
+      still holds: `upper` maps U+0345, U+03B9 and U+1FBE to U+0399, and
+      `fold` maps U+0399 back to U+0345, as before; so `αί` and `άι`
+      still merge (U+0345, combining class 240, is put after U+0301,
+      class 230, by the last `NFD`). Then the element's trailing dots and
       spaces are dropped. So the composed and decomposed forms of a name
       (`café`, `ǰ` against `J` + U+030C) are one, as on macOS (APFS),
       even on Linux, where they are two folders. (0.93.0 compared
@@ -19287,6 +19362,38 @@ item's settings allow for its task:
     no settings is `conflict`. `leash.item.list` shows an item with no
     settings as `{agent_id, item_id, ways: ["use"]}`, with no `version`
     and no `updated_at`.
+  - (0.93.2; not built: vault card to follow) **Why a setting is
+    refused.** A `leash.item.set` answered `bad_request` carries
+    `error.message` (§5.3), so that the app can say which setting the
+    vault refused: printable ASCII only, at most 200 bytes, in the form
+    `<member>: <rule>`, where `<member>` is the member's path in the
+    body (`ways`, `run.programs[1].program`,
+    `run.programs[0].env[2]`, `run.each`, `run.folders[3].path`, `proxy.hosts[0]`,
+    `proxy.header`, `proxy.prefix`), indexes from 0, and `<rule>` a short
+    English phrase for the rule broken (`not absolute`, `too long`,
+    `holds a control or format character`, `holds a ~ in the last
+    element`, `matches another entry`, `inside or above another entry`,
+    `not a valid name`, `too many`, `not a host name`, `not allowed for
+    the proxy`); these phrases are examples, not a closed list. **It
+    never holds a value the member typed** (a
+    program, a path, a host, a header name or a prefix), with one
+    exception: a variable name the vault refuses by its own list may be
+    named, as in `run.programs[0].env[1]: VETTID_IN is reserved` or
+    `run.programs[0].env[0]: LD_PRELOAD loads code`. The name's form
+    (`^[A-Z_][A-Z0-9_]{0,63}$`) is checked before the list, so a name
+    that is echoed always has that form; a name of another form gets
+    `not a valid name` and is not echoed. **Which rule is named:** the
+    first one broken, taking the members in the order this
+    specification lists them (`ways`, then `run` with `programs`,
+    `each` and `folders`, then `proxy` with `hosts`, `header` and
+    `prefix`; entries by index), and within a member the rules in the
+    order this section lists them; for a rule between entries (two that
+    match, one inside another), the later entry is named. The message is
+    advice for the member: an app MUST NOT parse it, and shows a
+    fallback text of its own when it is absent, empty, longer than 200
+    bytes, or holds a byte outside printable ASCII (0x20–0x7E); the app
+    does not check its form. This adds an optional message: the code
+    and what is refused are unchanged.
   - **Widening needs the member.** A `leash.item.set` that adds a way or
     a program or a host, empties `programs`, adds a name to an entry's
     `env` (0.85.3), or sets `each` to `false` needs the credential's
@@ -19484,7 +19591,8 @@ item's settings allow for its task:
     (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`,
     (0.93.1) `COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`, `LPT³`, and,
     deliberately wider than Microsoft's list, `COM0`, `LPT0`, `CONIN$`
-    and `CONOUT$`; any case, with or without an extension: (0.93.1) the
+    and `CONOUT$`; any case ((0.93.2) compared upper-cased, Go
+    `strings.ToUpper`), with or without an extension: (0.93.1) the
     name is judged up to its first dot with trailing spaces dropped, so
     `CON .txt` and `nul  .log` are reserved). Two inputs with the same
     name (compared on the key of "No entry may be equal to, under or
@@ -19627,7 +19735,7 @@ item's settings allow for its task:
     `name`, in `env` and in a binding's `env` list (`leash.item.set`,
     `bad_request`); a name with a
     `/`, `\`, `:`, `..`, a reserved Windows name, a trailing dot, or
-    two names equal without case refused (`bad_request`); an input
+    two names equal on the key (0.93.1) refused (`bad_request`); an input
     outside every entry, or an output folder in a read-only entry or
     outside every entry, `cwd_not_allowed` with `where` `"input"` or
     `"output"`; the approval carries `member_files` and shows names,
@@ -19642,7 +19750,9 @@ item's settings allow for its task:
     (`/home/al/work/. /.. /.. /.ssh`); two entries that differ only by
     NFC against NFD (`/a/café` and `/a/cafe\u0301`), or by `/a/J\u030c`
     against `/a/\u01f0`, or `/a/a\u03b9\u0301` against
-    `/a/a\u0345\u0301`, or nest on the key, refused; two input or
+    `/a/a\u0345\u0301`, or (0.93.2) `/a/\u0131` against `/a/I` (and
+    against `/a/i`), or nest on the key, refused; (0.93.2) `/a/\u0130`
+    against `/a/i` accepted (two entries); two input or
     output names equal on the key refused; `COM0`, `LPT0`, `COM²`,
     `COM¹`, `LPT³`, `LPT³.txt`, `CONIN$`, `CONIN$.txt`, `conout$`,
     `CON .txt` and `nul  .log` refused as names; an input equal to an
@@ -19820,8 +19930,10 @@ item's settings allow for its task:
   > `item.proxy` (decision a, GC #14595; §8.2).
 
   The app shows, for an `item.run`: the agent, the item and field, the
-  program, (0.85.3) its fingerprint (the first 16 hex digits of
-  `sha256`, in groups of four) and, for `program_changed`, the previous
+  program, (0.85.3) its fingerprint ((0.93.2) at least the first 16
+  hex digits of `sha256`, in groups of four; an app may show more, all
+  64 included, as ANDROID-PLAN AA8 does on a tap and for
+  `program_changed`) and, for `program_changed`, the previous
   fingerprint and path beside them and that the program changed since
   the member last approved it, or, when `previous_path` differs, that
   it "moved to <path>", stressed, every argument unabridged (characters that are not printable
@@ -20127,7 +20239,7 @@ grant set carries a `grant_seq`:
 | `leash.agent.resume` (app) | `{agent_id}` | `{}`; `not_found` unless the agent is suspended |
 | `leash.status.get` (agent) | `{grant_id}` | `{grant_id, status, status_sig, rotations?}`; `not_found`, `forbidden` (suspended), `owner_check_required` (the vault is held, §3.6.3) |
 | `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}`; (0.42.0) `{op: "item.run", item_id, field_id, program, sha256 (0.85.3), argv, cwd (0.93.0: optional), how, name?, env?, inputs? (0.93.0), output? (0.93.0)}` or `{op: "item.proxy", item_id, field_id, host, seconds?}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}`; (0.42.0) `{item_id, field_id, value}` or `{item_id, field_id, value, header, prefix, host, expires_at}`; (0.92.0) a retransmission's cached copy of an `item.get`, `item.run` or `item.proxy` answer carries `withheld: true` and no secret value (§8.2); `way_not_allowed` (body `{ways}`), `program_not_allowed`, (0.85.3) `env_not_allowed` (body `{names}`), (0.93.0) `cwd_not_allowed` (body `{where, path}`) |
-| `leash.item.set` (app; widening within the unlock window) | `{agent_id, item_id, version?, ways, run?, proxy?}` (0.42.0; (0.93.0) `run` may hold `folders`); `version` required to replace existing settings (`conflict`) | `<item_ways>`; `not_found` unless a rule of the agent includes the item, with or without a use left (§10.11 "An item with no use left"); `credential_locked` for a widening outside the window; `bad_request` |
+| `leash.item.set` (app; widening within the unlock window) | `{agent_id, item_id, version?, ways, run?, proxy?}` (0.42.0; (0.93.0) `run` may hold `folders`); `version` required to replace existing settings (`conflict`) | `<item_ways>`; `not_found` unless a rule of the agent includes the item, with or without a use left (§10.11 "An item with no use left"); `credential_locked` for a widening outside the window; `bad_request`, (0.93.2) with `error.message` naming the member and the rule (§10.11 "Why a setting is refused") |
 | `leash.item.list` (app, desktop) | `{agent_id, item_id?}` (0.42.0) | `{items: [<item_ways>]}`: each item the agent's rules include, (0.91.0) with or without a use left, with or without settings (shown as `{agent_id, item_id, ways: ["use"]}` when it has none) |
 
 - `agent_id` names an active device of role `agent` (`not_found`
@@ -22540,6 +22652,14 @@ size (§11.4).
   NOT be replaced: the enclave answers `vault_exists`. (0.27.4: the
   enclave decides this from stored objects the host serves, so the rule
   holds against the member API and apps, not against the host, §13.3.)
+- **Confirming twice** (0.93.2, a clarification of what the vault
+  already does). `vault.enroll.confirm`
+  is idempotent: on a vault already confirmed, it answers `{}` and
+  changes nothing (no audit line, no event). So a second confirmation,
+  sent again under a new `id` after a lost answer, is harmless. An app
+  that then sends its first settings may meet a `conflict` on
+  `settings.set` (§10.8) if its first try had already landed; the app
+  retries it (it reads the current `version`, then sends again).
 - **Re-enrollment.** The API assigns `vault_id` once per member: a new
   enrollment carries the member's existing `vault_id` unless the vault was
   deleted. For an enrollment whose `vault_id` already holds a vault, the

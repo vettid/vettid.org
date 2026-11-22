@@ -1,15 +1,22 @@
 ---
 title: AGENT-SEPARATE-ACCOUNT
 status: approved by the owner 2026-11-05 (§9); design note. Nothing here is built; AGENT-PLAN and the code follow
-version: 0.1.4
+version: 0.1.5
 date: 2026-11-22
 owner: Al Liebl (Mesmer)
 component: vettid-agent (the agent connector): install, process model, keys at rest, runs and proxies
 related:
-  - AGENT-LINUX-RUNTIME.md (0.1.1, draft) §11 — who counts as an administrator on Linux
-  - AGENT-PLAN.md (0.1.9; 0.1.10 in vettid.org #538) AG1a, AG3, AG4, AG11, §4.2, §4.6, §4.7, §4.9, A3.8, A3.9, A5
-  - VAULT-MESSAGING.md (0.84.0; 0.85.0 in #538) §10.11 "Ways to use a secret"
+  - AGENT-LINUX-RUNTIME.md (0.1.2, draft) §11 — who counts as an administrator on Linux
+  - AGENT-PLAN.md (0.1.21) AG1a, AG3, AG4, AG11, §4.2, §4.6, §4.7, §4.9, A3.8, A3.9, A5
+  - VAULT-MESSAGING.md (0.93.2) §10.11 "Ways to use a secret"
 changelog:
+  - 0.1.5: 2026-11-22, erratum (VAULT-MESSAGING 0.93.2, AGENT-PLAN
+    0.1.21; owner-approved card GC #16477). §6 "Outputs": the reserved
+    Windows names are VAULT-MESSAGING §10.11's list, which the note now
+    points at instead of "`CON`, `NUL`, `COM1` and the like". This only
+    clarifies (the list refuses more than the examples suggested).
+    Related versions brought up to date (AGENT-PLAN 0.1.21,
+    VAULT-MESSAGING 0.93.2, AGENT-LINUX-RUNTIME 0.1.2).
   - 0.1.4: 2026-11-22 (card #16224; owner a, GC #16214). §5: on Linux a
     member with password-less `sudo` is now refused (`member_is_admin`,
     AGENT-LINUX-RUNTIME §11), rather than only left without the
@@ -725,8 +732,11 @@ cannot read the member's files**. This is the main cost.
         or a symbolic link. A run can't link an output to the
         connector's state, and macOS has no `protected_hardlinks`.
       - Flat names only: no folders, no `..`, no absolute paths, no
-        stream names (`:`), and no reserved Windows names (`CON`, `NUL`,
-        `COM1` and the like).
+        stream names (`:`), and no reserved Windows names: (0.1.5) the
+        list of VAULT-MESSAGING §10.11's flat-name rule (`CON`, `PRN`,
+        `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`, the superscript
+        forms, `CONIN$` and `CONOUT$`, any case, judged up to the first
+        dot with trailing spaces dropped).
       - Caps: at most 16 files, 16 MiB each, 64 MiB in all; past them, the
         rest is dropped, and the answer says so.
     - **Writing them**: the stub writes into the folder the member chose

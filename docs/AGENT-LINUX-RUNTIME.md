@@ -1,14 +1,21 @@
 ---
 title: AGENT-LINUX-RUNTIME
 status: draft design note; the run helper and the key sealing get their independent reviews (AGENT-PLAN §9 rule 6) from it, before their code. Built so far: the channel's Unix-socket end (vettid/vettid-agent#55)
-version: 0.1.1
+version: 0.1.2
 date: 2026-11-22
 owner: Al Liebl (Mesmer)
 component: vettid-agent (the agent connector): the separate-account mode on Linux (AGENT-PLAN A5.6)
 related:
-  - AGENT-SEPARATE-ACCOUNT.md (0.1.4) §2, §3, §4, §5, §6, §8
-  - AGENT-PLAN.md (0.1.20) AG3, AG14, §4.2, §4.7, §4.9, A3.10a, A3.10d, A5.6, §11
+  - AGENT-SEPARATE-ACCOUNT.md (0.1.5) §2, §3, §4, §5, §6, §8
+  - AGENT-PLAN.md (0.1.21) AG3, AG14, §4.2, §4.7, §4.9, A3.10a, A3.10d, A5.6, §11
+  - VAULT-MESSAGING.md (0.93.2) §10.11 "Files handed in and out"
 changelog:
+  - 0.1.2: 2026-11-22, erratum (VAULT-MESSAGING 0.93.2, AGENT-PLAN
+    0.1.21; owner-approved card GC #16477). §7: the connector builds
+    `VETTID_IN` and `VETTID_OUT` only for a run with non-empty `inputs`
+    or an `output` (VAULT-MESSAGING §10.11 "How a program finds them";
+    0.93.1: `inputs: []` is the same as none). This only clarifies.
+    Related versions brought up to date.
   - 0.1.1: 2026-11-22 (card #16224). §11 rewritten to the owner's a on
     GC #16214 (replacing a on #15946), a on #16258 and a-a on #16331:
     the member is an administrator only when its account can become
@@ -797,8 +804,10 @@ is refused if it repeats one the connection used. Descriptors travel with
     tmpfs it never reaches the disk (see §6 on swap).
 
   The paths follow from `<n>`, the slot and `run`, so the connector
-  builds `HOME`, `TMPDIR`, `VETTID_IN`, `VETTID_OUT`, the secret's
-  variable and `{secret_file}` in `env` and `argv` itself. Two of these
+  builds `HOME`, `TMPDIR`, (0.1.2) `VETTID_IN` and `VETTID_OUT` (only
+  for a run with non-empty `inputs` or an `output`, VAULT-MESSAGING
+  §10.11), the secret's variable and `{secret_file}` in `env` and
+  `argv` itself. Two of these
   depart from AGENT-PLAN §4.9's minimal environment, which copies them
   from the connector's environment, and the owner accepted both:
   - `USER` and `LOGNAME` are the runner's name (owner a, GC #15969),
