@@ -47,7 +47,47 @@ changelog:
     Users, Everyone or Users pass the launch check (treat as launchable); git, node, npm, ssh and
     python run; errors 1385, 1907 and 1058. Gaps: window messages on the
     run's desktop are untried, and the holder of the dead launcher's
-    object is unknown. **Second review round (two more blind reviewers, NOT READY; the lead's calls marked):** the launcher's token is INTERACTIVE enabled, LOCAL absent and BATCH absent (measured, vettid/vettid-agent#57); the service's pipes reaching the program through `STARTF_USESTDHANDLES` is to be measured by the probe's step 3 (only the non-inheritance of the service's sentinel is measured); the launcher's conhost gap, its requirement and the report channel (to be measured by step 3); failure handling with a NEW §11 text (the lead's call); the DCOM wording (the launch check passes, treat as launchable); the launcher builds its token before the lock; the deny re-check by the elevated `status`; the per-run desktop's access list; the service's own image read decides and the launcher's is a pre-check; one kill-on-close job per run; the inferred TOKEN_QUERY read and the documented sign-in log are marked as not measured. Nothing else changes
+    object is unknown. **Second review round (two more blind reviewers, NOT READY; the lead's calls marked):** the launcher's token is INTERACTIVE enabled, LOCAL absent and BATCH absent (measured, vettid/vettid-agent#57); the service's pipes reaching the program through `STARTF_USESTDHANDLES`, the launcher's conhost gap, its requirement and the report channel (all measured, below); failure handling with a NEW §11 text (the lead's call); the DCOM wording (the launch check passes, treat as launchable); the launcher builds its token before the lock; the deny re-check by the elevated `status`; the per-run desktop's access list; the service's own image read decides and the launcher's is a pre-check; one kill-on-close job per run; the inferred TOKEN_QUERY read and the documented sign-in log are marked as not measured. Nothing else changes
+    **Measured by vettid/vettid-agent#60 (at 4cffd3b, windows-2025, all
+    asserted):** (1) the launcher's conhost: with `CREATE_NO_WINDOW` it
+    holds an INTERACTIVE-enabled copy of the unlocked token; it was gone
+    by the time the program ran in every run, which depends on timing
+    and is no guarantee. **Design (the lead's call):** the launcher is a
+    GUI-subsystem executable built with `-ldflags -H=windowsgui` (not a
+    patched binary, which would break an Authenticode signature); it has
+    no conhost (measured with an equivalent subsystem-2 binary), and the
+    lock, handoff, resume, output and report work the same;
+    `CREATE_NO_WINDOW` is ignored for it. Fallbacks: `FreeConsole` ends
+    the conhost at once, or the launcher locks its process and token
+    (both measured). The belt stays: the service resumes only once the
+    job's process list is exactly the program. (2) Output pipes: the
+    service creates the program's standard pipes non-inheritable and
+    passes them with `STARTF_USESTDHANDLES`; they reach the launcher as
+    inheritable handles either way, the launcher passes them in the
+    program's handle list, and output from both reaches the service
+    after the launcher exits. (3) Report pipe (tightened, the lead's
+    call): a random name of at least 48 bits, first instance, one
+    instance, remote clients rejected; its access list gives the service
+    and that runner only, the runner write-only (no
+    `FILE_CREATE_PIPE_INSTANCE`, 0x4); the service checks
+    `GetNamedPipeClientProcessId` against the launcher's id; the launcher
+    opens it with `SECURITY_SQOS_PRESENT|SECURITY_IDENTIFICATION`; it
+    carries the `cwd` final path, whether it is listable, the lock's
+    result, and the program's process and thread ids (measured); another
+    runner and a plain local user are refused read and write (measured);
+    the report is a claim the service verifies. (4) Order: after the
+    lock, `OpenProcessToken` on itself is denied, so the launcher opens
+    its token handle before the lock and builds the restricted token from
+    it. (5) The deny re-check: the service, with ChangeNotify only,
+    cannot read the runners' rights (`LsaEnumerateAccountRights` returns
+    STATUS_ACCESS_DENIED, 0xC0000022), so the RDP and network-logon
+    denies are re-checked only by the elevated `status` and at
+    install and upgrade, not at each run. (6) The virtual account's
+    default groups were not read by step 3: still to be read. (7) The
+    desktop's own access mask stays to be measured (the narrowest
+    DESKTOP_* mask user32 and ole32 need). (8) Gaps, unchanged: the
+    holder of the dead launcher's process object is unknown, and window
+    messages are untried.
   - 0.1.2: 2026-11-21, erratum with AGENT-PLAN 0.1.16. §4: an elevated
     administrator or root is also admitted to the channel, only for
     `pair`, `forget` and `status` (the lead's call). §3 "Keys at rest":
@@ -177,7 +217,7 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   `SeAssignPrimaryTokenPrivilege`, `SeIncreaseQuotaPrivilege` or
   `SeTcbPrivilege`; the service checks its own token at start and
   refuses to run, with an Event Log entry and `status` saying why, if it
-  holds any privilege beyond `SeChangeNotifyPrivilege`, or if its account is in Administrators or any group beyond the defaults (the virtual account's default groups are to be read by the probe's step 3; the self-check compares with that list) (the lead's call, 0.1.3 fix round). When the service refused to start, the stub answers `status`: it reads the service's state and the Event Log entry. **Route A is
+  holds any privilege beyond `SeChangeNotifyPrivilege`, or if its account is in Administrators or any group beyond the defaults (the virtual account's default groups are still to be read: step 3 of vettid/vettid-agent#60 did not read them; the self-check compares with that list) (the lead's call, 0.1.3 fix round). When the service refused to start, the stub answers `status`: it reads the service's state and the Event Log entry. **Route A is
   rejected:** granting `SeAssignPrimaryTokenPrivilege` to the service
   SID through LSA works (it alone is enough; `SeIncreaseQuotaPrivilege`
   is not needed), but that privilege alone is widely treated as enough
@@ -190,8 +230,7 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   secondary-logon service: `CreateProcessWithLogonW` with the runner's
   name and password (the password the connector keeps under its DPAPI),
   `dwLogonFlags` exactly 0 (never `LOGON_NETCREDENTIALS_ONLY`, which
-  would run as the connector; no profile), `CREATE_NO_WINDOW` (seclogon
-  refuses `DETACHED_PROCESS` for it), the run's own desktop (`lpDesktop`
+  would run as the connector; no profile), `CREATE_NO_WINDOW` (seclogon refuses `DETACHED_PROCESS` for it; the launcher is a GUI-subsystem executable, so the flag is ignored and not relied on, measured by vettid/vettid-agent#60), the run's own desktop (`lpDesktop`
   is never null), suspended, assigned to the run's kill-on-close job (one job per run),
   then resumed. **The job is mandatory** (the service cannot end a
   program without it), with no breakaway and the UI limits
@@ -223,10 +262,10 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   the job's process list is exactly the program** (so the launcher's
   conhost, which runs with an unlocked token, is gone too). It checks `GetProcessIdOfThread(th) == pid`, `IsProcessInJob` and the program's image (`QueryFullProcessImageNameW`, measured possible) against the pinned file, and only then resumes the program. The service's own read of the image decides; the launcher's check is a pre-check. **Output:** the
   service creates the standard pipes and passes them through the
-  launcher's standard handles to the program (whether they reach the program is to be measured by the probe's step 3); with `DETACHED_PROCESS`
+  launcher's standard handles to the program (measured by vettid/vettid-agent#60: the service creates them non-inheritable and passes them with `STARTF_USESTDHANDLES` to `CreateProcessWithLogonW`; they arrive at the launcher as inheritable handles either way, and the launcher passes them in the program's handle list; output from the launcher and the program reaches the service after the launcher exits); with `DETACHED_PROCESS`
   there is no console, and no conhost exists while the program runs
   (measured: the job holds only the program). (e) The read-only folder
-  check (`AccessCheck`) uses the program's token, not the launcher's. (f) **Order in the launcher (0.1.19, second review round):** it builds its restricted token before it locks its own token (or first opens a handle to it that can duplicate), since the lock removes its own right to duplicate it. **Gap, the launcher's conhost (0.1.19, second review round):** with `CREATE_NO_WINDOW` the launcher's conhost holds an unlocked, INTERACTIVE-enabled copy of the launcher's token, made before the launcher runs and so before the lock. **Requirement (the lead's call):** the launcher has no conhost (it is built as a GUI-subsystem executable), or, if that fails, its conhost is locked or detached before the program starts. Which one works is to be measured by the probe's step 3. **The report channel (the lead's call; to be measured by the probe's step 3):** a per-run named pipe the service creates, with an access list for the service's SID plus that runner's SID only; its name is on the launcher's command line. The launcher reports through it the `cwd` final path, the access-check result, the lock's result, and the program's process and thread ids. The report is untrusted: the service re-checks the ids, the job and the image itself. The standard handles are the program's alone. **Failure handling (the lead's call):** the launcher never starts the program unless the lock, the default access list and the thread's access list all succeeded, and it reports each result. On any failure, or on a timeout, the service closes the job (which kills everything in it), removes the station entry and the desktop, and refuses the run with the NEW §11 text "The program could not be started safely (<step>)."; `status` and the Event Log name the step. The failures covered: the lock or an access list failing; the restricted token or `CreateProcessAsUser` failing; the launcher exiting without a report; ids that fail `GetProcessIdOfThread`, `IsProcessInJob` or the image check; the job not coming down to exactly the program within 5 s; `ResumeThread` returning a count other than 1. Then the slot goes through its usual cleanup.
+  check (`AccessCheck`) uses the program's token, not the launcher's. (f) **Order in the launcher (0.1.19, second review round):** after the lock, `OpenProcessToken` on itself is denied (measured by vettid/vettid-agent#60), so it opens its token handle, with the rights `CreateRestrictedToken` needs, **before** the lock and builds the program's restricted token from that handle (measured: INTERACTIVE deny-only, `SeChangeNotifyPrivilege` only). **The launcher's conhost (0.1.19; measured by vettid/vettid-agent#60 at 4cffd3b, windows-2025, asserted):** with `CREATE_NO_WINDOW` the launcher has a conhost, and it holds an INTERACTIVE-enabled copy of the unlocked token (measured). It was gone by the time the program ran in every run, but that depends on timing, not a guarantee. **Design (the lead's call):** the launcher is a **GUI-subsystem executable, built with `-ldflags -H=windowsgui`** (not a patched binary, which would break an Authenticode signature). It has no console and no conhost (measured with an equivalent subsystem-2 binary), and the lock, the handoff, the resume, the output and the report work the same (measured). `CREATE_NO_WINDOW` is ignored for a GUI image, so nothing relies on it. Fallbacks, if ever needed: `FreeConsole` ends the conhost at once (measured), or the launcher locks the conhost's process and token (measured). **The belt (keep):** the service resumes the program only once the job's process list is exactly the program. **The report channel (the lead's call, with the tightening; measured by vettid/vettid-agent#60):** a per-run named pipe the service creates before the launcher starts: a random name of at least 48 bits, `FILE_FLAG_FIRST_PIPE_INSTANCE`, one instance, `PIPE_REJECT_REMOTE_CLIENTS`; its name is on the launcher's command line. Its access list grants the service and that runner only, the runner with write-only rights (no `FILE_CREATE_PIPE_INSTANCE`, 0x4). The service checks that `GetNamedPipeClientProcessId` equals the launcher's process id, and the launcher opens the pipe with `SECURITY_SQOS_PRESENT|SECURITY_IDENTIFICATION`. The launcher reports through it the `cwd` final path and whether it is listable, the lock's result, and the program's process and thread ids (measured). Another runner and a plain local user are refused both read and write (measured). The report is a claim: the service verifies the ids through the job, `GetProcessIdOfThread`, the creation time and the image. The standard handles are the program's alone. **Failure handling (the lead's call):** the launcher never starts the program unless the lock, the default access list and the thread's access list all succeeded, and it reports each result. On any failure, or on a timeout, the service closes the job (which kills everything in it), removes the station entry and the desktop, and refuses the run with the NEW §11 text "The program could not be started safely (<step>)."; `status` and the Event Log name the step. The failures covered: the lock or an access list failing; the restricted token or `CreateProcessAsUser` failing; the launcher exiting without a report; ids that fail `GetProcessIdOfThread`, `IsProcessInJob` or the image check; the job not coming down to exactly the program within 5 s; `ResumeThread` returning a count other than 1. Then the slot goes through its usual cleanup.
   Every handle the connector creates is non-inheritable. Measured: the
   launcher builds the restricted token and starts the program on it with
   no privilege; the program runs as exactly the runner, and git, node,
@@ -252,7 +291,7 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   runner accounts are granted `SeInteractiveLogonRight` explicitly
   (`install` checks the effective right), denied RDP logon
   (`SeDenyRemoteInteractiveLogonRight`) and network logon
-  (`SeDenyNetworkLogonRight`), re-checked by the elevated `status` (an administrator can read LSA rights); whether the service can read them with only ChangeNotify is to be measured by the probe's step 3, not
+  (`SeDenyNetworkLogonRight`), re-checked only by the elevated `status` and at install and upgrade (an administrator can read LSA rights; the service, with ChangeNotify only, cannot: `LsaEnumerateAccountRights` returns STATUS_ACCESS_DENIED, 0xC0000022, measured by vettid/vettid-agent#60; not measured: a network-logon attempt with the runner's password should fail with 1385, and RDP denial cannot be checked that way), not
   denied interactive logon (a runner also denied it was refused in the
   probe, error 1385) and not granted the batch logon right (measured: a
   run starts without it). Their passwords are random, meet the local complexity policy
@@ -284,7 +323,7 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   (READ_CONTROL, WINSTA_ACCESSGLOBALATOMS, WINSTA_EXITWINDOWS), the
   measured minimum (0x37F, 0x2003A and 0x2005A fail), removed after the
   run; it is never 0xF037F, which would give WRITE_DAC and WRITE_OWNER
-  on the shared station. The job's UI limits stop clipboard, atom and handle sharing. The per-run desktop's access list is SYSTEM, the service's SID, and that runner's SID, with DESKTOP_* rights for a normal client; the exact mask is to be measured by the probe's step 3, and until then it is the rights user32 needs. The desktop is closed after the run, and the connector creates no windows on the shared station. Window messages between processes on the run's
+  on the shared station. The job's UI limits stop clipboard, atom and handle sharing. The per-run desktop's access list is SYSTEM, the service's SID, and that runner's SID, with DESKTOP_* rights for a normal client; the exact mask is (to be measured: the narrowest DESKTOP_* mask user32 and ole32 need), and until then it is the rights user32 needs. The desktop is closed after the run, and the connector creates no windows on the shared station. Window messages between processes on the run's
   desktop are untried (low risk: a detached program has no peer window
   in its job, and other desktops are out of reach). Without a desktop, programs that
   load user32 fail at start (0xC0000142). `lpDesktop` is never null; a
