@@ -33,26 +33,34 @@ changelog:
   - 0.93.2: 2026-11-22, erratum to 0.93.1. Owner-approved card GC
     #16477, from the reviews of ANDROID-PLAN 0.1.137 (AA7, AA8,
     vettid/vettid.org#652) and vettid/vettid-android#430. Every rule
-    here only clarifies or refuses more. (1) §10.11 "No entry may be
+    here only clarifies or refuses more, except that (5) adds an
+    optional message. (1) §10.11 "No entry may be
     equal to, under or above another": the key gains an upper-case
     step, `NFD(fold(upper(NFD(e))))`, where `upper` maps each rune by
     its Unicode simple upper-case mapping (Go `unicode.ToUpper`), so
-    the dotless `ı` (U+0131) merges with `I` and `i`, as NTFS's
-    `$UpCase` table merges them. It only refuses more: in Unicode 15.0
-    (Go's tables) U+0131 is the only rune whose simple upper case lies
-    outside its `SimpleFold` orbit, so no other key changes. `İ`
-    (U+0130) stays distinct from `i`, as on NTFS. The U+0345 note still
-    holds, re-derived. Tests added. (2) §10.11 "The approval": an app
+    the dotless `ı` (U+0131) merges with `I` and `i`: Unicode's simple
+    upper case maps `ı` to `I`. File systems differ here: NTFS's
+    default `$UpCase` table from Windows XP to Windows 7 keeps `ı` and
+    `I` apart, while exFAT's recommended up-case table merges them.
+    Merging only refuses more. In Unicode 15.0 (Go's tables) U+0131 is
+    the only rune whose simple upper case lies outside its `SimpleFold`
+    orbit, so no other key changes; and the review's check
+    (vettid/vettid.org#653, on that table rebuilt from ntfs-3g's) found
+    that the 0.93.1 key already merges every pair the Windows 7 table
+    upper-cases. `İ` (U+0130) stays distinct from `i`. The U+0345 note
+    still holds, re-derived. Tests added. (2) §10.11 "The approval": an app
     shows **at least** the first 16 hex digits of `sha256` (it may show
     more, all 64 included). (3) §11.3: `vault.enroll.confirm` is
-    idempotent: a repeat answers `{}` and changes nothing. (4) §6.8
+    idempotent: a repeat answers `{}` and changes nothing; the vault
+    already behaves so, so the card owes at most a test. (4) §6.8
     step 1 lists `folders?`, as the wire table does, and §6.8 says that
-    an app treats an unknown top-level member of `approval.pending` as
-    Deny only, so a new member ships only after the apps that know it.
-    (5) `leash.item.set`'s `bad_request` carries a short reason in
-    `error.message`, naming the member and the rule, never a value;
-    apps keep a fallback text for an empty one. Not built: vault card
-    to follow (with (1) and (3)). **Open (lead):** a `leash.item.list`
+    an app treats an unknown top-level member of an agent's
+    `approval.pending` as Deny only, so a new member ships only after
+    the apps that know it. (5) `leash.item.set`'s `bad_request` adds an
+    optional short reason in `error.message`, naming the member and the
+    rule, never a value; apps show a fallback text when it is absent,
+    empty, longer than 200 bytes or not printable ASCII. Not built:
+    vault card to follow, for (1) and (5), and a test for (3). **Open (lead):** a `leash.item.list`
     member that marks an item with no use left (§10.11 "An item with no
     use left"; ANDROID-PLAN AA7 cannot show it) is left for a later
     change: it is a new member, not a clarification.
@@ -12356,14 +12364,23 @@ device (`limit` beyond that):
    `folders`, 0.93.0: a run's folder entries, §10.11) and the requester
    `approval.waiting{approval_id, request_id, exp}`; a requester that
    receives it waits up to `exp` for the response instead of the usual
-   30 s (§8.1). (0.93.2) **New members ship after the apps.** An app
-   shows an approval only when it knows every top-level member of
-   `approval.pending` (and of its `pending.list` entry); one it does not
-   know makes it Deny only (ANDROID-PLAN AA8 "Fail closed"), against
-   §5.3's "unknown fields are ignored", because a member it cannot show
-   may change what approving means. So a vault release that adds a
-   member ships only after the app versions that know it, or members
-   see Deny only. This only clarifies.
+   30 s (§8.1). (0.93.2) **New members ship after the apps.** For an
+   agent's `item.run`, `item.proxy` and `item.get` (ANDROID-PLAN AA8
+   "Fail closed", IOS-PLAN §4.21), an app shows an approval only when it
+   knows every top-level member of `approval.pending` (and of its
+   `pending.list` entry); one it does not know makes it Deny only,
+   against §10.1's "unknown members are ignored", because a member it
+   cannot show may change what approving means. Other approval types
+   (an agent's `item.use` and `catalog`, the delegable owner types, a
+   desktop's step-up request) follow §10.1 and ignore an unknown
+   member; a member that would change what approving one of them means
+   needs the apps to adopt this rule for it first. So a vault release
+   that adds a member to an agent's approval ships only after the app
+   versions that know it, or members see Deny only. Those app versions
+   must still work with a vault that does not send the member yet
+   (absent means what it meant before), so this makes no ordering knot
+   with "apps require the current vault release" (§10.4.2). This only
+   clarifies.
 2. An app answers `approval.decide{approval_id, approve}`. On approval the
    vault executes the request then, as the requester's (its access
    session must still be valid), and answers the requester as usual; on
@@ -19126,17 +19143,24 @@ item's settings allow for its task:
       the smallest rune of its `unicode.SimpleFold` orbit** (simple case
       folding, CaseFolding.txt statuses C and S, as for ballot labels);
       this is normative. It is Unicode's canonical caseless match (D145)
-      with simple folding, except that the orbit of U+0345 (combining
+      with simple folding, with two exceptions, each of which only
+      refuses more: the orbit of U+0345 (combining
       ypogegrammeni, with U+0399, U+03B9 and U+1FBE) folds to the
-      combining mark, so a few Greek names with an iota merge more,
-      which only refuses more. (0.93.2) The `upper` step merges the
-      dotless `ı` (U+0131) with `I` and `i`, as NTFS's `$UpCase` table
-      does (`ı` is alone in its `SimpleFold` orbit, so `fold` alone kept
-      it apart). In Unicode 15.0 (Go's tables) U+0131 is the only rune
+      combining mark, so a few Greek names with an iota merge more; and
+      (0.93.2) the dotless `ı` (U+0131) keys as `I`, so it merges with
+      `I` and `i`. (0.93.2) That is the `upper` step: Unicode's simple
+      upper case maps `ı` to `I`, while `ı` is alone in its `SimpleFold`
+      orbit, so `fold` alone kept it apart. File systems differ here:
+      NTFS's default `$UpCase` table from Windows XP to Windows 7 keeps
+      `ı` and `I` apart, while exFAT's recommended up-case table merges
+      them. Merging only refuses more. A check of that Windows 7 table
+      (rebuilt from ntfs-3g's) found that the 0.93.1 key already merges
+      every pair the table upper-cases. In Unicode 15.0 (Go's tables)
+      U+0131 is the only rune
       whose simple upper case lies outside its orbit; for every other
       rune `upper` stays in the orbit and `fold` gives what it gave
       before, so the step only refuses more. `İ` (U+0130) stays
-      distinct from `i`, as on NTFS: the first `NFD` makes it `I` +
+      distinct from `i`: the first `NFD` makes it `I` +
       U+0307, which keys as `I` + U+0307, never as `I` (it merges with
       `i` + U+0307, which only refuses more). The U+0345 note above
       still holds: `upper` maps U+0345, U+03B9 and U+1FBE to U+0399, and
@@ -19349,15 +19373,26 @@ item's settings allow for its task:
     `holds a control or format character`, `holds a ~ in the last
     element`, `matches another entry`, `inside or above another entry`,
     `not a valid name`, `too many`, `not a host name`, `not allowed for
-    the proxy`). **It never holds a value the member typed** (a
+    the proxy`); these phrases are examples, not a closed list. **It
+    never holds a value the member typed** (a
     program, a path, a host, a header name or a prefix), with one
     exception: a variable name the vault refuses by its own list may be
     named, as in `run.programs[0].env[1]: VETTID_IN is reserved` or
-    `run.programs[0].env[0]: LD_PRELOAD loads code`. The first rule
-    broken, in body order, is the one named. The message is advice for
-    the member: an app MUST NOT parse it, and shows a fallback text of
-    its own when it is absent, empty or not of this form. This only
-    clarifies: the code and what is refused are unchanged.
+    `run.programs[0].env[0]: LD_PRELOAD loads code`. The name's form
+    (`^[A-Z_][A-Z0-9_]{0,63}$`) is checked before the list, so a name
+    that is echoed always has that form; a name of another form gets
+    `not a valid name` and is not echoed. **Which rule is named:** the
+    first one broken, taking the members in the order this
+    specification lists them (`ways`, then `run` with `programs`,
+    `each` and `folders`, then `proxy` with `hosts`, `header` and
+    `prefix`; entries by index), and within a member the rules in the
+    order this section lists them; for a rule between entries (two that
+    match, one inside another), the later entry is named. The message is
+    advice for the member: an app MUST NOT parse it, and shows a
+    fallback text of its own when it is absent, empty, longer than 200
+    bytes, or holds a byte outside printable ASCII (0x20–0x7E); the app
+    does not check its form. This adds an optional message: the code
+    and what is refused are unchanged.
   - **Widening needs the member.** A `leash.item.set` that adds a way or
     a program or a host, empties `programs`, adds a name to an entry's
     `env` (0.85.3), or sets `each` to `false` needs the credential's
@@ -19555,7 +19590,8 @@ item's settings allow for its task:
     (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`,
     (0.93.1) `COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`, `LPT³`, and,
     deliberately wider than Microsoft's list, `COM0`, `LPT0`, `CONIN$`
-    and `CONOUT$`; any case, with or without an extension: (0.93.1) the
+    and `CONOUT$`; any case ((0.93.2) compared upper-cased, Go
+    `strings.ToUpper`), with or without an extension: (0.93.1) the
     name is judged up to its first dot with trailing spaces dropped, so
     `CON .txt` and `nul  .log` are reserved). Two inputs with the same
     name (compared on the key of "No entry may be equal to, under or
@@ -22615,13 +22651,14 @@ size (§11.4).
   NOT be replaced: the enclave answers `vault_exists`. (0.27.4: the
   enclave decides this from stored objects the host serves, so the rule
   holds against the member API and apps, not against the host, §13.3.)
-- **Confirming twice** (0.93.2, a clarification). `vault.enroll.confirm`
+- **Confirming twice** (0.93.2, a clarification of what the vault
+  already does). `vault.enroll.confirm`
   is idempotent: on a vault already confirmed, it answers `{}` and
   changes nothing (no audit line, no event). So a second confirmation,
   sent again under a new `id` after a lost answer, is harmless. An app
   that then sends its first settings may meet a `conflict` on
-  `settings.set` (§10.8) if its first try had already landed; that is
-  retried as §10.1 says (read the current `version`, then send again).
+  `settings.set` (§10.8) if its first try had already landed; the app
+  retries it (it reads the current `version`, then sends again).
 - **Re-enrollment.** The API assigns `vault_id` once per member: a new
   enrollment carries the member's existing `vault_id` unless the vault was
   deleted. For an enrollment whose `vault_id` already holds a vault, the

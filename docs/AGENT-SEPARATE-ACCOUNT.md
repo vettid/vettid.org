@@ -6,15 +6,17 @@ date: 2026-11-22
 owner: Al Liebl (Mesmer)
 component: vettid-agent (the agent connector): install, process model, keys at rest, runs and proxies
 related:
-  - AGENT-LINUX-RUNTIME.md (0.1.1, draft) §11 — who counts as an administrator on Linux
-  - AGENT-PLAN.md (0.1.9; 0.1.10 in vettid.org #538) AG1a, AG3, AG4, AG11, §4.2, §4.6, §4.7, §4.9, A3.8, A3.9, A5
-  - VAULT-MESSAGING.md (0.84.0; 0.85.0 in #538) §10.11 "Ways to use a secret"
+  - AGENT-LINUX-RUNTIME.md (0.1.2, draft) §11 — who counts as an administrator on Linux
+  - AGENT-PLAN.md (0.1.21) AG1a, AG3, AG4, AG11, §4.2, §4.6, §4.7, §4.9, A3.8, A3.9, A5
+  - VAULT-MESSAGING.md (0.93.2) §10.11 "Ways to use a secret"
 changelog:
   - 0.1.5: 2026-11-22, erratum (VAULT-MESSAGING 0.93.2, AGENT-PLAN
     0.1.21; owner-approved card GC #16477). §6 "Outputs": the reserved
     Windows names are VAULT-MESSAGING §10.11's list, which the note now
     points at instead of "`CON`, `NUL`, `COM1` and the like". This only
     clarifies (the list refuses more than the examples suggested).
+    Related versions brought up to date (AGENT-PLAN 0.1.21,
+    VAULT-MESSAGING 0.93.2, AGENT-LINUX-RUNTIME 0.1.2).
   - 0.1.4: 2026-11-22 (card #16224; owner a, GC #16214). §5: on Linux a
     member with password-less `sudo` is now refused (`member_is_admin`,
     AGENT-LINUX-RUNTIME §11), rather than only left without the
