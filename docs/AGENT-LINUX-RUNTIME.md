@@ -1508,7 +1508,12 @@ this note):
   distribution grants it (measured, §13);
 - Flatpak's `app-install`, `runtime-install`, `app-uninstall` and
   `runtime-uninstall` (a system install runs apps as the user, with no
-  setuid; the lead's call, GC #16374);
+  setuid; the lead's calls, GC #16374 and #16382). A system install's
+  `apply_extra` step runs as root, but inside bubblewrap with every
+  capability dropped, `/usr` and `/app` read-only, only the app's own
+  `/app/extra` writable, no `/proc` and no bus (measured in flatpak
+  1.14.6's `flatpak-dir.c`): root confined to the app's folder, not root
+  on the computer;
 - Fedora's `org.fedoraproject.thirdparty.opt-out`, and the fixed
   helpers GNOME's settings daemon (48 and earlier, as on Ubuntu 24.04
   and Debian 12 and 13) runs through `exec.path` for the backlight and
@@ -1525,9 +1530,10 @@ refused until those actions ask for the password. Stock Fedora also
 grants `wheel` FirewallD's actions, which refuse too; measured on
 Fedora 44: `org.fedoraproject.FirewallD1.all`, `config`, `direct` and
 `policies` (and their `.info` actions) default to `auth_admin_keep`,
-and `FirewallD1.info` to `yes`. The read-only `.info` actions are
-reported, as recorded-`yes` exceptions where their default is `yes`,
-and the rules file skips them. `install` names the one rules file
+and `FirewallD1.info` to `yes`, which is the reported recorded-`yes`
+exception. The rules file skips every `.info` action, so the firewall's
+status stays readable wherever a desktop policy makes them `yes` (the
+lead's call, GC #16382). `install` names the one rules file
 that makes all of them ask, `/etc/polkit-1/rules.d/40-vettid-agent.rules`
 (it returns `polkit.Result.AUTH_ADMIN_KEEP` for PackageKit's two
 actions and FirewallD's `all`, `config`, `direct` and `policies`, and sorts
