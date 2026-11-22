@@ -1110,7 +1110,10 @@ Any of these:
   administrator identities: those the `addAdminRule` calls in the rules
   folders name as `unix-user:` or `unix-group:` strings, and, failing
   closed, every member of `sudo`, `wheel` and `admin` (for whose empty
-  password counts only; it doesn't make those groups refusing); Another account's empty
+  password counts only; it doesn't make those groups refusing). An
+  `addAdminRule` whose return isn't a literal list of strings (built
+  from a variable, a concatenation or a call) is "could not check
+  <file>"; Another account's empty
   password is reported (the lead's call, GC #16374);
 - **a sudo rule or setting that asks for no password** (§11.2): any
   rule that applies to the member, directly, through a group, a
