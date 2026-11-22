@@ -98,6 +98,7 @@ group.
 | The channel | `/run/vettid-agent/<n>.sock` | `vettid-c-<h>`:`vettid-m-<h>`, 0660, in `/run/vettid-agent/` (root, 0755) |
 | The helper's socket (chosen) | `/run/vettid-runhelper/<n>.sock` | root:`vettid-c-<h>`, 0660, in `/run/vettid-runhelper/` (root, 0755) |
 | Units | `vettid-agent-<n>.socket`, `vettid-agent-<n>.service`, `vettid-runhelper-<n>.socket`, `vettid-runhelper-<n>.service` | in `/etc/systemd/system/` |
+| The policy check (chosen; shared by every pairing) | `vettid-agent-polkitcheck.path` (`PathChanged=` on `/usr/share/polkit-1/actions`, `/etc/polkit-1/rules.d`, `/usr/share/polkit-1/rules.d`) and `vettid-agent-polkitcheck.service` (`Type=oneshot`, root, the helper's hardening with the package database readable), which writes every installed pairing's `admin.json` | in `/etc/systemd/system/`; the first `install` adds them, the last uninstall removes them |
 
 - **Separate prefixes.** The run root is outside `/var/lib/vettid-agent/`,
   so a pairing named `run` can't meet it. The helper's units have their
@@ -674,7 +675,9 @@ else.
   Any failure stops it, and `status` says why. It never takes a uid,
   a path, a program path or an environment of its own from the
   connector. It never starts anything as root for a run; the one root
-  program it runs is `sudo`, for the administrator checks (§11.5).
+  program it runs is `sudo` (and `cvtsudoers`), for the administrator
+  checks (§11.5). The package check runs in a different unit, the
+  policy check's oneshot (§2, §11.4).
 - **Its own start** is checked as the service's is (§3): exactly one
   descriptor from `LISTEN_FDS` and `LISTEN_PID`, a listening `AF_UNIX`
   stream socket bound to `/run/vettid-runhelper/<n>.sock`.
@@ -1401,7 +1404,12 @@ file). `install` and the elevated `status` make this check, and so does
 a root path unit (`vettid-agent-polkitcheck.path`, watching the polkit
 actions and rules folders) that starts a oneshot whenever they change,
 with no password: so a system update is checked as it happens, and
-only a real new grant refuses (the lead's call, GC #16374). Each check
+only a real new grant refuses (the lead's call, GC #16374). The oneshot
+waits until the package manager's lock (`dpkg`'s frontend lock, rpm's
+transaction lock) is free and the database is quiet, then checks, and
+records a result only when two checks a few seconds apart agree; until
+then it records "not checked". So it never judges a file in the middle
+of the update that wrote it. Each check
 records the files' digests in `admin.json`; at a run start or a proxy's
 opening the helper only compares digests and runs no package manager,
 and while the oneshot hasn't caught up with a change the result is "not
@@ -1534,7 +1542,9 @@ it does exactly this, and nothing the connector names:
   the runtime (so no Go code runs in a forked child of the threaded
   helper; the lead's call, GC #16374). File and socket access is then
   judged as the member's; §13 checks that the thread can't open a
-  root-only file.
+  root-only file. A probe only connects, with a non-blocking connect and
+  a time limit (a stalled thread can't be killed as a child could), and
+  closes; it sends nothing to the service it reaches.
 - **polkit's no-session subject** is the helper's own program, started
   as the member (all its ids, no capabilities, `no_new_privs`, every
   inherited descriptor closed) in a mode that only waits, and exits when
@@ -1543,10 +1553,7 @@ it does exactly this, and nothing the connector names:
   change nothing polkit answers about that pid.
 
 A probe or subject that dies, stalls past its share of the bound or
-answers otherwise is "not checked". How the helper forks without a new program
-in its language (in Go, only raw system calls are safe in the child of
-a threaded runtime) is written in the helper PR; re-execution is not a
-fallback.
+answers otherwise is "not checked".
 
 What this needs from the helper's unit (the capabilities `sudo -l` uses
 as root, the system bus under its sandbox) is measured in the helper PR
@@ -1876,9 +1883,10 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     an allowlisted grant) appear in `status` and refuse nothing. If any
     stock member is refused, it goes back to the owner before the PR
     merges;
-  - the no-session and probe children are non-dumpable, hold no
-    inherited descriptor, and a member process can't signal or trace
-    the probe child; one killed mid-check gives "not checked";
+  - the probe thread can't open a root-only file and is discarded after
+    its probes; a probe to a socket that never answers times out; the
+    no-session subject holds no inherited descriptor, and one the member
+    kills mid-check gives "not checked";
   - the stock user is not refused when `install` runs in a desktop
     terminal, nor when a run starts with the member signed in at the
     desktop (the no-session child judged by that session's default);
@@ -1897,8 +1905,9 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
   - with `sudoers: sss` in `nsswitch.conf`, the host-name grants and
     NetworkManager's `settings.modify.system` refuse;
   - `fwupd`'s `OnlyTrusted=false` makes `update-internal` refuse;
-  - a system update that rewrites a `.policy` file is checked by the
-    path unit with no password, and runs start again once it has;
+  - a real package update that rewrites a `.policy` file ends "clear"
+    with no elevated command: the oneshot waits for the update to end,
+    and runs start again once it has checked;
   - measured and written in the `install` PR: ModemManager's
     `Device.Control` on Debian and Ubuntu; the recorded `yes` defaults
     of the named exceptions (`machine1.host-login`,
@@ -1930,7 +1939,9 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     proxies;
   - `install` and uninstall leave nothing behind. Uninstall removes the
     users, the groups, the `.deny` entries, the run root,
-    `/etc/vettid-agent/<n>/`, the credential and the four units. It
+    `/etc/vettid-agent/<n>/`, the credential and the pairing's four
+    units, and the last pairing's uninstall the two shared policy-check
+    units and the rules file `install` didn't write. It
     overwrites the state file before deleting it and removes the state
     folder as the connector's account (`state-wipe`, never root
     following its contents), runs the sweeper for both slots first,
