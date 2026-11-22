@@ -1574,7 +1574,11 @@ firewall's status stays readable (the lead's calls, GC #16382 and
 that makes all of them ask, `/etc/polkit-1/rules.d/40-vettid-agent.rules`,
 written by the elevated `vettid-agent rules-file --write` (§2: root,
 mode 0644, through the same folder checks as the configuration, as
-`/etc/polkit-1/rules.d` is `root:polkitd 0750`; chosen), or printed by
+`/etc/polkit-1/rules.d` is `root:polkitd 0750`, measured on Ubuntu 24.04
+and 26.04 and Fedora 44: root-owned with no group or other write, so
+the checks pass; a folder owned by polkit's own account instead makes
+`--write` stop and print the file and its path for an administrator to
+place; chosen), or printed by
 `rules-file` for an administrator to read first
 (it returns `polkit.Result.AUTH_ADMIN_KEEP` for PackageKit's two
 actions, FirewallD's `all`, `config`, `direct` and `policies`, and
@@ -2014,7 +2018,12 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     rules file is in place; the stock `addAdminRule` files of each
     measured distribution read as literal lists;
   - measured and written in the `install` PR: whether Debian 12 and 13
-    have any printer grant; ModemManager's
+    have any printer grant; the owner and mode of `/etc/polkit-1/rules.d`
+    on each measured distribution (`root:polkitd 0750` on Ubuntu 24.04
+    and 26.04 and Fedora 44, already measured); cups-pk-helper's action
+    ids at the version each distribution ships (upstream checks
+    `printer-default` where the registered id is `printer-set-default`,
+    so the allowlist is checked against the shipped version's checks); ModemManager's
     `Device.Control` on Debian and Ubuntu; the recorded `yes` defaults
     of the named exceptions (`machine1.host-login`,
     `machine1.register-machine`, `sysupdate1.check`, `sysupdate1.update`,
