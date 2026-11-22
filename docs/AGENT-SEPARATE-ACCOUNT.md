@@ -323,7 +323,7 @@ elevated or as SYSTEM (AGENT-PLAN §4.7).
   (READ_CONTROL, WINSTA_ACCESSGLOBALATOMS, WINSTA_EXITWINDOWS), the
   measured minimum (0x37F, 0x2003A and 0x2005A fail), removed after the
   run; it is never 0xF037F, which would give WRITE_DAC and WRITE_OWNER
-  on the shared station. The job's UI limits stop clipboard, atom and handle sharing. The per-run desktop's access list is SYSTEM, the service's SID, and that runner's SID, with DESKTOP_* rights for a normal client; the exact mask is (to be measured: the narrowest DESKTOP_* mask user32 and ole32 need), and until then it is the rights user32 needs. The desktop is closed after the run, and the connector creates no windows on the shared station. Window messages between processes on the run's
+  on the shared station. The job's UI limits stop clipboard, atom and handle sharing. The per-run desktop's access list is SYSTEM, the service's SID, and that runner's SID, with the runner's entry exactly 0x83 (DESKTOP_READOBJECTS, DESKTOP_CREATEWINDOW and DESKTOP_WRITEOBJECTS; measured by vettid/vettid-agent#60 at 380958b as the narrowest that lets user32 and ole32 initialize: without READOBJECTS or WRITEOBJECTS user32 fails, and without CREATEWINDOW ole32 is refused; no standard right is needed, and HOOKCONTROL, JOURNALRECORD, JOURNALPLAYBACK, ENUMERATE, CREATEMENU and SWITCHDESKTOP are never granted). The desktop is closed after the run, and the connector creates no windows on the shared station. Window messages between processes on the run's
   desktop are untried (low risk: a detached program has no peer window
   in its job, and other desktops are out of reach). Without a desktop, programs that
   load user32 fail at start (0xC0000142). `lpDesktop` is never null; a
