@@ -99,7 +99,7 @@ group.
 | The channel | `/run/vettid-agent/<n>.sock` | `vettid-c-<h>`:`vettid-m-<h>`, 0660, in `/run/vettid-agent/` (root, 0755) |
 | The helper's socket (chosen) | `/run/vettid-runhelper/<n>.sock` | root:`vettid-c-<h>`, 0660, in `/run/vettid-runhelper/` (root, 0755) |
 | Units | `vettid-agent-<n>.socket`, `vettid-agent-<n>.service`, `vettid-runhelper-<n>.socket`, `vettid-runhelper-<n>.service` | in `/etc/systemd/system/` |
-| The policy check (chosen; shared by every pairing) | `vettid-agent-polkitcheck.path` (`PathChanged=` on the `actions` and `rules.d` folders, and `polkitd.conf`, under each of `/etc/polkit-1`, `/run/polkit-1`, `/usr/local/share/polkit-1` and `/usr/share/polkit-1`, the folders polkitd reads, §11.4) and `vettid-agent-polkitcheck.service` (`Type=oneshot`, root, the helper's hardening with the package database readable), which writes every installed pairing's `admin.json` | in `/etc/systemd/system/`; the first `install` adds them, the last uninstall removes them |
+| The policy check (chosen; shared by every pairing) | `vettid-agent-polkitcheck.path` (`PathChanged=` on the `actions` and `rules.d` folders, and `polkitd.conf`, under each of `/etc/polkit-1`, `/run/polkit-1`, `/usr/local/share/polkit-1` and `/usr/share/polkit-1`, the folders polkitd reads, §11.4) and `vettid-agent-polkitcheck.service` (`Type=oneshot`, root, the helper's hardening, with `ReadWritePaths=/etc/vettid-agent` so it can take each pairing's lock and write its `admin.json`, the package database readable, and `WantedBy=multi-user.target` so it also runs at boot), which writes every installed pairing's `admin.json` | in `/etc/systemd/system/`; the first `install` adds them, the last uninstall removes them |
 
 - **Separate prefixes.** The run root is outside `/var/lib/vettid-agent/`,
   so a pairing named `run` can't meet it. The helper's units have their
@@ -1109,7 +1109,8 @@ Any of these:
   group, holds a sudo or `doas` rule, or is one of polkit's
   administrator identities: those the `addAdminRule` calls in the rules
   folders name as `unix-user:` or `unix-group:` strings, and, failing
-  closed, every member of `sudo`, `wheel` and `admin`. Another account's empty
+  closed, every member of `sudo`, `wheel` and `admin` (for whose empty
+  password counts only; it doesn't make those groups refusing); Another account's empty
   password is reported (the lead's call, GC #16374);
 - **a sudo rule or setting that asks for no password** (§11.2): any
   rule that applies to the member, directly, through a group, a
@@ -1427,7 +1428,8 @@ Kubernetes items, the sudo, PAM and group findings): it never writes
 "clear" for what it didn't check. It and the elevated `status` take the
 pairing's lock (§2) before writing `admin.json`, so neither overwrites
 the other. A digest mismatch the helper sees that persists starts it
-again; if it still hasn't settled after a few minutes, the result's
+again (a `StartUnit` call on the system bus, no `systemctl` program, at
+most once a minute); if it still hasn't settled after a few minutes, the result's
 text says to run the elevated `status`. Each check
 records the files' digests in `admin.json`; at a run start or a proxy's
 opening the helper only compares digests and runs no package manager,
@@ -1581,6 +1583,8 @@ it does exactly this, and nothing the connector names:
   reads;
 - it asks polkitd and logind over the system bus, and starts the
   no-session subject of §11.4;
+- it starts the policy check's oneshot (§11.4) with `StartUnit` on the
+  system bus, at most once a minute;
 - **the access probes** for §11.1's root services run on a locked
   operating-system thread of the helper that sets its supplementary
   groups, file-system gid and file-system uid to the member's by raw
@@ -1933,7 +1937,9 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     desktop install in the PR), with the stock `sudoers`, PAM stacks and
     polkit rules (and on Fedora and Ubuntu desktops the rules file of
     §11.4; without it, Fedora's package and firewall grants and Ubuntu's
-    `printeraddremove` refuse, with the file named),
+    `printeraddremove` refuse, with the file named; with it in place
+    those grants ask for the password, which shows the file sorts
+    before the stock ones on each measured distribution),
     in an active session where it can mount a USB disk and power off;
     a rule with `rootpw` and a root password set; a `NOPASSWD` rule for
     another user; a member without `sudo` installed; a computer without
