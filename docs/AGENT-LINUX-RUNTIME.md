@@ -1376,7 +1376,9 @@ kind of subject is checked against the package database (`dpkg
 --verify`, `rpm -V`), by `install` and the elevated `status` only: one
 no package owns, or one whose content the package manager reports as
 changed (its digest or size; a changed time stamp or mode alone
-doesn't count), counts likewise, and the install text names it (the
+doesn't count), counts likewise (except a file snapd wrote for a snap
+installed now, as snapd's own records list it; chosen, measured in
+§13), and the install text names it (the
 README says software installed outside the package manager can ship
 such a file). They record each such file's digest in `admin.json`; at a
 run start or a proxy's opening the helper only compares the digests,
@@ -1480,13 +1482,13 @@ it does exactly this, and nothing the connector names:
 - it asks polkitd and logind over the system bus, and forks the
   no-session child of §11.4;
 - **the access probes** for §11.1's root services run in a separate
-  child with only the effective ids switched to the member's (the
-  supplementary groups and the effective gid first, then the effective
-  uid; real and saved uid stay 0), so the member's processes can
-  neither signal nor trace it. Before probing it drops its permitted
-  and bounding capability sets (with `PR_SET_KEEPCAPS` off), so its
-  answers are plainly the member's and a bug in it can't regain
-  capabilities; §13 checks that it can't open a root-only file.
+  child that becomes the member entirely: the supplementary groups, then
+  all three gids, then all three uids (`setresgid`, `setresuid`), so its
+  answers are plainly the member's and nothing in it can return to root
+  (§13 checks that it can't open a root-only file). Being non-dumpable,
+  it can't be traced by the member's processes; one of them can kill
+  it, which gives "not checked" and refuses that run: a denial, never a
+  way in.
 
 Either child closes every descriptor it inherited, makes itself
 non-dumpable (`PR_SET_DUMPABLE` 0) before anything else, is forked
@@ -1838,7 +1840,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     installed, or of an older version, fails or asks for the password;
   - measured and written in the `install` PR: the polkit rules
     folders' owner on each distribution; Silverblue's rpm-ostree
-    grants; the recorded defaults of the named actions; whether
+    grants; snapd's policy files on a stock Ubuntu with a snap that
+    uses its polkit interface; the package check's time at `install`; the recorded defaults of the named actions; whether
     `sudo -V` prints the parsed `Defaults`; whether a session subject
     can return a kept authorization; parsing `sudo-rs`, a condition
     for that PR;
