@@ -1343,10 +1343,9 @@ covered:
   start time): a child the checker forks, which sets the member's uid
   and gids with `no_new_privs`, runs no program, does nothing but wait,
   and exits after the check. Forked by the helper, it is in no session. Forked by `install`
-  under `sudo` in a terminal, it sits in that terminal's session scope,
-  so polkit may judge it as that session: the stricter answer. Whether
-  polkit falls back to the member's display session for it is measured
-  (§13).
+  under `sudo` in a terminal, it sits in that terminal's session scope;
+  under the helper, polkit may judge it by the member's display session.
+  Its answer is compared as the paragraph on comparison says.
 
 With the member signed in nowhere (an `install` over SSH as another
 user, say), only the no-session subject is asked, and the active case
@@ -1356,16 +1355,35 @@ waits for the first run start, whose stub runs in the member's session.
 (owner a, GC #16331, the inverted rule). The checker enumerates the
 actions polkit lists (`EnumerateActions`), and asks only those; an
 action the list doesn't hold isn't asked. Each answer is compared with
-the shipped default **for that kind of subject**: an active session's
-with `allow_active`, an inactive session's with `allow_inactive`, the
-no-session child's with `allow_any`. An action **refuses** when polkit
+the default **for the kind of subject polkit judged**: worked out as
+polkit does, from the process's own logind session, else the member's
+display session, and that session's active and local state: an active
+local one with `allow_active`, an inactive one with `allow_inactive`,
+none with `allow_any`. So the no-session child, which polkit may place
+in the `sudo` terminal's session under `install` or in the member's
+display session under the helper, is compared with that session's
+default; where it lands in a session already asked as a session
+subject, its answer adds nothing and is dropped.
+
+**Which default.** For the actions named below (those that refuse
+whatever their defaults, and the allowlist), the default compared with
+is the one **recorded in the code** (upstream's, measured), never the
+one on disk: a `.policy` file on the computer that makes one of them
+weaker (`yes` where the recorded default asks for a password) counts as
+a grant to every account, so the member is an administrator. For every
+other action, a `.policy` file whose defaults include `yes` for any
+kind of subject is checked against the package database (`dpkg
+--verify`, `rpm -V`): one no package owns, or one the package manager
+reports as changed, counts likewise; one it can't check is "could not
+check <file>". An action **refuses** when polkit
 authorizes the member for it without a password and either
 - the default for that kind of subject is `auth_admin` or
   `auth_admin_keep`, and it isn't on the allowlist below (so mounting a
   USB disk or powering off, `yes` for an active session, refuses
   nothing); or
-- it runs code as root, and its default for that kind of subject isn't
-  `yes` (one that is `yes` is reported): `pkexec`
+- it runs code as root, whatever its defaults, except the named ones
+  whose recorded default is `yes` for that kind of subject (measured,
+  such as `sysupdate1.check`), which are reported: `pkexec`
   (`org.freedesktop.policykit.exec`), `org.freedesktop.systemd1.*`
   units and environment (`manage-units`, `manage-unit-files`,
   `set-environment`), `machine1`'s shells, logins, machines and images,
@@ -1452,15 +1470,22 @@ it does exactly this, and nothing the connector names:
 - it asks polkitd and logind over the system bus, and forks the
   no-session child of §11.4;
 - **the access probes** for §11.1's root services run in a separate
-  child with only the effective uid and groups switched to the
-  member's (real and saved uid stay 0), so the member's processes can
-  neither signal nor trace it.
+  child with only the effective ids switched to the member's (the
+  supplementary groups and the effective gid first, then the effective
+  uid; real and saved uid stay 0), so the member's processes can
+  neither signal nor trace it. Before probing it drops its permitted
+  and bounding capability sets (with `PR_SET_KEEPCAPS` off), so its
+  answers are plainly the member's and a bug in it can't raise its
+  privileges again; §13 checks that it can't open a root-only file.
 
 Either child closes every descriptor it inherited, makes itself
 non-dumpable (`PR_SET_DUMPABLE` 0) before anything else, is forked
 without a new program (no re-execution), and returns one fixed-size
 answer; one that dies, stalls past its share of the bound or answers
-otherwise is "not checked".
+otherwise is "not checked". How the helper forks without a new program
+in its language (in Go, only raw system calls are safe in the child of
+a threaded runtime) is written in the helper PR; re-execution is not a
+fallback.
 
 What this needs from the helper's unit (the capabilities `sudo -l` uses
 as root, the system bus under its sandbox) is measured in the helper PR
@@ -1792,13 +1817,21 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
   - the no-session and probe children are non-dumpable, hold no
     inherited descriptor, and a member process can't signal or trace
     the probe child; one killed mid-check gives "not checked";
+  - the stock user is not refused when `install` runs in a desktop
+    terminal, nor when a run starts with the member signed in at the
+    desktop (the no-session child judged by that session's default);
+  - `org.freedesktop.systemd1.manage-units` or `pkexec` edited to `yes`
+    in its `.policy` file refuses; another action's `.policy` file
+    changed to `yes` refuses through the package check;
+  - the allowlisted updates are upgrade-only on Ubuntu and Fedora:
+    PackageKit's `UpdatePackages` with the id of a package that isn't
+    installed, or of an older version, fails or asks for the password;
   - measured and written in the `install` PR: the polkit rules
     folders' owner on each distribution; Silverblue's rpm-ostree
-    grants; whether `sudo -V` prints
-    the parsed `Defaults`; whether polkit falls back to the member's
-    display session for the no-session child; whether a session
-    subject can return a kept authorization; parsing `sudo-rs`, a
-    condition for that PR;
+    grants; the recorded defaults of the named actions; whether
+    `sudo -V` prints the parsed `Defaults`; whether a session subject
+    can return a kept authorization; parsing `sudo-rs`, a condition
+    for that PR;
   - a `NOPASSWD` rule added after `install` refuses the next run, and
     every tool and proxy after it, with `member_is_admin`; removing it
     and running the elevated `status` restores the tools;
