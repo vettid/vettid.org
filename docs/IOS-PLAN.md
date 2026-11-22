@@ -4,7 +4,7 @@ status: approved (owner, 2026-10-17)
 version: 0.1.79
 date: 2026-11-22
 changelog:
-  - 0.1.79: 2026-11-22 (ANDROID-PLAN 0.1.137, AGENT-PLAN AA7 and AA8, VAULT-MESSAGING §6.8 and §10.11; owner-approved card, Ground Control #16365). Not built; cards #16366 (Android), #16367 (iOS). Two new sections, after §4.19 so that its number stays: §4.20 "How an agent may use an item" and §4.21 "Approvals for runs, proxies and reveals": the iPhone shows what ANDROID-PLAN's AA7 and AA8 subsections specify, identically, texts included. iOS differences only: the settings' text fields turn off the keyboard helpers of §6.5; confirmations are alerts; SF Mono for the strings of an approval; VoiceOver and Dynamic Type. Until the app version with §4.21, `item.run` and `item.proxy` approvals are Deny only, as ANDROID-PLAN's decision 15 now says. §4.19 and "Later" gain the pointers. Every NEW text is ANDROID-PLAN's, for the owner's approval; **Open (owner)** is ANDROID-PLAN 0.1.137's list.
+  - 0.1.79: 2026-11-22 (ANDROID-PLAN 0.1.137, AGENT-PLAN AA7 and AA8, VAULT-MESSAGING §6.8 and §10.11; owner-approved card, Ground Control #16365). Not built; cards #16366 (Android), #16367 (iOS). Two new sections, after §4.19 so that its number stays: §4.20 "How an agent may use an item" and §4.21 "Approvals for runs, proxies and reveals": the iPhone shows what ANDROID-PLAN's AA7 and AA8 subsections specify, identically, texts included. iOS differences only: the settings' text fields turn off the keyboard helpers of §6.5; confirmations are alerts; SF Mono for the strings of an approval; VoiceOver and Dynamic Type. Until the app version with §4.21, `item.run` and `item.proxy` approvals are Deny only, as ANDROID-PLAN's decision 15 now says. §4.19 and "Later" gain the pointers. Every NEW text is ANDROID-PLAN's, for the owner's approval; **Open (owner)** is ANDROID-PLAN 0.1.137's list. **Fix round after the blind reviews** (vettid/vettid.org#652; the lead's calls): follows ANDROID-PLAN 0.1.137's fix round (Approve only on the detail screen, after scrolling to the end, with the warnings and the summary at the top; the detail closes on a re-referral; strings forced left to right and isolated, §10.8 step 4's class escaped, look-alikes highlighted, spaces marked; full fingerprints on a tap; the wider deny-only list; the last program's removal a widening; the Ask me before each run confirmation; the new and changed NEW texts). iOS: the alert list adds "Stop sending <item> to an API?", "Remove the last program?" and "Stop asking before each run?"; no overlay protection is needed, since no other app can draw over VettID on iOS, so the overlay acceptance case is Android's only; the "live region" reference is dropped; VoiceOver reads "escaped character U+…".
   - 0.1.78: 2026-11-21 (ANDROID-PLAN 0.1.135, VAULT-MESSAGING 0.93.0, AGENT-PLAN 0.1.17; AGENT-SEPARATE-ACCOUNT Q1 a and Q9 a; Ground Control #15810). Not built; card #15813. A new §4.19 "Member folders and files on a run": the iPhone shows what ANDROID-PLAN's AA9 subsection specifies, identically, and its path field turns off the keyboard helpers of §6.5. "Later" gains the pointer. No existing text changes. **Fix round after the blind reviews:** follows ANDROID-PLAN 0.1.135's fix round (`share` for a working folder only, no nested or case-duplicate entries, the path typed exactly as the computer shows it and not a whole home folder, 1,024-based sizes). The owner's decision a (GC #15855) is in: "Read only" is enforced for the folder a run starts in, and the help says a run can reach every folder shared with the pairing (as on Android); runs with files only are referred too (GC #15856)
   - 0.1.77: erratum, 2026-11-18 (ANDROID-PLAN 0.1.134; owner rule 3, #r60; owner decisions a, 2026-11-18, #13774; lead decisions #13781, #13821). §6.7: a new point "While the vault's release is checked", summarizing ANDROID-PLAN 0.1.134, which governs both apps, with the push-wake rule for when phase P brings Apple push. Built by vettid-ios #307 except the opening's moment from an answer of this opening (Ground Control #13823).
   - 0.1.76: erratum, 2026-11-15 (ANDROID-PLAN 0.1.132; owner decisions a, 2026-11-15). §6.7 "Local notifications for feed items before phase P": the one exception to "never a full read" is ANDROID-PLAN's: when a passed check, not an unlock's own, ends the held or due state, each ask still waiting of its three kinds is notified once (pairings left out; nothing at an unlock); before phase P this is a banner while VettID is in front.
@@ -2007,12 +2007,15 @@ iOS differences, which change no behavior or text:
 
 - The program, variable name, host, header name and "Before the key"
   fields turn off autocorrection, autocapitalization, smart punctuation,
-  inline predictions and AutoFill (§6.5), so what is saved is exactly
-  what was typed; a trailing space in "Before the key" is shown with
-  the same visible mark.
-- The confirmations ("Stop runs with <item>?", "Let <agent> see
-  <item>?", "Forget this fingerprint?") are alerts with the destructive
-  or confirming button styled as such; Cancel is the cancel button.
+  inline predictions and AutoFill (§6.5), in place of Android's
+  `KeyboardOptions`, so what is saved is exactly what was typed; a
+  trailing space in "Before the key" is shown with the same visible
+  mark.
+- The confirmations ("Stop runs with <item>?", "Stop sending <item> to
+  an API?", "Let <agent> see <item>?", "Remove the last program?",
+  "Stop asking before each run?", "Forget this fingerprint?") are
+  alerts with the destructive or confirming button styled as such;
+  Cancel is the cancel button.
 - VoiceOver in place of TalkBack, and Dynamic Type's largest size in
   place of the largest font scale.
 
@@ -2038,7 +2041,7 @@ and the length from `seconds`, which may end sooner with the access
 session; for `item.get`, the history warning; approving and the pin;
 a request referred again (`replaces`, `result: "referred"`); the
 refusal texts and an expired approval; the same fail-closed cases and
-acceptance list. Like ANDROID-PLAN's decision 15, until the app version
+acceptance list, the overlay case left out (below). Like ANDROID-PLAN's decision 15, until the app version
 with this section every `item.run` and `item.proxy` approval is Deny
 only.
 
@@ -2046,9 +2049,20 @@ iOS differences, which change no behavior or text:
 
 - Strings are shown in a monospaced font (SF Mono), one bordered box
   per string, wrapped, with an escaped character in a highlighted box,
-  as on Android.
-- VoiceOver reads an escaped character as ANDROID-PLAN's "character
-  U+202E"; the countdown is announced as on Android's live region.
+  as on Android. Each box is forced left to right
+  (`.environment(\.layoutDirection, .leftToRight)` and a natural
+  direction of left to right) and its text wrapped in LRI … PDI, with
+  the same escaping, highlighting and space marks as ANDROID-PLAN.
+- **Overlays: none needed.** iOS lets no other app draw over VettID's
+  window or receive its touches (there is no overlay permission like
+  Android's `SYSTEM_ALERT_WINDOW`), so the iPhone has no equivalent of
+  `filterTouchesWhenObscured` and shows no overlay text. Screen capture
+  is §6.4's matter, not this one.
+- Approve only on the detail screen, disabled until the content is
+  scrolled to its end, and the detail closed on a re-referral, as on
+  Android; no notification action approves.
+- VoiceOver reads an escaped character as ANDROID-PLAN's "escaped
+  character U+202E".
 - Dynamic Type's largest size in place of the largest font scale.
 
 ## 5. Architecture
