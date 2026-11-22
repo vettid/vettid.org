@@ -1373,9 +1373,17 @@ weaker (`yes` where the recorded default asks for a password) counts as
 a grant to every account, so the member is an administrator. For every
 other action, a `.policy` file whose defaults include `yes` for any
 kind of subject is checked against the package database (`dpkg
---verify`, `rpm -V`): one no package owns, or one the package manager
-reports as changed, counts likewise; one it can't check is "could not
-check <file>". An action **refuses** when polkit
+--verify`, `rpm -V`), by `install` and the elevated `status` only: one
+no package owns, or one whose content the package manager reports as
+changed (its digest or size; a changed time stamp or mode alone
+doesn't count), counts likewise, and the install text names it (the
+README says software installed outside the package manager can ship
+such a file). They record each such file's digest in `admin.json`; at a
+run start or a proxy's opening the helper only compares the digests,
+runs no package manager, and a file changed, added or gone since is
+"not checked" until the elevated `status` checks it again. On a
+distribution with neither `dpkg` nor `rpm`, such a file is "could not
+check <file>" (chosen). An action **refuses** when polkit
 authorizes the member for it without a password and either
 - the default for that kind of subject is `auth_admin` or
   `auth_admin_keep`, and it isn't on the allowlist below (so mounting a
@@ -1461,7 +1469,9 @@ some details only can't be seen (§11.6).
 The run helper runs no program as root for a run (§6). For these checks
 it does exactly this, and nothing the connector names:
 - it runs each `sudo` of §11.2 and `cvtsudoers`, after §8's folder
-  checks on their paths;
+  checks on their paths (`install` and the elevated `status` also run
+  `dpkg --verify` or `rpm -V` for §11.4's package check; the helper
+  doesn't);
 - it reads `/etc/passwd`, `/etc/shadow`, `/etc/sudo.conf`,
   `/etc/doas.conf` (and `/usr/local/etc/doas.conf`), the PAM files of
   §11.1, `/etc/security/console.apps/`, the group database, and the
@@ -1475,8 +1485,8 @@ it does exactly this, and nothing the connector names:
   uid; real and saved uid stay 0), so the member's processes can
   neither signal nor trace it. Before probing it drops its permitted
   and bounding capability sets (with `PR_SET_KEEPCAPS` off), so its
-  answers are plainly the member's and a bug in it can't raise its
-  privileges again; §13 checks that it can't open a root-only file.
+  answers are plainly the member's and a bug in it can't regain
+  capabilities; §13 checks that it can't open a root-only file.
 
 Either child closes every descriptor it inherited, makes itself
 non-dumpable (`PR_SET_DUMPABLE` 0) before anything else, is forked
