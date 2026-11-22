@@ -42,8 +42,9 @@ changelog:
     elements), so such an element can name `.` or `..`; this also
     refuses a POSIX folder really named `...` or ` `; (2) entries are
     compared for nesting, and input and output names for duplicates,
-    on a defined key, `NFD(fold(NFD(x)))` with simple case folding
-    (Unicode D145, canonical caseless matching), so
+    on a defined key, `NFD(fold(NFD(x)))` with simple case folding to
+    the smallest rune of each orbit (Unicode D145's canonical caseless
+    match, merging slightly more for U+0345), so
     the composed and decomposed forms of a name are one, as on macOS
     (APFS), even on Linux, where they are two folders; coverage stays
     exact on the text sent; (3) the **reserved Windows names** add the
@@ -19084,12 +19085,15 @@ item's settings allow for its task:
     also refuses a POSIX folder really named `...` or ` `.
     - **No entry may be equal to, under or above another.** Entries are compared **folded**, on every system, on
       this key: a drive path's `/` as `\`, and for each element
-      (0.93.1) `NFD(fold(NFD(e)))`, Unicode's canonical caseless match
-      (D145) with **simple** case folding (CaseFolding.txt statuses C
-      and S; each rune may stand for its whole `unicode.SimpleFold`
-      orbit, for example its smallest rune, since the element is
-      decomposed first), and then the element's trailing dots and
-      spaces dropped. So the composed and decomposed forms of a name
+      (0.93.1) `NFD(fold(NFD(e)))`, where `fold` maps **each rune to
+      the smallest rune of its `unicode.SimpleFold` orbit** (simple case
+      folding, CaseFolding.txt statuses C and S, as for ballot labels);
+      this is normative. It is Unicode's canonical caseless match (D145)
+      with simple folding, except that the orbit of U+0345 (combining
+      ypogegrammeni, with U+0399, U+03B9 and U+1FBE) folds to the
+      combining mark, so a few Greek names with an iota merge more,
+      which only refuses more. Then the element's trailing dots and
+      spaces are dropped. So the composed and decomposed forms of a name
       (`café`, `ǰ` against `J` + U+030C) are one, as on macOS (APFS),
       even on Linux, where they are two folders. (0.93.0 compared
       without case only, as an entry's `program` is for the
@@ -19637,7 +19641,8 @@ item's settings allow for its task:
     an input and `output.folder`, as the last element and earlier
     (`/home/al/work/. /.. /.. /.ssh`); two entries that differ only by
     NFC against NFD (`/a/café` and `/a/cafe\u0301`), or by `/a/J\u030c`
-    against `/a/\u01f0`, or nest on the key, refused; two input or
+    against `/a/\u01f0`, or `/a/a\u03b9\u0301` against
+    `/a/a\u0345\u0301`, or nest on the key, refused; two input or
     output names equal on the key refused; `COM0`, `LPT0`, `COM²`,
     `COM¹`, `LPT³`, `LPT³.txt`, `CONIN$`, `CONIN$.txt`, `conout$`,
     `CON .txt` and `nul  .log` refused as names; an input equal to an
