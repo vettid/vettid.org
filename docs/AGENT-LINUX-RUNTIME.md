@@ -1,14 +1,33 @@
 ---
 title: AGENT-LINUX-RUNTIME
-status: draft design note; the run helper and the key sealing get their independent reviews (AGENT-PLAN §9 rule 6) from it, before their code. Nothing here is built; the channel's Unix-socket end is in review (vettid/vettid-agent#55)
-version: 0.1.0
-date: 2026-11-21
+status: draft design note; the run helper and the key sealing get their independent reviews (AGENT-PLAN §9 rule 6) from it, before their code. Built so far: the channel's Unix-socket end (vettid/vettid-agent#55)
+version: 0.1.1
+date: 2026-11-22
 owner: Al Liebl (Mesmer)
 component: vettid-agent (the agent connector): the separate-account mode on Linux (AGENT-PLAN A5.6)
 related:
-  - AGENT-SEPARATE-ACCOUNT.md (0.1.2) §2, §3, §4, §5, §6, §8
-  - AGENT-PLAN.md (0.1.18) AG3, AG14, §4.2, §4.7, §4.9, A3.10a, A3.10d, A5.6, §11
+  - AGENT-SEPARATE-ACCOUNT.md (0.1.4) §2, §3, §4, §5, §6, §8
+  - AGENT-PLAN.md (0.1.20) AG3, AG14, §4.2, §4.7, §4.9, A3.10a, A3.10d, A5.6, §11
 changelog:
+  - 0.1.1: 2026-11-22 (card #16224). §11 rewritten to the owner's a on
+    GC #16214, replacing a on #15946, and a on #16258: the member is an
+    administrator only when its account can become root without a
+    password, or read the keystrokes, the password hashes or the
+    kernel's memory. `sudo`, `wheel`, `admin`, `adm` and
+    `systemd-journal` alone no longer refuse; `adm`, `systemd-journal`
+    and `video` are reported. Counted: the refusing groups (`input`,
+    `kmem`, `mock` and `staff` added), empty passwords, any `NOPASSWD`
+    or `!authenticate` rule whatever its command and the `Defaults`
+    that skip the password, a `doas` `nopass` rule, an authentication
+    stack that can succeed with no password, and polkit actions meant
+    for administrators granted with none, asked of polkitd for each of
+    the member's sessions and none. Checked by `install`, at every run
+    start in the helper (a new `admin` message, §7) and by the elevated
+    `status` (`admin.json`, which also clears a refusal). The helper
+    runs `sudo` as root for these checks and nothing else (§6). The
+    caching settings are reported; what the rule doesn't protect
+    against is said plainly. The service's own accounts keep the
+    stricter list. §2, §3, §12 and §13 follow
   - 0.1.0: 2026-11-21, first draft (card #15760, the lead's call a on
     GC #15918). How A5.6 is built on Linux: names, files and units; the
     channel's Unix-socket end; the connector service; the data key as a
@@ -83,11 +102,12 @@ group.
   (`vettid-agent-x-run` is pairing `x-run`'s; chosen).
 - **The configuration** holds the member's uid, the uids of the three
   accounts, the `--run-path` folders, the `--run-env` values, whether
-  `--no-tpm` was given, and whether `install` found the member to be an
-  administrator (§11). It is readable by the connector's account and
+  `--no-tpm` was given. It is readable by the connector's account and
   not by the member, since a `--run-env` value may be private. The stub
   needs nothing from it: the socket's path comes from `<n>`, and the
-  connector's account from `<h>` (§3).
+  connector's account from `<h>` (§3). The last administrator check's
+  result is beside it in `admin.json`, readable by the connector's
+  account and not by the member, like the configuration (§11.3).
 - **The accounts kept apart.** `install` refuses, and the service and
   the helper check at each start, that:
   - no runner is in `vettid-c-<h>` or `vettid-m-<h>`;
@@ -101,7 +121,7 @@ group.
 
 It follows A3.10a as merged (vettid-agent 311d86b): the same hellos,
 `Op`s, refusal codes and `Admit` rules, with the peer's uid in place of
-the Windows token. It is in review (vettid/vettid-agent#55, A5.6's first PR).
+the Windows token. It is built (vettid/vettid-agent#55, A5.6's first PR).
 
 - **The socket is made by systemd** (`vettid-agent-<n>.socket`):
 
@@ -646,12 +666,14 @@ else.
     folders;
   - each runner uid is the uid of the user `vettid-r-<h>-<slot>`;
   - none is 0, the member's or the connector's, the two differ, and
-    neither is in an administrator's group (§11) or a group §2 keeps
-    apart.
+    neither is in an administrator's group (§11.3) or a group §2 keeps
+    apart, nor has a sudo, `doas` or polkit grant (§11.3, checked at
+    each start).
 
   Any failure stops it, and `status` says why. It never takes a uid,
   a path, a program path or an environment of its own from the
-  connector. It never starts anything as root.
+  connector. It never starts anything as root for a run; the one root
+  program it runs is `sudo`, for the administrator checks (§11.5).
 - **Its own start** is checked as the service's is (§3): exactly one
   descriptor from `LISTEN_FDS` and `LISTEN_PID`, a listening `AF_UNIX`
   stream socket bound to `/run/vettid-runhelper/<n>.sock`.
@@ -675,6 +697,8 @@ is another slot's, is refused (chosen). Descriptors travel with
 | From | Message | Fields | Descriptors |
 |---|---|---|---|
 | connector | `start` | `v` (1), `slot` (1 or 2), `run` (32 hex digits), `argv` (`argv[0]` the resolved path), `env` (`NAME=value` strings), `cwd` (absent for `work/`, or a cleaned absolute path), `secret_file` (true for the `file` way), `inputs` (names, A3.10d) | the program's sealed memory file; standard input, output and error; with `secret_file` a sealed memory file holding the value; one sealed memory file per input |
+| connector | `check` | `run` (a fresh 32-hex id, for a proxy's opening, §11.3); answered with `admin` only, never `error`, and accepted while both slots are busy | — |
+| helper | `admin` | `run`, `at`, `admin` (bool), `reasons` and `reported` (fixed codes, §11.3) | — |
 | helper | `cwd` | `run`, `final` (the folder's path from the held descriptor), `writable` (bool) | — |
 | connector | `go` | `run`, `final` (the path it approves, as the helper sent it) | — |
 | connector | `refuse` | `run` | — |
@@ -686,6 +710,12 @@ is another slot's, is refused (chosen). Descriptors travel with
 | helper | `ended` | `run`, `clean` (bool), `reason` when false | — |
 | helper | `error` | `run` when it concerns one, `code` (a short, fixed code) | — |
 
+- **`admin` comes first.** After `start`'s checks and before it makes
+  anything, the helper makes the administrator checks (§11.1) and sends
+  their result. If the member is an administrator, or a check couldn't
+  be completed, it then sends `error` with the code `member_is_admin`
+  and ends the run as for `refuse`; the connector keeps the result and
+  applies it to every tool (§11.3).
 - **`go` names what it approves.** The helper starts the program only
   if `go`'s `final` is exactly the `final` it sent for that run;
   otherwise it ends the run as for `refuse` (chosen). So a `go` meant
@@ -1015,50 +1045,369 @@ and nothing else.
   A3.10a's "can't open the channel" text. `install` says to log out and
   in again, and the README says it too (chosen).
 
-## 11. `member_is_admin` on Linux (decided: owner a, GC #15946)
+## 11. `member_is_admin` on Linux (owner a, GC #16214 and #16258)
 
 On Windows the service gives no tools to a member whose token holds
 Administrators (`member_is_admin`, owner decision a, GC #15862): the
 connector's own account protects its keys only from a standard account.
-The owner chose the same rule for Linux (owner a, GC #15946, #15965).
-The member is an administrator if any of these holds:
+On Linux only root can read the connector's keys (§5), so the question
+is whether code running as the member can become root on its own. On
+Windows it can, from a split-token administrator, since User Account
+Control is not a security boundary. On Linux, `sudo` and polkit asking
+for the member's password is one. So the owner chose (a on GC #16214,
+replacing a on #15946): **the member is an administrator when its
+account can become root without a password, or reach what the keys or
+that password pass through.** A member in `sudo`, `wheel` or `admin`
+whose `sudo` asks for its password keeps its tools.
 
-- **sudo's usual groups:** it is in `sudo`, `wheel` or `admin`;
-- **groups that give root in all but name** (the lead's call adds the
-  last four): `docker`, `lxd`, `incus-admin`, `libvirt`, `libvirtd`,
-  `microk8s` (a container or VM manager can mount the host's disk),
-  `disk` (raw access to it), `shadow` (the password hashes), `adm` and
-  `systemd-journal` (every log, a crashed program's included), and the
-  `root` group, gid 0, whatever its name: groups that read what root
-  reads;
-- **sudo rules:** `sudo -l -U <member>`, run as root, shows any rule
-  for it;
-- **polkit:** the member, or one of its groups, is among polkit's
-  administrator identities.
+### 11.1 What makes the member an administrator
 
-**Where each is checked:**
-- **`install`** checks all four and **refuses a member who is an
-  administrator**, with a plain text in the manner of A5.5's: make a
-  standard account for the agent's work and install for that one (the
-  lead's call, applying the owner's a). It also refuses a member who
-  isn't a local account (§1), and a member who is uid 0 or uid 65534.
-- **The service**, at each connection, checks the groups again, from
+Any of these:
+
+- **uid 0** (refused at `install` in any case, §11.3);
+- **a group that gives root, or what root reads, with no prompt**
+  (these are **the refusing groups** of this note):
+  - `docker`, `lxd`, `incus-admin`, `libvirt`, `libvirtd`, `microk8s`
+    and Fedora's `mock` (a container, VM or build-root manager can
+    mount the host's disk or run as root);
+  - `disk` (raw access to the disk) and `kmem` (the kernel's memory);
+  - `shadow` (the password hashes) and `input` (every keystroke, the
+    `sudo` password included; owner a, GC #16258);
+  - `staff` (on Debian it can write `/usr/local`, early in root's
+    `PATH`; counted wherever it exists, since the code can't tell);
+  - the `root` group, gid 0, whatever its name;
+- **an empty password**, the member's or root's: the password field of
+  its `/etc/shadow` line is empty (not `!`, `*`, `!!` or a `!` before a
+  hash, which lock it), or it has no `shadow` line and the field in
+  `/etc/passwd` is empty (`pam_unix`'s `nullok`, Ubuntu's default, lets
+  `sudo`, `su` and polkit through with no prompt);
+- **a sudo rule or setting that asks for no password** (§11.2): any
+  rule that applies to the member, directly, through a group, a
+  netgroup or `ALL`, tagged `NOPASSWD` or with `!authenticate` in its
+  options, **whatever its command and whatever user it runs as** (the
+  lead's call, GC #16219: judging which commands are safe is
+  open-ended; a rule for a package manager, `systemctl` or an editor
+  reaches root through hooks, units or a shell escape); `exempt_group`
+  naming one of the member's groups; a `timestampdir` or
+  `timestampowner` the member can write or is; a negative
+  `timestamp_timeout`, or one above a day (chosen: after one use,
+  `sudo` doesn't ask again for that long); a `Defaults` entry the code
+  doesn't know (§11.2);
+- **a `doas` rule with `nopass`** for the member or one of its groups,
+  where a setuid `doas` is installed (chosen);
+- **an authentication stack that can succeed with no password:** the
+  `auth` lines of the PAM services `sudo`, `sudo-i`, `su`, `su-l`,
+  `doas` and `polkit-1` (from `/etc/pam.d/`, else `/usr/lib/pam.d/`,
+  else `/usr/share/pam.d/`, else `other`), with `include`, `substack`
+  and `@include` followed. The code walks every path through the
+  control values (`required`, `requisite`, `sufficient`, `optional` and
+  the `[value=action]` form with its jumps) and counts the stack if
+  some path reaches overall success without a module that asks for the
+  password or a factor a program can't supply having succeeded
+  (`pam_unix`, `pam_sss`, `pam_systemd_home`, `pam_fprintd`, `pam_u2f`
+  without `nouserok`). The model: `pam_permit` always succeeds,
+  `pam_deny` always fails, and every other module known not to decide
+  alone is walked both ways, succeeding and failing, since the code
+  can't judge its condition for every caller, so `auth sufficient
+  pam_succeed_if.so user ingroup wheel` counts (`pam_env`, `pam_faildelay`, `pam_faillock`,
+  `pam_usertype`, `pam_localuser`, `pam_deny`, `pam_permit`,
+  `pam_cap`, `pam_gnome_keyring`, `pam_kwallet5`, `pam_ecryptfs`,
+  `pam_succeed_if`, `pam_wheel` without
+  `trust`, `pam_rootok` in `su` only); `pam_wheel` with `trust` (Fedora ships it commented out in
+  `su`), `pam_ssh_agent_auth` (the member's own SSH agent satisfies
+  it), `pam_rootok` elsewhere and `pam_u2f` with `nouserok` succeed with
+  no password. A module or a control the code doesn't know counts (fail
+  closed). Both lists live in the code with a test, and change by a
+  revision of this note. The stock stacks of Ubuntu 24.04, Debian 12
+  and Fedora (Ubuntu's trailing `required pam_permit` after `requisite
+  pam_deny`, Fedora's `pam_usertype` and `pam_localuser` jumps) are
+  measured not to count (§13);
+- **a polkit action granted without a password** (§11.4).
+
+A check that can't be completed (a file that can't be read, an answer
+that can't be parsed, a program that fails or takes too long) counts:
+the member is refused with the "could not be checked" reason, never
+admitted (fail closed).
+
+**Reported, not counted.** `status` names each of these, and none
+refuses anything:
+- `adm` and `systemd-journal` (owner a, GC #16258): they read the logs
+  and don't give root. The connector logs no value (§4), runs can't
+  dump core (§6, `LimitCORE=1`, apport refused), so what reaches the
+  logs is only what a program a run starts writes there itself; the
+  README says so;
+- `video` (the lead's call, GC #16260): it can read the screen on some
+  setups, not the keys;
+- the caching settings: `timestamp_type=global` or `ppid`, a
+  `timestamp_timeout` above the build's default and up to a day (the
+  default is 15 minutes on Debian and Ubuntu, 5 upstream and on
+  Fedora; read with `sudo -V`), `doas`'s `persist`, and a polkit
+  action of §11.4 at `auth_admin_keep` or `auth_self_keep`.
+
+`lpadmin` is neither: printer administration through CUPS doesn't give
+root under the stock `cups-files.conf` (its `SystemGroup` and the
+filters' user), so it isn't listed (the lead's call, GC #16260).
+
+### 11.2 How the sudo rules are read
+
+Root runs `/usr/bin/sudo -V` and `/usr/bin/sudo -ll -U <member>`, by
+absolute path, with only `LC_ALL=C` and `PATH=/usr/bin:/bin` in the
+environment, standard input from `/dev/null`, at most 4 s each and
+1 MiB of output, inside the checks' overall bound (§11.3; chosen).
+- `sudo -V`, as root, gives the compiled-in values (the default
+  `timestamp_timeout` and `timestamp_type`) and the implementation.
+  The code knows the format of the original `sudo` (1.9 and later) and,
+  once measured, `sudo-rs` (Ubuntu 25.10's default, installed beside
+  the original as `sudo.ws`). Every setuid `sudo`, `sudo.ws` and
+  `sudo-rs` in `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`,
+  `/usr/local/bin`, `/usr/local/sbin` and `/usr/lib/cargo/bin` is
+  checked, each in its own format; one the code doesn't know counts as
+  "could not be checked" (chosen; the `install` PR measures `sudo-rs`).
+- `sudo -ll -U` answers from every source sudo is configured with
+  (the `sudoers` files and their includes, LDAP and sssd). The code
+  reads each rule's options (`NOPASSWD`, `Options: !authenticate`),
+  the "Matching Defaults entries" and the "Runas and Command-specific
+  defaults" blocks. **`Defaults` are judged against a list of entries
+  known not to touch authentication** (`env_reset`, `env_keep`,
+  `env_delete`, `mail_badpass`, `secure_path`, `use_pty`, `lecture`,
+  `insults`, `logfile`, `log_*`, `syslog*`, `!visiblepw`,
+  `badpass_message`, `passwd_tries`, `passwd_timeout`, `pwfeedback`,
+  `editor`, `requiretty`, `always_set_home`, `set_home`,
+  `match_group_by_gid`, `always_query_group_plugin`, `rootpw`,
+  `targetpw`, `runaspw` (each still asks for a password),
+  `timestamp_timeout` and `timestamp_type` within the bounds above;
+  it holds every entry of the stock `sudoers` of Ubuntu 24.04,
+  Debian 12 and Fedora, checked by a test against each one's
+  `sudo -ll -U` output). The list lives in the code with a test and
+  grows by a revision of this note: any other entry counts.
+  `pam_service`, `pam_login_service` and `pam_askpass_service` stay off
+  it on purpose: they change which PAM stack sudo uses, so they count.
+- A non-zero exit other than sudo's "not allowed to run sudo", any
+  output on standard error, a line the code can't classify, or a
+  timeout counts as "could not be checked". The text names what was
+  printed, so a common case (`sudo: unable to resolve host`, a host
+  name missing from `/etc/hosts`) can be fixed by the member (chosen:
+  no line is let through). (sssd serving its cache
+  without a word is not seen: said plainly in §11.6.)
+- Without a setuid `/usr/bin/sudo`, there is no sudo rule; a setuid
+  `sudo` elsewhere counts as "could not be checked".
+
+### 11.3 Where and when it is checked, and where the result lives
+
+- **`install`** makes every check of §11.1 and **refuses a member who
+  is an administrator**, or whose check couldn't be completed, with the
+  text of AGENT-PLAN §11 ("Administrator member, install stops,
+  Linux") naming the reason. It also refuses a member who isn't a
+  local account (§1), and a member who is uid 0 or uid 65534. For
+  polkit's session kinds (§11.4) it checks the member's sessions that
+  exist then; an active session it couldn't see is checked at the
+  first run start.
+- **The run helper, at every run start** (§7, the `admin` message),
+  makes the checks of §11.1 again before it makes anything for the
+  run. A member found to be an administrator, or a check that can't be
+  completed, ends the run with `member_is_admin`. The connector keeps
+  the result (in memory and in its state). **A finding that the member
+  is an administrator** applies to every tool, proxies included, until
+  a later check finds otherwise. **A check that couldn't be completed**
+  (a timeout, polkitd restarting) refuses that run or proxy only: the
+  next run start or proxy opening checks again, at most once a minute
+  (chosen; until then, runs and proxies are refused without a check),
+  so a passing failure doesn't send the member to the elevated
+  `status`. The `admin` message tells the two apart: a check not
+  completed carries the reason code `not_checked`, never with
+  `admin` true.
+- **The elevated `status`** makes them again, writes the result to
+  `/etc/vettid-agent/<n>/admin.json` (owned by root, group the
+  connector's account, 0640, the same folder checks as the
+  configuration, §2; the member's `status` gets the result through the
+  service, since a reason such as an empty password would tell another
+  local user what to try), and connects to the service,
+  which reads that file again whenever root's `status` connects. **This
+  is how a member clears a refusal** after removing its cause: no run
+  starts while tools are refused, so the member runs the elevated
+  `status` (AGENT-PLAN §11 says so in the refusal's text).
+- **The service**, at each connection, checks the refusing groups, from
   the group database (which every user can read) and from the groups
   the client holds (`SO_PEERGROUPS`, and the gid it connected with). A
   held group the local group database can't name refuses the member,
-  since it may be an administrator's group from an NSS source the
-  build doesn't read (§1). A member found to be an administrator gets
-  `member_is_admin` for every tool, as on Windows.
-- **The sudo and polkit checks** need root, so the service can't make
-  them. `install` records their result. The elevated `status` makes
-  them again and records the new result, and the member's `status`
-  says when they were last made (chosen).
+  since it may be an administrator's group from an NSS source the build
+  doesn't read (§1). A member in a refusing group gets `member_is_admin`
+  for every tool, as on Windows.
+- **When a proxy opens**, the connector asks the helper for the checks
+  (`check`, §7), and the helper answers with `admin` as at a run start;
+  a proxy opens only on a result that finds no administrator. So a
+  member who only uses proxies is checked too, in its session.
+- **Between checks**, the service relies on the newest result, from
+  `install`'s and the elevated `status`'s file or the helper's last
+  `admin` message, and the member's `status` says when it was made.
 
-The channel's code (vettid/vettid-agent#55) does the service's part.
+A result holds its time, whether the member is an administrator, the
+reasons and the reported settings, as fixed codes, never a rule's or a
+file's text.
 
-**The cost, said plainly:** most desktop Linux users are in `sudo` (the
-first user made on Ubuntu and Fedora is). They need a separate
-standard account for the agent's work, as Windows administrators do.
+**The cost.** The checks take two `sudo` calls and one
+`CheckAuthorization` per action and subject. Their time at a run start
+and at a proxy's opening is measured in the helper PR and bounded there
+(10 s in all, the `sudo` calls' 4 s each inside it; a check over that
+counts as "could not be checked"); it is not part of the run's own time
+limit (§13).
+
+**The service's own accounts are held to more.** The connector's and the
+runners' accounts have no password, so no prompt can be their boundary:
+one of them in `sudo`, `wheel` or `admin` (sudo's usual groups), in a
+refusing group, or with any sudo rule, `doas` rule or polkit grant (no
+session, §11.4), refuses runs and proxies (§4, §6). `install` and the
+helper at each start check it. Wherever this note says "an
+administrator's group" for those accounts, it means all of these.
+
+### 11.4 Polkit
+
+**The question is put to polkitd itself**, never decided by reading its
+rules (they are JavaScript): root calls `CheckAuthorization` on the
+system bus, with no user interaction allowed, for each subject below
+and each action below. An answer `is_authorized` true for any pair makes
+the member an administrator; a challenge is fine; an error or no answer
+counts as "could not be checked".
+
+**The subjects** (chosen), so that whichever way the member signs in
+is covered:
+- each of the member's logind sessions (`unix-session`), active or not,
+  as logind lists them then;
+- a process of the member's in no session (`unix-process`, by pid and
+  start time): a child the checker forks, which sets the member's uid
+  and gids with `no_new_privs`, runs no program and exits after the
+  check.
+
+With the member signed in nowhere (an `install` over SSH as another
+user, say), only the no-session subject is asked, and the active case
+waits for the first run start, whose stub runs in the member's session.
+An inactive session is only as good as logind's view at that moment;
+that limit is said in §11.6.
+
+**The actions that refuse** are these, whatever their defaults (the
+lead's list, GC #16219, with more added; chosen): they run code as root, make
+a root service, or reach the disk or the packages' trust:
+- `org.freedesktop.systemd1.manage-units`, `manage-unit-files`,
+  `set-environment` (which `run0` and an `LD_PRELOAD` into a root
+  service use);
+- `org.freedesktop.machine1.host-shell`, `host-login`, `shell`,
+  `login`, `manage-machines`, `manage-images`;
+- `org.freedesktop.portable1.attach-images`;
+- `org.freedesktop.udisks2.open-device-system` and
+  `modify-device-system`;
+- `org.freedesktop.packagekit.package-install-untrusted`,
+  `system-sources-configure`, `repo-enable`,
+  `system-trust-signing-key`; aptdaemon's `org.debian.apt.install-file`,
+  `install-or-remove-packages`, `change-repository`;
+  `io.snapcraft.snapd.manage`;
+- `org.freedesktop.policykit.exec` (`pkexec`), and every action with
+  the `org.freedesktop.policykit.exec.path` annotation;
+- `org.freedesktop.accounts.user-administration`.
+
+**The other actions meant for an administrator** (every action polkit
+lists whose shipped `allow_active` default is `auth_admin` or
+`auth_admin_keep`) are asked too, and one granted without a password is
+**reported, not counted** (chosen). Stock desktops grant several to the
+first user with no password: Ubuntu's `policykit-desktop-privileges`
+(mounting a system disk's file system, setting the time and the
+locale), GNOME's control-center rules on Fedora and Debian (the locale,
+the keyboard, the host name, the date and time), and Fedora's rule for
+installing signed packages from the configured repositories
+(`org.freedesktop.packagekit.package-install`, `package-remove`). None
+of them runs a program the member chooses as root; installing a
+package that isn't signed by a configured repository, configuring the
+repositories or trusting a signing key does, and those are in the
+refusing list. The list lives in the code with a test that names each
+action, and changes only by a revision of this note. If stock Ubuntu
+24.04, Debian 12 or Fedora would refuse a member in `sudo` or `wheel`
+whose `sudo` asks for its password, it comes back to the owner before
+the `install` PR merges (§13).
+
+**A kept authorization** (an answer `is_authorized` true carrying a
+`polkit.temporary_authorization_id`: the member typed the password in a
+polkit dialog a moment ago) is reported as a caching window, not
+counted; whether a session subject can return one is measured (§13).
+
+**Where the no-session child sits.** Forked by the helper, it is in no
+session. Forked by `install` under `sudo` in a terminal, it sits in that
+terminal's session scope, so polkit may judge it as that session: the
+stricter answer, never a weaker one.
+
+### 11.5 The checker inside the run helper
+
+The run helper runs no program as root for a run (§6). For these checks
+it does exactly this, and nothing the connector names:
+- it runs `/usr/bin/sudo` as §11.2 says, after the folder checks of
+  §8 on its path;
+- it reads `/etc/shadow`, `/etc/doas.conf` (and
+  `/usr/local/etc/doas.conf`), the PAM files of §11.1 and the group
+  database;
+- it asks polkitd and logind over the system bus, and forks the
+  no-session child of §11.4.
+
+What this needs from the helper's unit (the capabilities `sudo -l`
+uses as root, the system bus under its sandbox) is measured in the
+helper PR and added there by exactly what is needed, said in that PR
+(§13).
+
+**The elevated commands drop the member's sudo ticket.** `pair`,
+`forget` and the elevated `status` make the member type the `sudo`
+password, which opens sudo's caching window for that terminal. Before
+they exit they remove the invoking member's time stamp, as a best
+effort (chosen): the name comes from `getpwuid(SUDO_UID)`, never from
+`$SUDO_USER`, and one holding a `/` is refused; the file is removed with
+`unlinkat` in an opened `/run/sudo/ts`, without following links. (A
+`timestampdir` other than the default is already counted, §11.1.) The README says
+to run them in a terminal where no agent runs.
+
+### 11.6 What it doesn't protect against, said plainly
+
+- **A caught password.** Code running as the member can put a `sudo` of
+  its own in the member's shell configuration, show a polkit dialog of
+  its own, or read the keystrokes where the session allows it (an X11
+  session; `ptrace` of the member's shell where `ptrace_scope` is 0, as
+  on Fedora). It then catches the password the next time the member
+  types it. That needs the member to act, and no check here can see it.
+- **The caching windows.** For as long as `sudo` keeps the member's
+  password (15 minutes per terminal on Ubuntu and Debian, 5 on Fedora)
+  or polkit keeps a grant, root is a command away without a prompt in
+  that terminal or session. These are reported (§11.1), not detected.
+- **A grant made between checks.** A member who adds a `NOPASSWD` rule
+  (typing the password once to do it) is not seen until the next run
+  start or elevated `status`; until then the service applies the last
+  result.
+- **Routes no list covers:** root's `authorized_keys` holding a key the
+  member has (`ssh root@localhost`); setuid programs and programs with
+  file capabilities; files run by root that the member can write
+  (cron, units, a writable folder in root's `PATH`); a bug in a root
+  service reachable from the member's session; a polkit action from a
+  third-party package that gives root but isn't on the refusing list
+  (it is only reported); Fedora's signed-package install, which lets a
+  program add or remove any package of the configured repositories
+  (a setuid program or a root service among them, or a security
+  package removed), reported (§11.4); sssd answering `sudo` from a
+  stale cache; an inactive session's polkit result changing
+  when the member switches to it.
+
+The README says the same, under "Running programs on Linux"
+(AGENT-PLAN §11, "README, sudo password", Linux).
+
+### 11.7 What it costs, and what is built
+
+A member whose `sudo` asks for its password (the first user on a stock
+Ubuntu or Fedora desktop, in `sudo` and `adm`, or `wheel`) uses runs and
+proxies. Refused are the accounts that can become root silently, or
+read the keystrokes, the password hashes or the kernel's memory: uid 0,
+an empty password, a `NOPASSWD` or `!authenticate` rule, a `doas`
+`nopass` rule, an authentication stack that skips the password, a
+polkit grant, and the refusing groups, Docker's included. Those members
+need a separate standard account for the agent's work, as Windows
+administrators do.
+
+The channel's code (vettid/vettid-agent#55) checks the groups; the
+change to this list (refusing `input`, `kmem`, `mock` and `staff`; not
+`sudo`, `wheel`, `admin`, `adm` or `systemd-journal`) is card #16224's.
+Until it merges, the merged code still refuses a member in `sudo`.
 
 ## 12. What this note chooses
 
@@ -1140,8 +1489,25 @@ owner's go:
    5 rounds; the retry of a slot out of use (§9).
 10. No configuration read by the stub on Linux; the "log in again" step
     after `install` (§10).
-11. The sudo and polkit snapshot refreshed by the elevated `status`
-    (§11).
+11. In §11: the refusing groups (`mock`, `kmem`, `staff` added to the
+    owner's list); a `timestamp_timeout` above a day counted, and the
+    lower ones reported; `doas`'s `nopass` counted; the PAM stacks and
+    the empty passwords; `sudo -V` and `sudo -ll -U` with a fixed
+    environment and limits, `Defaults` judged against a known list, an
+    unknown `sudo` implementation not admitted; polkit asked through
+    `CheckAuthorization` for each of the member's sessions and a
+    no-session child: a named list refuses, the other actions meant
+    for administrators are reported (stock desktops grant several),
+    and a kept authorization is reported; the PAM stacks walked path by
+    path; the connector's `check` when a proxy opens; the checks made by `install`, at every run
+    start in the helper (the `admin` message, §7) and by the elevated
+    `status` (`admin.json`), which is how a refusal is cleared; the
+    elevated commands dropping the member's sudo time stamp. (Any
+    `NOPASSWD` rule whatever its command, the negative timeout, the
+    polkit action list and the three check points are the lead's calls,
+    GC #16219; `adm` and `systemd-journal` reported and `input` refusing
+    are the owner's a, GC #16258; `video` reported and `lpadmin`
+    unlisted are the lead's calls, GC #16260.)
 
 ## 13. The tests (A5.6's list, on Linux)
 
@@ -1153,11 +1519,14 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
   `ProtectKernelTunables=yes`; `/dev/shm` and `/dev/mqueue` private;
   the run root's tmpfs writable under `ProtectSystem=strict`; `clone3`
   and `CLONE_INTO_CGROUP` working under the system-call filter.
-- **The channel** (in review, vettid/vettid-agent#55):
+- **The channel** (vettid/vettid-agent#55, merged; the group list
+  changed by card #16224):
   - another user is refused;
   - root gets `status`, `pair` and `forget` but no tool;
   - the member's normal process can't `pair` or `forget`;
-  - a member in an administrator's group gets `member_is_admin`;
+  - a member in a refusing group gets `member_is_admin`, and a member
+    in `sudo`, `wheel`, `admin`, `adm` or `systemd-journal` and nothing
+    else gets its tools;
   - the stub refuses a link, a socket of another owner, a server of
     another uid, and a folder above the socket that another user can
     change.
@@ -1239,11 +1608,65 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
 - **The accounts:**
   - `install` refuses a member who is an administrator, or who isn't a
     local account, with its text;
+  - **the administrator checks (§11)**. Each of these members is
+    refused by `install`, at a run start (the `admin` message, then
+    `member_is_admin`) and by the elevated `status`:
+    - in each refusing group (`input` and `docker` among them);
+    - with an empty password, and with root's password empty;
+    - a `NOPASSWD` rule for one command only (`/usr/bin/apt`), one
+      through a group, one through `ALL`, one through a netgroup, one
+      with a run-as user other than root; `!authenticate` in `Defaults`
+      and in a command's `Defaults`; `exempt_group`; a negative
+      `timestamp_timeout`, and one of two days; an unknown `Defaults`
+      entry;
+    - a `doas` `nopass` rule, and an unparseable `doas.conf`;
+    - each stock distribution's `sudo -ll -U` output parsed with no
+      unknown `Defaults` entry;
+    - `pam_permit` as `sufficient` in `/etc/pam.d/sudo`, `pam_wheel
+      trust` in `su`, an unknown module in `polkit-1`;
+    - each named polkit action granted by a `.rules` file, asked in an
+      active session, an inactive one and with no session; an action
+      with the `exec.path` annotation; polkitd stopped (could not be
+      checked);
+    - `sudo -ll` failing, provoked by `sudoers: sss` in
+      `nsswitch.conf` with sssd stopped and by a `sudoers` include
+      that can't be read;
+    - a second setuid `sudo` on the system.
+
+    And these are **not** refused: a user made with the groups the
+    distribution's installer gives its first user (Ubuntu 24.04:
+    `adm cdrom sudo dip plugdev users lpadmin`; Fedora: `wheel`), with
+    the stock `sudoers`, PAM stacks and polkit rules, on Ubuntu 24.04,
+    Debian 12 and Fedora; a rule with `rootpw` and a root password set;
+    a `NOPASSWD` rule for another user; a member without `sudo`
+    installed. The reported settings (`adm`, `systemd-journal`,
+    `video`, `timestamp_type=global`, a 60-minute timeout, `persist`,
+    `auth_admin_keep`) appear in `status` and refuse nothing. If any
+    stock member is refused, it goes back to the owner before the PR
+    merges;
+  - a `NOPASSWD` rule added after `install` refuses the next run, and
+    every tool and proxy after it, with `member_is_admin`; removing it
+    and running the elevated `status` restores the tools;
+  - the checks run inside the helper's unit as written, its sandbox
+    and capabilities included (§11.5), within their bound;
+  - a proxy opened by a member who never starts a run is checked
+    (`check`), and refused once a `NOPASSWD` rule is added;
+  - an action of the refusing list granted refuses; a stock grant of
+    another administrator action (Ubuntu's mount, Fedora's locale and
+    signed-package install) is reported and refuses nothing;
+  - the elevated `pair`, `forget` and `status` leave no sudo time stamp
+    for the member, with the original `sudo` and, once measured,
+    `sudo-rs` (which names its files by uid);
+  - a check that can't be completed (polkitd stopped) refuses that run
+    only, and the next run after a minute, with polkitd back, starts;
+  - `sudo-rs`'s output is measured and parsed, or `install` on a system
+    using it refuses with "could not be checked", said in the README;
   - the member's account can't read the state, the run root or a run's
     secret, and the run root isn't on any disk;
-  - a connector or runner account made the member's, or an
-    administrator's, or put in a group §2 keeps apart, refuses runs
-    and proxies;
+  - a connector or runner account made the member's, or put in
+    `sudo`, `wheel`, `admin`, a refusing group or a group §2 keeps
+    apart, or given a sudo, `doas` or polkit grant, refuses runs and
+    proxies;
   - `install` and uninstall leave nothing behind. Uninstall removes the
     users, the groups, the `.deny` entries, the run root,
     `/etc/vettid-agent/<n>/`, the credential and the four units. It

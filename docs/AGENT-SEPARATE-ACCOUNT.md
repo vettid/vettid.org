@@ -1,14 +1,18 @@
 ---
 title: AGENT-SEPARATE-ACCOUNT
 status: approved by the owner 2026-11-05 (§9); design note. Nothing here is built; AGENT-PLAN and the code follow
-version: 0.1.3
-date: 2026-11-21
+version: 0.1.4
+date: 2026-11-22
 owner: Al Liebl (Mesmer)
 component: vettid-agent (the agent connector): install, process model, keys at rest, runs and proxies
 related:
   - AGENT-PLAN.md (0.1.9; 0.1.10 in vettid.org #538) AG1a, AG3, AG4, AG11, §4.2, §4.6, §4.7, §4.9, A3.8, A3.9, A5
   - VAULT-MESSAGING.md (0.84.0; 0.85.0 in #538) §10.11 "Ways to use a secret"
 changelog:
+  - 0.1.4: 2026-11-22 (card #16224; owner a, GC #16214). §5: on Linux a
+    member with password-less `sudo` is now refused (`member_is_admin`,
+    AGENT-LINUX-RUNTIME §11), rather than only left without the
+    elevation's protection. Nothing else changes
   - 0.1.3: 2026-11-21, erratum with AGENT-PLAN 0.1.19, the owner's
     decision (GC #15936), with the facts measured by the CI probe on
     windows-2025 (vettid/vettid-agent#53 at 1842446). §3: the
@@ -520,7 +524,10 @@ and the service never takes another name.
   menu's elevated shortcut. The README gives these lines as written, and
   says to start them only that way. Said plainly: a member with password-less
   `sudo` (NOPASSWD), or UAC set to "never notify", gets no protection
-  from this elevation, since the agent can elevate the same way. `status` needs no elevation. The SAS and the
+  from this elevation, since the agent can elevate the same way. On
+  Linux such a member is refused (`member_is_admin`, AGENT-LINUX-RUNTIME
+  §11); on Windows an administrator member is refused whatever UAC's
+  setting (AGENT-PLAN §11, "Administrator member"). `status` needs no elevation. The SAS and the
   texts of AGENT-PLAN §11 are shown by the command, as today. The
   pairing code is passed once over the channel and never stored or
   logged (AGENT-PLAN §4.7).
