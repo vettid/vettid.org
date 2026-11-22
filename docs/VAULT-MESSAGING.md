@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.93.0
+version: 0.93.1
 date: 2026-11-21
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -30,6 +30,25 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.93.1: 2026-11-22, erratum to 0.93.0, from the blind review of
+    vettid/vettid-vault#292 (the vault's side of §10.11 "Member folders
+    for runs" and "Files handed in and out"; the lead's calls, Ground
+    Control #16389). Every rule only refuses more, so a 0.93.0 vault is
+    not wrong for any path this text accepts. §10.11: (1) **an element
+    made only of dots and spaces** (`.. `, `. `, `...`, ` `) is refused
+    in a `folders` path, a `cwd`, an input's `path` and
+    `output.folder`, as `.` and `..` already are: Windows drops the
+    trailing dots and spaces of an element, so `.. ` can name the
+    parent; (2) entries are compared for nesting, and input and output
+    names for duplicates, after **Unicode normalization (NFC)** as well
+    as without case, since macOS (APFS) treats the composed and
+    decomposed forms of a name as one; coverage stays exact on the text
+    sent; (3) the **reserved Windows names** add `COM0`, `LPT0`, `COM¹`,
+    `COM²`, `COM³`, `LPT¹`, `LPT²`, `LPT³`, `CONIN$` and `CONOUT$`;
+    (4) an input **lies strictly under** an entry (an input equal to an
+    entry's path is `cwd_not_allowed`, `where: "input"`); (5) an empty
+    `inputs` list is the same as none (no `member_files`). The tests
+    required grow to match. No other change.
   - 0.93.0: 2026-11-21, with AGENT-PLAN 0.1.17, ANDROID-PLAN 0.1.135
     and IOS-PLAN 0.1.78. Owner-approved card GC #15810, from
     AGENT-SEPARATE-ACCOUNT 0.1.2 §6 and the owner's decisions Q1 a
@@ -19044,11 +19063,18 @@ item's settings allow for its task:
     ("Program strings"): at most 4,096 bytes of UTF-8, no control, Cf,
     Zl or Zp character, absolute and clean, no `:` after the root.
     Unlike a `cwd`, it may not be the root itself (`/` or a drive
-    root), which would put every file in reach.
+    root), which would put every file in reach. (0.93.1) No element
+    of it, nor of a run's `cwd`, an input's `path` or `output.folder`,
+    may be made only of dots and spaces (`.. `, `. `, `...`, ` `):
+    Windows drops an element's trailing dots and spaces, so `.. ` can
+    name the parent. Such a path is `bad_request`, as one with a `..`
+    element is.
     - **No entry may be equal to, under or above another.** Entries are compared **folded**, on every system, as
       an entry's `program` is for the no-two-match rule: without case,
       a drive path's `/` as `\`, and trailing dots and spaces dropped
-      from each element. So `/home/al/Work` and `/home/al/work` cannot
+      from each element; (0.93.1) and after Unicode normalization to
+      NFC, since macOS (APFS) treats a name's composed and decomposed
+      forms (`café` written either way) as one. So `/home/al/Work` and `/home/al/work` cannot
       both be listed, even on Linux, where they are two folders. A
       binding that breaks the rule is `bad_request`. With no nesting,
       every `write` applies to exactly one entry, and removing an
@@ -19417,7 +19443,11 @@ item's settings allow for its task:
   - `inputs` (0–16) lists files copied, read-only, into the run's
     `work/in/` before it starts: each `{path, size}`. `path` is a
     clean absolute path as for `cwd`, and **must lie under a `folders`
-    entry**, whether or not it has `write`. `size` is a non-negative
+    entry**, whether or not it has `write`; (0.93.1) strictly under: an
+    input equal to an entry's path is `cwd_not_allowed` (`where:
+    "input"`), since an entry is a folder. (0.93.1) An empty `inputs`
+    list is the same as none: nothing is handed in and the run is not
+    flagged `member_files`. `size` is a non-negative
     JSON integer (a fraction, an exponent form or a negative number is
     `bad_request`) of at most 16,777,216 (16 MiB), and all sizes
     together at most 67,108,864 (64 MiB). **The paths together are at
@@ -19428,13 +19458,15 @@ item's settings allow for its task:
     element, which must be a **flat name**: 1–255 bytes of UTF-8, no
     control, Cf, Zl or Zp character, no `/`, `\` or `:`, not `.` or
     `..`, no trailing dot or space, and no reserved Windows name
-    (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`,
-    with or without an extension, any case). Two inputs with the same
-    name (compared without case) are `bad_request`.
+    (`CON`, `PRN`, `AUX`, `NUL`, `COM0` to `COM9`, `LPT0` to `LPT9`,
+    (0.93.1) `COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`, `LPT³`, `CONIN$` and
+    `CONOUT$`, with or without an extension, any case). Two inputs with
+    the same name (compared without case, (0.93.1) after NFC) are
+    `bad_request`.
   - `output` is `{folder, names}`. `folder` is a clean absolute path
     **equal to or under a `folders` entry with `write: true`**. `names`
     (1–16, so 0 or 17 is `bad_request`) are flat names (as above),
-    unique without case: the files of the run's `work/out/` the
+    unique without case ((0.93.1) after NFC): the files of the run's `work/out/` the
     connector copies back to `folder` when the run ends, and no
     others.
   - **Which process checks what.** The vault checks the request's
@@ -19578,6 +19610,16 @@ item's settings allow for its task:
     again at approval, never answered with the value.
   - A retransmission of an `item.run` with these members is answered
     as before (cached, `withheld: true`).
+  - (0.93.1) An element made only of dots and spaces (`.. `, `. `,
+    `...`, ` `) refused (`bad_request`) in a `folders` path, a `cwd`,
+    an input and `output.folder`; two entries that differ only by NFC
+    against NFD (`/a/café` and `/a/cafe\u0301`), or nest after NFC,
+    refused; two input or output names equal after NFC and without
+    case refused; `COM0`, `LPT0`, `COM¹`, `LPT³.txt`, `CONIN$` and
+    `conout$` refused as names; an input equal to an entry's path
+    `cwd_not_allowed` (`where: "input"`); `inputs: []` decided as no
+    inputs (no `member_files`); the limits pinned by their literal
+    values (16 entries; 16,777,216; 67,108,864; 16,384; 255 bytes).
 - **The connector holds the value** for a run or a proxy. The vault
   cannot see what it does with it: these ways trust the connector, the
   member's own program on the agent's computer, and not the agent. A
