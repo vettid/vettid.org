@@ -1931,7 +1931,9 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     floppy sudo audio dip video plugdev users netdev bluetooth lpadmin
     scanner`; Fedora: `wheel`; Ubuntu 26.04 and Debian 13 measured on a
     desktop install in the PR), with the stock `sudoers`, PAM stacks and
-    polkit rules (and on Fedora the package-grant rules file of §11.4),
+    polkit rules (and on Fedora and Ubuntu desktops the rules file of
+    §11.4; without it, Fedora's package and firewall grants and Ubuntu's
+    `printeraddremove` refuse, with the file named),
     in an active session where it can mount a USB disk and power off;
     a rule with `rootpw` and a root password set; a `NOPASSWD` rule for
     another user; a member without `sudo` installed; a computer without
