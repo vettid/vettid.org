@@ -6,6 +6,7 @@ date: 2026-11-22
 owner: Al Liebl (Mesmer)
 component: vettid-agent (the agent connector): install, process model, keys at rest, runs and proxies
 related:
+  - AGENT-LINUX-RUNTIME.md (0.1.1, draft) §11 — who counts as an administrator on Linux
   - AGENT-PLAN.md (0.1.9; 0.1.10 in vettid.org #538) AG1a, AG3, AG4, AG11, §4.2, §4.6, §4.7, §4.9, A3.8, A3.9, A5
   - VAULT-MESSAGING.md (0.84.0; 0.85.0 in #538) §10.11 "Ways to use a secret"
 changelog:
