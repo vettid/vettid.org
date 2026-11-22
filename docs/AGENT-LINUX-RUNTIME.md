@@ -1702,7 +1702,7 @@ A member whose `sudo` asks for its password uses runs and proxies once
 the stock grants that skip the password are made to ask: the first
 user on a stock Debian desktop; on a stock Ubuntu desktop (in `sudo`
 and `adm`), once the rules file of §11.4 makes cups-pk-helper's
-printer-from-a-file actions ask (Debian has no such grant:
+printer-from-a-file actions and `server-settings` ask (Debian has no such grant:
 `policykit-desktop-privileges` is Ubuntu's; §13 measures it); and
 a stock Fedora desktop's first user (`wheel`), once the same file makes
 the package installs and the firewall ask (owner a, GC #16331 and
@@ -1968,7 +1968,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     desktop install in the PR), with the stock `sudoers`, PAM stacks and
     polkit rules (and on Fedora and Ubuntu desktops the rules file of
     §11.4; without it, Fedora's package and firewall grants and Ubuntu's
-    printer-from-a-file actions refuse, with the file named; with it in place
+    printer-from-a-file actions and `server-settings` refuse, with the
+    file named; with it in place
     those grants ask for the password, which shows the file sorts
     before the stock ones on each measured distribution),
     in an active session where it can mount a USB disk and power off;
