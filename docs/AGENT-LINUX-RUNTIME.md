@@ -1105,7 +1105,8 @@ Any of these:
   asks for (`targetpw`, `runaspw`) count; so does, while a stack of
   `su` or `sudo` takes an empty password (`pam_unix`'s `nullok`,
   Ubuntu's default), that of any account that is uid 0, in a refusing
-  group, or holds a sudo or `doas` rule. Another account's empty
+  group, holds a sudo or `doas` rule, or is one of polkit's
+  administrator identities (`addAdminRule`). Another account's empty
   password is reported (the lead's call, GC #16374);
 - **a sudo rule or setting that asks for no password** (§11.2): any
   rule that applies to the member, directly, through a group, a
@@ -1544,7 +1545,11 @@ it does exactly this, and nothing the connector names:
   judged as the member's; §13 checks that the thread can't open a
   root-only file. A probe only connects, with a non-blocking connect and
   a time limit (a stalled thread can't be killed as a child could), and
-  closes; it sends nothing to the service it reaches.
+  closes; it sends nothing to the service it reaches. (The connect
+  permission is judged with the member's file-system ids, but the
+  daemon would see the thread's effective uid 0 in `SO_PEERCRED`: so a
+  daemon that judges by peer credentials is judged here by the socket
+  file's access alone.)
 - **polkit's no-session subject** is the helper's own program, started
   as the member (all its ids, no capabilities, `no_new_privs`, every
   inherited descriptor closed) in a mode that only waits, and exits when
@@ -1590,8 +1595,11 @@ terminal where no agent runs.
   applies the last result.
 - **What the checks can't see:** a polkit rule that grants an action
   for some details only (§11.4); host-scoped sudo rules held in LDAP or
-  sssd, seen for this host only, so a member who can set the host name
-  (an allowlisted grant) could make one of them apply; sssd answering `sudo` from a stale
+  sssd, seen for this host only (the host-name grants then refuse,
+  §11.4, but a rule given by IP address can still be made to apply: a
+  member granted NetworkManager's `settings.modify.own`, the default for
+  an active session, can bring up a connection of its own with a static
+  address); sssd answering `sudo` from a stale
   cache; an inactive session's polkit result changing when the member
   switches to it.
 - **Routes no check covers:** root's `authorized_keys` holding a key the
