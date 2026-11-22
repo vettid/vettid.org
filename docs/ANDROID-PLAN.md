@@ -4,7 +4,7 @@ status: draft
 version: 0.1.136
 date: 2026-11-22
 changelog:
-  - 0.1.136: erratum, 2026-11-22 (lead decision 2026-11-22). Notification modes 7, "While the vault's release is checked", **Released**: an event or arrival that only waits for the feed's read (it came while the feed was not loaded with nothing the check held ahead of it, or it is queued behind only such) is not held in this sense, and a push wake while the feed is not loaded does not wait behind it, except an event of the push's own item as new as its copy or newer; and with a push wake waiting (held by the check, behind what it held, or behind a newer change of its own item), a read that fails and leaves the feed not loaded makes one catch-up after a short wait, once per failure run, instead of none. **Tests** gain both. IOS-PLAN is unchanged: the iPhone app has no push wake before phase P, and this paragraph governs both apps' order when it does.
+  - 0.1.136: erratum, 2026-11-22 (lead decisions of 2026-11-22; built by vettid/vettid-android#429). Notification modes 7, "While the vault's release is checked", **Released**: an event or arrival that only waits for the feed's read (it came while the feed was not loaded with nothing the check held ahead of it, or it is queued behind only such) is not held in this sense, and a push wake while the feed is not loaded does not wait behind it, except an event of the push's own item as new as its copy or newer; and with a push wake waiting in any of the queues (held by the check, behind what it held, behind a newer change of its own item, or a copy the opening already covered, kept for the list), a read that fails and leaves the feed not loaded makes one catch-up after a short wait, once per failure run, instead of none. **Tests** gain both. IOS-PLAN is unchanged: the iPhone app has no push wake before phase P, and this paragraph governs both apps' order when it does.
   - 0.1.135: 2026-11-21 (VAULT-MESSAGING 0.93.0, AGENT-PLAN 0.1.17, IOS-PLAN 0.1.78; AGENT-SEPARATE-ACCOUNT Q1 a and Q9 a; Ground Control #15810). Not built; card #15812. §4 "Devices & agents": a new subsection "Member folders and files on a run (AA9)": the run settings' folders list with read only offered first (adding a folder or turning on write is a widening, so it asks for the password), and a run approval's folder, input files and output folder with their warnings, shown from the approval's `folders` member; deny-only when it is missing. Every text in it is NEW, for the owner's approval. Nothing existing changes: AA7 and AA8 still have no section of their own, and decision 15 (an `item.run` approval is deny-only before AA8) still holds **Fix round after the blind reviews:** `share` applies to a working folder only (files in and out need no share); no nested or case-duplicate entries, with a NEW text; the hint says to type the path exactly as the computer shows it and not to list a whole home folder, and that the connector uses it as typed; sizes are 1,024-based; "Can change files" is the one wording; an inputs-only approval has `folders: {}`; "the section below". The owner's decision a (GC #15855) is in: "Read only" is enforced for the folder a run starts in, the switch line loses its "until then" wording, and the help says a run can reach every folder shared with the pairing; a run with files only is also referred to the phone (owner decision a, GC #15856)
   - 0.1.134: erratum, 2026-11-18 (owner rule 3 as amended, Ground Control #r60; owner decisions a, 2026-11-18, #13774; lead decisions #13781, #13821; IOS-PLAN 0.1.77). Notification modes 7: a new paragraph "While the vault's release is checked": the release gate's three states (checking, a failed check included; behind; over); what is held (events, arrivals and the waiting-asks replay), dropped while the owner check is due or held, released after the feed's reads (arrivals, then events), and what notifies on release (an arrival or a replay as the feed lists it now; a covered held event only if its message came at or after the vault's opening, judged on the vault's clock from the first answer of this opening; a push-started process's events whatever their time). Built today by vettid-android #407 except: the opening's moment from an answer of this opening, the push wake limited to a push-started process, the replay against the first `pending.list` after the check and kept as a fresh arrival, no repeat within the opening, and a failed incremental read: Ground Control #13822. The 0.1.133 notes cite #r58; #r60 amends it (upgrades from the previous release must work), which changes none of them.
   - 0.1.133: erratum, 2026-11-17 (owner rule 3, Ground Control #r58; VAULT-MESSAGING 0.90.17). §4 "Transfer (new phone)": a transfer's `device.paired` without `transfer: true` and a valid `user_guid` is refused and dropped (the app no longer completes and warns); a dated note on the row, text kept. §4 "Release capabilities": a dated note that without `recovery_r` the app will refuse before anything is sent and `Path.EARLIER` goes (text to be set, owner approval). iOS has no such rule in IOS-PLAN, so no change there.
@@ -2518,22 +2518,23 @@ its process runs; nothing keeps it running in the background).
      item). It waits for the feed's reads under way and for a loaded feed
      (one not loaded is read first); at the end of a failed check, or at the lift from *behind*, it waits
      for a full read. A live event never overtakes what is held. A read
-     that fails and leaves the feed not loaded releases nothing and starts
-     no read of its own; the next event starts one, so the feed never
-     stalls and never loops. (0.1.136) An event or arrival that only
-     waits for the feed's read (one that came while the feed was not
-     loaded with nothing the check held ahead of it, as an event of a
-     start no push caused, or one queued behind only such) is not held
-     in this sense: a push wake that comes while the feed is not loaded
-     does not wait behind it, and notifies its own copy as with nothing
-     held, except behind an event of the push's own item as new as its
-     copy or newer, which it waits for and is judged with. And with a
-     push wake waiting (held by the check, behind what it held, or
-     behind a newer change of its own item), a read that fails and
-     leaves the feed not loaded makes one catch-up after a short wait,
-     once per failure run (a second failure waits for the next event, so
-     it still never loops): no next event may come for a push to wait
-     for.
+     that fails and leaves the feed not loaded releases nothing and
+     starts no read of its own, except as below; the next event starts
+     one, so the feed never stalls and never loops. (0.1.136) An event
+     or arrival that only waits for the feed's read (one that came while
+     the feed was not loaded with nothing the check held ahead of it, as
+     an event of a start no push caused, or one queued behind only such)
+     is not held in this sense: a push wake that comes while the feed is
+     not loaded does not wait behind it, and notifies its own copy as
+     with nothing held, except behind an event of the push's own item as
+     new as its copy or newer, which it waits for and is judged with.
+     And with a push wake waiting in any of the queues (held by the
+     check, behind what it held, behind a newer change of its own item,
+     or a copy the opening already covered, kept for the list), a read
+     that fails and leaves the feed not loaded makes one catch-up after
+     a short wait, once per failure run (a second failure waits for the
+     next event, so it still never loops): no next event may come for a
+     push to wait for.
    - **What notifies on release.**
      - A held arrival notifies as the feed lists it now, and not at all if
        the feed no longer lists it (deleted, past retention) or it is no
@@ -2576,7 +2577,8 @@ its process runs; nothing keeps it running in the background).
      push notified at once), a late older push behind a newer event of its
      item (silent), and a push held behind what the check held, then a
      failed read (one catch-up releases both in order; a second failure
-     starts no other read); the lift after
+     starts no other read), and a covered copy kept, then a failed read
+     (one catch-up judges it against the list); the lift after
      an item was read elsewhere (no alert); the replay held over a pause.
 
 8. **Content** (privacy). Every notification is
