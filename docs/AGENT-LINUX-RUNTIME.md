@@ -1382,8 +1382,11 @@ installed now, as snapd's own records list it; chosen, measured in
 README says software installed outside the package manager can ship
 such a file). They record each such file's digest in `admin.json`; at a
 run start or a proxy's opening the helper only compares the digests,
-runs no package manager, and a file changed, added or gone since is
-"not checked" until the elevated `status` checks it again. On a
+runs no package manager. A file changed or added since whose content
+now has no `yes` default needs no package check and is accepted; one
+that has a `yes` is "not checked" until the elevated `status` checks it
+again, and its text says so (an ordinary system update can do this; the
+README says to run the elevated `status` afterwards). On a
 distribution with neither `dpkg` nor `rpm`, such a file is "could not
 check <file>" (chosen). An action **refuses** when polkit
 authorizes the member for it without a password and either
