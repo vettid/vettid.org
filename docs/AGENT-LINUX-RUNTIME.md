@@ -99,6 +99,7 @@ group.
 | The channel | `/run/vettid-agent/<n>.sock` | `vettid-c-<h>`:`vettid-m-<h>`, 0660, in `/run/vettid-agent/` (root, 0755) |
 | The helper's socket (chosen) | `/run/vettid-runhelper/<n>.sock` | root:`vettid-c-<h>`, 0660, in `/run/vettid-runhelper/` (root, 0755) |
 | Units | `vettid-agent-<n>.socket`, `vettid-agent-<n>.service`, `vettid-runhelper-<n>.socket`, `vettid-runhelper-<n>.service` | in `/etc/systemd/system/` |
+| The rules file (chosen; shared, written only on request) | `/etc/polkit-1/rules.d/40-vettid-agent.rules`, written by the elevated `vettid-agent rules-file --write` (§11.4) | root, 0644; uninstall leaves it, since the member's administrator chose it |
 | The policy check (chosen; shared by every pairing) | `vettid-agent-polkitcheck.path` (`PathChanged=` on the `actions` and `rules.d` folders, and `polkitd.conf`, under each of `/etc/polkit-1`, `/run/polkit-1`, `/usr/local/share/polkit-1` and `/usr/share/polkit-1`, the folders polkitd reads, §11.4) and `vettid-agent-polkitcheck.service` (`Type=oneshot`, root, the helper's hardening, with `ReadWritePaths=/etc/vettid-agent` so it can take each pairing's lock and write its `admin.json`, the package database readable, and `WantedBy=multi-user.target` so it also runs at boot), which writes every installed pairing's `admin.json` | in `/etc/systemd/system/`; the first `install` adds them, the last uninstall removes them |
 
 - **Separate prefixes.** The run root is outside `/var/lib/vettid-agent/`,
@@ -1107,13 +1108,16 @@ Any of these:
   `su` or `sudo` takes an empty password (`pam_unix`'s `nullok`,
   Ubuntu's default), that of any account that is uid 0, in a refusing
   group, holds a sudo or `doas` rule, or is one of polkit's
-  administrator identities: those the `addAdminRule` calls in the rules
-  folders name as `unix-user:` or `unix-group:` strings, and, failing
+  administrator identities. Only when another account has an empty
+  password does the checker read the `addAdminRule` calls in the rules
+  folders (the one place this note reads polkit's rules rather than
+  asking polkitd), taking the `unix-user:` and `unix-group:` strings they
+  name, and, failing
   closed, every member of `sudo`, `wheel` and `admin` (for whose empty
   password counts only; it doesn't make those groups refusing). An
   `addAdminRule` whose return isn't a literal list of strings (built
-  from a variable, a concatenation or a call) is "could not check
-  <file>"; Another account's empty
+  from a variable, a concatenation or a call) is then "could not check
+  <file>"; §13 tests the stock files; Another account's empty
   password is reported (the lead's call, GC #16374);
 - **a sudo rule or setting that asks for no password** (§11.2): any
   rule that applies to the member, directly, through a group, a
@@ -1460,7 +1464,8 @@ authorizes the member for it without a password and either
   `system-trust-signing-key`, aptdaemon's `install-file`,
   `install-or-remove-packages` and `change-repository`,
   `io.snapcraft.snapd.manage`, `org.freedesktop.accounts.user-administration`,
-  every FirewallD action (`direct` and `config` are raw rules passed
+  FirewallD's `all`, `config`, `direct` and `policies` (`direct` and
+  `config` are raw rules passed
   to the firewall as root; firewalld passes an iptables
   `--modprobe=<program>` through unfiltered, measured not to run it on
   Fedora 44's kernel, which loads the module itself first, but that is
@@ -1490,17 +1495,21 @@ this note):
   `org.freedesktop.upower.hibernate`); `org.gnome.cpufreqselector` and
   `org.mate.cpufreqselector`;
   `com.ubuntu.whoopsiepreferences.change`; `cups-pk-helper`'s
-  actions for `sudo` and `lpadmin`, by exact id (as `lpadmin` is,
-  §11.1; GNOME's control center recommends the package, so a stock
-  Ubuntu 24.04 desktop has it): `org.opensuse.cupspkhelper.mechanism.`
-  `all-edit`, `class-edit`, `devices-get`, `job-edit`,
-  `job-not-owned-edit`, `printer-enable`, `printer-local-edit`,
-  `printer-remote-edit`, `printer-set-default` and `server-settings`.
-  Not `printeraddremove`: adding a printer with a PPD file opens the
-  path the caller gives as root (measured in cups-pk-helper 0.2.6's
-  `cups.c`: only the config-file get and put switch to the caller's
-  ids), so it refuses until the rules file below makes it ask (owner a,
-  GC #16381);
+  actions for `sudo` and `lpadmin` that can't add a printer from a
+  file, by exact id, derived from the methods' own checks in
+  cups-pk-helper 0.2.6 (Ubuntu's; GNOME's control center recommends the
+  package, so a stock Ubuntu 24.04 desktop has it):
+  `org.opensuse.cupspkhelper.mechanism.` `class-edit`, `devices-get`,
+  `job-edit`, `job-not-owned-edit`, `printer-enable`,
+  `printer-set-default` and `server-settings`. `PrinterAddWithPpdFile`
+  opens the path the caller gives as root (only the config-file get and
+  put switch to the caller's ids), and its check accepts any one of
+  `all-edit`, `printeraddremove`, `printer-local-edit` or
+  `printer-remote-edit`; so those four refuse until the rules file below
+  makes them ask (owner a, GC #16381; the lead's call, #16397).
+  `class-edit` stays: its check falls through to the printer check only
+  for a name that isn't a class, so it can't reach that method on its
+  own;
 - `hostname1`'s `set-hostname` and `set-static-hostname`, **only with
   §11.1's rule that a `NOPASSWD` rule for any host counts** (the lead's
   condition, GC #16332): otherwise setting the host name could make a
@@ -1535,8 +1544,8 @@ this note):
 
 **Fedora's package grant and Ubuntu's printer grant count** (owner a,
 GC #16331, B, and #16381). Stock Ubuntu desktops grant `sudo` and
-`lpadmin` cups-pk-helper's `printeraddremove` without a password (see
-the allowlist), so a stock Ubuntu desktop member is refused until it
+`lpadmin` every cups-pk-helper action without a password, the four that
+can add a printer from a file among them (see the allowlist), so a stock Ubuntu desktop member is refused until it
 asks for the password, by the same rules file. On Fedora: stock Fedora
 gives `wheel` PackageKit's `package-install` and `package-remove`
 (beside the updates above) without a password, and a trusted local
@@ -1544,17 +1553,24 @@ RPM file maps to `package-install`, so code running as the member could
 install any Fedora-signed package, an old build with a known hole
 included, whose scriptlets run as root. So a Fedora desktop member is
 refused until those actions ask for the password. Stock Fedora also
-grants `wheel` FirewallD's actions, which refuse too; measured on
-Fedora 44: `org.fedoraproject.FirewallD1.all`, `config`, `direct` and
-`policies` (and their `.info` actions) default to `auth_admin_keep`,
-and `FirewallD1.info` to `yes`, which is the reported recorded-`yes`
-exception. The rules file skips every `.info` action, so the firewall's
-status stays readable wherever a desktop policy makes them `yes` (the
-lead's call, GC #16382). `install` names the one rules file
-that makes all of them ask, `/etc/polkit-1/rules.d/40-vettid-agent.rules`
+grants `wheel` FirewallD's actions; `all`, `config`, `direct` and
+`policies` refuse. Measured on Fedora 44, whose
+`org.fedoraproject.FirewallD1.policy` links to one of two choice files:
+in both, those four default to `auth_admin_keep`; in the desktop
+variant (a Workstation's) `info`, `config.info`, `direct.info` and
+`policies.info` are `yes`, in the server variant (the cloud image's)
+only `info` is. The four `.info` actions are reported exceptions,
+accepted with either default, and the rules file skips them, so the
+firewall's status stays readable (the lead's calls, GC #16382 and
+#16397). `install` names the one rules file
+that makes all of them ask, `/etc/polkit-1/rules.d/40-vettid-agent.rules`,
+written by the elevated `vettid-agent rules-file --write` (§2: root,
+mode 0644, through the same folder checks as the configuration, as
+`/etc/polkit-1/rules.d` is `root:polkitd 0750`; chosen), or printed by
+`rules-file` for an administrator to read first
 (it returns `polkit.Result.AUTH_ADMIN_KEEP` for PackageKit's two
 actions, FirewallD's `all`, `config`, `direct` and `policies`, and
-cups-pk-helper's `printeraddremove`, and sorts
+cups-pk-helper's four actions that can add a printer from a file, and sorts
 before Fedora's own files, so it decides first), and the README gives
 it; the member runs `install` again afterwards (the lead's call within
 B, GC #16374). Fedora Silverblue and
@@ -1674,8 +1690,10 @@ The README says the same, under "Running programs on Linux"
 
 A member whose `sudo` asks for its password uses runs and proxies once
 the stock grants that skip the password are made to ask: the first
-user on a stock Ubuntu or Debian desktop (in `sudo` and `adm`), once the
-rules file of §11.4 makes cups-pk-helper's `printeraddremove` ask; and
+user on a stock Debian desktop; on a stock Ubuntu desktop (in `sudo`
+and `adm`), once the rules file of §11.4 makes cups-pk-helper's
+printer-from-a-file actions ask (Debian has no such grant:
+`policykit-desktop-privileges` is Ubuntu's; §13 measures it); and
 a stock Fedora desktop's first user (`wheel`), once the same file makes
 the package installs and the firewall ask (owner a, GC #16331 and
 #16381). Refused are the accounts
@@ -1940,7 +1958,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     desktop install in the PR), with the stock `sudoers`, PAM stacks and
     polkit rules (and on Fedora and Ubuntu desktops the rules file of
     §11.4; without it, Fedora's package and firewall grants and Ubuntu's
-    `printeraddremove` refuse, with the file named; with it in place
+    printer-from-a-file actions refuse, with the file named; with it in place
     those grants ask for the password, which shows the file sorts
     before the stock ones on each measured distribution),
     in an active session where it can mount a USB disk and power off;
@@ -1980,7 +1998,12 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
   - a real package update that rewrites a `.policy` file ends "clear"
     with no elevated command: the oneshot waits for the update to end,
     and runs start again once it has checked;
-  - measured and written in the `install` PR: ModemManager's
+  - Fedora's firewalld with each choice file (desktop and server): the
+    `.info` actions are reported, the four others refuse until the
+    rules file is in place; the stock `addAdminRule` files of each
+    measured distribution read as literal lists;
+  - measured and written in the `install` PR: whether Debian 12 and 13
+    have any printer grant; ModemManager's
     `Device.Control` on Debian and Ubuntu; the recorded `yes` defaults
     of the named exceptions (`machine1.host-login`,
     `machine1.register-machine`, `sysupdate1.check`, `sysupdate1.update`,
