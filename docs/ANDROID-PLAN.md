@@ -6304,7 +6304,7 @@ no longer have" and offers only **Deny**.
 | `type` and `body` | Title | Body | Buttons |
 |---|---|---|---|
 | `agent.request`, `op: "item.use"` | "<name> wants to use <item> without seeing it" | "Field: <label>. Your vault uses the value for the agent and gives it only the result. For a short or guessable value, such as a PIN or a common password, the agent could work the value out from that result." Then the data the result is computed over (`data`, decoded; shown as text when it is printable UTF-8, else as hex), under "Data from the agent" (decision 18) | Approve, Deny |
-| `agent.request`, `op: "item.get"` | "<name> wants to see <item>" | "Fields: <labels>" (or "All fields and notes"). Then, always (with or without the `history` flag): "The agent's app may keep the value in its history." | Approve, Deny |
+| `agent.request`, `op: "item.get"` | "<name> wants to see <item>" | "Fields: <labels>" (or "All fields and notes"). Then, always (with or without the `history` flag): "The agent's app may keep the value in its history." | Approve, Deny; from the app version with AA8 (0.1.137), Deny on the entry and Approve only on the detail screen (AA8) |
 | `agent.request`, `op: "catalog"` | "<name> wants to list the items it may use" | "It sees their names and field labels, never their values." | Approve, Deny |
 | `agent.request`, `op: "item.run"` or `"item.proxy"`, before the app version with AA8 (0.1.137; card #16366) | "<name> wants to use <item> in a way this version of VettID can't show" | "Update VettID to see the details. Until then you can only deny it." | Deny |
 | `agent.request`, `op: "item.run"` or `"item.proxy"`, from the app version with AA8 (0.1.137) | as "Approvals for runs, proxies and reveals (AA8)" says | as AA8 says | Deny on the entry; Approve and Deny only on the detail screen, after it is scrolled to its end (Deny only where AA8 says) |
@@ -6530,7 +6530,7 @@ except the first:
   logs,", the sentence "It may also reach the AI service that the
   agent's app uses." (NEW), so the text reads "…which may keep it in
   its history or logs. It may also reach the AI service that the
-  agent's app uses. VettID can't remove it from there.")
+  agent's app uses. VettID can't remove it from any of these places.")
 
 **Run settings** (`run`; present exactly when `run` is on):
 
@@ -6707,7 +6707,7 @@ confirmation above): that save removes the way and its member and
 sends everything else exactly as read, unknown members included, so it
 only narrows. Such a save is never followed by the password prompt: a
 `credential_locked` answer to it shows "Your vault asked for your
-password for this change, so it was not saved. Update VettID to change
+credential password for this change, so it was not saved. Update VettID to change
 these settings." (NEW), and nothing is resent. A version of the app with AA7 but without AA9 treats a
 non-empty `run.folders` so too, and sends back an empty one as read.
 
@@ -6753,8 +6753,9 @@ from `approval.pending` (its `body`, `flags`, `previous_sha256`,
 `previous_path`, `replaces`, `proxy` and `folders`), or from the same
 members of its `pending.list` entry, which is shown under the same
 rules; never from the app's copy of the item's settings. A
-`pending.list` entry that differs from what is shown for the same
-`approval_id` makes it Deny only. The app reads these with a strict
+`pending.list` entry whose parsed members differ from what is shown
+for the same `approval_id` makes it Deny only; when that read fails,
+the approval stays as shown and the read is retried. The app reads these with a strict
 JSON parser that refuses duplicate members (the build card's
 requirement), so "Fail closed" can catch them.
 
@@ -6793,7 +6794,10 @@ first point also for `item.get`):
     accessibility description.
   - **At the largest font scale**, the hint moves above the buttons, and
     the scroll area keeps at least 120 dp of height (chosen; the
-    buttons and the hint do not grow past what leaves it).
+    buttons and the hint do not grow past what leaves it). In a window
+    too small for that, the buttons sit side by side and their labels
+    may wrap or shrink, but **Deny** is never clipped and stays
+    tappable.
 - **Overlays.** On the approval screens, **Approve** ignores taps while
   another app draws over the screen: `filterTouchesWhenObscured` on
   Approve, and a touch whose `MotionEvent` carries
@@ -6805,7 +6809,10 @@ first point also for `item.get`):
   permission, so other apps' overlays are hidden while it shows.
   **Deny** and scrolling stay live while obscured. An accessibility
   service that clicks Approve itself is out of scope: such a service
-  can act on any screen of the phone.
+  can act on any screen of the phone. The app's minimum is API 31
+  (vettid-android `VettIdBuild.MIN_SDK`), so `setHideOverlayWindows`
+  always applies, and an overlay cannot hide part of the content while
+  the member scrolls to the end.
 
 **How a string is shown** (every argument, `argv[0]`, the program, the
 directory, each variable's value, a previous path, the proxy's host,
@@ -6976,9 +6983,12 @@ VettID can't show this request, so you can only deny it.", when:
   vault returns `run.folders` (no `leash.item.list` answer in this
   session), it reads the item's settings (`leash.item.list{agent_id,
   item_id}`) first, and the approval is Deny only until that answer
-  comes. `inputs: []` without `member_files` is Deny only by intent: the
-  vault never sets the flag for it, and an app gains nothing by
-  guessing;
+  comes, and still Deny only if that answer has no `run` member. This
+  applies only to an approval whose `body.cwd` comes without
+  `member_folder`. `inputs: []` without `member_files` is Deny only by
+  intent: VAULT-MESSAGING 0.93.1 flags `member_files` only for non-empty
+  `inputs` or `output`, so a well-formed request never carries an empty
+  list with the flag;
 - `proxy` comes on any op other than `item.proxy`, or `replaces` on an
   op other than `item.run` and `item.proxy`;
 - the item or the field does not resolve (AA5's "an item you no longer
@@ -7011,7 +7021,7 @@ was not run." (NEW), for a proxy "Approved, but the item or its field
 is gone, so the key was not sent." (NEW); `"forbidden"` → for these two
 ops, "Approved, but your vault refused it, so nothing was done.
 <agent> may no longer have a permission that covers it, may be paused,
-or this request was asked about too many times." (NEW; changed: it
+or this request was asked again too many times." (NEW; changed: it
 named a damaged record; a re-referral past the cap is `forbidden` too,
 §10.11), while AA5's text stays for the other ops. A deny shows
 "Denied". At `exp` the entry leaves Approvals; an open detail screen
@@ -7029,7 +7039,7 @@ request is no longer waiting.", AA5).
 - Approve: absent from the list entry and from notifications; disabled
   until the end is scrolled to; the top lines and the summary for each
   flag; an overlay drawn by another app (a test app with
-  `SYSTEM_ALERT_WINDOW`) makes taps on Approve and Deny do nothing and
+  `SYSTEM_ALERT_WINDOW`) makes taps on Approve do nothing and
   shows the overlay text, while Deny and scrolling still work; a
   re-referral closes the open detail; TalkBack's scroll actions alone
   reach the end and enable Approve, whose disabled state is read as
