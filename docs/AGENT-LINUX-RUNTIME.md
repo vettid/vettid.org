@@ -1500,22 +1500,24 @@ this note):
   cups-pk-helper 0.2.6 (Ubuntu's; GNOME's control center recommends the
   package, so a stock Ubuntu 24.04 desktop has it):
   `org.opensuse.cupspkhelper.mechanism.` `class-edit`, `devices-get`,
-  `job-edit`, `job-not-owned-edit`, `printer-enable`,
-  `printer-set-default` and `server-settings`. `PrinterAddWithPpdFile`
+  `job-edit`, `job-not-owned-edit`, `printer-enable` and
+  `printer-set-default`. `PrinterAddWithPpdFile`
   opens the path the caller gives as root (only the config-file get and
   put switch to the caller's ids), and its check accepts any one of
   `all-edit`, `printeraddremove`, `printer-local-edit` or
   `printer-remote-edit`; so those four refuse until the rules file below
   makes them ask (owner a, GC #16381; the lead's call, #16397).
+  `server-settings` refuses with them, and the rules file covers it too
+  (chosen): it lets the member replace `cupsd.conf`, read with the
+  caller's ids and sent as root, and whether a directive still accepted
+  there (`SetEnv` reaching a backend cupsd runs as root, say) gives root
+  isn't measured; the cost is a password prompt for print-server
+  settings.
   `class-edit` stays: its check falls through to the printer check only
   for a name that isn't a class, so it can't reach that method on its
   own (renaming a class re-adds a printer only for a name that is no
   longer a class, and then from the temporary PPD the helper itself
-  fetched, never a path the caller gives). `server-settings` stays too,
-  though it lets the member replace `cupsd.conf` (read with the
-  caller's ids, sent as root): that is `lpadmin`'s power, and the
-  directives that would give root live in `cups-files.conf`, which it
-  can't change (the lead's call, GC #16260);
+  fetched, never a path the caller gives);
 - `hostname1`'s `set-hostname` and `set-static-hostname`, **only with
   §11.1's rule that a `NOPASSWD` rule for any host counts** (the lead's
   condition, GC #16332): otherwise setting the host name could make a
@@ -1576,7 +1578,8 @@ mode 0644, through the same folder checks as the configuration, as
 `rules-file` for an administrator to read first
 (it returns `polkit.Result.AUTH_ADMIN_KEEP` for PackageKit's two
 actions, FirewallD's `all`, `config`, `direct` and `policies`, and
-cups-pk-helper's four actions that can add a printer from a file, and sorts
+cups-pk-helper's four actions that can add a printer from a file and
+`server-settings`, and sorts
 before Fedora's own files, so it decides first), and the README gives
 it; the member runs `install` again afterwards (the lead's call within
 B, GC #16374). Fedora Silverblue and
@@ -2041,7 +2044,12 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     proxies;
   - `rules-file --write` leaves the file root-owned, 0644, and the
     granted actions then ask for the password (the four printer actions
-    on Ubuntu, the package and firewall actions on Fedora);
+    and `server-settings` on Ubuntu, the package and firewall actions on
+    Fedora);
+  - with `class-edit` alone, `PrinterAddWithPpdFile`, and a class method
+    on a name that isn't a class, fail or ask for the password;
+    `ClassAddPrinter` with a new class name creates nothing that reads a
+    file;
   - `install` and uninstall leave nothing behind but the rules file,
     which uninstall leaves (§2). Uninstall removes the
     users, the groups, the `.deny` entries, the run root,
