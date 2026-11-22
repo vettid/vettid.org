@@ -1485,9 +1485,17 @@ this note):
   `org.freedesktop.upower.hibernate`); `org.gnome.cpufreqselector` and
   `org.mate.cpufreqselector`;
   `com.ubuntu.whoopsiepreferences.change`; `cups-pk-helper`'s
-  `org.opensuse.cupspkhelper.mechanism.*` for `sudo` and `lpadmin` (as
-  `lpadmin` is, §11.1; GNOME's control center recommends it, so a
-  stock Ubuntu 24.04 desktop has it);
+  actions for `sudo` and `lpadmin`, by exact id (as `lpadmin` is,
+  §11.1; GNOME's control center recommends the package, so a stock
+  Ubuntu 24.04 desktop has it): `org.opensuse.cupspkhelper.mechanism.`
+  `all-edit`, `class-edit`, `devices-get`, `job-edit`,
+  `job-not-owned-edit`, `printer-enable`, `printer-local-edit`,
+  `printer-remote-edit`, `printer-set-default` and `server-settings`.
+  Not `printeraddremove`: adding a printer with a PPD file opens the
+  path the caller gives as root (measured in cups-pk-helper 0.2.6's
+  `cups.c`: only the config-file get and put switch to the caller's
+  ids), so it refuses until the rules file below makes it ask (owner a,
+  GC #16381);
 - `hostname1`'s `set-hostname` and `set-static-hostname`, **only with
   §11.1's rule that a `NOPASSWD` rule for any host counts** (the lead's
   condition, GC #16332): otherwise setting the host name could make a
@@ -1520,7 +1528,11 @@ this note):
   Wacom tablets: fixed programs, not chosen by the member. Another
   desktop's helper not on the list refuses, with the program named.
 
-**Fedora's package grant counts** (owner a, GC #16331, B): stock Fedora
+**Fedora's package grant and Ubuntu's printer grant count** (owner a,
+GC #16331, B, and #16381). Stock Ubuntu desktops grant `sudo` and
+`lpadmin` cups-pk-helper's `printeraddremove` without a password (see
+the allowlist), so a stock Ubuntu desktop member is refused until it
+asks for the password, by the same rules file. On Fedora: stock Fedora
 gives `wheel` PackageKit's `package-install` and `package-remove`
 (beside the updates above) without a password, and a trusted local
 RPM file maps to `package-install`, so code running as the member could
@@ -1536,7 +1548,8 @@ status stays readable wherever a desktop policy makes them `yes` (the
 lead's call, GC #16382). `install` names the one rules file
 that makes all of them ask, `/etc/polkit-1/rules.d/40-vettid-agent.rules`
 (it returns `polkit.Result.AUTH_ADMIN_KEEP` for PackageKit's two
-actions and FirewallD's `all`, `config`, `direct` and `policies`, and sorts
+actions, FirewallD's `all`, `config`, `direct` and `policies`, and
+cups-pk-helper's `printeraddremove`, and sorts
 before Fedora's own files, so it decides first), and the README gives
 it; the member runs `install` again afterwards (the lead's call within
 B, GC #16374). Fedora Silverblue and
@@ -1652,10 +1665,13 @@ The README says the same, under "Running programs on Linux"
 
 ### 11.7 What it costs, and what is built
 
-A member whose `sudo` asks for its password (the first user on a stock
-Ubuntu or Debian desktop, in `sudo` and `adm`) uses runs and proxies. A
-stock Fedora desktop's first user (`wheel`) does too once the
-package-grant rules file of §11.4 is in place. Refused are the accounts
+A member whose `sudo` asks for its password uses runs and proxies once
+the stock grants that skip the password are made to ask: the first
+user on a stock Ubuntu or Debian desktop (in `sudo` and `adm`), once the
+rules file of §11.4 makes cups-pk-helper's `printeraddremove` ask; and
+a stock Fedora desktop's first user (`wheel`), once the same file makes
+the package installs and the firewall ask (owner a, GC #16331 and
+#16381). Refused are the accounts
 that can become root silently, or read or type the keystrokes, the
 password hashes or the kernel's memory: uid 0, an empty password, a
 `NOPASSWD` or `!authenticate` rule for any host, a `doas` `nopass` rule,
