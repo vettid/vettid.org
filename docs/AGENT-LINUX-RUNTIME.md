@@ -65,6 +65,8 @@ silent it chooses, marks the choice "(chosen)", and lists it in §12.
   `install` refuses a member it can't find there, and the channel
   refuses a member holding a group it can't name (§11).
 - **cgroup v2 only** (the unified hierarchy).
+- **`dpkg` or `rpm`** as the package manager (§11.4's policy-file check;
+  chosen): Arch and others without them are not supported.
 - **systemd 252 or later:** encrypted credentials came in 250,
   `systemd-creds has-tpm2` in 251, and `--tpm2-public-key=` in 252 (§5).
 
@@ -1097,9 +1099,11 @@ Any of these:
   account's `/etc/shadow` line (not `!`, `*`, `!!` or a `!` before a
   hash, which lock it), or, with no `shadow` line, in `/etc/passwd`.
   The member's, root's and that of any account whose password `sudo`
-  asks for (`targetpw`, `runaspw`) count; so does any other account's
-  while a stack of `su` or `sudo` takes an empty password (`pam_unix`'s
-  `nullok`, Ubuntu's default);
+  asks for (`targetpw`, `runaspw`) count; so does, while a stack of
+  `su` or `sudo` takes an empty password (`pam_unix`'s `nullok`,
+  Ubuntu's default), that of any account that is uid 0, in a refusing
+  group, or holds a sudo or `doas` rule. Another account's empty
+  password is reported (the lead's call, GC #16374);
 - **a sudo rule or setting that asks for no password** (§11.2): any
   rule that applies to the member, directly, through a group, a
   netgroup or `ALL`, **for any host**, tagged `NOPASSWD` or with
@@ -1121,14 +1125,18 @@ Any of these:
 - **a polkit action granted without a password** (§11.4; owner a, GC
   #16331);
 - **a root service the member can command** (chosen): a socket the
-  member's no-session child (§11.4) can connect to: Docker's
-  (`/run/docker.sock`, also through an access list or a `daemon.json`
-  group), rootful Podman's, containerd's, LXD's and Incus's, libvirt's
-  read-write socket; a Kubernetes administrator's configuration it can
+  member's access probe (§11.5) can connect to, links resolved (so
+  `/run/docker.sock` pointing at Podman's is Podman's): Docker's (also
+  through an access list or a `daemon.json` group), rootful Podman's,
+  containerd's, LXD's and Incus's administrator socket. libvirt's isn't
+  probed: its sockets are open to every user by design, and
+  `org.libvirt.unix.manage` decides (§11.4); a Kubernetes administrator's configuration it can
   read (`/etc/kubernetes/admin.conf`, `/etc/rancher/k3s/k3s.yaml`); and
-  a snapd login in the member's `~/.snap/auth.json` (read by `install`
-  and the elevated `status` only: the helper can't see home folders,
-  §6, so at a run start this item keeps the last result);
+  a snapd login in the member's `~/.snap/auth.json`, and a Kubernetes
+  configuration in its `~/.kube/config` holding a local cluster's
+  administrator credentials (both read by `install` and the elevated
+  `status` only: the helper can't see home folders, §6, so at a run
+  start these keep the last result);
 - **an input the checks read that the member can change:** any file of
   §11.5 (the `sudoers` files and their includes, `sudo.conf`,
   `doas.conf`, the PAM files, the polkit rules folders) that isn't
@@ -1150,9 +1158,12 @@ program can't supply having succeeded. Modules are in three classes,
 and the lists live in the code with a test:
 - **always succeeds:** `pam_permit`;
 - **always fails for the member:** `pam_deny`, and `pam_rootok` in the
-  stacks of `sudo`, `su` and `doas` (it checks the real uid, which is
-  the member's); in `polkit-1` it is counted as always succeeding,
-  since polkit's agent helper may run with real uid 0;
+  stacks of `sudo`, `su`, `doas` and the `console.apps` services under
+  the setuid `userhelper` (it checks the real uid, which is the
+  member's); in `polkit-1` it is counted as always succeeding, since
+  polkit's agent helper may run with real uid 0;
+- **a caching window:** `pam_timestamp` (vpnc's `config-util` stack on
+  Fedora) is walked as failing and reported, like sudo's;
 - **the deciders,** which succeed only with the password or a factor:
   `pam_unix`, `pam_sss`, `pam_systemd_home`, `pam_fprintd`, and
   `pam_u2f` without `nouserok` or `userpresence=0`;
@@ -1178,6 +1189,8 @@ refuses anything:
   dump core (§6, `LimitCORE=1`, apport refused), so what reaches the
   logs is only what a program a run starts writes there itself; the
   README says so;
+- `auth_self` and `auth_self_keep` grants (the member's own password)
+  aren't counted: they ask for the password a program can't supply;
 - `video` (the lead's call, GC #16260): it can read the screen on some
   setups, not the keys; and `tty` (it can write to other terminals);
 - another uid-0 account with a password, or locked;
@@ -1208,7 +1221,9 @@ overall bound (§11.3; chosen).
   `/usr/local/sbin` and `/usr/lib/cargo/bin`, each judged by its
   resolved path (`/usr/bin/sudo` is an alternatives link on Ubuntu
   25.10 and 26.04, where `sudo-rs` is the default and the original is
-  `sudo.ws`), with §8's folder checks on that path. The code knows the
+  `sudo.ws`, measured on 26.04.1: `/usr/bin/sudo` resolves to
+  `/usr/lib/cargo/bin/sudo`, and the original is a setuid
+  `/usr/bin/sudo.ws`), with §6's folder checks on that path. The code knows the
   format of the original `sudo` (1.9 and later) and of `sudo-rs` once
   measured; parsing `sudo-rs` is a condition for the `install` PR
   (§13). One it doesn't know is "could not check <path>".
@@ -1222,7 +1237,9 @@ overall bound (§11.3; chosen).
   LDAP's `sudoOption`), the "Matching Defaults entries" and the "Runas
   and Command-specific defaults" blocks.
 - **Rules for any host** come from the `sudoers` files themselves,
-  read with `cvtsudoers -f json -e` (aliases expanded), which keeps
+  read with `cvtsudoers -f json -e` (aliases expanded; the same 4 s and
+  1 MiB bound; on Ubuntu 26.04 it is `cvtsudoers.ws`, beside `sudo.ws`,
+  measured), which keeps
   every host's rules and `Defaults`: a rule or a host-scoped `Defaults`
   entry there counts by §11.1 whatever host it names, matched to the
   member by user, group, netgroup (one it can't resolve counts) or
@@ -1333,16 +1350,17 @@ rules (they are JavaScript): root calls `CheckAuthorization` on the
 system bus, with no user interaction allowed, for each subject and each
 action below. A challenge is fine; an error for an action polkit lists,
 or no answer, is "could not check polkit". With no polkitd on the
-computer there is no polkit route, and nothing is asked.
+computer (no polkit service unit, no `polkitd` program, and
+`org.freedesktop.PolicyKit1` neither on the system bus nor activatable
+there) there is no polkit route, and nothing is asked.
 
 **The subjects** (chosen), so that whichever way the member signs in is
 covered:
 - each of the member's logind sessions (`unix-session`), active or not,
   as logind lists them then;
 - a process of the member's in no session (`unix-process`, by pid and
-  start time): a child the checker forks, which sets the member's uid
-  and gids with `no_new_privs`, runs no program, does nothing but wait,
-  and exits after the check. Forked by the helper, it is in no session. Forked by `install`
+  start time): the checker's own program started as the member in a
+  mode that only waits (§11.5). Forked by the helper, it is in no session. Forked by `install`
   under `sudo` in a terminal, it sits in that terminal's session scope;
   under the helper, polkit may judge it by the member's display session.
   Its answer is compared as the paragraph on comparison says.
@@ -1365,30 +1383,31 @@ display session under the helper, is compared with that session's
 default; where it lands in a session already asked as a session
 subject, its answer adds nothing and is dropped.
 
-**Which default.** For the actions named below (those that refuse
-whatever their defaults, and the allowlist), the default compared with
-is the one **recorded in the code** (upstream's, measured), never the
+**Which default.** For the actions that refuse whatever their defaults
+(below), the default compared with is the one **recorded in the
+code** (upstream's, measured), never the
 one on disk: a `.policy` file on the computer that makes one of them
 weaker (`yes` where the recorded default asks for a password) counts as
 a grant to every account, so the member is an administrator. For every
 other action, a `.policy` file whose defaults include `yes` for any
 kind of subject is checked against the package database (`dpkg
---verify`, `rpm -V`), by `install` and the elevated `status` only: one
-no package owns, or one whose content the package manager reports as
-changed (its digest or size; a changed time stamp or mode alone
-doesn't count), counts likewise (except a file snapd wrote for a snap
-installed now, as snapd's own records list it; chosen, measured in
-§13), and the install text names it (the
-README says software installed outside the package manager can ship
-such a file). They record each such file's digest in `admin.json`; at a
-run start or a proxy's opening the helper only compares the digests,
-runs no package manager. A file changed or added since whose content
-now has no `yes` default needs no package check and is accepted; one
-that has a `yes` is "not checked" until the elevated `status` checks it
-again, and its text says so (an ordinary system update can do this; the
-README says to run the elevated `status` afterwards). On a
-distribution with neither `dpkg` nor `rpm`, such a file is "could not
-check <file>" (chosen). An action **refuses** when polkit
+--verify`, `rpm -V`): one no package owns, or one whose content the
+package manager reports as changed (its digest or size; a changed time
+stamp or mode alone doesn't count), counts likewise (except a file
+snapd wrote for a snap installed now, as snapd's own records list it;
+chosen, measured in §13), and the install text names it (the README
+says software installed outside the package manager can ship such a
+file). `install` and the elevated `status` make this check, and so does
+a root path unit (`vettid-agent-polkitcheck.path`, watching the polkit
+actions and rules folders) that starts a oneshot whenever they change,
+with no password: so a system update is checked as it happens, and
+only a real new grant refuses (the lead's call, GC #16374). Each check
+records the files' digests in `admin.json`; at a run start or a proxy's
+opening the helper only compares digests and runs no package manager,
+and while the oneshot hasn't caught up with a change the result is "not
+checked" ("try again in a minute"). A distribution with neither `dpkg`
+nor `rpm` (Arch) is not supported by the separate-account mode (§1, the
+README). An action **refuses** when polkit
 authorizes the member for it without a password and either
 - the default for that kind of subject is `auth_admin` or
   `auth_admin_keep`, and it isn't on the allowlist below (so mounting a
@@ -1405,16 +1424,17 @@ authorizes the member for it without a password and either
   `udisks2`'s `open-device-system`, `modify-device-system` and
   `modify-system-configuration`, `org.libvirt.unix.manage`, PackageKit's
   `package-install-untrusted`, `package-downgrade`,
-  `system-sources-configure`, `repo-enable` and
+  `system-sources-configure` and
   `system-trust-signing-key`, aptdaemon's `install-file`,
   `install-or-remove-packages` and `change-repository`,
   `io.snapcraft.snapd.manage`, `org.freedesktop.accounts.user-administration`,
-  FirewallD's `direct` (raw firewall rules as root; firewalld passes an
-  iptables `--modprobe=<program>` through unfiltered, measured not to
-  run it on Fedora 44's kernel, which loads the module itself first, but
-  that is the kernel's behaviour, not a rule), and every action with the
+  every FirewallD action (`direct` and `config` are raw rules passed
+  to the firewall as root; firewalld passes an iptables
+  `--modprobe=<program>` through unfiltered, measured not to run it on
+  Fedora 44's kernel, which loads the module itself first, but that is
+  the kernel's behaviour, not a rule), and every action with the
   `org.freedesktop.policykit.exec.path` annotation whose program isn't
-  on the allowlist.
+  on the allowlist (the reason then names the program, not a rule).
 
 **The allowlist** holds stock grants measured not to run a program the
 member chooses as root (the measurements are in §13; the list lives in
@@ -1425,14 +1445,27 @@ this note):
   `filesystem-mount-system`, `encrypted-unlock-system` and
   `filesystem-fstab`; `timedate1`'s `set-time`, `set-timezone`,
   `set-local-rtc` and `set-ntp`, and the desktops' date-and-time
-  actions; `locale1`'s `set-locale` and `set-keyboard`; `bolt`'s
-  `enroll`, `authorize` and `manage`; `fwupd.update-internal`; the
+  actions (`org.gnome.controlcenter.datetime.configure`,
+  `com.canonical.controlcenter.datetime.configure`,
+  `org.kde.kcontrol.kcmclock.save`,
+  `org.mate.settingsdaemon.datetimemechanism.settime`); `locale1`'s
+  `set-locale` and `set-keyboard`; `bolt`'s
+  `enroll`, `authorize` and `manage`; `fwupd.update-internal` only while
+  fwupd's `OnlyTrusted` isn't off (otherwise it installs unsigned system
+  firmware, and refuses); the
   hibernate actions; `org.gnome.cpufreqselector` and its MATE twin;
-  `com.ubuntu.whoopsiepreferences.change`;
+  `com.ubuntu.whoopsiepreferences.change`; `cups-pk-helper`'s
+  `org.opensuse.cupspkhelper.mechanism.*` for `sudo` and `lpadmin` (as
+  `lpadmin` is, §11.1; GNOME's control center recommends it, so a
+  stock Ubuntu 24.04 desktop has it);
 - `hostname1`'s `set-hostname` and `set-static-hostname`, **only with
   §11.1's rule that a `NOPASSWD` rule for any host counts** (the lead's
   condition, GC #16332): otherwise setting the host name could make a
-  host-scoped rule apply;
+  host-scoped rule apply. With a network source for sudo rules in
+  `nsswitch.conf` (LDAP, sssd), whose host-scoped rules can't all be
+  read, they leave the allowlist and refuse, and so does
+  NetworkManager's `settings.modify.system` (it can set the host name
+  and address);
 - PackageKit's `upgrade-system`, `system-update`,
   `trigger-offline-update` and `trigger-offline-upgrade`, and
   aptdaemon's `upgrade-packages`, **only while they can neither install
@@ -1440,7 +1473,12 @@ this note):
   installs or local files to them takes them off the list, which §13's
   stock test catches. On Fedora too: they update what is installed from
   the configured repositories (chosen);
-- NetworkManager's `settings.modify.system` (Fedora, `wheel`);
+- NetworkManager's `settings.modify.system` (Fedora, `wheel`), under the
+  condition above; ModemManager's `Device.Control` where a stock
+  distribution grants it (measured, §13);
+- Flatpak's `app-install`, `runtime-install`, `app-uninstall` and
+  `runtime-uninstall` (a system install runs apps as the user, with no
+  setuid; the lead's call, GC #16374);
 - Fedora's `org.fedoraproject.thirdparty.opt-out`, and the fixed
   helpers GNOME's settings daemon runs through `exec.path` for the
   backlight and Wacom tablets: fixed programs, not chosen by the member.
@@ -1451,11 +1489,15 @@ gives `wheel` PackageKit's `package-install` and `package-remove`
 RPM file maps to `package-install`, so code running as the member could
 install any Fedora-signed package, an old build with a known hole
 included, whose scriptlets run as root. So a Fedora desktop member is
-refused until those actions ask for the password. `install` names the
-one rules file that does it, `/etc/polkit-1/rules.d/40-vettid-agent-packagekit.rules`
-(it returns `polkit.Result.AUTH_ADMIN_KEEP` for those two actions, and sorts
-before Fedora's own file, so it decides first), and the README gives
-it; the member runs `install` again afterwards. Fedora Silverblue and
+refused until those actions ask for the password. Stock Fedora also
+grants `wheel` every FirewallD action (`direct`, `config`, `zone`,
+`policy`, `ipset`), which refuse too. `install` names the one rules file
+that makes all of them ask, `/etc/polkit-1/rules.d/40-vettid-agent.rules`
+(it returns `polkit.Result.AUTH_ADMIN_KEEP` for PackageKit's two
+actions and every `org.fedoraproject.FirewallD1.` action, and sorts
+before Fedora's own files, so it decides first), and the README gives
+it; the member runs `install` again afterwards (the lead's call within
+B, GC #16374). Fedora Silverblue and
 Kinoite grant rpm-ostree's actions instead; no rules file is offered
 for them, and the refusal names the action (chosen; §13 measures
 them).
@@ -1482,22 +1524,26 @@ it does exactly this, and nothing the connector names:
   §11.1, `/etc/security/console.apps/`, the group database, and the
   owners and modes of `/usr/local`'s folders and of every input it
   reads;
-- it asks polkitd and logind over the system bus, and forks the
-  no-session child of §11.4;
-- **the access probes** for §11.1's root services run in a separate
-  child that becomes the member entirely: the supplementary groups, then
-  all three gids, then all three uids (`setresgid`, `setresuid`), so its
-  answers are plainly the member's and nothing in it can return to root
-  (§13 checks that it can't open a root-only file). Being non-dumpable,
-  it can't be traced by the member's processes; one of them can kill
-  it, which gives "not checked" and refuses that run: a denial, never a
-  way in.
+- it asks polkitd and logind over the system bus, and starts the
+  no-session subject of §11.4;
+- **the access probes** for §11.1's root services run on a locked
+  operating-system thread of the helper that sets its supplementary
+  groups, file-system gid and file-system uid to the member's by raw
+  system calls (`setgroups`, `setfsgid`, `setfsuid`, per thread), makes
+  the probes, and is then discarded with its thread, never returned to
+  the runtime (so no Go code runs in a forked child of the threaded
+  helper; the lead's call, GC #16374). File and socket access is then
+  judged as the member's; §13 checks that the thread can't open a
+  root-only file.
+- **polkit's no-session subject** is the helper's own program, started
+  as the member (all its ids, no capabilities, `no_new_privs`, every
+  inherited descriptor closed) in a mode that only waits, and exits when
+  told or after the bound; its pid and start time are the subject. A
+  member that kills it gives "not checked"; one that controls it can
+  change nothing polkit answers about that pid.
 
-Either child closes every descriptor it inherited, makes itself
-non-dumpable (`PR_SET_DUMPABLE` 0) before anything else, is forked
-without a new program (no re-execution), and returns one fixed-size
-answer; one that dies, stalls past its share of the bound or answers
-otherwise is "not checked". How the helper forks without a new program
+A probe or subject that dies, stalls past its share of the bound or
+answers otherwise is "not checked". How the helper forks without a new program
 in its language (in Go, only raw system calls are safe in the child of
 a threaded runtime) is written in the helper PR; re-execution is not a
 fallback.
@@ -1815,7 +1861,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     distribution's installer gives its first user (Ubuntu 24.04:
     `adm cdrom sudo dip plugdev users lpadmin`; Debian 12: `cdrom
     floppy sudo audio dip video plugdev users netdev bluetooth lpadmin
-    scanner`; Fedora: `wheel`), with the stock `sudoers`, PAM stacks and
+    scanner`; Fedora: `wheel`; Ubuntu 26.04 and Debian 13 measured on a
+    desktop install in the PR), with the stock `sudoers`, PAM stacks and
     polkit rules (and on Fedora the package-grant rules file of §11.4),
     in an active session where it can mount a USB disk and power off;
     a rule with `rootpw` and a root password set; a `NOPASSWD` rule for
@@ -1840,9 +1887,24 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     changed to `yes` refuses through the package check;
   - the allowlisted updates are upgrade-only on Ubuntu and Fedora:
     PackageKit's `UpdatePackages` with the id of a package that isn't
-    installed, or of an older version, fails or asks for the password;
-  - measured and written in the `install` PR: the polkit rules
-    folders' owner on each distribution; Silverblue's rpm-ostree
+    installed, of an older version, or of a kernel (an install-only
+    package); `UpgradeSystem` and `trigger-offline-upgrade` to an older
+    or a branched release; aptdaemon's upgrade with `pkg=version`. Each
+    fails or asks for the password; one that doesn't takes its grant off
+    the allowlist;
+  - a rule that grants an action to an inactive or non-local subject
+    only is asked and judged by that subject's default;
+  - with `sudoers: sss` in `nsswitch.conf`, the host-name grants and
+    NetworkManager's `settings.modify.system` refuse;
+  - `fwupd`'s `OnlyTrusted=false` makes `update-internal` refuse;
+  - a system update that rewrites a `.policy` file is checked by the
+    path unit with no password, and runs start again once it has;
+  - measured and written in the `install` PR: ModemManager's
+    `Device.Control` on Debian and Ubuntu; the recorded `yes` defaults
+    of the named exceptions (`machine1.host-login`,
+    `machine1.register-machine`, `sysupdate1.check`, `sysupdate1.update`,
+    `home1.update-home-by-owner`); the polkit rules folders' owner on
+    each distribution; Silverblue's rpm-ostree
     grants; snapd's policy files on a stock Ubuntu with a snap that
     uses its polkit interface; the package check's time at `install`; the recorded defaults of the named actions; whether
     `sudo -V` prints the parsed `Defaults`; whether a session subject
