@@ -19,7 +19,7 @@ changelog:
     settings that skip the password for any host, `doas nopass`, PAM
     stacks with a passwordless path, polkit grants of an
     administrator's action (inverted, with a measured allowlist; Fedora's
-    package grant until a rules file makes it ask), root services the
+    package and firewall grants until a rules file makes them ask), root services the
     member can command, and inputs it can change. Checked by `install`,
     at every run start and proxy opening in the helper (the `admin` and
     `check` messages, §7) and by the elevated `status` (`admin.json`,
@@ -72,8 +72,9 @@ silent it chooses, marks the choice "(chosen)", and lists it in §12.
 
 `install` checks the kernel, the cgroup hierarchy and systemd's version
 itself, and stops with a plain message naming what is missing; it
-never judges a system by its name. Ubuntu 24.04, Debian 12 and Fedora
-38 or later meet it. Ubuntu 22.04 (systemd 249) and Fedora 37 (251) do
+never judges a system by its name. The distributions measured are
+§13's (Ubuntu 24.04 and 26.04, Debian 12 and 13, Fedora 44); Fedora 38
+or later meets these requirements too. Ubuntu 22.04 (systemd 249) and Fedora 37 (251) do
 not.
 
 ## 2. Names, files and units
@@ -98,7 +99,7 @@ group.
 | The channel | `/run/vettid-agent/<n>.sock` | `vettid-c-<h>`:`vettid-m-<h>`, 0660, in `/run/vettid-agent/` (root, 0755) |
 | The helper's socket (chosen) | `/run/vettid-runhelper/<n>.sock` | root:`vettid-c-<h>`, 0660, in `/run/vettid-runhelper/` (root, 0755) |
 | Units | `vettid-agent-<n>.socket`, `vettid-agent-<n>.service`, `vettid-runhelper-<n>.socket`, `vettid-runhelper-<n>.service` | in `/etc/systemd/system/` |
-| The policy check (chosen; shared by every pairing) | `vettid-agent-polkitcheck.path` (`PathChanged=` on `/usr/share/polkit-1/actions`, `/etc/polkit-1/rules.d`, `/usr/share/polkit-1/rules.d`) and `vettid-agent-polkitcheck.service` (`Type=oneshot`, root, the helper's hardening with the package database readable), which writes every installed pairing's `admin.json` | in `/etc/systemd/system/`; the first `install` adds them, the last uninstall removes them |
+| The policy check (chosen; shared by every pairing) | `vettid-agent-polkitcheck.path` (`PathChanged=` on the `actions` and `rules.d` folders, and `polkitd.conf`, under each of `/etc/polkit-1`, `/run/polkit-1`, `/usr/local/share/polkit-1` and `/usr/share/polkit-1`, the folders polkitd reads, §11.4) and `vettid-agent-polkitcheck.service` (`Type=oneshot`, root, the helper's hardening with the package database readable), which writes every installed pairing's `admin.json` | in `/etc/systemd/system/`; the first `install` adds them, the last uninstall removes them |
 
 - **Separate prefixes.** The run root is outside `/var/lib/vettid-agent/`,
   so a pairing named `run` can't meet it. The helper's units have their
@@ -1106,7 +1107,9 @@ Any of these:
   `su` or `sudo` takes an empty password (`pam_unix`'s `nullok`,
   Ubuntu's default), that of any account that is uid 0, in a refusing
   group, holds a sudo or `doas` rule, or is one of polkit's
-  administrator identities (`addAdminRule`). Another account's empty
+  administrator identities: those the `addAdminRule` calls in the rules
+  folders name as `unix-user:` or `unix-group:` strings, and, failing
+  closed, every member of `sudo`, `wheel` and `admin`. Another account's empty
   password is reported (the lead's call, GC #16374);
 - **a sudo rule or setting that asks for no password** (§11.2): any
   rule that applies to the member, directly, through a group, a
@@ -1143,9 +1146,9 @@ Any of these:
   start these keep the last result);
 - **an input the checks read that the member can change:** any file of
   §11.5 (the `sudoers` files and their includes, `sudo.conf`,
-  `doas.conf`, the PAM files, the polkit rules folders) that isn't
-  root-owned (or, for the polkit rules folders, owned by polkit's own
-  account, as on Arch), or that the member or every user can write, or
+  `doas.conf`, the PAM files, and every polkit folder polkitd reads,
+  §11.4) that isn't root-owned (or, for the polkit rules folders, owned
+  by polkit's own account), or that the member or every user can write, or
   whose folder they can.
 
 **The authentication stack walk.** The `auth` lines of the PAM services
@@ -1381,11 +1384,19 @@ the default **for the kind of subject polkit judged**: worked out as
 polkit does, from the process's own logind session, else the member's
 display session, and that session's active and local state: an active
 local one with `allow_active`, an inactive one with `allow_inactive`,
-none with `allow_any`. So the no-session child, which polkit may place
+none with `allow_any`. So the no-session subject, which polkit may place
 in the `sudo` terminal's session under `install` or in the member's
 display session under the helper, is compared with that session's
 default; where it lands in a session already asked as a session
 subject, its answer adds nothing and is dropped.
+
+**Which folders.** polkitd reads actions, rules and `polkitd.conf`
+from `/etc/polkit-1`, `/run/polkit-1`, `/usr/local/share/polkit-1` and `/usr/share/polkit-1` (polkit 127 on Fedora 44 and Ubuntu 26.04, measured;
+Ubuntu 24.04's polkit 124 reads actions from all four and rules from
+`/etc` and `/usr/share`). Every check of this section, the path unit,
+the package check and the inputs of §11.1 cover every folder polkitd
+reads on that computer; a `.policy` file under `/usr/local/share`,
+which no package owns, counts as the package check says.
 
 **Which default.** For the actions that refuse whatever their defaults
 (below), the default compared with is the one **recorded in the
@@ -1402,15 +1413,22 @@ snapd wrote for a snap installed now, as snapd's own records list it;
 chosen, measured in §13), and the install text names it (the README
 says software installed outside the package manager can ship such a
 file). `install` and the elevated `status` make this check, and so does
-a root path unit (`vettid-agent-polkitcheck.path`, watching the polkit
-actions and rules folders) that starts a oneshot whenever they change,
-with no password: so a system update is checked as it happens, and
+a root path unit (`vettid-agent-polkitcheck.path`, §2, watching every
+folder polkitd reads) that starts a oneshot whenever they change, and
+at boot, with no password: so a system update is checked as it happens, and
 only a real new grant refuses (the lead's call, GC #16374). The oneshot
 waits until the package manager's lock (`dpkg`'s frontend lock, rpm's
 transaction lock) is free and the database is quiet, then checks, and
 records a result only when two checks a few seconds apart agree; until
 then it records "not checked". So it never judges a file in the middle
-of the update that wrote it. Each check
+of the update that wrote it. It rewrites only the policy part of each
+`admin.json`, carrying every other finding forward (the snapd and
+Kubernetes items, the sudo, PAM and group findings): it never writes
+"clear" for what it didn't check. It and the elevated `status` take the
+pairing's lock (§2) before writing `admin.json`, so neither overwrites
+the other. A digest mismatch the helper sees that persists starts it
+again; if it still hasn't settled after a few minutes, the result's
+text says to run the elevated `status`. Each check
 records the files' digests in `admin.json`; at a run start or a proxy's
 opening the helper only compares digests and runs no package manager,
 and while the oneshot hasn't caught up with a change the result is "not
@@ -1462,7 +1480,10 @@ this note):
   `enroll`, `authorize` and `manage`; `fwupd.update-internal` only while
   fwupd's `OnlyTrusted` isn't off (otherwise it installs unsigned system
   firmware, and refuses); the
-  hibernate actions; `org.gnome.cpufreqselector` and its MATE twin;
+  hibernate actions (`org.freedesktop.login1.hibernate`,
+  `handle-hibernate-key`, `hibernate-multiple-sessions`,
+  `org.freedesktop.upower.hibernate`); `org.gnome.cpufreqselector` and
+  `org.mate.cpufreqselector`;
   `com.ubuntu.whoopsiepreferences.change`; `cups-pk-helper`'s
   `org.opensuse.cupspkhelper.mechanism.*` for `sudo` and `lpadmin` (as
   `lpadmin` is, §11.1; GNOME's control center recommends it, so a
@@ -1489,8 +1510,10 @@ this note):
   `runtime-uninstall` (a system install runs apps as the user, with no
   setuid; the lead's call, GC #16374);
 - Fedora's `org.fedoraproject.thirdparty.opt-out`, and the fixed
-  helpers GNOME's settings daemon runs through `exec.path` for the
-  backlight and Wacom tablets: fixed programs, not chosen by the member.
+  helpers GNOME's settings daemon (48 and earlier, as on Ubuntu 24.04
+  and Debian 12 and 13) runs through `exec.path` for the backlight and
+  Wacom tablets: fixed programs, not chosen by the member. Another
+  desktop's helper not on the list refuses, with the program named.
 
 **Fedora's package grant counts** (owner a, GC #16331, B): stock Fedora
 gives `wheel` PackageKit's `package-install` and `package-remove`
@@ -1499,11 +1522,15 @@ RPM file maps to `package-install`, so code running as the member could
 install any Fedora-signed package, an old build with a known hole
 included, whose scriptlets run as root. So a Fedora desktop member is
 refused until those actions ask for the password. Stock Fedora also
-grants `wheel` every FirewallD action (`direct`, `config`, `zone`,
-`policy`, `ipset`), which refuse too. `install` names the one rules file
+grants `wheel` FirewallD's actions, which refuse too; measured on
+Fedora 44: `org.fedoraproject.FirewallD1.all`, `config`, `direct` and
+`policies` (and their `.info` actions) default to `auth_admin_keep`,
+and `FirewallD1.info` to `yes`. The read-only `.info` actions are
+reported, as recorded-`yes` exceptions where their default is `yes`,
+and the rules file skips them. `install` names the one rules file
 that makes all of them ask, `/etc/polkit-1/rules.d/40-vettid-agent.rules`
 (it returns `polkit.Result.AUTH_ADMIN_KEEP` for PackageKit's two
-actions and every `org.fedoraproject.FirewallD1.` action, and sorts
+actions and FirewallD's `all`, `config`, `direct` and `policies`, and sorts
 before Fedora's own files, so it decides first), and the README gives
 it; the member runs `install` again afterwards (the lead's call within
 B, GC #16374). Fedora Silverblue and
@@ -1524,7 +1551,7 @@ some details only can't be seen (§11.6).
 
 The run helper runs no program as root for a run (§6). For these checks
 it does exactly this, and nothing the connector names:
-- it runs each `sudo` of §11.2 and `cvtsudoers`, after §8's folder
+- it runs each `sudo` of §11.2 and `cvtsudoers`, after §6's folder
   checks on their paths (`install` and the elevated `status` also run
   `dpkg --verify` or `rpm -V` for §11.4's package check; the helper
   doesn't);
@@ -1545,7 +1572,10 @@ it does exactly this, and nothing the connector names:
   judged as the member's; §13 checks that the thread can't open a
   root-only file. A probe only connects, with a non-blocking connect and
   a time limit (a stalled thread can't be killed as a child could), and
-  closes; it sends nothing to the service it reaches. (The connect
+  closes; it sends nothing to the service it reaches. A denial is
+  compared with the file's owner, mode and access list: one these would
+  allow the member (an SELinux or AppArmor denial of the helper's own
+  domain) is "could not check", never a "no". (The connect
   permission is judged with the member's file-system ids, but the
   daemon would see the thread's effective uid 0 in `SO_PEERCRED`: so a
   daemon that judges by peer credentials is judged here by the socket
@@ -1586,9 +1616,10 @@ terminal where no agent runs.
   next time the member types it. That needs the member to act, and no
   check here can see it.
 - **The caching windows.** For as long as `sudo` doesn't ask again
-  (15 minutes per terminal on Ubuntu and Debian, 5 on Fedora) or polkit
-  keeps a grant, root is a command away without a prompt in that
-  terminal or session. These are reported (§11.1), not detected.
+  (15 minutes per terminal on Ubuntu and Debian, 5 on Fedora), polkit
+  keeps a grant, or a `console.apps` program's `pam_timestamp` holds
+  (Fedora's `userhelper`), root is a command away without a prompt in
+  that terminal or session. These are reported (§11.1), not detected.
 - **A grant made between checks.** A member who adds a `NOPASSWD` rule
   (typing the password once to do it) is not seen until the next run
   start, proxy opening or elevated `status`; until then the service
@@ -1897,7 +1928,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     kills mid-check gives "not checked";
   - the stock user is not refused when `install` runs in a desktop
     terminal, nor when a run starts with the member signed in at the
-    desktop (the no-session child judged by that session's default);
+    desktop (the no-session subject judged by that session's default);
   - `org.freedesktop.systemd1.manage-units` or `pkexec` edited to `yes`
     in its `.policy` file refuses; another action's `.policy` file
     changed to `yes` refuses through the package check;
