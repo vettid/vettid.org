@@ -6509,7 +6509,10 @@ except the first:
   shows the run settings (below). Turning it off asks first: "Stop
   runs with <item>?" / "The programs you listed, their variables,
   their recorded fingerprints and the folders runs may use are
-  removed." (NEW), **Turn off** and **Cancel**.
+  removed." (NEW), **Turn off** and **Cancel**; without a vault answer
+  that carries `run.folders` (AA9), the text leaves out "and the
+  folders runs may use" ("The programs you listed, their variables and
+  their recorded fingerprints are removed.", NEW).
 - **Send it to an API for the agent** (`proxy`; AGENT-PLAN §11's
   draft). On, it shows the API settings (below). Turning it off asks
   first: "Stop sending <item> to an API?" / "The hosts and the header
@@ -6522,9 +6525,12 @@ except the first:
   it sees the value. Once you approve, the value goes to the agent's
   app, which may keep it in its history or logs, and VettID can't
   remove it from there." (NEW), **Turn on** and **Cancel**. Cancel
-  leaves it off. Turning it off asks nothing. (Open (owner): the
-  warning may also say that the value can reach the AI service the
-  agent's app uses.)
+  leaves it off. Turning it off asks nothing. (Open (owner), item 7,
+  which both reviewers recommend: add, after "…in its history or
+  logs,", the sentence "It may also reach the AI service that the
+  agent's app uses." (NEW), so the text reads "…which may keep it in
+  its history or logs. It may also reach the AI service that the
+  agent's app uses. VettID can't remove it from there.")
 
 **Run settings** (`run`; present exactly when `run` is on):
 
@@ -6602,16 +6608,17 @@ except the first:
   VAULT-MESSAGING §10.11 says for the `shell` flag ("The approval",
   `shell`: 0.91.1's comparison), is one of `git`, `rsync`, `tar`,
   `sed`, `npm`, `yarn`, `pnpm`, `uv`, `dotnet`, `make`, `find`, `vim`,
-  `nvim`, `vi`, `ex`, `cargo`, `go`, `gradle`, `mvn`, `pip`, `docker`,
-  `podman`, `kubectl`, `terraform`, `gh`, `scp`, `sftp`, `less`, `ed`
-  or `zip` shows, on its row and page while **Ask me before each run**
+  `nvim`, `vi`, `ex`, `cargo`, `go`, `gradle`, `mvn`, `pip`, `pip3`,
+  `docker`, `podman`, `kubectl`, `terraform`, `gh`, `scp`, `sftp`,
+  `less`, `ed` or `zip`, or `pip` with digits and dots appended
+  (`pip3.12`, by the same comparison), shows, on its row and page while **Ask me before each run**
   is off: "<program> can run other commands given in its arguments, so
   the agent could use it to run any command with your secret. Asking
   before each run is safer for it." (NEW). AA8 shows a line for the
   same names on a run's approval. It is advice only: it blocks nothing
   and the vault still decides.
 
-**Folders runs with this item may use** (`run.folders`): one list for
+**Folders for runs with this item** (`run.folders`): one list for
 the item, under the programs, not per program; AA9 specifies it.
 
 **API settings** (`proxy`; present exactly when `proxy` is on):
@@ -6698,7 +6705,10 @@ can't show. Update VettID to change them." (NEW) and offers only to
 turn a whole way off (**Turn off** on that way's switch, with its
 confirmation above): that save removes the way and its member and
 sends everything else exactly as read, unknown members included, so it
-only narrows. A version of the app with AA7 but without AA9 treats a
+only narrows. Such a save is never followed by the password prompt: a
+`credential_locked` answer to it shows "Your vault asked for your
+password for this change, so it was not saved. Update VettID to change
+these settings." (NEW), and nothing is resent. A version of the app with AA7 but without AA9 treats a
 non-empty `run.folders` so too, and sends back an empty one as read.
 
 **Acceptance (AA7):**
@@ -6742,28 +6752,60 @@ Each is an Approvals entry as AA5 says (the agent's name, "Waiting for
 from `approval.pending` (its `body`, `flags`, `previous_sha256`,
 `previous_path`, `replaces`, `proxy` and `folders`), or from the same
 members of its `pending.list` entry, which is shown under the same
-rules; never from the app's copy of the item's settings.
+rules; never from the app's copy of the item's settings. A
+`pending.list` entry that differs from what is shown for the same
+`approval_id` makes it Deny only. The app reads these with a strict
+JSON parser that refuses duplicate members (the build card's
+requirement), so "Fail closed" can catch them.
 
-**Approve only after seeing it all** (`item.run` and `item.proxy`):
+**Approve only after seeing it all** (`item.run` and `item.proxy`; the
+first point also for `item.get`):
 
 - **Approve is only on the detail screen.** The list entry offers
   **Deny** and opens the detail; no notification has an Approve action
-  for these ops.
+  for these ops. An `item.get` too is approved only from its detail
+  screen, without the scroll gate.
 - **At the top**, after the title: one line per flag, each with that
-  flag's full warning text (below), and for a run the summary "<N>
+  flag's full warning text (below), the #636 line when it applies (A
+  run, below), and for a run the summary "<N>
   arguments, <M> variables, <size> in all" (NEW; `argv` after the
   first, `env`'s entries, and the bytes of all of `argv` and of `env`'s
   names and values, in bytes, KB or MB, 1,024-based).
 - **Approve stays disabled until the content has been scrolled to its
-  end**, with "Scroll to the end to approve." (NEW) beside it. Content
-  that fits on one screen counts as scrolled. **Approve** and **Deny**
-  stay at the bottom, outside the scrolled content.
-- **Overlays.** The approval screens refuse touches while another app
-  draws over them: `filterTouchesWhenObscured` on the screen's root
-  view, and a touch whose `MotionEvent` carries
+  end**, with "Scroll to the end to approve." (NEW) beside it.
+  **Approve** and **Deny** stay at the bottom, outside the scrolled
+  content. Precisely:
+  - **The end** is reached when the bottom edge of the last element has
+    been fully visible above the buttons and the system bars, with the
+    window insets applied (the screen is edge to edge). In a lazy list,
+    the last item must also be fully laid out.
+  - **Any way of scrolling counts**: touch, fling, TalkBack's or Switch
+    Access's scroll actions, a keyboard or a D-pad.
+  - **Once reached, it stays reached** while the member scrolls back up.
+  - **Content that fits** on one screen counts as reached, judged after
+    the full layout, never from a first measure.
+  - **The gate re-arms** when the content changes other than by the
+    member's own tap (for example a fingerprint expanded by an update,
+    or a new `approval.pending` for the same entry), and when the
+    detail is opened again. Rotation, a font-scale change or a window
+    resize keeps it.
+  - **The disabled Approve** has "Scroll to the end to approve." as its
+    accessibility description.
+  - **At the largest font scale**, the hint moves above the buttons, and
+    the scroll area keeps at least 120 dp of height (chosen; the
+    buttons and the hint do not grow past what leaves it).
+- **Overlays.** On the approval screens, **Approve** ignores taps while
+  another app draws over the screen: `filterTouchesWhenObscured` on
+  Approve, and a touch whose `MotionEvent` carries
   `FLAG_WINDOW_IS_OBSCURED` or `FLAG_WINDOW_IS_PARTIALLY_OBSCURED` is
-  dropped, with "Another app is drawing over VettID, so this screen
-  ignores taps. Close that app, then try again." (NEW).
+  dropped, with "Another app is drawing over VettID, so Approve ignores
+  taps. Close that app, then try again." (NEW; changed: it said "this
+  screen ignores taps"). On API 31 and later the window also calls
+  `Window.setHideOverlayWindows(true)`, with the `HIDE_OVERLAY_WINDOWS`
+  permission, so other apps' overlays are hidden while it shows.
+  **Deny** and scrolling stay live while obscured. An accessibility
+  service that clicks Approve itself is out of scope: such a service
+  can act on any screen of the phone.
 
 **How a string is shown** (every argument, `argv[0]`, the program, the
 directory, each variable's value, a previous path, the proxy's host,
@@ -6771,25 +6813,31 @@ header and prefix, and AA9's paths and names):
 
 - In full, in a monospace box per string, so its start and end are
   visible, wrapped and never cut or ellipsized. Each box is forced
-  left to right and isolated: its text is laid out with a left-to-right
-  direction (`TextDirectionHeuristics.LTR`, `LayoutDirection.Ltr`) and
-  wrapped in LRI (U+2066) … PDI (U+2069), so nothing in it can reorder
-  the text around it or its own characters.
+  left to right and isolated: its text is laid out left to right
+  (`TextDirection.Ltr` in Compose, `LayoutDirection.Ltr`) and wrapped
+  in LRI (U+2066) … PDI (U+2069), which keeps it from reordering the
+  text around it, and, inside the isolate, in a left-to-right override,
+  LRO (U+202D) … PDF (U+202C), so right-to-left letters show in their
+  logical order exactly, one after another as stored. (The isolate
+  alone would not stop a right-to-left run inside the box from being
+  reversed.)
 - **Escaped, as code points** (such as `U+202E`, in a highlighted box
   that cannot be taken for typed text): every code point of category
   Cc, Cf, Zl, Zp, Co, Cs or Cn; every White_Space code point other than
   U+0020; and every code point of VAULT-MESSAGING §10.8 step 4's class,
   every Default_Ignorable_Code_Point (ZWJ, ZWNJ, variation selectors and
   fillers such as U+3164 included) and U+2800 BRAILLE PATTERN BLANK. A
-  combining mark (Mn or Me) at the start of a string, or right after a
-  `/` or `\`, is escaped too, so it cannot join the box's edge or a
-  separator.
+  combining mark (Mn or Me) at the start of a string, right after a
+  `/` or `\`, right after an escaped code point or right after a marked
+  space is escaped too, so it cannot join the box's edge, a separator,
+  an escape or a space mark.
 - **Spaces inside a string are marked** with a faint visible mark, so
   two spaces, or a space at either end, can be counted.
 - **Characters outside printable ASCII** (U+0020 to U+007E) that are
-  not escaped are shown highlighted, and the box gets the line
+  not escaped are shown highlighted, and the box gets the line "Some
+  characters here may look like others." (NEW; changed: it said
   "Contains characters other than plain English letters, digits and
-  punctuation." (NEW) under it.
+  punctuation.") under it.
 - An empty string shows "(empty)" (NEW) in an escape box. TalkBack
   reads an escaped character as "escaped character U+202E" (NEW).
 - §10.8's cleaning step for texts in an approval (removing Cc and Cf,
@@ -6924,9 +6972,15 @@ VettID can't show this request, so you can only deny it.", when:
   `folders` (AA9), or `folders` comes without either flag;
   `body.inputs` or `body.output` come without `member_files`; or, with
   a vault whose answers carry `run.folders` (AA9), `body.cwd` comes
-  without `member_folder`;
-- `proxy` comes on a run, or `replaces` on an op other than `item.run`
-  and `item.proxy`;
+  without `member_folder`. When the app does not yet know whether this
+  vault returns `run.folders` (no `leash.item.list` answer in this
+  session), it reads the item's settings (`leash.item.list{agent_id,
+  item_id}`) first, and the approval is Deny only until that answer
+  comes. `inputs: []` without `member_files` is Deny only by intent: the
+  vault never sets the flag for it, and an app gains nothing by
+  guessing;
+- `proxy` comes on any op other than `item.proxy`, or `replaces` on an
+  op other than `item.run` and `item.proxy`;
 - the item or the field does not resolve (AA5's "an item you no longer
   have").
 
@@ -6955,10 +7009,10 @@ removed meanwhile; a pin is still recorded, §10.11 "Pins, as built") →
 for a run "Approved, but the item or its field is gone, so the program
 was not run." (NEW), for a proxy "Approved, but the item or its field
 is gone, so the key was not sent." (NEW); `"forbidden"` → for these two
-ops, "Refused, so nothing was done. <agent> may no longer have a
-permission that covers it, or this request was asked again too many
-times, or its record was damaged. The agent can ask again." (NEW; a
-re-referral past the cap and a damaged held note are `forbidden` too,
+ops, "Approved, but your vault refused it, so nothing was done.
+<agent> may no longer have a permission that covers it, may be paused,
+or this request was asked about too many times." (NEW; changed: it
+named a damaged record; a re-referral past the cap is `forbidden` too,
 §10.11), while AA5's text stays for the other ops. A deny shows
 "Denied". At `exp` the entry leaves Approvals; an open detail screen
 shows "This request expired, so nothing was done." (NEW) and its
@@ -6976,16 +7030,26 @@ request is no longer waiting.", AA5).
   until the end is scrolled to; the top lines and the summary for each
   flag; an overlay drawn by another app (a test app with
   `SYSTEM_ALERT_WINDOW`) makes taps on Approve and Deny do nothing and
-  shows the overlay text; a re-referral closes the open detail.
+  shows the overlay text, while Deny and scrolling still work; a
+  re-referral closes the open detail; TalkBack's scroll actions alone
+  reach the end and enable Approve, whose disabled state is read as
+  "Scroll to the end to approve."; the largest font scale in landscape
+  and in a small window (split screen) keeps the scroll area's minimum
+  and the hint above the buttons; scrolling back up keeps Approve
+  enabled, a content change re-arms it, rotation does not; an
+  `item.get` has no Approve on its list entry; a `pending.list` entry
+  that differs from the shown one is Deny only.
 - A long or non-printable argument is shown in full, escaped, never
   cut: a 4,096-byte argument; 64 arguments of 32,768 bytes in all, every
   one reached by scrolling, with Approve enabled only at the end; an
   argument with U+202E, U+200B, a tab and a line break; RTL text
-  (Hebrew and Arabic letters, and U+202E inside a path); a Cyrillic
+  (Hebrew and Arabic letters, and U+202E inside a path), whose visual
+  order on screen is compared with the logical order, character by
+  character; a Cyrillic
   look-alike in `program` (`/usr/bin/gіt`, U+0456) highlighted with
-  the "Contains characters…" line; a variation selector (U+FE0F) and a
-  Hangul filler (U+3164) escaped; a combining mark at the start and
-  after `/`; two spaces inside and spaces at both ends, marked; an
+  the "Some characters here may look like others." line; a variation selector (U+FE0F) and a
+  Hangul filler (U+3164) escaped; a combining mark at the start,
+  after `/`, after an escaped code point and after a marked space; two spaces inside and spaces at both ends, marked; an
   empty one; each checked character by character against `argv`; the
   same for `env` values, `argv[0]` and the paths.
 - Fingerprints: 64 digits on a tap; `program_changed` with both in full
@@ -7022,7 +7086,7 @@ NEW is for the owner's approval.*
 connector newer than the vault cannot send them) is deny-only.
 
 - **In the run settings** (`leash.item.set`, `run.folders`), under the
-  programs: the heading "Folders runs with this item may use" (NEW;
+  programs: the heading "Folders for runs with this item" (NEW;
   (0.1.137) one list for the item, not per program; it was "Folders
   this program may use") and, under
   it, "The agent can run these programs only in the folders listed here,
