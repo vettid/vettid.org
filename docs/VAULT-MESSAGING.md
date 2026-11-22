@@ -42,7 +42,8 @@ changelog:
     elements), so such an element can name `.` or `..`; this also
     refuses a POSIX folder really named `...` or ` `; (2) entries are
     compared for nesting, and input and output names for duplicates,
-    on a defined key, `NFC(fold(NFC(x)))` with simple case folding, so
+    on a defined key, `NFD(fold(NFD(x)))` with simple case folding
+    (Unicode D145, canonical caseless matching), so
     the composed and decomposed forms of a name are one, as on macOS
     (APFS), even on Linux, where they are two folders; coverage stays
     exact on the text sent; (3) the **reserved Windows names** add the
@@ -56,10 +57,8 @@ changelog:
     `member_files`, does not refer the run, and is not refused by a
     binding with no `folders` (0.93.0 could be read either way;
     nothing is handed in). The tests required grow to match. No other
-    change. Open (lead): on macOS a folder the computer stores in
-    decomposed form must be typed in that form, since coverage is
-    exact; whether the connector sends NFC paths on macOS is decided
-    with the macOS runtime (card #15817).
+    change. One point is left open (lead), in §10.11's open notes:
+    macOS paths stored decomposed.
   - 0.93.0: 2026-11-21, with AGENT-PLAN 0.1.17, ANDROID-PLAN 0.1.135
     and IOS-PLAN 0.1.78. Owner-approved card GC #15810, from
     AGENT-SEPARATE-ACCOUNT 0.1.2 §6 and the owner's decisions Q1 a
@@ -19080,20 +19079,21 @@ item's settings allow for its task:
     may be made only of dots and spaces (`.. `, `. `, `...`, ` `):
     Windows trims trailing dots and spaces (all of them at the end of a
     path, a single trailing dot in other elements), so such an element
-    can name `.` or `..`, a final `.. ` the parent. Such a path is
+    can name `.` or `..`. Such a path is
     `bad_request` on every system, as one with a `..` element is; this
     also refuses a POSIX folder really named `...` or ` `.
-    - **No entry may be equal to, under or above another.** Entries are compared **folded**, on every system, as
-      an entry's `program` is for the no-two-match rule: without case,
-      a drive path's `/` as `\`, and trailing dots and spaces dropped
-      from each element. (0.93.1) The key is defined: each element is
-      put in NFC, case-folded with **simple** case folding (each rune
-      mapped to the smallest rune of its `unicode.SimpleFold` orbit, as
-      for ballot labels, §10.19), put in NFC again, and then its
-      trailing dots and spaces are dropped. So the composed and
-      decomposed forms of a name (`café`, `ǰ` against `j` + U+030C)
-      are one, as on macOS (APFS), even on Linux, where they are two
-      folders. The program no-two-match rule is unchanged. So `/home/al/Work` and `/home/al/work` cannot
+    - **No entry may be equal to, under or above another.** Entries are compared **folded**, on every system, on
+      this key: a drive path's `/` as `\`, and for each element
+      (0.93.1) `NFD(fold(NFD(e)))`, Unicode's canonical caseless match
+      (D145) with **simple** case folding (CaseFolding.txt statuses C
+      and S; each rune may stand for its whole `unicode.SimpleFold`
+      orbit, for example its smallest rune, since the element is
+      decomposed first), and then the element's trailing dots and
+      spaces dropped. So the composed and decomposed forms of a name
+      (`café`, `ǰ` against `J` + U+030C) are one, as on macOS (APFS),
+      even on Linux, where they are two folders. (0.93.0 compared
+      without case only, as an entry's `program` is for the
+      no-two-match rule, which is unchanged.) So `/home/al/Work` and `/home/al/work` cannot
       both be listed, even on Linux, where they are two folders. A
       binding that breaks the rule is `bad_request`. With no nesting,
       every `write` applies to exactly one entry, and removing an
@@ -19511,7 +19511,7 @@ item's settings allow for its task:
     numbered suffix if the name is taken), never through a link in the
     destination, and each is redacted as standard output is, over its
     bytes, before it leaves the service (AGENT-PLAN §4.9).
-  - **How a program finds them.** When a run has `inputs` or `output`,
+  - **How a program finds them.** When a run has (0.93.1) non-empty `inputs` or `output`,
     the connector sets two variables in the program's environment:
     **`VETTID_IN`**, the absolute path of the run's `work/in/`, and
     **`VETTID_OUT`**, that of `work/out/` (the run's `cwd` may be a
@@ -19791,6 +19791,13 @@ item's settings allow for its task:
   > other commands as ordinary programs (decision b, GC #14779); 8.3
   > short names are refused ("Program strings"). See the `shell` flag
   > above.
+  >
+  > Open (lead), 0.93.1: **macOS paths stored decomposed.** Coverage
+  > is exact on the text sent, and the key above refuses listing a
+  > name's two forms, so on macOS a folder the computer stores in
+  > decomposed form (as Finder often does) must be typed in that form.
+  > Option: the connector sends NFC paths on macOS. Decided with the
+  > macOS runtime (card #15817).
   >
   > Open (owner), 0.91.0: **`inline_code` matches whole arguments
   > only.** `-Ic`, `-ne`, `-pe`, `--eval=` and `node -p` are not
