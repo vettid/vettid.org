@@ -28,8 +28,8 @@ changelog:
     while file operations still ask for an administrator;
     update-notifier's lock check, mutter's backlight helper and
     GNOME's Debian keyboard action with its helper, libmalcontent's
-    three read-only actions and gnome-software's two key tests (by
-    action id) allowlisted; dnf5daemon's install and key actions always
+    three read-only actions allowlisted, and gnome-software's two key
+    tests allowed by action id (their defaults still counting); dnf5daemon's install and key actions always
     refuse and join the rules file; three systemd v259 `yes` defaults
     recorded, per kind of subject, and `machine1.register-machine`'s;
     dnf5daemon's other actions refuse; the rules file returns
@@ -2300,9 +2300,10 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     `systemd-run --user --machine` route does open a transient one) and
     is judged by the display session's kind, on systemd 252 too (whose
     `StartTransientUnit` checks `CAP_SYS_ADMIN`, which the oneshot's
-    bounding set lacks, and then rests on polkitd granting uid 0); a
-    reported pid outside `user@<uid>.service`, or with other uids, is
-    refused;
+    bounding set lacks, and then rests on polkitd granting uid 0); for
+    a reported pid outside `user@<uid>.service`, with other uids, or with
+    `NoNewPrivs` 1, polkitd isn't asked and the subject is "could not
+    check";
   - a member taken out of `wheel` or `sudo` while signed in is "could
     not check: sign out and in again" (measured on one desktop with a
     caller on the bus, to show polkitd judges the held groups there);
