@@ -52,7 +52,10 @@ changelog:
     out of what the `install` PR measures, and FirewallD's grants on a
     Fedora Workstation install into it. §2, §11.1 and §11.6 follow
     (the measurements of kind and locality: GC #16634; the review: GC
-    #16676)
+    #16676). Arch (GC #16724): mutter's backlight helper and gvfsd-admin
+    allowed at Arch's `/usr/lib` path too, under the same conditions;
+    systemd v261's four `sysupdate1.cancel-*` `yes` defaults recorded;
+    polkit 128 measured, and Arch's row in §13
   - 0.1.2: 2026-11-22, erratum (VAULT-MESSAGING 0.93.2, AGENT-PLAN
     0.1.21; owner-approved card GC #16477). §7: the connector builds
     `VETTID_IN` and `VETTID_OUT` only for a run with non-empty `inputs`
@@ -1696,7 +1699,11 @@ authorizes the member for it without a password and either
   `home1.update-home-by-owner` (it needs the owner's own password; the
   lead's call, GC #16601), and `machine1.register-machine` (it names to
   machined a machine the caller already runs; reaching into it needs
-  `shell` or `login`, which refuse). Those that refuse: `pkexec`
+  `shell` or `login`, which refuse), and, from systemd v261's,
+  `allow_active` `yes` for `sysupdate1.cancel-check`, `cancel-update`,
+  `cancel-update-to-version` and `cancel-vacuum` (each only signals a
+  running update job to stop, which pulling the plug also does; GC
+  #16724). Those that refuse: `pkexec`
   (`org.freedesktop.policykit.exec`), `org.freedesktop.systemd1.*`
   units and environment (`manage-units`, `manage-unit-files`,
   `set-environment`), `machine1`'s shells, logins, machines and images,
@@ -1816,8 +1823,9 @@ this note):
   `/usr/lib/fedora-third-party/fedora-third-party-opt-out`, and the
   fixed helpers GNOME's settings daemon (48 and earlier, as on Ubuntu
   24.04 and Debian 12 and 13) runs through `exec.path` for the backlight
-  and Wacom tablets, and mutter's `/usr/libexec/mutter-backlight-helper`,
-  their successor in GNOME 49 and later (GC #16598): fixed programs, not
+  and Wacom tablets, and mutter's `/usr/libexec/mutter-backlight-helper`
+  (`/usr/lib/mutter-backlight-helper` on Arch, GC #16724), their
+  successor in GNOME 49 and later (GC #16598): fixed programs, not
   chosen by the member. Another desktop's helper not on the list
   refuses, with the program named;
 - update-notifier's `com.ubuntu.update-notifier.pkexec.package-system-locked`
@@ -1828,7 +1836,8 @@ this note):
   not check", as for every fixed helper (GC #16589);
 - gvfs's `org.gtk.vfs.file-operations-helper` (gvfs-backends' rule for
   `sudo`, `admin` and `wheel`, active and local), whose program
-  `/usr/libexec/gvfsd-admin` runs as root, **only while**
+  `/usr/libexec/gvfsd-admin` (`/usr/lib/gvfsd-admin` on Arch, GC
+  #16724) runs as root, **only while**
   `org.gtk.vfs.file-operations`, which `gvfsd-admin` checks for each
   caller and each operation, asks for an administrator of the same
   subject (a challenge where its default for that kind is `auth_admin`
@@ -2340,7 +2349,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     asks polkitd for every action it lists and every subject below, and
     judges the answers as this section does): stock desktops with the
     first user's groups (`sudo` and `lpadmin` on Ubuntu and Debian,
-    `wheel` on Fedora), an active local session from autologin on tty1,
+    `wheel` on Fedora and Arch), an active local session from autologin on tty1,
     an inactive one from a VT switch, and the member signed in nowhere;
     each subject asked through a process, a transient system service as
     the member, and a transient unit of the member's own service
@@ -2353,6 +2362,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     | Fedora 44, the Workstation group on the cloud image (`VARIANT_ID=cloud`; GNOME 50) | 127 | 519 | PackageKit's and dnf5daemon's two each refuse | every subject passes |
     | Debian 12 (GNOME) | 122 | 256 | passes | passes |
     | Debian 13 (GNOME) | 126 | 278 | passes | passes |
+    | Arch (the official image, GNOME) | 128 | 290 | passes (with the `/usr/lib` helpers and the `cancel-*` defaults above; before them, those six refused) | passes |
 
     Inactive and with the member signed in nowhere, every distribution
     passes without the rules file too. The last runs asked each subject
@@ -2441,6 +2451,10 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     and one whose content differs from its package's `mtree` digest or
     size, refuse through the package check; the oneshot waits for
     `db.lck`; the stock desktop's grants are measured as above;
+    mutter's backlight helper and gvfsd-admin at `/usr/lib` are
+    allowed as at `/usr/libexec` (gvfsd-admin only under its gate),
+    and a `sysupdate1.cancel-*` grant refuses for a subject other than
+    an active session;
   - the stock user is not refused when `install` runs in a desktop
     terminal, nor when a run starts with the member signed in at the
     desktop (the no-session subject, under the helper, compared with
