@@ -23,8 +23,12 @@ changelog:
     by the implying grant, one level, for the first case only (an
     always-refusing action stays refused); a grant over a default of `no`
     counts as one over `auth_admin*`; each subject's held groups
-    compared with the group database; a unit of the member's service
-    manager asked as a subject; polkit 122 the floor; gvfs's admin helper allowlisted
+    compared with the group database, for every process of the
+    member's; a unit of the member's service manager asked as a
+    subject; on polkit 124 and later every subject sent as a root-opened
+    pidfd, so rules' `system_unit` and `no_new_privileges` are seen;
+    polkit's version from `BackendVersion`, 122 the floor; a grant over
+    `auth_self*` counts too; gvfs's admin helper allowlisted
     while file operations still ask for an administrator;
     update-notifier's lock check, mutter's backlight helper and
     GNOME's Debian keyboard action with its helper, libmalcontent's
@@ -1425,14 +1429,24 @@ action below. A challenge is fine; an error for an action polkit lists,
 or no answer, is "could not check polkit". With no polkitd on the
 computer (no polkit service unit, no `polkitd` program, and
 `org.freedesktop.PolicyKit1` neither on the system bus nor activatable
-there) there is no polkit route, and nothing is asked. polkit 122 is the
-oldest measured (§13); an older polkitd is "could not check polkit". (A
+there) there is no polkit route, and nothing is asked. polkitd's
+version is read from the Authority's `BackendVersion` property; polkit
+122 is the oldest measured (§13), and an older or unreadable version is
+"could not check polkit". (A
 computer with only the old `.pkla` authority, polkit 0.105 as on Debian
 11, also has a systemd below §1's floor.)
 
 **The subjects** (chosen), so that whichever way the member signs in is
-covered. Each is a process (`unix-process`, by pid, start time and
-uid), never a `unix-session` subject: polkitd 124 (Ubuntu 24.04) and
+covered. Each is a process (`unix-process`), never a `unix-session`
+subject. On polkit 124 and later each is sent as a `pidfd` handle root
+opens and passes over the bus: polkitd counts only such a handle as
+safe, and only for a safe one gives rules `subject.system_unit` and
+`subject.no_new_privileges` (polkit 127's polkitunixprocess.c and its
+duktape authority; measured on Fedora 44: with a pid only, a rule sees
+no unit; with the handle, `session-5.scope` and `user@1000.service`).
+On 122 and 123 it is sent by pid, start time and uid, and §11.6 states
+what rules can then decide unseen. The reason for no `unix-session`
+subject: polkitd 124 (Ubuntu 24.04) and
 127 (Ubuntu 26.04, Fedora 44) abort on one, and a few aborts in a row
 reach systemd's start limit and leave polkit failed, which breaks the
 desktop's password prompts until `reset-failed` (measured; the lead's
@@ -1451,9 +1465,10 @@ calls, GC #16589 and #16598):
   checker's waiting program, without `NoNewPrivileges`, as an ordinary
   user service runs): judged by the display session's kind, or with
   `allow_any` when the member is signed in nowhere and the manager
-  lingers, but a rule can tell it apart (`subject.system_unit` and
-  `subject.no_new_privileges`, polkit 124 and later), so it is asked
-  too. Only `install`, the elevated `status` and the oneshot ask it,
+  lingers, but a rule can tell it apart (`subject.system_unit`, and
+  `subject.no_new_privileges`, which is the unit's `NoNewPrivileges`
+  property, not the process's flag; polkit 124 and later), so it is
+  asked too. Only `install`, the elevated `status` and the oneshot ask it,
   and only while `user@<uid>.service` is already active (read over the
   system bus; never started for this). The route works under their
   sandbox because the hop happens outside it: a `StartTransientUnit`
@@ -1463,13 +1478,19 @@ calls, GC #16589 and #16598):
   asks the member's manager to start the waiting unit (to measure,
   §13). That hop unit gets no `ProtectHome=`, no `tmpfs` over `/run`,
   no `PrivateUsers=` and no address-family restriction without
-  `AF_UNIX`, since each would hide or block the member's bus. It reports
+  `AF_UNIX`, since each would hide or block the member's bus; under
+  SELinux it takes the SELinux context of the member's manager, since
+  the user bus refuses a system service's (measured on Fedora 44). A
+  hop that fails, times out or is blocked is "could not check". It reports
   the waiting unit's pid back to the checker, which asks polkitd only
   after confirming that pid itself: its cgroup lies under
-  `user@<uid>.service`, all four of its uids are the member's, and its
-  `NoNewPrivs` is 0 (the hop runs as the member, who could otherwise
-  name a process of its own choosing). The helper doesn't ask it, by §11.5's short list (chosen), so
-  at a run start this subject's last result stands;
+  `user@<uid>.service` and all four of its uids are the member's (the
+  hop runs as the member, who could otherwise name a process of its own
+  choosing; its `NoNewPrivs` being 0 is checked as hygiene only). When a
+  policy change is seen while this subject can't be asked, its stored
+  result is cleared, so it reads "not checked" until it is asked again.
+  The helper doesn't ask it, by §11.5's short list (chosen), so at a
+  run start this subject's last result stands;
 - a process of the member's in no session: the checker's own program
   started as the member in a mode that only waits (§11.5). Forked by
   the helper, a system service, it is in no session, and polkitd
@@ -1479,12 +1500,14 @@ calls, GC #16589 and #16598):
   terminal's session scope. Its answer is compared as the paragraph on
   comparison says.
 
-**Groups.** polkitd 124 and later fill a `unix-process` subject's
-groups from the group database (`getgrouplist`), but a caller on the
-bus is judged by the groups its process holds. So each subject's held
-groups (`/proc/<pid>/status`) are compared with the database's for the
-member; where they differ, every answer for that subject is "could not
-check polkit". For a group the database no longer gives (a member taken
+**Groups.** A `unix-process` subject's groups come from the group
+database (`getgrouplist`); from polkit 124 a caller on the bus is judged
+by the groups its process holds. So every process of the member's
+(found in `/proc`, not only the subjects) has its held groups
+(`/proc/<pid>/status`) compared with the database's: one holding a
+group the database doesn't give makes every answer "could not check
+polkit". Holding fewer can't widen a grant and is fine (the user
+manager's `(sd-pam)` holds none, measured on Fedora 44). For a group the database no longer gives (a member taken
 out of `wheel` while signed in, whose session still holds it) the text
 says to sign out and in again; for one added at sign-in that the
 database never lists (`pam_group`) it names the group and its source
@@ -1578,17 +1601,19 @@ is "could not check polkit". Each path is resolved through its
 symbolic links: each link on the way must be listed by a package (for
 an rpm `%ghost` link, as Fedora's FirewallD `.policy` is, which
 `rpm -V` doesn't verify, the package that lists it; measured), and the
-final regular file must be owned and unchanged. Each link's target
+final regular file must be owned and unchanged. rpm and pacman record
+a link's target, which is compared; dpkg doesn't, so each link's target
 string is recorded in `admin.json` with the digests, and a changed one
-counts as a changed file (a package manager records no target to
-verify). "Could not check" too:
+counts as a changed file. "Could not check" too:
 a regular file with no recorded digest (dpkg with no `md5sums` entry
 for it, rpm's `%ghost` or `%verify(not filedigest)`, an `mtree` entry
 with no `sha256digest`, or no `mtree`), a `?` in `rpm -V`'s output (a file
 it couldn't read), and a file more than one package claims. For
 pacman: run with `LC_ALL=C`, the owner from `pacman -Qqo <path>`, the
 database path from `pacman-conf DBPath`, and the package's `mtree`
-(gzip) parsed as mtree(5) says (`/set` defaults, `\ooo` escapes,
+(gzip), found through the local database entry whose `desc` names that
+package (`%NAME%`) at its installed version, never by a name prefix,
+parsed as mtree(5) says (`/set` defaults, `\ooo` escapes,
 continued lines). Its SHA-256 and size are compared and the
 modification time ignored (`pacman -Qkk`'s verdict isn't used: it also
 flags a changed time alone); a `backup=` file (configuration pacman
@@ -1601,7 +1626,10 @@ A distribution with none of `dpkg`,
 the README). An action **refuses** when polkit
 authorizes the member for it without a password and either
 - the default for that kind of subject is `auth_admin`,
-  `auth_admin_keep` or `no` (a grant the stock defaults don't make), and
+  `auth_admin_keep`, `no`, `auth_self` or `auth_self_keep` (a grant the
+  stock defaults don't make: one over `auth_self` lets code act as if
+  it had the member's password, a rule making `change-own-password`
+  `yes` lets it set the password and then use sudo), and
   its action id isn't on the allowlist below (so mounting a USB disk or
   powering off, `yes` for an active session, refuses nothing). An entry
   for a helper that names its action id (gvfs's helper under its gate,
@@ -1827,7 +1855,9 @@ cups-pk-helper's four actions that can add a printer from a file and
 `server-settings`, and sorts
 before Fedora's own files, so it decides first), and the README gives
 it; the member runs `install` again afterwards (the lead's call within
-B, GC #16374). Fedora Silverblue and
+B, GC #16374). The README also says the file applies to every account
+on the computer, so its 13 actions ask an active user each time, where
+stock kept the password for a few minutes. Fedora Silverblue and
 Kinoite grant rpm-ostree's actions instead; no rules file is offered
 for them, and the refusal names the action (chosen; §13 measures
 them).
@@ -1926,9 +1956,12 @@ terminal where no agent runs.
   applies the last result.
 - **What the checks can't see:** a polkit rule that grants an action
   for some details only (§11.4), or that decides on `subject.pid`, or,
-  from polkit 124, `subject.system_unit` or `subject.no_new_privileges`,
-  for a process of the member's unlike the subjects asked (the helper's
-  child has `no_new_privs` and the helper's unit); host-scoped sudo rules held in LDAP or
+  from polkit 124, `subject.system_unit` or `subject.no_new_privileges`
+  (the unit's `NoNewPrivileges` property), for a process of the
+  member's unlike the subjects asked (the helper's child runs in the
+  helper's unit, with `NoNewPrivileges`); on polkit 122 and 123, where
+  subjects go by pid, rules on `system_unit` and `no_new_privileges`
+  decide unseen for every subject; host-scoped sudo rules held in LDAP or
   sssd, seen for this host only (the host-name grants then refuse,
   §11.4, but a rule given by IP address can still be made to apply: a
   member granted NetworkManager's `settings.modify.own`, the default for
@@ -2301,9 +2334,16 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     is judged by the display session's kind, on systemd 252 too (whose
     `StartTransientUnit` checks `CAP_SYS_ADMIN`, which the oneshot's
     bounding set lacks, and then rests on polkitd granting uid 0); for
-    a reported pid outside `user@<uid>.service`, with other uids, or with
-    `NoNewPrivs` 1, polkitd isn't asked and the subject is "could not
-    check";
+    a reported pid outside `user@<uid>.service` or with other uids,
+    polkitd isn't asked and the subject is "could not check"; a hop that
+    fails or is blocked (SELinux, without the manager's context) is
+    "could not check";
+  - on polkit 124 and later a rule deciding on `subject.system_unit`
+    sees the session's scope for a session subject and
+    `user@<uid>.service` for the manager's (measured on Fedora 44 with
+    a pidfd; a pid-only subject showed none);
+  - a grant over `auth_self` refuses; a process of the member's holding
+    a group beyond the database's makes polkit "could not check";
   - a member taken out of `wheel` or `sudo` while signed in is "could
     not check: sign out and in again" (measured on one desktop with a
     caller on the bus, to show polkitd judges the held groups there);
