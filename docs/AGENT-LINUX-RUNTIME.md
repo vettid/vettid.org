@@ -1591,8 +1591,10 @@ Only a process that is gone (`ENOENT` or `ESRCH`) is skipped: any other
 error reading a process's `status`, a `/proc` that can't be listed, or
 `/proc` mounted with `hidepid` in a mode that hides processes from the
 helper is "could not check polkit", since the scan would otherwise pass
-having seen nothing. The helper and the oneshot run as root without
-`CAP_SYS_PTRACE`, so they are judged as the kernel judges them:
+having seen nothing. The scan runs with the checker's own file-system
+ids (fsuid and fsgid 0), never on the helper's probe thread, which
+switches them to the member's (§11.5). The helper and the oneshot run as
+root without `CAP_SYS_PTRACE`, so they are judged as the kernel judges them:
 `hidepid=1` or `2` (`noaccess`, `invisible`) hides nothing from a
 member of the mount's `gid=` group, which is gid 0 when no `gid=` is
 given (as the helper's gid is); `hidepid=4` (`ptraceable`) hides the
@@ -2006,6 +2008,10 @@ it does exactly this, and nothing the connector names:
   also run `getent group` for the subgid scan, by its fixed path
   `/usr/bin/getent` after §6's folder checks on that path, as for
   `sudo`; the helper doesn't);
+- it scans `/proc` for §11.4's groups, which must show the host's PID
+  namespace: the helper's and the oneshot's units have no
+  `PrivatePIDs=` and no private PID namespace (§13 checks the units),
+  and the scan never runs on the probe thread below;
 - it asks polkitd and logind over the system bus, and starts §11.4's
   no-session subject, its own waiting child (the subject in the
   member's service manager is asked only by `install`, the elevated
@@ -2453,7 +2459,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     the skipped `manager` session and the system service's `allow_any`,
     and nothing of the rest; its system service's read-back, as the run
     printed it: 78 of its 270 refusals explained by `allow_any` and not
-    by the active kind, with no count printed the other way),
+    by the active kind, and 0 the other way),
     a process of the service manager was
     asked on every desktop, every session's kind was consistent with polkitd's answers, and no process of the
     member's held other groups than the database gives. Their old `.pkla`
@@ -2617,7 +2623,9 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     every tool and proxy after it, with `member_is_admin`; removing it
     and running the elevated `status` restores the tools;
   - the checks run inside the helper's unit as written, its sandbox
-    and capabilities included (§11.5), within their bound;
+    and capabilities included (§11.5), within their bound; the helper's
+    and the oneshot's units have no `PrivatePIDs=` or private PID
+    namespace, so the `/proc` scan sees the host's processes;
   - a proxy opened by a member who never starts a run is checked
     (`check`), and refused once a `NOPASSWD` rule is added;
   - the elevated `pair`, `forget` and `status` leave no sudo time stamp
