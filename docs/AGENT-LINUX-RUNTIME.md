@@ -133,7 +133,8 @@ silent it chooses, marks the choice "(chosen)", and lists it in §12.
 `install` checks the kernel, the cgroup hierarchy and systemd's version
 itself, and stops with a plain message naming what is missing; it
 never judges a system by its name. The distributions measured are
-§13's (Ubuntu 24.04 and 26.04, Debian 12 and 13, Fedora 44); Fedora 38
+§13's (Ubuntu 24.04 and 26.04, Debian 12 and 13, Fedora 44; Arch for
+§11.4's polkit check only); Fedora 38
 or later meets these requirements too. Ubuntu 22.04 (systemd 249) and Fedora 37 (251) do
 not.
 
@@ -1466,7 +1467,7 @@ calls, GC #16589 and #16598):
   later: the member's `user@.service`; Ubuntu 26.04 and Fedora 44 have
   one) isn't asked as a session: logind places none of its processes in
   it, and polkitd judges them by the member's display session (measured
-  on all five desktops of §13);
+  on the five desktops of §13 other than Arch);
 - while the member's service manager runs, a transient unit of it (the
   checker's waiting program, without `NoNewPrivileges`, as an ordinary
   user service runs): judged by the display session's kind, or with
@@ -1522,7 +1523,8 @@ calls, GC #16589 and #16598):
   started as the member in a mode that only waits (§11.5). Forked by
   the helper, a system service, it is in no session, and polkitd
   judges it with `allow_any`, not by the display session (measured on
-  polkit 122, 124, 126 and 127: the five desktops of §13).
+  polkit 122, 124, 126 and 127: the five desktops of §13 other than
+  Arch).
   Forked by `install` under `sudo` in a terminal, it sits in that
   terminal's session scope. Its answer is compared as the paragraph on
   comparison says.
@@ -1699,8 +1701,8 @@ authorizes the member for it without a password and either
   `home1.update-home-by-owner` (it needs the owner's own password; the
   lead's call, GC #16601), and `machine1.register-machine` (it names to
   machined a machine the caller already runs; reaching into it needs
-  `shell` or `login`, which refuse), and, from systemd v261's,
-  `allow_active` `yes` for `sysupdate1.cancel-check`, `cancel-update`,
+  `shell` or `login`, which refuse); and, from systemd v261's own
+  policy files, `allow_active` `yes` for `sysupdate1.cancel-check`, `cancel-update`,
   `cancel-update-to-version` and `cancel-vacuum` (each only signals a
   running update job to stop, which pulling the plug also does; GC
   #16724). Those that refuse: `pkexec`
@@ -2349,7 +2351,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     asks polkitd for every action it lists and every subject below, and
     judges the answers as this section does): stock desktops with the
     first user's groups (`sudo` and `lpadmin` on Ubuntu and Debian,
-    `wheel` on Fedora and Arch), an active local session from autologin on tty1,
+    `wheel` on Fedora, and on Arch, whose image has no stock user, a
+    first user added to `wheel`), an active local session from autologin on tty1,
     an inactive one from a VT switch, and the member signed in nowhere;
     each subject asked through a process, a transient system service as
     the member, and a transient unit of the member's own service
@@ -2365,7 +2368,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     | Arch (the official image, GNOME) | 128 | 290 | passes (with the `/usr/lib` helpers and the `cancel-*` defaults above; before them, those six refused) | passes |
 
     Inactive and with the member signed in nowhere, every distribution
-    passes without the rules file too. The last runs asked each subject
+    passes without the rules file too. On the five other than Arch, the
+    last runs asked each subject
     by a root-opened pidfd on polkit 126 and 127 (Debian 13, Ubuntu
     26.04, Fedora 44), by pid on 122 (Debian 12), and by pid on Ubuntu
     24.04's 124 as well, since its `busctl` (systemd 255) can't pass a
