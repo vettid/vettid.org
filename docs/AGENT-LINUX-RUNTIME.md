@@ -1484,11 +1484,14 @@ calls, GC #16589 and #16598):
   hop that fails, times out or is blocked is "could not check". It reports
   the waiting unit's pid back to the checker, which asks polkitd only
   after confirming that pid itself: its cgroup is the waiting unit's
-  own, under `user@<uid>.service`, its program is the checker's, all
-  four of its uids are the member's, its `NoNewPrivs` is 0, and the
-  unit has no drop-ins (the hop runs as the member, who could otherwise
-  name a process of its own choosing, or shape the unit with a
-  drop-in of its own). When a
+  own, under `user@<uid>.service`, its program is the checker's file
+  (by file identity), all four of its uids are the member's, its
+  `NoNewPrivs` is 0, and no drop-in the member could write applies to
+  the unit: one under the member's home or runtime folder, or a file or
+  folder not root-owned or writable by group or others (the
+  distribution's own, as Fedora's user `service.d`, are fine; the hop
+  runs as the member, who could otherwise name a process of its own
+  choosing, or shape the unit with a drop-in of its own). When a
   policy change is seen while this subject can't be asked, its stored
   result is cleared, so it reads "not checked" until it is asked again.
   The helper doesn't ask it, by §11.5's short list (chosen), so at a
@@ -1510,8 +1513,10 @@ by the groups its process holds. So every process of the member's
 (a rule can grant on a group's absence, so fewer counts as well as
 more): any difference makes every answer "could not check polkit". The
 one exemption is the user manager's `(sd-pam)` child (its parent the
-`MainPID` of `user@<uid>.service`), which holds none (measured on
-Fedora 44). For a group the database no longer gives (a member taken
+`MainPID` of `user@<uid>.service`, in the first user namespace, holding
+no groups at all), which holds none (measured on Fedora 44); a name and
+a parent can be had by any unit's process, and dropping groups needs a
+user namespace of one's own. For a group the database no longer gives (a member taken
 out of `wheel` while signed in, whose session still holds it) the text
 says to sign out and in again; for one added at sign-in that the
 database never lists (`pam_group`) it names the group and its source
