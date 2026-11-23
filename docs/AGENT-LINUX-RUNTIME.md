@@ -2540,7 +2540,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     (3 and 3) and the probe passes; `hidepid=invisible,gid=10` hides
     all three from root without `CAP_SYS_PTRACE` (3 and 0) and the
     probe, judging as the helper would, gives "could not check" for
-    every subject; so does `hidepid=ptraceable` (3 and 0). The test
+    every subject; so does `hidepid=ptraceable,gid=10` (3 and 0; under
+`ptraceable` the group doesn't count). The test
     also checks that a `status` read failing other than for a process's
     end is "could not check";
   - a `.policy` file changed while the member is signed out clears the
