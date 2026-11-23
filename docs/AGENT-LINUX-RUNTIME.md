@@ -1266,8 +1266,9 @@ refuses anything:
   dump core (§6, `LimitCORE=1`, apport refused), so what reaches the
   logs is only what a program a run starts writes there itself; the
   README says so;
-- `auth_self` and `auth_self_keep` grants (the member's own password)
-  aren't counted: they ask for the password a program can't supply;
+- `auth_self*` challenges (the member's own password) aren't counted:
+  they ask for the password a program can't supply (a grant of an
+  `auth_self*` action without a password counts, §11.4);
 - `video` (the lead's call, GC #16260): it can read the screen on some
   setups, not the keys; and `tty` (it can write to other terminals);
 - another uid-0 account with a password, or locked;
@@ -1445,7 +1446,8 @@ safe, and only for a safe one gives rules `subject.system_unit` and
 duktape authority; measured on Fedora 44: with a pid only, a rule sees
 no unit; with the handle, `session-5.scope` and `user@1000.service`).
 On 122 and 123 it is sent by pid, start time and uid, and §11.6 states
-what rules can then decide unseen. The reason for no `unix-session`
+what rules can then decide unseen. On 124 and later there is no
+fallback: a pidfd that can't be sent is "could not check polkit". The reason for no `unix-session`
 subject: polkitd 124 (Ubuntu 24.04) and
 127 (Ubuntu 26.04, Fedora 44) abort on one, and a few aborts in a row
 reach systemd's start limit and leave polkit failed, which breaks the
@@ -1493,9 +1495,17 @@ calls, GC #16589 and #16598):
   component of its path root-owned, not a link and not writable by
   group or others (Fedora's user `service.d` is one; the hop
   runs as the member, who could otherwise name a process of its own
-  choosing, or shape the unit with a drop-in of its own). When a
-  policy change is seen while this subject can't be asked, its stored
-  result is cleared, so it reads "not checked" until it is asked again.
+  choosing, or shape the unit with a drop-in of its own). polkitd sees
+  only the process's system unit, `user@<uid>.service`, and that unit's
+  property, which the member can't change, so the drop-in, program and
+  `NoNewPrivs` confirmations are extra caution, not the boundary (the
+  same holds for the unit's environment, which the member can set
+  without a drop-in). When a policy change is seen while this subject
+  can't be asked, its stored result is cleared, so it reads "not
+  checked" until it is asked again; so that nothing waits on an elevated
+  `status`, the helper starts the oneshot (the same `StartUnit` call,
+  at most once a minute) when this subject reads "not checked" and
+  `user@<uid>.service` is active.
   The helper doesn't ask it, by §11.5's short list (chosen), so at a
   run start this subject's last result stands;
 - a process of the member's in no session: the checker's own program
@@ -1510,11 +1520,13 @@ calls, GC #16589 and #16598):
 **Groups.** A `unix-process` subject's groups come from the group
 database (`getgrouplist`); from polkit 124 a caller on the bus is judged
 by the groups its process holds. So every process of the member's
-(found in `/proc`, not only the subjects) has its held groups
+(all four of its uids the member's, found in `/proc`, not only the
+subjects) has its held groups
 (`/proc/<pid>/status`) compared with the database's, as exact sets
 (a rule can grant on a group's absence, so fewer counts as well as
-more): any difference makes every answer "could not check polkit". The
-one exemption is the user manager's `(sd-pam)` child (its parent the
+more): any difference makes every answer "could not check polkit",
+and the text names the process (its pid and program). The one
+exemption is the user manager's `(sd-pam)` child (its parent the
 `MainPID` of `user@<uid>.service`, in the first user namespace, holding
 no groups at all), which holds none (measured on Fedora 44); a name and
 a parent can be had by any unit's process, and dropping groups needs a
@@ -1689,8 +1701,8 @@ authorizes the member for it without a password and either
   then names the program, not a rule).
 
 **Implied grants** (the lead's calls, GC #16589 and #16601). An action
-refused only under the first case above (its default `auth_admin*` or
-`no`, not on the allowlist), granted while a granted action for the same subject
+refused only under the first case above (its default `auth_admin*`,
+`no` or `auth_self*`, not on the allowlist), granted while a granted action for the same subject
 implies it (`org.freedesktop.policykit.imply`), is judged by that
 implying grant: accepted when that grant is accepted on its own
 (allowlisted with its condition met, recorded `yes` for that kind, or
@@ -1965,6 +1977,11 @@ terminal where no agent runs.
   (typing the password once to do it) is not seen until the next run
   start, proxy opening or elevated `status`; until then the service
   applies the last result.
+- **A rule that grants on a group's absence** (`!subject.isInGroup(...)`)
+  can't be covered by a scan of held groups: a process that holds fewer
+  groups than the database gives would get it from its real calls on
+  the bus. The exact comparison of §11.4 refuses that state; it can't
+  see a process started later.
 - **What the checks can't see:** a polkit rule that grants an action
   for some details only (§11.4), or that decides on `subject.pid`, or,
   from polkit 124, `subject.system_unit` or `subject.no_new_privileges`
@@ -2334,7 +2351,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
   - polkitd is never asked about a `unix-session` subject; each session
     is asked through one of the member's processes in it, never its
     leader; a session with no such process is "not checked"; a
-    `manager`-class session is skipped; a seatless session (SSH) is
+    `manager`-class session is skipped (its manager's unit is asked as
+    its own subject); a seatless session (SSH) is
     compared with `allow_any`;
   - an action granted only through `imply` by a grant whose own default
     is `no` or `auth_self` refuses, and so does one implied through two
@@ -2367,6 +2385,13 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     a pidfd; a pid-only subject showed none);
   - a grant over `auth_self` refuses; a process of the member's holding
     a group beyond the database's makes polkit "could not check";
+  - a rootless container: measured on Fedora 44, a plain `podman run`
+    container's processes hold no groups, so polkit is "could not
+    check" while one runs, naming the process; a toolbox container keeps
+    the member's groups (`keep-groups`) and passes;
+  - a `.policy` file changed while the member is signed out clears the
+    manager subject's result, and the helper starts the oneshot again
+    once the manager runs, with no elevated `status`;
   - a member taken out of `wheel` or `sudo` while signed in is "could
     not check: sign out and in again" (measured on one desktop with a
     caller on the bus, to show polkitd judges the held groups there);
@@ -2410,8 +2435,10 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     `printer-default` where the registered id is `printer-set-default`,
     so the allowlist is checked against the shipped version's checks); ModemManager's
     `Device.Control` on Debian and Ubuntu; FirewallD's grants on a
-    Fedora Workstation install (the desktop choice file linked); the
-    polkit rules folders' owner on
+    Fedora Workstation install (the desktop choice file linked);
+    Ubuntu 24.04 again with the checker's own D-Bus client, whose pidfd
+    the probe's `busctl` couldn't send there; the polkit rules folders'
+    owner on
     each distribution; Silverblue's rpm-ostree
     grants; snapd's policy files on a stock Ubuntu with a snap that
     uses its polkit interface; the package check's time at `install`; the recorded defaults of the named actions; whether
