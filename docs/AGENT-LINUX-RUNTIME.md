@@ -26,7 +26,10 @@ changelog:
     (19 actions), so Debian's stock first user now passes only with it,
     as Ubuntu's and Fedora's do. §11.6: the ordinary desktop controls
     that can also stall updates stay allowed, said as a limit. §11.3:
-    `install`'s text for the update actions is owed by AGENT-PLAN
+    `install`'s text for the update actions is owed by AGENT-PLAN. The
+    rules file applies to the VettID members it lists, by user name,
+    and every other account keeps polkit's defaults (the owner's a, GC
+    #16962); §2, §11.3, §11.4, §11.7, §12 and §13 follow
   - 0.1.4: 2026-11-23 (the owner's a, GC #16829). §11.4: outside the
     first user namespace a process may also hold gids inside the
     member's own `/etc/subgid` ranges (a rootless container whose image
@@ -200,7 +203,7 @@ group.
 | The channel | `/run/vettid-agent/<n>.sock` | `vettid-c-<h>`:`vettid-m-<h>`, 0660, in `/run/vettid-agent/` (root, 0755) |
 | The helper's socket (chosen) | `/run/vettid-runhelper/<n>.sock` | root:`vettid-c-<h>`, 0660, in `/run/vettid-runhelper/` (root, 0755) |
 | Units | `vettid-agent-<n>.socket`, `vettid-agent-<n>.service`, `vettid-runhelper-<n>.socket`, `vettid-runhelper-<n>.service` | in `/etc/systemd/system/` |
-| The rules file (chosen; shared, written only on request) | `/etc/polkit-1/rules.d/40-vettid-agent.rules`, written by the elevated `vettid-agent rules-file --write` (§11.4) | root, 0644; uninstall leaves it, since the member's administrator chose it |
+| The rules file (chosen; shared by the pairings, written only on request) | `/etc/polkit-1/rules.d/40-vettid-agent.rules`, written by the elevated `vettid-agent rules-file --write` (§11.4): one list of VettID members, one entry per pairing, and the rule, which applies to the listed members only (the owner's a, GC #16962) | root, 0644; `forget` removes its pairing's entry, and the file once no entry is left |
 | The policy check (chosen; shared by every pairing) | `vettid-agent-polkitcheck.path` (`PathChanged=` on the `actions` and `rules.d` folders, and `polkitd.conf`, under each of `/etc/polkit-1`, `/run/polkit-1`, `/usr/local/share/polkit-1` and `/usr/share/polkit-1`, the folders polkitd reads, on the allowed helper programs, on the resolved targets of linked `.policy` files, and on `/etc/subgid` and `/etc/nsswitch.conf` for the subgid scan, §11.4) and `vettid-agent-polkitcheck.service` (`Type=oneshot`, root, the helper's hardening, `After=nss-user-lookup.target sssd.service`, with `ReadWritePaths=/etc/vettid-agent` so it can take each pairing's lock and write its `admin.json`, the package database readable, and `WantedBy=multi-user.target` so it also runs at boot), which writes every installed pairing's `admin.json` | in `/etc/systemd/system/`; the first `install` adds them, the last uninstall removes them |
 
 - **Separate prefixes.** The run root is outside `/var/lib/vettid-agent/`,
@@ -1405,7 +1408,8 @@ file's text.
   ("Administrator member, install stops, Linux") naming the reason, and
   for the grants the rules file covers (Fedora's packages and firewall,
   Ubuntu's printers, PackageKit's offline updates, systemd 261's update
-  cancels) that file, which makes them ask for the password (§11.4).
+  cancels) that file, which makes them ask for the password, for the
+  member's account only (§11.4, GC #16962).
   AGENT-PLAN §11's install text offers `rules-file --write` only for
   Fedora's packages and firewall and Ubuntu's printers; the text for the
   update actions is owed by an AGENT-PLAN text card. It also refuses a member who isn't a local account
@@ -1689,10 +1693,13 @@ session that isn't local (an SSH session), or none, with `allow_any`.
 So the no-session subject is compared with `allow_any` under the
 helper, and with the `sudo` terminal's session's default under
 `install`; where it lands in a session already asked as a session
-subject, its answer adds nothing and is dropped. Where the kind is also read
-back from polkitd's own refusals (§13's measurement, and a session's
-kind checked against its answers), only the actions outside the rules
-file count: with the file in place their answers follow the file, not
+subject, its answer adds nothing and is dropped. The checker works the
+kind out from logind only and never reads it back from the answers, so
+an administrator's own rule that refuses or asks where the defaults
+grant can't leave a subject on "could not check". Where §13's
+measurement reads the kind back from polkitd's own refusals (to show
+that logind's kind is the one polkitd used), only the actions outside
+the rules file count: with the file in place their answers follow the file, not
 the stock defaults, so a stock `yes` that now asks would count against
 the active kind (measured on Arch with the update cancels in the file,
 GC #16934).
@@ -2028,18 +2035,32 @@ place; chosen), or printed by
 `rules-file` for an administrator to read first
 (it returns `polkit.Result.AUTH_ADMIN`, so it adds no kept-password
 window where stock had none (the lead's call, GC #16676), for
-PackageKit's two
-actions, dnf5daemon's two, FirewallD's `all`, `config`, `direct` and `policies`, and
+PackageKit's `package-install` and `package-remove`, dnf5daemon's two, FirewallD's `all`, `config`, `direct` and `policies`, and
 cups-pk-helper's four actions that can add a printer from a file and
 `server-settings`, PackageKit's `trigger-offline-update` and
 `trigger-offline-upgrade`, and systemd's four `sysupdate1.cancel-*`
 (systemd 261 and later, Arch today), and sorts
 before Fedora's own files, so it decides first), and the README gives
 it; the member runs `install` again afterwards (the lead's call within
-B, GC #16374). The README also says the file applies to every account
-on the computer, so its 19 actions ask an active user each time, where
-stock kept the password for a few minutes (or, for the cancels and
-the offline triggers, asked none where stock grants them). Fedora Silverblue and
+B, GC #16374). **The file applies to the VettID member only** (the
+owner's a, GC #16962): it holds a list of members, one entry per
+pairing, and its rule returns nothing (polkit's defaults apply) for a
+subject whose user (`subject.user`, from its uid) isn't listed. The
+member is matched by user name, not by its `vettid-m-<h>` group: a
+group can be missing from a process (one started before `install`, or
+a rootless container's, which may hold fewer groups, §11.4), while a
+process can't shed its uid. Every subject the checker asks about runs
+as the member (the session processes, the unit of the member's service
+manager, and the no-session subject, a system service started as the
+member), so each is covered. `rules-file --write` adds its pairing's
+member and keeps the other entries; `forget` removes its pairing's
+entry, and the file once no entry is left. A file that is missing, or
+doesn't list this pairing's member, changes nothing for it: polkitd
+then answers by the stock grants, which refuse, so it never passes in
+their place. For the member its 19 actions ask each time, where stock
+kept the password for a few minutes (or, for the cancels and the
+offline triggers, asked none where stock grants them); every other
+account on the computer keeps the stock behavior. Fedora Silverblue and
 Kinoite grant rpm-ostree's actions instead; no rules file is offered
 for them, and the refusal names the action (chosen; §13 measures
 them).
@@ -2220,8 +2241,9 @@ The README says the same, under "Running programs on Linux"
 ### 11.7 What it costs, and what is built
 
 A member whose `sudo` asks for its password uses runs and proxies once
-the stock grants that skip the password are made to ask, by the rules
-file of §11.4, which every stock desktop of §13 now needs (GC #16894,
+the stock grants that skip the password are made to ask for the member,
+by the rules file of §11.4 (every other account keeps the stock
+behavior, GC #16962), which every stock desktop of §13 now needs (GC #16894,
 #16914): the first user on a stock Debian desktop, once it makes
 PackageKit's offline update trigger ask; on a stock Ubuntu desktop (in
 `sudo` and `adm`), once it makes cups-pk-helper's printer-from-a-file
@@ -2338,8 +2360,9 @@ owner's go:
     through `CheckAuthorization` for each session and a no-session
     child, over the actions polkit lists, the inverted rule's allowlist
     (owner a-a, GC #16331, with the lead's two conditions, #16332) and
-    the always-refusing actions, and the rules file (19 actions;
-    GC #16894 and #16914); the three
+    the always-refusing actions, and the rules file (19 actions,
+    for the listed VettID members only; GC #16894, #16914 and the
+    owner's #16962); the three
     results (`admin`, `clear`, `not_checked`) and their use; the checks
     at `install`, every run start, every proxy opening (`check`) and by
     the elevated `status` (`admin.json`); the elevated commands dropping
@@ -2541,11 +2564,24 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     | Debian 13 (GNOME) | 126 | 278 | PackageKit's `trigger-offline-update` refuses | every subject passes |
     | Arch (the official image, GNOME; systemd 262.2) | 128 | 290 | the four `sysupdate1.cancel-*` refuse (mutter's backlight helper and gvfs's `gvfsd-admin` pass at their `/usr/lib` paths) | every subject passes |
 
-    The five rows above Arch's were measured again for 0.1.5, active,
-    with and without the 19-action rules file (the kind of each session
-    read only from actions outside the file); the inactive and
-    no-session results are from 0.1.3's runs. Inactive and with the member signed in nowhere, every distribution
-    passes without the rules file too. The last runs asked each subject
+    The five rows above Arch's were measured again for 0.1.5, active:
+    without the 19-action rules file, with it listing the member (every
+    subject passes), and with it listing another account only (the same
+    refusals as without it: the file changes no account it doesn't
+    list, GC #16962); the kind of each session was read back only from
+    actions outside the file. The shipped defaults of PackageKit's
+    offline triggers (`any`, `inactive`, `active`):
+    `trigger-offline-update` is `auth_admin`, `auth_admin`, `yes` on
+    Ubuntu 24.04, Fedora 44 and Debian 12 and 13, and `auth_admin`,
+    `yes`, `yes` on Ubuntu 26.04; `trigger-offline-upgrade` is
+    `auth_admin` throughout (its grant on Ubuntu 26.04 and Fedora 44
+    comes from their rules for the administrators' group). The inactive
+    and no-session results are from 0.1.3's runs, before the offline
+    triggers left the allowlist: with the member signed in nowhere every
+    distribution passes without the rules file too, and inactive every
+    one does but Ubuntu 26.04, whose inactive session the shipped
+    `yes` above now refuses without the file (read from the default, not
+    measured again). The last runs asked each subject
     by a root-opened pidfd on polkit 126, 127 and 128 (Debian 13, Ubuntu
     26.04, Fedora 44, Arch), by pid on 122 (Debian 12), and by pid on Ubuntu
     24.04's 124 as well, since its `busctl` (systemd 255) can't pass a
@@ -2673,6 +2709,10 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     allowed as at `/usr/libexec` (gvfsd-admin only under its gate),
     and a `sysupdate1.cancel-*` grant refuses for every kind of subject,
     while the rules file makes each ask for an administrator;
+  - the rules file names the member: the member passes; naming another
+    account instead, the member gets the stock behavior (the same
+    refusals as without the file), so the file changes no account it
+    doesn't list; `forget` of one pairing keeps another's entry;
   - PackageKit's `trigger-offline-update` and `trigger-offline-upgrade`
     granted refuse, whatever their defaults, and ask for an
     administrator with the rules file; `clear-offline-update` granted
