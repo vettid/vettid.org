@@ -2,7 +2,7 @@
 title: AGENT-LINUX-RUNTIME
 status: draft design note; the run helper and the key sealing get their independent reviews (AGENT-PLAN §9 rule 6) from it, before their code. Built so far: the channel's Unix-socket end (vettid/vettid-agent#55)
 version: 0.1.3
-date: 2026-11-23
+date: 2026-11-22
 owner: Al Liebl (Mesmer)
 component: vettid-agent (the agent connector): the separate-account mode on Linux (AGENT-PLAN A5.6)
 related:
@@ -10,7 +10,7 @@ related:
   - AGENT-PLAN.md (0.1.21) AG3, AG14, §4.2, §4.7, §4.9, A3.10a, A3.10d, A5.6, §11
   - VAULT-MESSAGING.md (0.93.2) §10.11 "Files handed in and out"
 changelog:
-  - 0.1.3: 2026-11-23, erratum (cards GC #16419 and #16565, the lead's
+  - 0.1.3: 2026-11-22, erratum (cards GC #16419 and #16565, the lead's
     calls #16589, #16598 and #16601). §11.4 measured on stock desktops
     with a probe (Ubuntu 24.04 and 26.04, Fedora 44 Workstation, Debian
     12 and 13 with GNOME; §13): polkitd is asked about processes only,
@@ -27,10 +27,16 @@ changelog:
     three read-only actions and gnome-software's two key tests (by
     action id) allowlisted; dnf5daemon's install and key actions always
     refuse and join the rules file; three systemd v259 `yes` defaults
-    recorded, per kind of subject. §1 and §11.4: pacman supported for the
-    package check (`pacman -Qo`, the `mtree` digests, pacman's lock);
-    xbps, apk and portage not until measured, NixOS by its own design.
-    §11.5 and §13 follow
+    recorded, per kind of subject; an `exec.path` action allowed by its
+    id with its own program; every allowed helper program held to the
+    package check. fwupd's `OnlyTrusted` read from every configuration
+    file fwupd reads, and `nsswitch.conf`'s `sudoers` line as sudo reads
+    it. §1, §11.4 and §12: pacman supported for the package check
+    (`pacman -Qo`, the `mtree` digests, pacman's lock file); xbps, apk
+    and portage not until measured, NixOS by its own design; no mode
+    without the package check. §11.5 follows; §13 records the
+    measurements and their tests, and moves Debian's printer grant and
+    the systemd v259 defaults out of what the `install` PR measures
   - 0.1.2: 2026-11-22, erratum (VAULT-MESSAGING 0.93.2, AGENT-PLAN
     0.1.21; owner-approved card GC #16477). §7: the connector builds
     `VETTID_IN` and `VETTID_OUT` only for a run with non-empty `inputs`
@@ -1415,11 +1421,12 @@ calls, GC #16589 and #16598):
   the member's; never the session's leader (a tty session's leader is
   `login`, running as root). A session with no such process is "could
   not check", never a pass. A `manager`-class session (systemd 258 and
-  later: the member's `user@.service`) is skipped: logind places none of
-  its processes in it, and polkitd judges them by the member's display
-  session, the kind that session's own subject is asked with (measured
-  on all five desktops of §13: a transient unit of the member's own
-  service manager is judged by the display session);
+  later: the member's `user@.service`; Ubuntu 26.04 and Fedora 44 have
+  one) is skipped: logind places none of its processes in it, and
+  polkitd judges them by the member's display session, so the display
+  session's own subject already covers them (measured on all five
+  desktops of §13: a transient unit of the member's own service manager
+  is judged by the display session's kind);
 - a process of the member's in no session: the checker's own program
   started as the member in a mode that only waits (§11.5). Forked by
   the helper, a system service, it is in no session, and polkitd
@@ -1470,7 +1477,8 @@ other action, a `.policy` file whose defaults include `yes` for any
 kind of subject is checked against the package database (`dpkg
 --verify`, `rpm -V`, or pacman's own records: `pacman -Qo` for the
 owner, and the SHA-256 digest and size in that package's `mtree` file,
-read as root): one no package owns, or one whose content the
+read as root; pacman's database path from `pacman.conf`): one no
+package owns, or one whose content the
 package manager reports as changed (its digest or size; a changed time
 stamp or mode alone doesn't count), counts likewise (except a file
 snapd wrote for a snap installed now, as snapd's own records list it;
@@ -1482,7 +1490,9 @@ folder polkitd reads) that starts a oneshot whenever they change, and
 at boot, with no password: so a system update is checked as it happens, and
 only a real new grant refuses (the lead's call, GC #16374). The oneshot
 waits until the package manager's lock (`dpkg`'s frontend lock, rpm's
-transaction lock, pacman's `/var/lib/pacman/db.lck`) is free and the database is quiet, then checks, and
+transaction lock, pacman's lock file `db.lck`, whose presence is the
+lock; one that stays for minutes, as a crashed pacman leaves it, keeps
+the result "not checked", and its text names the file) is free and the database is quiet, then checks, and
 records a result only when two checks a few seconds apart agree; until
 then it records "not checked". So it never judges a file in the middle
 of the update that wrote it. It rewrites only the policy part of each
@@ -1497,7 +1507,13 @@ text says to run the elevated `status`. Each check
 records the files' digests in `admin.json`; at a run start or a proxy's
 opening the helper only compares digests and runs no package manager,
 and while the oneshot hasn't caught up with a change the result is "not
-checked" ("try again in a minute"). A distribution with none of `dpkg`,
+checked" ("try again in a minute"). **Every allowed helper program**
+(each program on the `exec.path` allowlist, and each allowed with an
+action's id, below) is held to the same check, whatever its defaults:
+owned by a package and unchanged, watched by the path unit, its digest
+recorded; one no package owns or whose content changed makes that
+action "could not check", so it isn't allowed (the lead's condition, GC
+#16589). A distribution with none of `dpkg`,
 `rpm` and `pacman` is not supported by the separate-account mode (§1,
 the README). An action **refuses** when polkit
 authorizes the member for it without a password and either
@@ -1538,14 +1554,17 @@ authorizes the member for it without a password and either
   on the allowlist, and isn't allowed with that action's id (the reason
   then names the program, not a rule).
 
-**Implied grants** (the lead's calls, GC #16589 and #16601). An
-administrator's action granted only because a granted action implies it
-(`org.freedesktop.policykit.imply`) is judged by the implying grant for
-the same subject: accepted when that grant is accepted (allowlisted,
-recorded `yes` for that kind, or `yes` by its own default for that kind,
-so not counted under the rule), refused otherwise. One level only, as
-polkitd follows an implication: it doesn't follow the implying action's
-own. Measured: `login1.set-wall-message` comes with `power-off` and
+**Implied grants** (the lead's calls, GC #16589 and #16601). An action
+refused only under the first case above (its default `auth_admin*`, not
+on the allowlist), granted while a granted action for the same subject
+implies it (`org.freedesktop.policykit.imply`), is judged by that
+implying grant: accepted when that grant is accepted on its own
+(allowlisted with its condition met, recorded `yes` for that kind, or
+`yes` by its own default for that kind, so not counted under the rule;
+a kept authorization isn't), refused otherwise. An action that refuses
+whatever its defaults stays refused, whatever implies it. One level
+only, as polkitd follows an implication: it doesn't follow the implying
+action's own. Measured: `login1.set-wall-message` comes with `power-off` and
 `reboot` (`yes` for an active session), and `hostname1.set-machine-info`
 with the allowlisted `set-static-hostname`.
 
@@ -1638,13 +1657,16 @@ this note):
   package check pins the script's digest, so a changed script is "could
   not check", as for every fixed helper (GC #16589);
 - gvfs's `org.gtk.vfs.file-operations-helper` (gvfs-backends' rule for
-  `sudo`, `admin` and `wheel`, active and local), which starts
-  `gvfsd-admin` as root, **only while** `org.gtk.vfs.file-operations`,
-  which `gvfsd-admin` checks for each caller and each operation, asks
-  for an administrator (a challenge, its default `auth_admin` or
-  `auth_admin_keep`) of the same subject, and grants no other subject
-  asked without one (an outright refusal is fine); otherwise it
-  refuses. `file-operations`' `auth_admin_keep` is reported as a caching
+  `sudo`, `admin` and `wheel`, active and local), whose program
+  `/usr/libexec/gvfsd-admin` runs as root, **only while**
+  `org.gtk.vfs.file-operations`, which `gvfsd-admin` checks for each
+  caller and each operation, asks for an administrator of the same
+  subject (a challenge where its default for that kind is `auth_admin`
+  or `auth_admin_keep`; polkitd's answer doesn't say whose password a
+  challenge wants, so a rule returning `AUTH_SELF` can't be told from
+  it), and every other subject asked is asked the same way or refused
+  outright (a grant, an error or a challenge under another default
+  breaks it); otherwise it refuses. `file-operations`' `auth_admin_keep` is reported as a caching
   window, as polkit's is (GC #16589);
 - GNOME 50's (Ubuntu 26.04, Fedora 44; GC #16598): libmalcontent's
   `com.endlessm.ParentalControls.AppFilter.ReadAny`,
@@ -1656,7 +1678,8 @@ this note):
   that takes arguments limited to `[a-zA-Z0-9,_:-]`, rewrites only the
   XKB lines of `/etc/default/keyboard` and runs `dpkg-reconfigure
   keyboard-configuration`: the effect of the allowlisted
-  `locale1.set-keyboard`, which it implies, pinned by the package check;
+  `locale1.set-keyboard`, which `set-keyboard` implies. The helper is
+  allowed by its path, as the other fixed helpers are;
 - gnome-software's `org.gnome.software.dkms-test` and `akmods-test`
   (Fedora, `yes` for an active session), **by action id** with their
   own helper `/usr/libexec/gnome-software-dkms-helper` (`--test-dkms`,
@@ -1726,8 +1749,8 @@ The run helper runs no program as root for a run (§6). For these checks
 it does exactly this, and nothing the connector names:
 - it runs each `sudo` of §11.2 and `cvtsudoers`, after §6's folder
   checks on their paths (`install` and the elevated `status` also run
-  `dpkg --verify`, `rpm -V` or pacman's for §11.4's package check; the
-  helper doesn't);
+  `dpkg --verify`, `rpm -V`, or `pacman -Qo` and the `mtree` read, for
+  §11.4's package check; the helper doesn't);
 - it reads `/etc/passwd`, `/etc/shadow`, `/etc/sudo.conf`,
   `/etc/doas.conf` (and `/usr/local/etc/doas.conf`), the PAM files of
   §11.1, `/etc/security/console.apps/`, the group database, and the
@@ -1864,7 +1887,8 @@ The rest are "(chosen; not in the spec)" until the review and the
 owner's go:
 
 1. Linux 5.14, cgroup v2 and systemd 252 as the minimum, checked by
-   version; local accounts only (§1).
+   version; local accounts only; `dpkg`, `rpm` or `pacman` as the
+   package manager, with no mode without §11.4's package check (§1).
 2. The member group `vettid-m-<h>`; the configuration's path, owner
    and mode; the lock; the run root `/var/lib/vettid-agent-run/<n>/` as
    a tmpfs of the helper's; the helper's socket and unit names; the
@@ -2127,6 +2151,12 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     | Ubuntu 24.04 (`ubuntu-desktop-minimal`) | 124 | 289 | cups-pk-helper's five refuse | every subject passes |
     | Ubuntu 26.04 (`ubuntu-desktop`, GNOME 50) | 127 | 321 | cups-pk-helper's five refuse | every subject passes |
     | Fedora 44 Workstation (GNOME 50) | 127 | 519 | PackageKit's and dnf5daemon's two each refuse | every subject passes |
+
+    On Fedora, FirewallD granted nothing: the Workstation group install
+    on the cloud image keeps the server choice file, and polkit loads
+    the desktop choice's rule for `wheel` only when it is linked, as a
+    Workstation install links it. So FirewallD's four refusals on a
+    Workstation are still measured in the `install` PR (below).
     | Debian 12 (GNOME) | 122 | 256 | passes | passes |
     | Debian 13 (GNOME) | 126 | 278 | passes | passes |
 
@@ -2151,7 +2181,11 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     is `no` or `auth_self` refuses, and so does one implied through two
     levels; `login1.set-wall-message` through `power-off` is accepted;
   - gvfs's `file-operations-helper` refuses while `file-operations` is
-    granted to any subject asked, or asks for the member's own password;
+    granted to any subject asked, answers with an error, or challenges
+    where its default for that kind isn't `auth_admin*`;
+  - an allowed helper program changed after `install` makes its action
+    "could not check"; a stale pacman `db.lck` keeps the result "not
+    checked", naming the file;
   - the recorded `yes` defaults count for that kind of subject only: a
     rule that grants `sysupdate1.update` to the no-session subject
     refuses;
@@ -2192,7 +2226,9 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     ids at the version each distribution ships (upstream checks
     `printer-default` where the registered id is `printer-set-default`,
     so the allowlist is checked against the shipped version's checks); ModemManager's
-    `Device.Control` on Debian and Ubuntu; `machine1.register-machine`'s
+    `Device.Control` on Debian and Ubuntu; FirewallD's grants on a
+    Fedora Workstation install (the desktop choice file linked);
+    `machine1.register-machine`'s
     recorded default (the other named exceptions are recorded above,
     from systemd v259); the polkit rules folders' owner on
     each distribution; Silverblue's rpm-ostree
