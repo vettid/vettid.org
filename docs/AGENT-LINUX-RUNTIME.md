@@ -2054,12 +2054,15 @@ as the member (the session processes, the unit of the member's service
 manager, and the no-session subject, a system service started as the
 member), so each is covered. It also applies to a subject whose user
 is only digits, a uid with no account (a process the member runs under
-a subordinate uid in a rootless container), so no real account is
-touched and the member's own programs can't reach the stock grants that
-way. The list and the rule are inside one function, so no other rules
+a subordinate uid in a rootless container), so the member's own
+programs can't reach the stock grants that way: no real account gets a
+grant from it, and an account named only with digits, or a name polkitd
+can't resolve at that moment, gets the member's prompts. The list and the rule are inside one function, so no other rules
 file can change the list. **How it is written** (chosen):
-`rules-file --write` takes the pairing's lock and a lock on the file,
-reads the existing file, and refuses, printing it for an administrator,
+`rules-file --write` takes the pairing's lock and a separate, stable
+lock file outside `rules.d` (`/etc/vettid-agent/rules-file.lock`, root,
+0600; a lock on the rules file itself wouldn't survive the `rename`),
+then reads the rules file by its path, and refuses, printing it for an administrator,
 when it isn't exactly in the tool's own format (any edit or another
 tool's file); it then writes the pairing's entry, the member's name as
 `getpwuid` gives it for the member's uid, refused unless it matches
@@ -2067,10 +2070,14 @@ tool's file); it then writes the pairing's entry, the member's name as
 a backslash, a control character or U+2028/2029 could never end the
 string), with the pairing's name beside it. A rewrite replaces that
 pairing's old entry; two pairings for one member keep two entries, and
-forgetting one keeps the other. The file is replaced atomically (a
-temporary file in the same folder, then `rename`). `forget`, under the
-same locks, removes its pairing's entry, and the file once no entry is
-left. A file that is missing, or
+forgetting one keeps the other. The file is replaced atomically: a
+temporary file in the same folder whose name doesn't end in `.rules`
+(polkitd loads any `*.rules` there), written and `fsync`ed, then
+`rename`d over it; a leftover temporary file is removed at the next
+write. `forget`, under the same locks, removes its pairing's entry,
+and the file itself once no entry is left, so no file with an empty
+list is ever left; uninstall removes its pairing's entry as `forget`
+does. A file that is missing, or
 doesn't list this pairing's member, changes nothing for it: polkitd
 then answers by the stock grants, which refuse, so it never passes in
 their place. For the member its 19 actions ask each time, where stock
@@ -2224,12 +2231,18 @@ terminal where no agent runs.
   updates, not to install anything.
 - **Processes running as the member's subordinate uids** (a rootless
   container's other users) aren't the member's by uid, so the scan
-  doesn't see them. polkitd finds such a process's session from its
-  cgroup (inside the member's service manager), but its uid has no
-  account: measured on Fedora 44 (polkit 127), a container process as
-  a subordinate uid, with the system bus socket mounted, is refused
-  `trigger-offline-update` outright without the rules file, and asked
-  for an administrator with it (the file covers a uid with no account).
+  doesn't see them. Measured with `pkcheck --process` on one action, for
+  a rootless container's process the member started as a subordinate
+  uid (`podman run --user 1000:1000` with the system bus socket
+  mounted; the process holds only its own subordinate gid, its cgroup
+  inside the member's service manager, and logind gives it no
+  session): on Fedora 44 (polkit 127), `trigger-offline-update` was
+  refused outright without the rules file; on Arch (polkit 128),
+  `sysupdate1.cancel-update` was **granted** without the file and with a
+  file that named the member only, judged by the member's active
+  display session (GC #16976). With the file covering a uid with no
+  account, both ask for an administrator. A bus caller that keeps the
+  member's groups wasn't measured (§13).
   A rule of the administrator's that grants on "not this user" or "not
   in this group" still reaches it. The same family of limit, by uid.
 - **What the checks can't see:** a polkit rule that grants an action
@@ -2742,7 +2755,10 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     backslash, or a file not in the tool's format, is refused and the
     file printed; a process of the member's under a subordinate uid (a
     rootless container with the system bus mounted) is asked for an
-    administrator with the file;
+    administrator with the file, both one holding only its subordinate
+    gid and one that keeps the member's groups (not measured yet); a
+    `forget` of the last entry leaves no file, and a leftover temporary
+    file is removed at the next write;
   - PackageKit's `trigger-offline-update` and `trigger-offline-upgrade`
     granted refuse, whatever their defaults, and ask for an
     administrator with the rules file; `clear-offline-update` granted
