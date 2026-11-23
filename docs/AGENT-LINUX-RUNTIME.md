@@ -54,8 +54,13 @@ changelog:
     (the measurements of kind and locality: GC #16634; the review: GC
     #16676). Arch (GC #16724): mutter's backlight helper and gvfsd-admin
     allowed at Arch's `/usr/lib` path too, under the same conditions;
-    systemd v261's four `sysupdate1.cancel-*` `yes` defaults recorded;
-    polkit 128 measured, and Arch's row in §13
+    systemd v261's four `sysupdate1.cancel-*` `yes` defaults recorded
+    (unchanged in v262.2); polkit 128 measured, and Arch's row in §13.
+    The first user namespace read from a process's `uid_map` and
+    `gid_map`; the subgid scan only in `install`, the elevated `status`
+    and the oneshot, through `getent`, its result kept until
+    `/etc/subgid` or `nsswitch.conf` changes; the settings daemon's
+    helpers named; pacman's `mtree` paths and duplicate entries
   - 0.1.2: 2026-11-22, erratum (VAULT-MESSAGING 0.93.2, AGENT-PLAN
     0.1.21; owner-approved card GC #16477). §7: the connector builds
     `VETTID_IN` and `VETTID_OUT` only for a run with non-empty `inputs`
@@ -125,8 +130,8 @@ silent it chooses, marks the choice "(chosen)", and lists it in §12.
   There is no mode without the package check.
 - **systemd 252 or later:** encrypted credentials came in 250,
   `systemd-creds has-tpm2` in 251, and `--tpm2-public-key=` in 252 (§5).
-- **polkit 122 or later, or no polkit:** 122 is the oldest measured
-  (§11.4, §13); with an older polkitd (RHEL 9 and its rebuilds ship
+- **polkit 122 or later, or no polkit:** the measured range is 122 to
+  128 (122, 124, 126, 127 and 128; §11.4, §13); with an older polkitd (RHEL 9 and its rebuilds ship
   0.117) every check is "could not check polkit", so the
   separate-account mode refuses there.
 
@@ -161,7 +166,7 @@ group.
 | The helper's socket (chosen) | `/run/vettid-runhelper/<n>.sock` | root:`vettid-c-<h>`, 0660, in `/run/vettid-runhelper/` (root, 0755) |
 | Units | `vettid-agent-<n>.socket`, `vettid-agent-<n>.service`, `vettid-runhelper-<n>.socket`, `vettid-runhelper-<n>.service` | in `/etc/systemd/system/` |
 | The rules file (chosen; shared, written only on request) | `/etc/polkit-1/rules.d/40-vettid-agent.rules`, written by the elevated `vettid-agent rules-file --write` (§11.4) | root, 0644; uninstall leaves it, since the member's administrator chose it |
-| The policy check (chosen; shared by every pairing) | `vettid-agent-polkitcheck.path` (`PathChanged=` on the `actions` and `rules.d` folders, and `polkitd.conf`, under each of `/etc/polkit-1`, `/run/polkit-1`, `/usr/local/share/polkit-1` and `/usr/share/polkit-1`, the folders polkitd reads, on the allowed helper programs and on the resolved targets of linked `.policy` files, §11.4) and `vettid-agent-polkitcheck.service` (`Type=oneshot`, root, the helper's hardening, with `ReadWritePaths=/etc/vettid-agent` so it can take each pairing's lock and write its `admin.json`, the package database readable, and `WantedBy=multi-user.target` so it also runs at boot), which writes every installed pairing's `admin.json` | in `/etc/systemd/system/`; the first `install` adds them, the last uninstall removes them |
+| The policy check (chosen; shared by every pairing) | `vettid-agent-polkitcheck.path` (`PathChanged=` on the `actions` and `rules.d` folders, and `polkitd.conf`, under each of `/etc/polkit-1`, `/run/polkit-1`, `/usr/local/share/polkit-1` and `/usr/share/polkit-1`, the folders polkitd reads, on the allowed helper programs, on the resolved targets of linked `.policy` files, and on `/etc/subgid` and `/etc/nsswitch.conf` for the subgid scan, §11.4) and `vettid-agent-polkitcheck.service` (`Type=oneshot`, root, the helper's hardening, with `ReadWritePaths=/etc/vettid-agent` so it can take each pairing's lock and write its `admin.json`, the package database readable, and `WantedBy=multi-user.target` so it also runs at boot), which writes every installed pairing's `admin.json` | in `/etc/systemd/system/`; the first `install` adds them, the last uninstall removes them |
 
 - **Separate prefixes.** The run root is outside `/var/lib/vettid-agent/`,
   so a pairing named `run` can't meet it. The helper's units have their
@@ -1464,8 +1469,8 @@ calls, GC #16589 and #16598):
   the member's; never the session's leader (a tty session's leader is
   `login`, running as root). A session with no such process is "could
   not check", never a pass. A `manager`-class session (systemd 258 and
-  later: the member's `user@.service`; Ubuntu 26.04 and Fedora 44 have
-  one) isn't asked as a session: logind places none of its processes in
+  later: the member's `user@.service`; Ubuntu 26.04, Fedora 44 and Arch
+  have one, and it was skipped on each) isn't asked as a session: logind places none of its processes in
   it, and polkitd judges them by the member's display session (measured
   on the five desktops of §13 other than Arch);
 - while the member's service manager runs, a transient unit of it (the
@@ -1523,8 +1528,7 @@ calls, GC #16589 and #16598):
   started as the member in a mode that only waits (§11.5). Forked by
   the helper, a system service, it is in no session, and polkitd
   judges it with `allow_any`, not by the display session (measured on
-  polkit 122, 124, 126 and 127: the five desktops of §13 other than
-  Arch).
+  polkit 122, 124, 126, 127 and 128: the six desktops of §13).
   Forked by `install` under `sudo` in a terminal, it sits in that
   terminal's session scope. Its answer is compared as the paragraph on
   comparison says.
@@ -1548,17 +1552,32 @@ overlap the second user's default range), the member could hold that
 group at will: that is "could not check polkit", naming the range and
 the group (chosen). Each gid of the range is looked up by key, since a
 network source (sssd with `enumerate = false`, its default) doesn't
-list its groups. Ranges from an nsswitch `subid:` source (sss, FreeIPA)
-aren't read, a limit of §11.6. The checker confirms first that it runs in PID 1's
-user namespace (otherwise unmapped gids read as 65534), and a process
-whose namespace it can't read is compared exactly. The one
+list its groups: the static build runs `getent group` with the gids as
+keys, in batches, with a time limit; an exit other than 0 (all found)
+or 2 (some not found), no `getent`, or the time limit passed is "could
+not check polkit". A default range of 65,536 gids against a network
+source takes longer than a run start's bound (§11.3), so only
+`install`, the elevated `status` and the oneshot make this scan; its
+result goes in `admin.json` with the digests of `/etc/subgid` and
+`nsswitch.conf`, which the path unit watches (§2), and the helper at a
+run start only compares those digests (a change: "not checked" until
+the oneshot has scanned again). Ranges from an nsswitch `subid:` source
+(sss, FreeIPA) aren't read, a limit of §11.6. Whether a process is in
+the first user namespace is read from its `uid_map` and `gid_map`: the
+identity over every id, which only the first namespace has unless a
+privileged process made one so. Both are readable without `ptrace`
+access, unlike another uid's `ns/user` link, which would need
+`CAP_SYS_PTRACE` (not in the helper's set, §6); a map that can't be read
+is taken as the first namespace, so the process is compared exactly.
+The checker confirms first that its own maps are the identity
+(otherwise unmapped gids read as 65534). The one
 exemption is the user manager's `(sd-pam)` child (its parent the
 `MainPID` of `user@<uid>.service`, in the first user namespace, holding
 no groups at all), which holds none (measured on Fedora 44); a name and
 a parent can be had by any unit's process, and dropping groups needs a
 user namespace of one's own. `(sd-pam)` is dumpable, its `/proc` entry
 the member's (measured on Fedora 44), so where `ptrace` is allowed
-(Fedora's `ptrace_scope` 0) the member could make it call the bus with
+(`ptrace_scope` 0, the default on Fedora, Arch and upstream) the member could make it call the bus with
 no groups: that again reaches only the limit of §11.6. For a group the database no longer gives (a member taken
 out of `wheel` while signed in, whose session still holds it) the text
 says to sign out and in again; for one added at sign-in that the
@@ -1666,7 +1685,9 @@ database path from `pacman-conf DBPath`, and the package's `mtree`
 (gzip), found through the local database entry whose `desc` names that
 package (`%NAME%`) at its installed version, never by a name prefix,
 parsed as mtree(5) says (`/set` defaults, `\ooo` escapes,
-continued lines). Its SHA-256 and size are compared and the
+continued lines), each entry's leading `./` stripped before it is
+matched with the path. Two local database entries with the same
+`%NAME%` are "could not check". Its SHA-256 and size are compared and the
 modification time ignored (`pacman -Qkk`'s verdict isn't used: it also
 flags a changed time alone); a `backup=` file (configuration pacman
 keeps across upgrades) whose digest differs still counts as changed. A
@@ -1701,8 +1722,8 @@ authorizes the member for it without a password and either
   `home1.update-home-by-owner` (it needs the owner's own password; the
   lead's call, GC #16601), and `machine1.register-machine` (it names to
   machined a machine the caller already runs; reaching into it needs
-  `shell` or `login`, which refuse); and, from systemd v261's own
-  policy files, `allow_active` `yes` for `sysupdate1.cancel-check`, `cancel-update`,
+  `shell` or `login`, which refuse); and, from the policy files of
+  systemd v261 and later (unchanged in v262.2), `allow_active` `yes` for `sysupdate1.cancel-check`, `cancel-update`,
   `cancel-update-to-version` and `cancel-vacuum` (each only signals a
   running update job to stop, which pulling the plug also does; GC
   #16724). Those that refuse: `pkexec`
@@ -1825,7 +1846,9 @@ this note):
   `/usr/lib/fedora-third-party/fedora-third-party-opt-out`, and the
   fixed helpers GNOME's settings daemon (48 and earlier, as on Ubuntu
   24.04 and Debian 12 and 13) runs through `exec.path` for the backlight
-  and Wacom tablets, and mutter's `/usr/libexec/mutter-backlight-helper`
+  and Wacom tablets (`/usr/libexec/gsd-backlight-helper`,
+  `/usr/libexec/gsd-wacom-oled-helper` and
+  `/usr/libexec/gsd-wacom-led-helper`), and mutter's `/usr/libexec/mutter-backlight-helper`
   (`/usr/lib/mutter-backlight-helper` on Arch, GC #16724), their
   successor in GNOME 49 and later (GC #16598): fixed programs, not
   chosen by the member. Another desktop's helper not on the list
@@ -1942,7 +1965,10 @@ it does exactly this, and nothing the connector names:
   `/etc/doas.conf` (and `/usr/local/etc/doas.conf`), the PAM files of
   §11.1, `/etc/security/console.apps/`, the group database, and the
   owners and modes of `/usr/local`'s folders and of every input it
-  reads;
+  reads; for §11.4's groups, `/proc/<pid>/status`, `uid_map` and
+  `gid_map` of every process, and `/etc/subgid` and `nsswitch.conf`
+  for their digests (`install`, the elevated `status` and the oneshot
+  also run `getent group` for the subgid scan; the helper doesn't);
 - it asks polkitd and logind over the system bus, and starts §11.4's
   no-session subject, its own waiting child (the subject in the
   member's service manager is asked only by `install`, the elevated
@@ -2000,7 +2026,7 @@ terminal where no agent runs.
   that ran before can have changed the shell's start-up files), show a
   polkit dialog of its own, or read the keystrokes where the session
   allows it (an X11 session; `ptrace` of the member's shell where
-  `ptrace_scope` is 0, as on Fedora). It then catches the password the
+  `ptrace_scope` is 0, as on Fedora and Arch and upstream's default). It then catches the password the
   next time the member types it. That needs the member to act, and no
   check here can see it.
 - **The caching windows.** For as long as `sudo` doesn't ask again
@@ -2365,18 +2391,18 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     | Fedora 44, the Workstation group on the cloud image (`VARIANT_ID=cloud`; GNOME 50) | 127 | 519 | PackageKit's and dnf5daemon's two each refuse | every subject passes |
     | Debian 12 (GNOME) | 122 | 256 | passes | passes |
     | Debian 13 (GNOME) | 126 | 278 | passes | passes |
-    | Arch (the official image, GNOME) | 128 | 290 | passes (with the `/usr/lib` helpers and the `cancel-*` defaults above; before them, those six refused) | passes |
+    | Arch (the official image, GNOME; systemd 262.2) | 128 | 290 | passes (with the `/usr/lib` helpers and the `cancel-*` defaults above; before them six refused: mutter's backlight helper, gvfs's `file-operations-helper` and the four `sysupdate1.cancel-*`) | passes |
 
     Inactive and with the member signed in nowhere, every distribution
-    passes without the rules file too (for Arch only that verdict is
-    recorded here; what follows is the other five's). On those five, the
-    last runs asked each subject
-    by a root-opened pidfd on polkit 126 and 127 (Debian 13, Ubuntu
-    26.04, Fedora 44), by pid on 122 (Debian 12), and by pid on Ubuntu
+    passes without the rules file too. The last runs asked each subject
+    by a root-opened pidfd on polkit 126, 127 and 128 (Debian 13, Ubuntu
+    26.04, Fedora 44, Arch), by pid on 122 (Debian 12), and by pid on Ubuntu
     24.04's 124 as well, since its `busctl` (systemd 255) can't pass a
-    file descriptor (the checker's own D-Bus client must); a process of
-    the service manager was asked on every desktop, every session's kind
-    was consistent with polkitd's answers, and no process of the
+    file descriptor (the checker's own D-Bus client must); on the five
+    other than Arch (whose run recorded the verdicts above, the pidfd,
+    the skipped `manager` session and the system service's `allow_any`,
+    and nothing of the rest), a process of the service manager was
+    asked on every desktop, every session's kind was consistent with polkitd's answers, and no process of the
     member's held other groups than the database gives. Their old `.pkla`
     folders are root-owned with no group or other write wherever they
     exist (`/var/lib/polkit-1/localauthority` `root:root 0755` on Ubuntu
@@ -2439,10 +2465,17 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     container's processes hold no groups (accepted, being outside the
     first user namespace), and a toolbox container keeps the member's
     groups (`keep-groups`); both pass, and a container process holding a
-    group beyond the database's refuses (to measure: how often a stock
-    image's own groups, a host subgid such as 100062, refuse an ordinary
-    container); a subgid range overlapping a resolved group is "could
-    not check";
+    group beyond the database's refuses. Measured on Fedora 44 with
+    rootless podman: `alpine:3.20 sleep 600` runs as the image's root,
+    whose groups (0, 1, 2, 3, 4, 6, 10, 11, 20, 26 and 27) map to the
+    member's subgids (524288 and up), so its process holds those
+    beyond the database's and every subject is "could not check
+    polkit" while it runs; whether to accept such a container is the
+    owner's call (GC #16754). A subgid range overlapping a resolved group is "could
+    not check", and so is a `getent` that exits other than 0 or 2, is
+    missing or passes its time limit; a process whose `uid_map` and
+    `gid_map` aren't the identity is outside the first user namespace,
+    read by the helper with its own capability set;
   - a `.policy` file changed while the member is signed out clears the
     manager subject's result, and the helper starts the oneshot again
     once the manager runs, with no elevated `status`;
@@ -2452,10 +2485,18 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
   - a `.policy` file that is a link (Fedora's FirewallD) is checked
     through to its target; a file with no recorded digest, or more than
     one owner, is "could not check";
-  - on a pacman distribution (Arch): a `.policy` file no package owns,
-    and one whose content differs from its package's `mtree` digest or
-    size, refuse through the package check; the oneshot waits for
-    `db.lck`; the stock desktop's grants are measured as above;
+  - on a pacman distribution (Arch): measured by hand on the official
+    image, the `mtree` SHA-256 and size match the installed files for
+    malcontent's `.policy`, `/usr/lib/mutter-backlight-helper` (mutter
+    51.1-1) and `/usr/lib/gvfsd-admin` (gvfs 1.62.0-3); a comment
+    appended to a file changes both its digest and its size (while
+    `pacman -Qkk` also flags a changed time alone); an unowned copy
+    under `/usr/local` gives `No package owns`. The test checks that such
+    a `.policy` file, and one whose content differs from its package's
+    `mtree` digest or size, refuse through the package check, that two
+    local entries with the same `%NAME%` are "could not check", and that
+    the oneshot waits for `db.lck`; the stock desktop's grants are
+    measured as above;
     mutter's backlight helper and gvfsd-admin at `/usr/lib` are
     allowed as at `/usr/libexec` (gvfsd-admin only under its gate),
     and a `sysupdate1.cancel-*` grant refuses for a subject other than
