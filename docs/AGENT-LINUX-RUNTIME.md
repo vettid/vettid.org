@@ -1486,10 +1486,12 @@ calls, GC #16589 and #16598):
   after confirming that pid itself: its cgroup is the waiting unit's
   own, under `user@<uid>.service`, its program is the checker's file
   (by file identity), all four of its uids are the member's, its
-  `NoNewPrivs` is 0, and no drop-in the member could write applies to
-  the unit: one under the member's home or runtime folder, or a file or
-  folder not root-owned or writable by group or others (the
-  distribution's own, as Fedora's user `service.d`, are fine; the hop
+  `NoNewPrivs` is 0, and every drop-in that applies to the unit is
+  plainly the distribution's: under a system root (`/etc/systemd/user`,
+  `/run/systemd/user`, `/usr/local/lib/systemd/user`,
+  `/usr/lib/systemd/user`, `/usr/share/systemd/user`), with every
+  component of its path root-owned, not a link and not writable by
+  group or others (Fedora's user `service.d` is one; the hop
   runs as the member, who could otherwise name a process of its own
   choosing, or shape the unit with a drop-in of its own). When a
   policy change is seen while this subject can't be asked, its stored
