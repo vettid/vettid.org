@@ -118,6 +118,9 @@ silent it chooses, marks the choice "(chosen)", and lists it in §12.
   There is no mode without the package check.
 - **systemd 252 or later:** encrypted credentials came in 250,
   `systemd-creds has-tpm2` in 251, and `--tpm2-public-key=` in 252 (§5).
+- **polkit 122 or later, or no polkit:** 122 is the oldest measured
+  (§11.4, §13); with an older polkitd (RHEL 9 and its rebuilds ship
+  0.117) every check is "could not check polkit".
 
 `install` checks the kernel, the cgroup hierarchy and systemd's version
 itself, and stops with a plain message naming what is missing; it
@@ -149,7 +152,7 @@ group.
 | The helper's socket (chosen) | `/run/vettid-runhelper/<n>.sock` | root:`vettid-c-<h>`, 0660, in `/run/vettid-runhelper/` (root, 0755) |
 | Units | `vettid-agent-<n>.socket`, `vettid-agent-<n>.service`, `vettid-runhelper-<n>.socket`, `vettid-runhelper-<n>.service` | in `/etc/systemd/system/` |
 | The rules file (chosen; shared, written only on request) | `/etc/polkit-1/rules.d/40-vettid-agent.rules`, written by the elevated `vettid-agent rules-file --write` (§11.4) | root, 0644; uninstall leaves it, since the member's administrator chose it |
-| The policy check (chosen; shared by every pairing) | `vettid-agent-polkitcheck.path` (`PathChanged=` on the `actions` and `rules.d` folders, and `polkitd.conf`, under each of `/etc/polkit-1`, `/run/polkit-1`, `/usr/local/share/polkit-1` and `/usr/share/polkit-1`, the folders polkitd reads, and on the allowed helper programs, §11.4) and `vettid-agent-polkitcheck.service` (`Type=oneshot`, root, the helper's hardening, with `ReadWritePaths=/etc/vettid-agent` so it can take each pairing's lock and write its `admin.json`, the package database readable, and `WantedBy=multi-user.target` so it also runs at boot), which writes every installed pairing's `admin.json` | in `/etc/systemd/system/`; the first `install` adds them, the last uninstall removes them |
+| The policy check (chosen; shared by every pairing) | `vettid-agent-polkitcheck.path` (`PathChanged=` on the `actions` and `rules.d` folders, and `polkitd.conf`, under each of `/etc/polkit-1`, `/run/polkit-1`, `/usr/local/share/polkit-1` and `/usr/share/polkit-1`, the folders polkitd reads, on the allowed helper programs and on the resolved targets of linked `.policy` files, §11.4) and `vettid-agent-polkitcheck.service` (`Type=oneshot`, root, the helper's hardening, with `ReadWritePaths=/etc/vettid-agent` so it can take each pairing's lock and write its `admin.json`, the package database readable, and `WantedBy=multi-user.target` so it also runs at boot), which writes every installed pairing's `admin.json` | in `/etc/systemd/system/`; the first `install` adds them, the last uninstall removes them |
 
 - **Separate prefixes.** The run root is outside `/var/lib/vettid-agent/`,
   so a pairing named `run` can't meet it. The helper's units have their
@@ -1443,11 +1446,15 @@ calls, GC #16589 and #16598):
   it, and polkitd judges them by the member's display session (measured
   on all five desktops of §13);
 - while the member's service manager runs, a transient unit of it (the
-  checker's waiting program, started through that manager's bus as
-  `systemd-run --user --machine=<member>@` does): judged by the display
-  session's kind, but a rule can tell it apart (`subject.system_unit`,
+  checker's waiting program, without `NoNewPrivileges`, as an ordinary
+  user service runs): judged by the display session's kind, or with
+  `allow_any` when the member is signed in nowhere and the manager
+  lingers, but a rule can tell it apart (`subject.system_unit` and
   `subject.no_new_privileges`, polkit 124 and later), so it is asked
-  too;
+  too. Only `install`, the elevated `status` and the oneshot ask it
+  (through the system manager, as `systemd-run --user
+  --machine=<member>@` does): the helper's sandbox hides the member's
+  bus (§6), so at a run start this subject's last result stands;
 - a process of the member's in no session: the checker's own program
   started as the member in a mode that only waits (§11.5). Forked by
   the helper, a system service, it is in no session, and polkitd
@@ -1461,13 +1468,16 @@ calls, GC #16589 and #16598):
 groups from the group database (`getgrouplist`), but a caller on the
 bus is judged by the groups its process holds. So each subject's held
 groups (`/proc/<pid>/status`) are compared with the database's for the
-member; where they differ (a member taken out of `wheel` while signed
-in, whose session still holds it), every answer for that subject is
-"could not check polkit: sign out and in again" (chosen; to measure,
-§13).
+member; where they differ, every answer for that subject is "could not
+check polkit". For a group the database no longer gives (a member taken
+out of `wheel` while signed in, whose session still holds it) the text
+says to sign out and in again; for one added at sign-in that the
+database never lists (`pam_group`) it names the group and its source
+(chosen; to measure, §13).
 
 With the member signed in nowhere (an `install` over SSH as another
-user, say), only the no-session subject is asked, and the active case
+user, say), only the no-session subject is asked (and the manager's
+unit, if the manager lingers), and the active case
 waits for the first run start, whose stub runs in the member's session.
 
 **Which actions refuse: every action meant for an administrator**
@@ -1506,9 +1516,9 @@ weaker (`yes` where the recorded default asks for a password) counts as
 a grant to every account, so the member is an administrator. For every
 other action, a `.policy` file whose defaults include `yes` for any
 kind of subject is checked against the package database (`dpkg
---verify`, `rpm -V`, or pacman's own records: `pacman -Qo` for the
+--verify`, `rpm -V`, or pacman's own records: `pacman -Qqo` for the
 owner, and the SHA-256 digest and size in that package's `mtree` file,
-read as root; pacman's database path from `pacman.conf`): one no
+read as root, as the paragraph on records says): one no
 package owns, or one whose content the
 package manager reports as changed (its digest or size; a changed time
 stamp or mode alone doesn't count), counts likewise (except a file
@@ -1550,12 +1560,13 @@ not check", so it isn't allowed (the lead's condition, GC
 **How the package records are read.** The package manager used is the
 one whose database owns polkitd's own program; none, or more than one,
 is "could not check polkit". Each path is resolved through its
-symbolic links, and the link and its final target must each be owned
-and unchanged (Fedora's FirewallD `.policy` is a link rpm lists as
-`%ghost`, which `rpm -V` doesn't verify; measured). "Could not check"
-too: a file with no recorded digest (dpkg with no `md5sums` entry for
-it, rpm's `%ghost` or `%verify(not filedigest)`, an `mtree` entry with
-no `sha256digest`, or no `mtree`), a `?` in `rpm -V`'s output (a file
+symbolic links: each link on the way must be listed by a package (for
+an rpm `%ghost` link, as Fedora's FirewallD `.policy` is, which
+`rpm -V` doesn't verify, the package that lists it; measured), and the
+final regular file must be owned and unchanged. "Could not check" too:
+a regular file with no recorded digest (dpkg with no `md5sums` entry
+for it, rpm's `%ghost` or `%verify(not filedigest)`, an `mtree` entry
+with no `sha256digest`, or no `mtree`), a `?` in `rpm -V`'s output (a file
 it couldn't read), and a file more than one package claims. For
 pacman: run with `LC_ALL=C`, the owner from `pacman -Qqo <path>`, the
 database path from `pacman-conf DBPath`, and the package's `mtree`
@@ -1573,8 +1584,10 @@ the README). An action **refuses** when polkit
 authorizes the member for it without a password and either
 - the default for that kind of subject is `auth_admin`,
   `auth_admin_keep` or `no` (a grant the stock defaults don't make), and
-  it isn't on the allowlist below (so mounting a USB disk or powering
-  off, `yes` for an active session, refuses nothing); or
+  its action id isn't on the allowlist below (so mounting a USB disk or
+  powering off, `yes` for an active session, refuses nothing; a helper
+  allowed by its path or by its id is exempt only from the next case,
+  and its action's defaults still count here); or
 - it runs code as root, whatever its defaults, except the named ones
   whose recorded default is `yes` for that kind of subject, which are
   reported (and refuse for another kind): `sysupdate1.check`, and, from
@@ -1820,8 +1833,9 @@ it does exactly this, and nothing the connector names:
   owners and modes of `/usr/local`'s folders and of every input it
   reads;
 - it asks polkitd and logind over the system bus, and starts §11.4's
-  subjects outside a session: its own waiting child, and a transient
-  unit of the member's service manager, through that manager's bus;
+  no-session subject, its own waiting child (the subject in the
+  member's service manager is asked only by `install`, the elevated
+  `status` and the oneshot, §11.4);
 - it starts the policy check's oneshot (§11.4) with `StartUnit` on the
   system bus, at most once a minute;
 - **the access probes** for §11.1's root services run on a locked
@@ -1888,10 +1902,10 @@ terminal where no agent runs.
   start, proxy opening or elevated `status`; until then the service
   applies the last result.
 - **What the checks can't see:** a polkit rule that grants an action
-  for some details only (§11.4), or that decides on
-  `subject.system_unit`, `subject.no_new_privileges` or `subject.pid`
-  (polkit 124 and later), for a process of the member's unlike the
-  subjects asked; host-scoped sudo rules held in LDAP or
+  for some details only (§11.4), or that decides on `subject.pid`, or,
+  from polkit 124, `subject.system_unit` or `subject.no_new_privileges`,
+  for a process of the member's unlike the subjects asked (the helper's
+  child has `no_new_privs` and the helper's unit); host-scoped sudo rules held in LDAP or
   sssd, seen for this host only (the host-name grants then refuse,
   §11.4, but a rule given by IP address can still be made to apply: a
   member granted NetworkManager's `settings.modify.own`, the default for
