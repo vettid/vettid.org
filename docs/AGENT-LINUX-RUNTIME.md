@@ -1566,7 +1566,13 @@ subgid is accepted only because no range of the member's holds a gid the
 group database resolves (until the next scan, a group added inside a
 range in a source other than `/etc/group` is accepted as a subgid,
 §11.6), and a range that does is "could not check
-polkit" whatever the processes hold. Container root can hold any gid in the
+polkit" whatever the processes hold. `/etc/subgid` is read once per
+check, and the same ranges are accepted and scanned. A line counts as
+the member's as `newgidmap` counts it: by name, by uid, or by another
+account name with the member's uid (shadow's `is_same_user` in
+`lib/subordinateio.c`). A line of the member's that isn't exactly
+`name:start:count` with plain decimal numbers (no sign, no leading
+zero) is "could not check polkit". Container root can hold any gid in the
 member's `/etc/subgid` ranges, so where such a range contains a gid the
 group database resolves to a group (sssd or AD id-mapping ranges can
 overlap the second user's default range), the member could hold that
@@ -2553,7 +2559,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     to the member's subgids (524288 and up, inside `member:524288:65536`),
     so its process holds those subgids; it passes (no "could not check",
     no refusal), and with a group added at gid 530000, inside that range,
-    every subject is "could not check polkit" (the overlap check). A subgid range overlapping a resolved group is "could
+    every subject is "could not check polkit" (the overlap check: the
+    probe's `getent` scan of the range found the group). A subgid range overlapping a resolved group is "could
     not check", and so is a `getent` that exits other than 0 or 2 (a
     stub at `/usr/bin/getent` that exits 1), is missing (`/usr/bin/getent`
     removed) or passes its time limit (a stub there that sleeps), and an
