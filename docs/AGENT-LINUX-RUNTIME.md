@@ -2303,7 +2303,19 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     | Debian 13 (GNOME) | 126 | 278 | passes | passes |
 
     Inactive and with the member signed in nowhere, every distribution
-    passes without the rules file too. On Fedora, FirewallD granted
+    passes without the rules file too. The last runs asked each subject
+    by a root-opened pidfd on polkit 126 and 127 (Debian 13, Ubuntu
+    26.04, Fedora 44), by pid on 122 (Debian 12), and by pid on Ubuntu
+    24.04's 124 as well, since its `busctl` (systemd 255) can't pass a
+    file descriptor (the checker's own D-Bus client must); a process of
+    the service manager was asked on every desktop, every session's kind
+    was consistent with polkitd's answers, and no process of the
+    member's held other groups than the database gives. The old `.pkla`
+    folders are root-owned with no group or other write wherever they
+    exist (`/var/lib/polkit-1/localauthority` `root:root 0755` on Ubuntu
+    24.04 and 26.04, Debian 12 and Fedora 44; `/etc/polkit-1/localauthority`
+    `root:polkitd 0750` on Fedora 44; neither on Debian 13), so the input
+    check passes them. On Fedora, FirewallD granted
     nothing: the Workstation group install on the cloud image keeps the
     server choice file, and polkit loads the desktop choice's rule for
     `wheel` only when it is linked, as a Workstation install links it.
