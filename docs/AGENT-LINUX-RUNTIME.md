@@ -1525,12 +1525,19 @@ subjects) has its held groups
 (`/proc/<pid>/status`) compared with the database's, as exact sets
 (a rule can grant on a group's absence, so fewer counts as well as
 more): any difference makes every answer "could not check polkit",
-and the text names the process (its pid and program). The one
+and the text names the process (its pid and program). Outside the first
+user namespace (a rootless container's process) fewer groups are
+accepted, while a group beyond the database's still refuses (the
+lead's call, GC #16712): such a caller is judged by fewer, which matters
+only for the limit of §11.6. The one
 exemption is the user manager's `(sd-pam)` child (its parent the
 `MainPID` of `user@<uid>.service`, in the first user namespace, holding
 no groups at all), which holds none (measured on Fedora 44); a name and
 a parent can be had by any unit's process, and dropping groups needs a
-user namespace of one's own. For a group the database no longer gives (a member taken
+user namespace of one's own. `(sd-pam)` is dumpable, its `/proc` entry
+the member's (measured on Fedora 44), so where `ptrace` is allowed
+(Fedora's `ptrace_scope` 0) the member could make it call the bus with
+no groups: that again reaches only the limit of §11.6. For a group the database no longer gives (a member taken
 out of `wheel` while signed in, whose session still holds it) the text
 says to sign out and in again; for one added at sign-in that the
 database never lists (`pam_group`) it names the group and its source
@@ -2386,9 +2393,10 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
   - a grant over `auth_self` refuses; a process of the member's holding
     a group beyond the database's makes polkit "could not check";
   - a rootless container: measured on Fedora 44, a plain `podman run`
-    container's processes hold no groups, so polkit is "could not
-    check" while one runs, naming the process; a toolbox container keeps
-    the member's groups (`keep-groups`) and passes;
+    container's processes hold no groups (accepted, being outside the
+    first user namespace), and a toolbox container keeps the member's
+    groups (`keep-groups`); both pass, and a container process holding a
+    group beyond the database's refuses;
   - a `.policy` file changed while the member is signed out clears the
     manager subject's result, and the helper starts the oneshot again
     once the manager runs, with no elevated `status`;
