@@ -19,7 +19,14 @@ changelog:
     security fixes would never install. The rules file gives them
     `AUTH_ADMIN`. §1, §11.3 and §13: Arch's stock first user is refused
     without the rules file and passes with it, so an Arch member
-    installs it
+    installs it. With them (the owner's a, GC #16914): PackageKit's
+    `trigger-offline-update` and `trigger-offline-upgrade` leave the
+    allowlist and always refuse, since PackageKit's offline `Cancel`
+    checks the same actions; the rules file gives them `AUTH_ADMIN` too
+    (19 actions), so Debian's stock first user now passes only with it,
+    as Ubuntu's and Fedora's do. §11.6: the ordinary desktop controls
+    that can also stall updates stay allowed, said as a limit. §11.3:
+    `install`'s text for the update actions is owed by AGENT-PLAN
   - 0.1.4: 2026-11-23 (the owner's a, GC #16829). §11.4: outside the
     first user namespace a process may also hold gids inside the
     member's own `/etc/subgid` ranges (a rootless container whose image
@@ -99,8 +106,11 @@ changelog:
     refusing groups, uid-0 accounts and empty passwords, sudo rules and
     settings that skip the password for any host, `doas nopass`, PAM
     stacks with a passwordless path, polkit grants of an
-    administrator's action (inverted, with a measured allowlist; Fedora's
-    package and firewall grants until a rules file makes them ask), root services the
+    administrator's action (inverted, with a measured allowlist; the
+    stock grants the rules file covers, which are Fedora's packages and
+    firewall, Ubuntu's printers, PackageKit's offline updates and systemd
+    261's update cancels, until it makes them ask; GC #16894 and
+    #16914), root services the
     member can command, and inputs it can change. Checked by `install`,
     at every run start and proxy opening in the helper (the `admin` and
     `check` messages, §7) and by the elevated `status` (`admin.json`,
@@ -162,8 +172,9 @@ silent it chooses, marks the choice "(chosen)", and lists it in §12.
 itself, and stops with a plain message naming what is missing; it
 never judges a system by its name. The distributions measured are
 §13's (Ubuntu 24.04 and 26.04, Debian 12 and 13, Fedora 44; Arch for
-§11.4's polkit check only, where the member installs §11.4's rules
-file); Fedora 38
+§11.4's polkit check only); on each of them the member installs §11.4's
+rules file, since each stock desktop grants an action it covers (GC
+#16894 and #16914); Fedora 38
 or later meets these requirements too. Ubuntu 22.04 (systemd 249) and Fedora 37 (251) do
 not.
 
@@ -1392,8 +1403,12 @@ file's text.
 - **`install`** makes every check of §11.1. It **refuses a member whose
   result is admin or not checked**, with the text of AGENT-PLAN §11
   ("Administrator member, install stops, Linux") naming the reason, and
-  for Fedora's package grant and Arch's update cancels the rules file
-  that makes them ask for the password (§11.4). It also refuses a member who isn't a local account
+  for the grants the rules file covers (Fedora's packages and firewall,
+  Ubuntu's printers, PackageKit's offline updates, systemd 261's update
+  cancels) that file, which makes them ask for the password (§11.4).
+  AGENT-PLAN §11's install text offers `rules-file --write` only for
+  Fedora's packages and firewall and Ubuntu's printers; the text for the
+  update actions is owed by an AGENT-PLAN text card. It also refuses a member who isn't a local account
   (§1), and a member who is uid 0 or uid 65534. For polkit's session
   kinds (§11.4) it asks about the member's sessions that exist then; an
   active session it couldn't see is asked at the first run start.
@@ -1674,7 +1689,13 @@ session that isn't local (an SSH session), or none, with `allow_any`.
 So the no-session subject is compared with `allow_any` under the
 helper, and with the `sudo` terminal's session's default under
 `install`; where it lands in a session already asked as a session
-subject, its answer adds nothing and is dropped.
+subject, its answer adds nothing and is dropped. Where the kind is also read
+back from polkitd's own refusals (§13's measurement, and a session's
+kind checked against its answers), only the actions outside the rules
+file count: with the file in place their answers follow the file, not
+the stock defaults, so a stock `yes` that now asks would count against
+the active kind (measured on Arch with the update cancels in the file,
+GC #16934).
 
 **Which folders.** polkitd reads actions, rules and `polkitd.conf`
 from `/etc/polkit-1`, `/run/polkit-1`, `/usr/local/share/polkit-1` and `/usr/share/polkit-1` (polkit 127 on Fedora 44 and Ubuntu 26.04, measured;
@@ -1790,7 +1811,7 @@ authorizes the member for it without a password and either
   lead's call, GC #16601), and `machine1.register-machine` (it names to
   machined a machine the caller already runs; reaching into it needs
   `shell` or `login`, which refuse). Not recorded, so they refuse: the
-  `allow_active` `yes` that systemd v261 and later
+  `allow_active` `yes` that systemd v261 and later (Arch today)
   (`src/sysupdate/org.freedesktop.sysupdate1.policy` is byte for byte
   the same at the `v261` and `v262.2` tags of systemd's repository)
   give `sysupdate1.cancel-check`, `cancel-update`,
@@ -1798,7 +1819,13 @@ authorizes the member for it without a password and either
   running update job, but it can be repeated, so anything running as the
   member, an agent's runs included, could keep every update, security
   fixes included, from ever installing (the owner, GC #16894; the rules
-  file makes them ask). Those that refuse: `pkexec`
+  file makes them ask). Also not on the allowlist, for the same reason
+  (the owner's a, GC #16914): PackageKit's `trigger-offline-update` and
+  `trigger-offline-upgrade`, which always refuse, since PackageKit's
+  offline `Cancel` checks the same action as the trigger
+  (`pk_engine_offline_get_action_id_for_role` in `src/pk-engine.c`);
+  `clear-offline-update` only clears the results message, so it stays a
+  stock `yes`. Those that refuse: `pkexec`
   (`org.freedesktop.policykit.exec`), `org.freedesktop.systemd1.*`
   units and environment (`manage-units`, `manage-unit-files`,
   `set-environment`), `machine1`'s shells, logins, machines and images,
@@ -1896,9 +1923,8 @@ this note):
   read, they leave the allowlist and refuse, and so does
   NetworkManager's `settings.modify.system` (it can set the host name
   and address);
-- PackageKit's `upgrade-system`, `system-update`,
-  `trigger-offline-update` and `trigger-offline-upgrade`, and
-  aptdaemon's `upgrade-packages`, **only while they can neither install
+- PackageKit's `upgrade-system` and `system-update`, and aptdaemon's
+  `upgrade-packages`, **only while they can neither install
   nor downgrade a package** (the lead's condition): a release that maps
   installs or local files to them takes them off the list, which §13's
   stock test catches. On Fedora too: they update what is installed from
@@ -2005,13 +2031,15 @@ window where stock had none (the lead's call, GC #16676), for
 PackageKit's two
 actions, dnf5daemon's two, FirewallD's `all`, `config`, `direct` and `policies`, and
 cups-pk-helper's four actions that can add a printer from a file and
-`server-settings`, and systemd's four `sysupdate1.cancel-*` (Arch), and sorts
+`server-settings`, PackageKit's `trigger-offline-update` and
+`trigger-offline-upgrade`, and systemd's four `sysupdate1.cancel-*`
+(systemd 261 and later, Arch today), and sorts
 before Fedora's own files, so it decides first), and the README gives
 it; the member runs `install` again afterwards (the lead's call within
 B, GC #16374). The README also says the file applies to every account
-on the computer, so its 17 actions ask an active user each time, where
-stock kept the password for a few minutes (or, for the cancels, asked
-none). Fedora Silverblue and
+on the computer, so its 19 actions ask an active user each time, where
+stock kept the password for a few minutes (or, for the cancels and
+the offline triggers, asked none where stock grants them). Fedora Silverblue and
 Kinoite grant rpm-ostree's actions instead; no rules file is offered
 for them, and the refusal names the action (chosen; §13 measures
 them).
@@ -2147,6 +2175,16 @@ terminal where no agent runs.
   isn't accepted, so a container mapped through it is "could not check
   polkit". Nothing from it can pass, since only gids in ranges the
   checker sees are accepted.
+- **Other ways to stall updates stay allowed.** The rules file makes
+  the update cancels ask (GC #16894, #16914), but the ordinary desktop
+  controls that can also keep an update from running are allowed, since
+  a person at the machine needs them: turning the network off and on
+  (NetworkManager's `network-control` and `enable-disable-network`),
+  reboot, power-off, suspend and hibernate, the `inhibit-block-*`
+  actions, the allowlisted clock and timezone actions,
+  `settings.modify.system`, and Fedora's
+  third-party opt-out. Code running as the member can use them to delay
+  updates, not to install anything.
 - **Processes running as the member's subordinate uids** (a rootless
   container's other users) aren't the member's by uid, so the scan
   doesn't see them; polkitd judges such a caller as an unknown uid with
@@ -2182,14 +2220,17 @@ The README says the same, under "Running programs on Linux"
 ### 11.7 What it costs, and what is built
 
 A member whose `sudo` asks for its password uses runs and proxies once
-the stock grants that skip the password are made to ask: the first
-user on a stock Debian desktop; on a stock Ubuntu desktop (in `sudo`
-and `adm`), once the rules file of §11.4 makes cups-pk-helper's
-printer-from-a-file actions and `server-settings` ask (Debian has no such grant:
-`policykit-desktop-privileges` is Ubuntu's; §13 measures it); and
-a stock Fedora desktop's first user (`wheel`), once the same file makes
-the package installs and the firewall ask (owner a, GC #16331 and
-#16381). Refused are the accounts
+the stock grants that skip the password are made to ask, by the rules
+file of §11.4, which every stock desktop of §13 now needs (GC #16894,
+#16914): the first user on a stock Debian desktop, once it makes
+PackageKit's offline update trigger ask; on a stock Ubuntu desktop (in
+`sudo` and `adm`), once it makes cups-pk-helper's printer-from-a-file
+actions and `server-settings` and the offline triggers ask (Debian has
+no printer grant: `policykit-desktop-privileges` is Ubuntu's); a stock
+Fedora desktop's first user (`wheel`), once it makes the package
+installs, the offline triggers and the firewall ask (owner a, GC #16331
+and #16381); and Arch's first user, once it makes systemd's update
+cancels ask. Refused are the accounts
 that can become root silently, or read or type the keystrokes, the
 password hashes or the kernel's memory: uid 0, an empty password, a
 `NOPASSWD` or `!authenticate` rule for any host, a `doas` `nopass` rule,
@@ -2297,7 +2338,8 @@ owner's go:
     through `CheckAuthorization` for each session and a no-session
     child, over the actions polkit lists, the inverted rule's allowlist
     (owner a-a, GC #16331, with the lead's two conditions, #16332) and
-    the always-refusing actions, and the Fedora rules file; the three
+    the always-refusing actions, and the rules file (19 actions;
+    GC #16894 and #16914); the three
     results (`admin`, `clear`, `not_checked`) and their use; the checks
     at `install`, every run start, every proxy opening (`check`) and by
     the elevated `status` (`admin.json`); the elevated commands dropping
@@ -2492,14 +2534,17 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
 
     | Distribution | polkit | Actions | Active, without the rules file | With it |
     |---|---|---|---|---|
-    | Ubuntu 24.04 (`ubuntu-desktop-minimal`) | 124 | 289 | cups-pk-helper's five refuse | every subject passes |
-    | Ubuntu 26.04 (`ubuntu-desktop`, GNOME 50) | 127 | 321 | cups-pk-helper's five refuse | every subject passes |
-    | Fedora 44, the Workstation group on the cloud image (`VARIANT_ID=cloud`; GNOME 50) | 127 | 519 | PackageKit's and dnf5daemon's two each refuse | every subject passes |
-    | Debian 12 (GNOME) | 122 | 256 | passes | passes |
-    | Debian 13 (GNOME) | 126 | 278 | passes | passes |
+    | Ubuntu 24.04 (`ubuntu-desktop-minimal`) | 124 | 289 | cups-pk-helper's five and PackageKit's `trigger-offline-update` refuse | every subject passes |
+    | Ubuntu 26.04 (`ubuntu-desktop`, GNOME 50) | 127 | 321 | cups-pk-helper's five and PackageKit's two offline triggers refuse | every subject passes |
+    | Fedora 44, the Workstation group on the cloud image (`VARIANT_ID=cloud`; GNOME 50) | 127 | 519 | PackageKit's install, remove and two offline triggers, and dnf5daemon's two, refuse | every subject passes |
+    | Debian 12 (GNOME) | 122 | 256 | PackageKit's `trigger-offline-update` refuses | every subject passes |
+    | Debian 13 (GNOME) | 126 | 278 | PackageKit's `trigger-offline-update` refuses | every subject passes |
     | Arch (the official image, GNOME; systemd 262.2) | 128 | 290 | the four `sysupdate1.cancel-*` refuse (mutter's backlight helper and gvfs's `gvfsd-admin` pass at their `/usr/lib` paths) | every subject passes |
 
-    Inactive and with the member signed in nowhere, every distribution
+    The five rows above Arch's were measured again for 0.1.5, active,
+    with and without the 19-action rules file (the kind of each session
+    read only from actions outside the file); the inactive and
+    no-session results are from 0.1.3's runs. Inactive and with the member signed in nowhere, every distribution
     passes without the rules file too. The last runs asked each subject
     by a root-opened pidfd on polkit 126, 127 and 128 (Debian 13, Ubuntu
     26.04, Fedora 44, Arch), by pid on 122 (Debian 12), and by pid on Ubuntu
@@ -2628,6 +2673,10 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     allowed as at `/usr/libexec` (gvfsd-admin only under its gate),
     and a `sysupdate1.cancel-*` grant refuses for every kind of subject,
     while the rules file makes each ask for an administrator;
+  - PackageKit's `trigger-offline-update` and `trigger-offline-upgrade`
+    granted refuse, whatever their defaults, and ask for an
+    administrator with the rules file; `clear-offline-update` granted
+    refuses nothing;
   - the stock user is not refused when `install` runs in a desktop
     terminal, nor when a run starts with the member signed in at the
     desktop (the no-session subject, under the helper, compared with
@@ -2638,8 +2687,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
   - the allowlisted updates are upgrade-only on Ubuntu and Fedora:
     PackageKit's `UpdatePackages` with the id of a package that isn't
     installed, of an older version, or of a kernel (an install-only
-    package); `UpgradeSystem` and `trigger-offline-upgrade` to an older
-    or a branched release; aptdaemon's upgrade with `pkg=version`. Each
+    package); `UpgradeSystem` to an older or a branched release; aptdaemon's upgrade with `pkg=version`. Each
     fails or asks for the password; one that doesn't takes its grant off
     the allowlist;
   - a rule that grants an action to an inactive or non-local subject
