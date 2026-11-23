@@ -2368,7 +2368,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     | Arch (the official image, GNOME) | 128 | 290 | passes (with the `/usr/lib` helpers and the `cancel-*` defaults above; before them, those six refused) | passes |
 
     Inactive and with the member signed in nowhere, every distribution
-    passes without the rules file too. On the five other than Arch, the
+    passes without the rules file too (for Arch only that verdict is
+    recorded here; what follows is the other five's). On those five, the
     last runs asked each subject
     by a root-opened pidfd on polkit 126 and 127 (Debian 13, Ubuntu
     26.04, Fedora 44), by pid on 122 (Debian 12), and by pid on Ubuntu
@@ -2376,7 +2377,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     file descriptor (the checker's own D-Bus client must); a process of
     the service manager was asked on every desktop, every session's kind
     was consistent with polkitd's answers, and no process of the
-    member's held other groups than the database gives. The old `.pkla`
+    member's held other groups than the database gives. Their old `.pkla`
     folders are root-owned with no group or other write wherever they
     exist (`/var/lib/polkit-1/localauthority` `root:root 0755` on Ubuntu
     24.04 and 26.04, Debian 12 and Fedora 44; `/etc/polkit-1/localauthority`
@@ -2386,7 +2387,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     server choice file, and polkit loads the desktop choice's rule for
     `wheel` only when it is linked, as a Workstation install links it.
     So FirewallD's four refusals on a Workstation are still measured in
-    the `install` PR (below). In every run the kind of each
+    the `install` PR (below). In every run on those five the kind of each
     no-session subject was read back
     from polkitd's own refusals: a kind is taken only when it explains
     at least five refusals the other kind doesn't, and the other
