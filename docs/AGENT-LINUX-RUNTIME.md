@@ -120,7 +120,8 @@ silent it chooses, marks the choice "(chosen)", and lists it in §12.
   `systemd-creds has-tpm2` in 251, and `--tpm2-public-key=` in 252 (§5).
 - **polkit 122 or later, or no polkit:** 122 is the oldest measured
   (§11.4, §13); with an older polkitd (RHEL 9 and its rebuilds ship
-  0.117) every check is "could not check polkit".
+  0.117) every check is "could not check polkit", so the
+  separate-account mode refuses there.
 
 `install` checks the kernel, the cgroup hierarchy and systemd's version
 itself, and stops with a plain message naming what is missing; it
@@ -1211,7 +1212,8 @@ Any of these:
   `doas.conf`, the PAM files, every polkit folder polkitd reads and the
   old `.pkla` folders (`/etc/polkit-1/localauthority`,
   `/var/lib/polkit-1/localauthority`), the allowed helper programs,
-  `pacman.conf` and the package databases, §11.4) that isn't root-owned (or, for the polkit rules folders, owned
+  `pacman.conf` with the files it includes, and the package databases,
+  §11.4) that isn't root-owned (or, for the polkit rules folders, owned
   by polkit's own account), or that the member or every user can write, or
   whose folder they can.
 
@@ -1451,10 +1453,16 @@ calls, GC #16589 and #16598):
   `allow_any` when the member is signed in nowhere and the manager
   lingers, but a rule can tell it apart (`subject.system_unit` and
   `subject.no_new_privileges`, polkit 124 and later), so it is asked
-  too. Only `install`, the elevated `status` and the oneshot ask it
-  (through the system manager, as `systemd-run --user
-  --machine=<member>@` does): the helper's sandbox hides the member's
-  bus (§6), so at a run start this subject's last result stands;
+  too. Only `install`, the elevated `status` and the oneshot ask it,
+  and only while `user@<uid>.service` is already active (read over the
+  system bus; never started for this). The route works under their
+  sandbox because the hop happens outside it: a `StartTransientUnit`
+  call on the system bus for a system service with `User=<member>` and
+  no `PAMName` (so no session is opened and no PAM stack runs), which
+  runs the checker in a mode that connects to `/run/user/<uid>/bus` and
+  asks the member's manager to start the waiting unit (to measure,
+  §13). The helper doesn't ask it, by §11.5's short list (chosen), so
+  at a run start this subject's last result stands;
 - a process of the member's in no session: the checker's own program
   started as the member in a mode that only waits (§11.5). Forked by
   the helper, a system service, it is in no session, and polkitd
@@ -1563,7 +1571,10 @@ is "could not check polkit". Each path is resolved through its
 symbolic links: each link on the way must be listed by a package (for
 an rpm `%ghost` link, as Fedora's FirewallD `.policy` is, which
 `rpm -V` doesn't verify, the package that lists it; measured), and the
-final regular file must be owned and unchanged. "Could not check" too:
+final regular file must be owned and unchanged. Each link's target
+string is recorded in `admin.json` with the digests, and a changed one
+counts as a changed file (a package manager records no target to
+verify). "Could not check" too:
 a regular file with no recorded digest (dpkg with no `md5sums` entry
 for it, rpm's `%ghost` or `%verify(not filedigest)`, an `mtree` entry
 with no `sha256digest`, or no `mtree`), a `?` in `rpm -V`'s output (a file
@@ -1585,9 +1596,13 @@ authorizes the member for it without a password and either
 - the default for that kind of subject is `auth_admin`,
   `auth_admin_keep` or `no` (a grant the stock defaults don't make), and
   its action id isn't on the allowlist below (so mounting a USB disk or
-  powering off, `yes` for an active session, refuses nothing; a helper
-  allowed by its path or by its id is exempt only from the next case,
-  and its action's defaults still count here); or
+  powering off, `yes` for an active session, refuses nothing). An entry
+  that names an action id (gvfs's helper under its gate, Fedora's
+  opt-out, `org.gnome.controlcenter.set-keyboard`, the two key tests)
+  is on this case's allowlist; a helper listed only by its program (the
+  settings daemon's backlight and Wacom helpers, mutter's backlight
+  helper, update-notifier's lock check) is exempt only from the next
+  case, and its action's defaults still count here; or
 - it runs code as root, whatever its defaults, except the named ones
   whose recorded default is `yes` for that kind of subject, which are
   reported (and refuse for another kind): `sysupdate1.check`, and, from
@@ -1826,7 +1841,7 @@ it does exactly this, and nothing the connector names:
   checks on their paths (`install` and the elevated `status` also run
   `dpkg --verify`, `rpm -V`, or `pacman -Qqo` and the `mtree` read, for
   §11.4's package check, with the owner lookups of polkitd and of each
-  allowed helper and the read of `pacman.conf`; the helper doesn't);
+  allowed helper and `pacman-conf DBPath`; the helper doesn't);
 - it reads `/etc/passwd`, `/etc/shadow`, `/etc/sudo.conf`,
   `/etc/doas.conf` (and `/usr/local/etc/doas.conf`), the PAM files of
   §11.1, `/etc/security/console.apps/`, the group database, and the
@@ -2272,6 +2287,10 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     refuses;
   - `dkms-test` or `akmods-test` with another program or `exec.argv1`
     refuses; a grant over a default of `no` refuses;
+  - the subject in the member's service manager, by the route of
+    §11.4 under the oneshot's hardening, opens no session (the probe's
+    `systemd-run --user --machine` route does open a transient one) and
+    is judged by the display session's kind;
   - a member taken out of `wheel` or `sudo` while signed in is "could
     not check: sign out and in again" (measured on one desktop with a
     caller on the bus, to show polkitd judges the held groups there);
