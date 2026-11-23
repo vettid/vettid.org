@@ -1559,11 +1559,13 @@ user namespace (a rootless container's process) fewer groups are
 accepted, and so are gids inside the member's own `/etc/subgid` ranges
 (a rootless container whose image gives its root supplementary groups,
 which map to the member's subgids; the owner's a, GC #16829), while any
-other group beyond the database's still refuses (the lead's call, GC
-#16712): such a caller is judged by fewer real groups, which matters
+other group beyond the database's is still "could not check polkit"
+(the lead's call, GC #16712): such a caller is judged by fewer real groups, which matters
 only for the limit of §11.6. This rests on the overlap check below: a
 subgid is accepted only because no range of the member's holds a gid the
-group database resolves, and a range that does is "could not check
+group database resolves (until the next scan, a group added inside a
+range in a source other than `/etc/group` is accepted as a subgid,
+§11.6), and a range that does is "could not check
 polkit" whatever the processes hold. Container root can hold any gid in the
 member's `/etc/subgid` ranges, so where such a range contains a gid the
 group database resolves to a group (sssd or AD id-mapping ranges can
@@ -2114,7 +2116,9 @@ terminal where no agent runs.
   gives the same answer for "not found"), isn't seen until the next
   scan (`install`, the elevated `status`, or any run of the oneshot,
   §2): the run-start recheck reads only `/etc/group`, and no digest
-  covers those sources.
+  covers those sources. Until then a container process holding that
+  gid is accepted as holding a subgid (§11.4), so the member could hold
+  that group for that long.
 - **Processes running as the member's subordinate uids** (a rootless
   container's other users) aren't the member's by uid, so the scan
   doesn't see them; polkitd judges such a caller as an unknown uid with
@@ -2270,8 +2274,10 @@ owner's go:
     at `install`, every run start, every proxy opening (`check`) and by
     the elevated `status` (`admin.json`); the elevated commands dropping
     the member's sudo time stamp; the release gate; each process's held
-    groups compared with the database's, the first user namespace read
-    from its id maps, and the subgid scan (`getent` in batches, two
+    groups compared with the database's (outside the first user
+    namespace, fewer accepted, GC #16712, and gids in the member's own
+    subgid ranges, GC #16829), the first user namespace read from its
+    id maps, and the subgid scan (`getent` in batches, two
     minutes in all, only in `install`, the elevated `status` and the
     oneshot, kept by the digests of `/etc/subgid` and `nsswitch.conf`).
     (Any `NOPASSWD` rule
@@ -2541,7 +2547,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     first user namespace), and a toolbox container keeps the member's
     groups (`keep-groups`); both pass, and a container process holding a
     group beyond the database's and outside the member's subgid ranges
-    refuses. Measured on Fedora 44 with rootless podman: `alpine:3.20
+    is "could not check polkit". Measured on Fedora 44 with rootless podman: `alpine:3.20
     sleep 900` runs as the image's root, whose groups (0, 1, 2, 3, 4, 6,
     10, 11, 20, 26 and 27) map, 0 to the member's own gid and the others
     to the member's subgids (524288 and up, inside `member:524288:65536`),
