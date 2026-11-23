@@ -20,7 +20,8 @@ changelog:
     worked out as polkitd's logind backend does (a seat makes a session
     local, the user's state makes it active), and the helper's
     no-session subject compared with `allow_any`; implied grants judged
-    by the implying grant, one level; gvfs's admin helper allowlisted
+    by the implying grant, one level, for the `auth_admin*` case only
+    (an always-refusing action stays refused); gvfs's admin helper allowlisted
     while file operations still ask for an administrator;
     update-notifier's lock check, mutter's backlight helper and
     GNOME's Debian keyboard action with its helper, libmalcontent's
@@ -35,8 +36,10 @@ changelog:
     (`pacman -Qo`, the `mtree` digests, pacman's lock file); xbps, apk
     and portage not until measured, NixOS by its own design; no mode
     without the package check. §11.5 follows; §13 records the
-    measurements and their tests, and moves Debian's printer grant and
-    the systemd v259 defaults out of what the `install` PR measures
+    measurements and their tests, a stale pacman lock file "not
+    checked", moves Debian's printer grant and the systemd v259 defaults
+    out of what the `install` PR measures, and FirewallD's grants on a
+    Fedora Workstation install into it
   - 0.1.2: 2026-11-22, erratum (VAULT-MESSAGING 0.93.2, AGENT-PLAN
     0.1.21; owner-approved card GC #16477). §7: the connector builds
     `VETTID_IN` and `VETTID_OUT` only for a run with non-empty `inputs`
@@ -1512,7 +1515,8 @@ checked" ("try again in a minute"). **Every allowed helper program**
 action's id, below) is held to the same check, whatever its defaults:
 owned by a package and unchanged, watched by the path unit, its digest
 recorded; one no package owns or whose content changed makes that
-action "could not check", so it isn't allowed (the lead's condition, GC
+action, when polkit grants it to the member without a password, "could
+not check", so it isn't allowed (the lead's condition, GC
 #16589). A distribution with none of `dpkg`,
 `rpm` and `pacman` is not supported by the separate-account mode (§1,
 the README). An action **refuses** when polkit
@@ -1678,7 +1682,8 @@ this note):
   that takes arguments limited to `[a-zA-Z0-9,_:-]`, rewrites only the
   XKB lines of `/etc/default/keyboard` and runs `dpkg-reconfigure
   keyboard-configuration`: the effect of the allowlisted
-  `locale1.set-keyboard`, which `set-keyboard` implies. The helper is
+  `locale1.set-keyboard`, which `org.gnome.controlcenter.set-keyboard`
+  implies. The helper is
   allowed by its path, as the other fixed helpers are;
 - gnome-software's `org.gnome.software.dkms-test` and `akmods-test`
   (Fedora, `yes` for an active session), **by action id** with their
@@ -2151,17 +2156,16 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     | Ubuntu 24.04 (`ubuntu-desktop-minimal`) | 124 | 289 | cups-pk-helper's five refuse | every subject passes |
     | Ubuntu 26.04 (`ubuntu-desktop`, GNOME 50) | 127 | 321 | cups-pk-helper's five refuse | every subject passes |
     | Fedora 44 Workstation (GNOME 50) | 127 | 519 | PackageKit's and dnf5daemon's two each refuse | every subject passes |
-
-    On Fedora, FirewallD granted nothing: the Workstation group install
-    on the cloud image keeps the server choice file, and polkit loads
-    the desktop choice's rule for `wheel` only when it is linked, as a
-    Workstation install links it. So FirewallD's four refusals on a
-    Workstation are still measured in the `install` PR (below).
     | Debian 12 (GNOME) | 122 | 256 | passes | passes |
     | Debian 13 (GNOME) | 126 | 278 | passes | passes |
 
     Inactive and with the member signed in nowhere, every distribution
-    passes without the rules file too. In every run the kind of each
+    passes without the rules file too. On Fedora, FirewallD granted
+    nothing: the Workstation group install on the cloud image keeps the
+    server choice file, and polkit loads the desktop choice's rule for
+    `wheel` only when it is linked, as a Workstation install links it.
+    So FirewallD's four refusals on a Workstation are still measured in
+    the `install` PR (below). In every run the kind of each
     no-session subject was read back
     from polkitd's own refusals: a kind is taken only when it explains
     at least five refusals the other kind doesn't, and the other
@@ -2180,6 +2184,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
   - an action granted only through `imply` by a grant whose own default
     is `no` or `auth_self` refuses, and so does one implied through two
     levels; `login1.set-wall-message` through `power-off` is accepted;
+    `manage-units` granted while an accepted grant implies it refuses;
   - gvfs's `file-operations-helper` refuses while `file-operations` is
     granted to any subject asked, answers with an error, or challenges
     where its default for that kind isn't `auth_admin*`;
