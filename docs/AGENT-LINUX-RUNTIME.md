@@ -1446,8 +1446,9 @@ safe, and only for a safe one gives rules `subject.system_unit` and
 duktape authority; measured on Fedora 44: with a pid only, a rule sees
 no unit; with the handle, `session-5.scope` and `user@1000.service`).
 On 122 and 123 it is sent by pid, start time and uid, and §11.6 states
-what rules can then decide unseen. On 124 and later there is no
-fallback: a pidfd that can't be sent is "could not check polkit". The reason for no `unix-session`
+what rules can then decide unseen. On 124 and later the checker has no
+fallback (unlike the measurement probe, whose `busctl` falls back on
+Ubuntu 24.04): a pidfd that can't be sent is "could not check polkit". The reason for no `unix-session`
 subject: polkitd 124 (Ubuntu 24.04) and
 127 (Ubuntu 26.04, Fedora 44) abort on one, and a few aborts in a row
 reach systemd's start limit and leave polkit failed, which breaks the
@@ -1505,7 +1506,10 @@ calls, GC #16589 and #16598):
   checked" until it is asked again; so that nothing waits on an elevated
   `status`, the helper starts the oneshot (the same `StartUnit` call,
   at most once a minute) when this subject reads "not checked" and
-  `user@<uid>.service` is active.
+  `user@<uid>.service` is active, judged at a run start, a proxy's
+  opening or a `check` (no timer of its own); if it still hasn't settled
+  after a few minutes it stops starting it, and the text says to run
+  the elevated `status`, as for a digest mismatch.
   The helper doesn't ask it, by §11.5's short list (chosen), so at a
   run start this subject's last result stands;
 - a process of the member's in no session: the checker's own program
@@ -1529,7 +1533,14 @@ and the text names the process (its pid and program). Outside the first
 user namespace (a rootless container's process) fewer groups are
 accepted, while a group beyond the database's still refuses (the
 lead's call, GC #16712): such a caller is judged by fewer, which matters
-only for the limit of §11.6. The one
+only for the limit of §11.6. Container root can hold any gid in the
+member's `/etc/subgid` ranges, so where such a range contains a gid the
+group database resolves to a group (sssd or AD id-mapping ranges can
+overlap the second user's default range), the member could hold that
+group at will: that is "could not check polkit", naming the range and
+the group (chosen). The checker confirms first that it runs in PID 1's
+user namespace (otherwise unmapped gids read as 65534), and a process
+whose namespace it can't read is compared exactly. The one
 exemption is the user manager's `(sd-pam)` child (its parent the
 `MainPID` of `user@<uid>.service`, in the first user namespace, holding
 no groups at all), which holds none (measured on Fedora 44); a name and
@@ -1987,8 +1998,16 @@ terminal where no agent runs.
 - **A rule that grants on a group's absence** (`!subject.isInGroup(...)`)
   can't be covered by a scan of held groups: a process that holds fewer
   groups than the database gives would get it from its real calls on
-  the bus. The exact comparison of §11.4 refuses that state; it can't
-  see a process started later.
+  the bus. The exact comparison of §11.4 refuses that state for
+  processes in the first user namespace; a rootless container's process
+  holding fewer, and `(sd-pam)` driven by `ptrace`, are accepted or
+  unseen; and it can't see a process started later.
+- **Processes running as the member's subordinate uids** (a rootless
+  container's other users) aren't the member's by uid, so the scan
+  doesn't see them; polkitd judges such a caller as an unknown uid with
+  no groups, in no session (`allow_any`), so a rule granting on "not
+  this user" or "not in this group" reaches it. The same family of
+  limit, by uid.
 - **What the checks can't see:** a polkit rule that grants an action
   for some details only (§11.4), or that decides on `subject.pid`, or,
   from polkit 124, `subject.system_unit` or `subject.no_new_privileges`
@@ -2396,7 +2415,10 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     container's processes hold no groups (accepted, being outside the
     first user namespace), and a toolbox container keeps the member's
     groups (`keep-groups`); both pass, and a container process holding a
-    group beyond the database's refuses;
+    group beyond the database's refuses (to measure: how often a stock
+    image's own groups, a host subgid such as 100062, refuse an ordinary
+    container); a subgid range overlapping a resolved group is "could
+    not check";
   - a `.policy` file changed while the member is signed out clears the
     manager subject's result, and the helper starts the oneshot again
     once the manager runs, with no elevated `status`;
