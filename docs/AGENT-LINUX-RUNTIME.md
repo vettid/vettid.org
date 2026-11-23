@@ -1570,7 +1570,8 @@ polkit" whatever the processes hold. `/etc/subgid` is read once per
 check, and the same ranges are accepted and scanned. A line counts as
 the member's as `newgidmap` counts it: by name, by uid, or by another
 account name with the member's uid (shadow's `is_same_user` in
-`lib/subordinateio.c`). A line of the member's that isn't exactly
+`lib/subordinateio.c`), that name looked up in `/etc/passwd` only, since
+the builds are static and read no NSS source (§1). A line of the member's that isn't exactly
 `name:start:count` with plain decimal numbers (no sign, no leading
 zero) is "could not check polkit". Container root can hold any gid in the
 member's `/etc/subgid` ranges, so where such a range contains a gid the
@@ -2125,6 +2126,12 @@ terminal where no agent runs.
   covers those sources. Until then a container process holding that
   gid is accepted as holding a subgid (§11.4), so the member could hold
   that group for that long.
+- **An `/etc/subgid` line under an alias known only to a network
+  source** (another account name with the member's uid that
+  `/etc/passwd` doesn't list) isn't seen as the member's: its range
+  isn't accepted, so a container mapped through it is "could not check
+  polkit". Nothing from it can pass, since only gids in ranges the
+  checker sees are accepted.
 - **Processes running as the member's subordinate uids** (a rootless
   container's other users) aren't the member's by uid, so the scan
   doesn't see them; polkitd judges such a caller as an unknown uid with
