@@ -629,7 +629,7 @@ owner: Al Liebl (Mesmer)
 related:
   - AGENT-SEPARATE-ACCOUNT.md (0.1.5) — the connector in its own account
     (AG14, A3.10, A5.5, A5.6; the macOS side is A5.4)
-  - AGENT-LINUX-RUNTIME.md (0.1.3, draft) — the separate-account mode on
+  - AGENT-LINUX-RUNTIME.md (0.1.4, draft) — the separate-account mode on
     Linux: units, the key as a systemd credential, the run helper (A5.6)
   - VAULT-MESSAGING.md (0.93.2) — §6.7, §6.8, §7, §8, §9.1, §10.2,
     §10.3, §10.11, §10.12; the connector's contract with the vault

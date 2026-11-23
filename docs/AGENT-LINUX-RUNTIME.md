@@ -1,8 +1,8 @@
 ---
 title: AGENT-LINUX-RUNTIME
 status: draft design note; the run helper and the key sealing get their independent reviews (AGENT-PLAN §9 rule 6) from it, before their code. Built so far: the channel's Unix-socket end (vettid/vettid-agent#55)
-version: 0.1.3
-date: 2026-11-22
+version: 0.1.4
+date: 2026-11-23
 owner: Al Liebl (Mesmer)
 component: vettid-agent (the agent connector): the separate-account mode on Linux (AGENT-PLAN A5.6)
 related:
@@ -10,6 +10,13 @@ related:
   - AGENT-PLAN.md (0.1.21) AG3, AG14, §4.2, §4.7, §4.9, A3.10a, A3.10d, A5.6, §11
   - VAULT-MESSAGING.md (0.93.2) §10.11 "Files handed in and out"
 changelog:
+  - 0.1.4: 2026-11-23 (the owner's a, GC #16829). §11.4: outside the
+    first user namespace a process may also hold gids inside the
+    member's own `/etc/subgid` ranges (a rootless container whose image
+    gives root supplementary groups), which rests on the overlap check:
+    a range holding a real group stays "could not check polkit". §11.6
+    and §13 follow; the rootless Alpine container measured again, now
+    a pass
   - 0.1.3: 2026-11-22, erratum (cards GC #16419 and #16565, the lead's
     calls #16589, #16598 and #16601). §11.4 measured on stock desktops
     with a probe (Ubuntu 24.04 and 26.04, Fedora 44 Workstation, Debian
@@ -1549,9 +1556,15 @@ subjects) has its held groups
 more): any difference makes every answer "could not check polkit",
 and the text names the process (its pid and program). Outside the first
 user namespace (a rootless container's process) fewer groups are
-accepted, while a group beyond the database's still refuses (the
-lead's call, GC #16712): such a caller is judged by fewer, which matters
-only for the limit of §11.6. Container root can hold any gid in the
+accepted, and so are gids inside the member's own `/etc/subgid` ranges
+(a rootless container whose image gives its root supplementary groups,
+which map to the member's subgids; the owner's a, GC #16829), while any
+other group beyond the database's still refuses (the lead's call, GC
+#16712): such a caller is judged by fewer real groups, which matters
+only for the limit of §11.6. This rests on the overlap check below: a
+subgid is accepted only because no range of the member's holds a gid the
+group database resolves, and a range that does is "could not check
+polkit" whatever the processes hold. Container root can hold any gid in the
 member's `/etc/subgid` ranges, so where such a range contains a gid the
 group database resolves to a group (sssd or AD id-mapping ranges can
 overlap the second user's default range), the member could hold that
@@ -2086,10 +2099,13 @@ terminal where no agent runs.
   groups than the database gives would get it from its real calls on
   the bus. The exact comparison of §11.4 refuses that state for
   processes in the first user namespace; a rootless container's process
-  holding fewer, and `(sd-pam)` driven by `ptrace`, are accepted or
-  unseen; and it can't see a process started later.
+  holding fewer (or subgids in place of real groups, §11.4), and
+  `(sd-pam)` driven by `ptrace`, are accepted or unseen; and it can't
+  see a process started later.
 - **Subordinate ids from an nsswitch `subid:` source** (sss, FreeIPA)
-  aren't read; only `/etc/subgid` ranges are compared with the group
+  aren't read (so a rootless container mapped through one isn't
+  accepted by §11.4's subgid rule, and gives "could not check"); only
+  `/etc/subgid` ranges are compared with the group
   database (§11.4).
 - **A group inside a subgid range from any source other than
   `/etc/group`** (a network source, a userdb drop-in, `altfiles`,
@@ -2524,13 +2540,14 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     container's processes hold no groups (accepted, being outside the
     first user namespace), and a toolbox container keeps the member's
     groups (`keep-groups`); both pass, and a container process holding a
-    group beyond the database's refuses. Measured on Fedora 44 with
-    rootless podman: `alpine:3.20 sleep 600` runs as the image's root,
-    whose groups (0, 1, 2, 3, 4, 6, 10, 11, 20, 26 and 27) map, 0 to
-    the member's own gid and the others to the member's subgids (524288
-    and up), so its process holds those beyond the database's and every subject is "could not check
-    polkit" while it runs; whether to accept such a container is the
-    owner's call (GC #16754). A subgid range overlapping a resolved group is "could
+    group beyond the database's and outside the member's subgid ranges
+    refuses. Measured on Fedora 44 with rootless podman: `alpine:3.20
+    sleep 900` runs as the image's root, whose groups (0, 1, 2, 3, 4, 6,
+    10, 11, 20, 26 and 27) map, 0 to the member's own gid and the others
+    to the member's subgids (524288 and up, inside `member:524288:65536`),
+    so its process holds those subgids; it passes (no "could not check",
+    no refusal), and with a group added at gid 530000, inside that range,
+    every subject is "could not check polkit" (the overlap check). A subgid range overlapping a resolved group is "could
     not check", and so is a `getent` that exits other than 0 or 2 (a
     stub at `/usr/bin/getent` that exits 1), is missing (`/usr/bin/getent`
     removed) or passes its time limit (a stub there that sleeps), and an
