@@ -1461,7 +1461,14 @@ calls, GC #16589 and #16598):
   no `PAMName` (so no session is opened and no PAM stack runs), which
   runs the checker in a mode that connects to `/run/user/<uid>/bus` and
   asks the member's manager to start the waiting unit (to measure,
-  §13). The helper doesn't ask it, by §11.5's short list (chosen), so
+  §13). That hop unit gets no `ProtectHome=`, no `tmpfs` over `/run`,
+  no `PrivateUsers=` and no address-family restriction without
+  `AF_UNIX`, since each would hide or block the member's bus. It reports
+  the waiting unit's pid back to the checker, which asks polkitd only
+  after confirming that pid itself: its cgroup lies under
+  `user@<uid>.service`, all four of its uids are the member's, and its
+  `NoNewPrivs` is 0 (the hop runs as the member, who could otherwise
+  name a process of its own choosing). The helper doesn't ask it, by §11.5's short list (chosen), so
   at a run start this subject's last result stands;
 - a process of the member's in no session: the checker's own program
   started as the member in a mode that only waits (§11.5). Forked by
@@ -1597,12 +1604,13 @@ authorizes the member for it without a password and either
   `auth_admin_keep` or `no` (a grant the stock defaults don't make), and
   its action id isn't on the allowlist below (so mounting a USB disk or
   powering off, `yes` for an active session, refuses nothing). An entry
-  that names an action id (gvfs's helper under its gate, Fedora's
-  opt-out, `org.gnome.controlcenter.set-keyboard`, the two key tests)
-  is on this case's allowlist; a helper listed only by its program (the
-  settings daemon's backlight and Wacom helpers, mutter's backlight
-  helper, update-notifier's lock check) is exempt only from the next
-  case, and its action's defaults still count here; or
+  for a helper that names its action id (gvfs's helper under its gate,
+  pinned to `org.gtk.vfs.file-operations-helper`; Fedora's opt-out;
+  `org.gnome.controlcenter.set-keyboard`) is on this case's allowlist;
+  a helper listed only by its program (the settings daemon's backlight
+  and Wacom helpers, mutter's backlight helper, update-notifier's lock
+  check) and the two key tests allowed by id are exempt only from the
+  next case, and their actions' defaults still count here; or
 - it runs code as root, whatever its defaults, except the named ones
   whose recorded default is `yes` for that kind of subject, which are
   reported (and refuse for another kind): `sysupdate1.check`, and, from
@@ -2290,7 +2298,11 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
   - the subject in the member's service manager, by the route of
     §11.4 under the oneshot's hardening, opens no session (the probe's
     `systemd-run --user --machine` route does open a transient one) and
-    is judged by the display session's kind;
+    is judged by the display session's kind, on systemd 252 too (whose
+    `StartTransientUnit` checks `CAP_SYS_ADMIN`, which the oneshot's
+    bounding set lacks, and then rests on polkitd granting uid 0); a
+    reported pid outside `user@<uid>.service`, or with other uids, is
+    refused;
   - a member taken out of `wheel` or `sudo` while signed in is "could
     not check: sign out and in again" (measured on one desktop with a
     caller on the bus, to show polkitd judges the held groups there);
