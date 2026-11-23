@@ -55,14 +55,18 @@ changelog:
     #16676). Arch (GC #16724): mutter's backlight helper and gvfsd-admin
     allowed at Arch's `/usr/lib` path too, under the same conditions;
     systemd v261's four `sysupdate1.cancel-*` `yes` defaults recorded
-    (unchanged in v262.2); polkit 128 measured, and Arch's row in §13.
+    (the policy file byte for byte the same at the `v261` and `v262.2`
+    tags); polkit 128 measured, and Arch's row in §13.
     The first user namespace read from a process's `uid_map` and
     `gid_map`; the subgid scan only in `install`, the elevated `status`
     and the oneshot, through `getent`, its result kept until
     `/etc/subgid` or `nsswitch.conf` changes; the settings daemon's
     helpers named; pacman's `mtree` paths and duplicate entries; a
     rootless Alpine container measured (it makes polkit "could not
-    check")
+    check"); a process the checker can't read, or `/proc` mounted with
+    a `hidepid` that hides processes from the helper, "could not check";
+    `getent` by its fixed path; §11.6's limit widened to every group
+    source other than `/etc/group`
   - 0.1.2: 2026-11-22, erratum (VAULT-MESSAGING 0.93.2, AGENT-PLAN
     0.1.21; owner-approved card GC #16477). §7: the connector builds
     `VETTID_IN` and `VETTID_OUT` only for a run with non-empty `inputs`
@@ -1585,10 +1589,16 @@ access, unlike another uid's `ns/user` link, which would need
 is taken as the first namespace, so the process is compared exactly.
 Only a process that is gone (`ENOENT` or `ESRCH`) is skipped: any other
 error reading a process's `status`, a `/proc` that can't be listed, or
-`/proc` mounted with `hidepid` (other than 0) while the checker isn't
-in the mount's `gid=` group (the helper has no `CAP_SYS_PTRACE`, so
-such a mount hides the member's processes from it) is "could not check
-polkit", since the scan would otherwise pass having seen nothing. The
+`/proc` mounted with `hidepid` in a mode that hides processes from the
+helper is "could not check polkit", since the scan would otherwise pass
+having seen nothing. The helper and the oneshot run as root without
+`CAP_SYS_PTRACE`, so they are judged as the kernel judges them:
+`hidepid=1` or `2` (`noaccess`, `invisible`) hides nothing from a
+member of the mount's `gid=` group, which is gid 0 when no `gid=` is
+given (as the helper's gid is); `hidepid=4` (`ptraceable`) hides the
+member's processes from the helper whatever its group; an unknown mode
+counts as hiding (chosen). `install` and the elevated `status` judge the
+mount the same way, so that all checks agree. The
 checker confirms first that its own maps are the identity
 (otherwise unmapped gids read as 65534). The one
 exemption is the user manager's `(sd-pam)` child (its parent the
@@ -2440,8 +2450,9 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     file descriptor (the checker's own D-Bus client must); on the five
     other than Arch (whose run recorded the verdicts above, the pidfd,
     the skipped `manager` session and the system service's `allow_any`,
-    and nothing of the rest; its system service's read-back: 78 of its
-    270 refusals explained by `allow_any` and not by the active kind),
+    and nothing of the rest; its system service's read-back, as the run
+    printed it: 78 of its 270 refusals explained by `allow_any` and not
+    by the active kind, with no count printed the other way),
     a process of the service manager was
     asked on every desktop, every session's kind was consistent with polkitd's answers, and no process of the
     member's held other groups than the database gives. Their old `.pkla`
@@ -2523,10 +2534,15 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     `gid_map` aren't the identity is outside the first user namespace,
     read by the helper with its own capability set (no
     `CAP_SYS_PTRACE`), and one whose maps can't be read is compared
-    exactly; with `/proc` remounted `hidepid=invisible` and the checker
-    not in its `gid=` group, every subject is "could not check polkit"
-    (measured on Fedora 44 with the probe), and a `status` read that
-    fails other than for a process's end is too;
+    exactly. Measured on Fedora 44, with `/proc` remounted and the
+    member's three processes counted by root with and without
+    `CAP_SYS_PTRACE`: `hidepid=invisible` with no `gid=` hides none
+    (3 and 3) and the probe passes; `hidepid=invisible,gid=10` hides
+    all three from root without `CAP_SYS_PTRACE` (3 and 0) and the
+    probe, judging as the helper would, gives "could not check" for
+    every subject; so does `hidepid=ptraceable` (3 and 0). The test
+    also checks that a `status` read failing other than for a process's
+    end is "could not check";
   - a `.policy` file changed while the member is signed out clears the
     manager subject's result, and the helper starts the oneshot again
     once the manager runs, with no elevated `status`;
