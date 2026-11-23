@@ -1976,8 +1976,9 @@ it does exactly this, and nothing the connector names:
   §11.1, `/etc/security/console.apps/`, the group database, and the
   owners and modes of `/usr/local`'s folders and of every input it
   reads; for §11.4's groups, `/proc/<pid>/status`, `uid_map` and
-  `gid_map` of every process, and `/etc/subgid` and `nsswitch.conf`
-  for their digests (`install`, the elevated `status` and the oneshot
+  `gid_map` of every process, `/etc/subgid` for the member's ranges
+  (checked against the local `/etc/group`) and its digest, and
+  `nsswitch.conf` for its digest (`install`, the elevated `status` and the oneshot
   also run `getent group` for the subgid scan; the helper doesn't);
 - it asks polkitd and logind over the system bus, and starts §11.4's
   no-session subject, its own waiting child (the subject in the
@@ -2061,9 +2062,8 @@ terminal where no agent runs.
 - **A network group inside a subgid range** that appears after the
   last scan, or one in a source that couldn't be reached during it
   (`getent` gives the same answer for "not found"), isn't seen until
-  the next scan (`install`, the elevated `status`, or the oneshot after
-  `/etc/subgid` or `nsswitch.conf` changes): no digest covers a network
-  source.
+  the next scan (`install`, the elevated `status`, or any run of the
+  oneshot, §2): no digest covers a network source.
 - **Processes running as the member's subordinate uids** (a rootless
   container's other users) aren't the member's by uid, so the scan
   doesn't see them; polkitd judges such a caller as an unknown uid with
