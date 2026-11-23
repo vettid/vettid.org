@@ -1483,10 +1483,12 @@ calls, GC #16589 and #16598):
   the user bus refuses a system service's (measured on Fedora 44). A
   hop that fails, times out or is blocked is "could not check". It reports
   the waiting unit's pid back to the checker, which asks polkitd only
-  after confirming that pid itself: its cgroup lies under
-  `user@<uid>.service` and all four of its uids are the member's (the
-  hop runs as the member, who could otherwise name a process of its own
-  choosing; its `NoNewPrivs` being 0 is checked as hygiene only). When a
+  after confirming that pid itself: its cgroup is the waiting unit's
+  own, under `user@<uid>.service`, its program is the checker's, all
+  four of its uids are the member's, its `NoNewPrivs` is 0, and the
+  unit has no drop-ins (the hop runs as the member, who could otherwise
+  name a process of its own choosing, or shape the unit with a
+  drop-in of its own). When a
   policy change is seen while this subject can't be asked, its stored
   result is cleared, so it reads "not checked" until it is asked again.
   The helper doesn't ask it, by §11.5's short list (chosen), so at a
@@ -1504,10 +1506,12 @@ calls, GC #16589 and #16598):
 database (`getgrouplist`); from polkit 124 a caller on the bus is judged
 by the groups its process holds. So every process of the member's
 (found in `/proc`, not only the subjects) has its held groups
-(`/proc/<pid>/status`) compared with the database's: one holding a
-group the database doesn't give makes every answer "could not check
-polkit". Holding fewer can't widen a grant and is fine (the user
-manager's `(sd-pam)` holds none, measured on Fedora 44). For a group the database no longer gives (a member taken
+(`/proc/<pid>/status`) compared with the database's, as exact sets
+(a rule can grant on a group's absence, so fewer counts as well as
+more): any difference makes every answer "could not check polkit". The
+one exemption is the user manager's `(sd-pam)` child (its parent the
+`MainPID` of `user@<uid>.service`), which holds none (measured on
+Fedora 44). For a group the database no longer gives (a member taken
 out of `wheel` while signed in, whose session still holds it) the text
 says to sign out and in again; for one added at sign-in that the
 database never lists (`pam_group`) it names the group and its source
