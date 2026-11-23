@@ -1560,8 +1560,10 @@ whole scan (chosen); an exit other than 0 (all found) or 2 (some not
 found), no `getent`, the time limit passed, or an `/etc/subgid` that
 exists but can't be read is "could not check polkit". (`getent` also
 exits 2 when a network source can't be reached, so the oneshot is
-ordered after `nss-user-lookup.target` and `sssd.service`, and a source
-down during the scan is a limit of §11.6.) A default range of 65,536
+ordered after `nss-user-lookup.target` and `sssd.service` for its run
+at boot; that ordering means sssd has started, not that its source is
+online, and any run of the oneshot can meet a source that is down: a
+limit of §11.6.) A default range of 65,536
 gids against a network source takes longer than a run start's bound
 (§11.3), so only `install`, the elevated `status` and the oneshot make
 this scan (chosen), once per check (the oneshot's two agreeing checks
@@ -1574,11 +1576,20 @@ gid inside the member's ranges itself. Ranges from an nsswitch `subid:` source
 (sss, FreeIPA) aren't read, a limit of §11.6. Whether a process is in
 the first user namespace is read from its `uid_map` and `gid_map`: the
 identity over every id, which only the first namespace has unless a
-privileged process made one so. Both are readable without `ptrace`
+privileged process made one so (writing a map needs `CAP_SETUID` or
+`CAP_SETGID` over those ids in the parent namespace, which the member
+lacks, and `newuidmap` and `newgidmap` let it map only its own id and
+its subordinate ranges). Both are readable without `ptrace`
 access, unlike another uid's `ns/user` link, which would need
 `CAP_SYS_PTRACE` (not in the helper's set, §6); a map that can't be read
 is taken as the first namespace, so the process is compared exactly.
-The checker confirms first that its own maps are the identity
+Only a process that is gone (`ENOENT` or `ESRCH`) is skipped: any other
+error reading a process's `status`, a `/proc` that can't be listed, or
+`/proc` mounted with `hidepid` (other than 0) while the checker isn't
+in the mount's `gid=` group (the helper has no `CAP_SYS_PTRACE`, so
+such a mount hides the member's processes from it) is "could not check
+polkit", since the scan would otherwise pass having seen nothing. The
+checker confirms first that its own maps are the identity
 (otherwise unmapped gids read as 65534). The one
 exemption is the user manager's `(sd-pam)` child (its parent the
 `MainPID` of `user@<uid>.service`, in the first user namespace, holding
@@ -1733,7 +1744,9 @@ authorizes the member for it without a password and either
   lead's call, GC #16601), and `machine1.register-machine` (it names to
   machined a machine the caller already runs; reaching into it needs
   `shell` or `login`, which refuse); and, from the policy files of
-  systemd v261 and later (unchanged in v262.2), `allow_active` `yes` for `sysupdate1.cancel-check`, `cancel-update`,
+  systemd v261 and later (`src/sysupdate/org.freedesktop.sysupdate1.policy`
+  is byte for byte the same at the `v261` and `v262.2` tags of systemd's
+  repository), `allow_active` `yes` for `sysupdate1.cancel-check`, `cancel-update`,
   `cancel-update-to-version` and `cancel-vacuum` (each only signals a
   running update job to stop, which pulling the plug also does; GC
   #16724). Those that refuse: `pkexec`
@@ -1979,7 +1992,9 @@ it does exactly this, and nothing the connector names:
   `gid_map` of every process, `/etc/subgid` for the member's ranges
   (checked against the local `/etc/group`) and its digest, and
   `nsswitch.conf` for its digest (`install`, the elevated `status` and the oneshot
-  also run `getent group` for the subgid scan; the helper doesn't);
+  also run `getent group` for the subgid scan, by its fixed path
+  `/usr/bin/getent` after §6's folder checks on that path, as for
+  `sudo`; the helper doesn't);
 - it asks polkitd and logind over the system bus, and starts §11.4's
   no-session subject, its own waiting child (the subject in the
   member's service manager is asked only by `install`, the elevated
@@ -2059,11 +2074,14 @@ terminal where no agent runs.
 - **Subordinate ids from an nsswitch `subid:` source** (sss, FreeIPA)
   aren't read; only `/etc/subgid` ranges are compared with the group
   database (§11.4).
-- **A network group inside a subgid range** that appears after the
-  last scan, or one in a source that couldn't be reached during it
-  (`getent` gives the same answer for "not found"), isn't seen until
-  the next scan (`install`, the elevated `status`, or any run of the
-  oneshot, §2): no digest covers a network source.
+- **A group inside a subgid range from any source other than
+  `/etc/group`** (a network source, a userdb drop-in, `altfiles`,
+  `extrausers`, a newly added sssd domain) that appears after the last
+  scan, or one in a source that couldn't be reached during it (`getent`
+  gives the same answer for "not found"), isn't seen until the next
+  scan (`install`, the elevated `status`, or any run of the oneshot,
+  §2): the run-start recheck reads only `/etc/group`, and no digest
+  covers those sources.
 - **Processes running as the member's subordinate uids** (a rootless
   container's other users) aren't the member's by uid, so the scan
   doesn't see them; polkitd judges such a caller as an unknown uid with
@@ -2422,7 +2440,9 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     file descriptor (the checker's own D-Bus client must); on the five
     other than Arch (whose run recorded the verdicts above, the pidfd,
     the skipped `manager` session and the system service's `allow_any`,
-    and nothing of the rest), a process of the service manager was
+    and nothing of the rest; its system service's read-back: 78 of its
+    270 refusals explained by `allow_any` and not by the active kind),
+    a process of the service manager was
     asked on every desktop, every session's kind was consistent with polkitd's answers, and no process of the
     member's held other groups than the database gives. Their old `.pkla`
     folders are root-owned with no group or other write wherever they
@@ -2503,7 +2523,10 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     `gid_map` aren't the identity is outside the first user namespace,
     read by the helper with its own capability set (no
     `CAP_SYS_PTRACE`), and one whose maps can't be read is compared
-    exactly;
+    exactly; with `/proc` remounted `hidepid=invisible` and the checker
+    not in its `gid=` group, every subject is "could not check polkit"
+    (measured on Fedora 44 with the probe), and a `status` read that
+    fails other than for a process's end is too;
   - a `.policy` file changed while the member is signed out clears the
     manager subject's result, and the helper starts the oneshot again
     once the manager runs, with no elevated `status`;
