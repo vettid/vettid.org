@@ -1,7 +1,7 @@
 ---
 title: AGENT-LINUX-RUNTIME
 status: draft design note; the run helper and the key sealing get their independent reviews (AGENT-PLAN §9 rule 6) from it, before their code. Built so far: the channel's Unix-socket end (vettid/vettid-agent#55)
-version: 0.1.4
+version: 0.1.5
 date: 2026-11-23
 owner: Al Liebl (Mesmer)
 component: vettid-agent (the agent connector): the separate-account mode on Linux (AGENT-PLAN A5.6)
@@ -10,6 +10,16 @@ related:
   - AGENT-PLAN.md (0.1.21) AG3, AG14, §4.2, §4.7, §4.9, A3.10a, A3.10d, A5.6, §11
   - VAULT-MESSAGING.md (0.93.2) §10.11 "Files handed in and out"
 changelog:
+  - 0.1.5: 2026-11-23 (the owner's decision, GC #16894: "we can't
+    block updates", replacing the cancel half of GC #16724). §11.4:
+    systemd's four `sysupdate1.cancel-*` actions are no longer recorded
+    `yes`: a grant of one refuses like any other administrator's action,
+    since a cancel can be repeated, so anything running as the member
+    (an agent's runs included) could stop every update, every time, and
+    security fixes would never install. The rules file gives them
+    `AUTH_ADMIN`. §1, §11.3 and §13: Arch's stock first user is refused
+    without the rules file and passes with it, so an Arch member
+    installs it
   - 0.1.4: 2026-11-23 (the owner's a, GC #16829). §11.4: outside the
     first user namespace a process may also hold gids inside the
     member's own `/etc/subgid` ranges (a rootless container whose image
@@ -152,7 +162,8 @@ silent it chooses, marks the choice "(chosen)", and lists it in §12.
 itself, and stops with a plain message naming what is missing; it
 never judges a system by its name. The distributions measured are
 §13's (Ubuntu 24.04 and 26.04, Debian 12 and 13, Fedora 44; Arch for
-§11.4's polkit check only); Fedora 38
+§11.4's polkit check only, where the member installs §11.4's rules
+file); Fedora 38
 or later meets these requirements too. Ubuntu 22.04 (systemd 249) and Fedora 37 (251) do
 not.
 
@@ -1381,8 +1392,8 @@ file's text.
 - **`install`** makes every check of §11.1. It **refuses a member whose
   result is admin or not checked**, with the text of AGENT-PLAN §11
   ("Administrator member, install stops, Linux") naming the reason, and
-  for Fedora's package grant the rules file that makes it ask for the
-  password (§11.4). It also refuses a member who isn't a local account
+  for Fedora's package grant and Arch's update cancels the rules file
+  that makes them ask for the password (§11.4). It also refuses a member who isn't a local account
   (§1), and a member who is uid 0 or uid 65534. For polkit's session
   kinds (§11.4) it asks about the member's sessions that exist then; an
   active session it couldn't see is asked at the first run start.
@@ -1778,13 +1789,16 @@ authorizes the member for it without a password and either
   `home1.update-home-by-owner` (it needs the owner's own password; the
   lead's call, GC #16601), and `machine1.register-machine` (it names to
   machined a machine the caller already runs; reaching into it needs
-  `shell` or `login`, which refuse); and, from the policy files of
-  systemd v261 and later (`src/sysupdate/org.freedesktop.sysupdate1.policy`
-  is byte for byte the same at the `v261` and `v262.2` tags of systemd's
-  repository), `allow_active` `yes` for `sysupdate1.cancel-check`, `cancel-update`,
-  `cancel-update-to-version` and `cancel-vacuum` (each only signals a
-  running update job to stop, which pulling the plug also does; GC
-  #16724). Those that refuse: `pkexec`
+  `shell` or `login`, which refuse). Not recorded, so they refuse: the
+  `allow_active` `yes` that systemd v261 and later
+  (`src/sysupdate/org.freedesktop.sysupdate1.policy` is byte for byte
+  the same at the `v261` and `v262.2` tags of systemd's repository)
+  give `sysupdate1.cancel-check`, `cancel-update`,
+  `cancel-update-to-version` and `cancel-vacuum`. A cancel only stops a
+  running update job, but it can be repeated, so anything running as the
+  member, an agent's runs included, could keep every update, security
+  fixes included, from ever installing (the owner, GC #16894; the rules
+  file makes them ask). Those that refuse: `pkexec`
   (`org.freedesktop.policykit.exec`), `org.freedesktop.systemd1.*`
   units and environment (`manage-units`, `manage-unit-files`,
   `set-environment`), `machine1`'s shells, logins, machines and images,
@@ -1991,12 +2005,13 @@ window where stock had none (the lead's call, GC #16676), for
 PackageKit's two
 actions, dnf5daemon's two, FirewallD's `all`, `config`, `direct` and `policies`, and
 cups-pk-helper's four actions that can add a printer from a file and
-`server-settings`, and sorts
+`server-settings`, and systemd's four `sysupdate1.cancel-*` (Arch), and sorts
 before Fedora's own files, so it decides first), and the README gives
 it; the member runs `install` again afterwards (the lead's call within
 B, GC #16374). The README also says the file applies to every account
-on the computer, so its 13 actions ask an active user each time, where
-stock kept the password for a few minutes. Fedora Silverblue and
+on the computer, so its 17 actions ask an active user each time, where
+stock kept the password for a few minutes (or, for the cancels, asked
+none). Fedora Silverblue and
 Kinoite grant rpm-ostree's actions instead; no rules file is offered
 for them, and the refusal names the action (chosen; §13 measures
 them).
@@ -2482,7 +2497,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     | Fedora 44, the Workstation group on the cloud image (`VARIANT_ID=cloud`; GNOME 50) | 127 | 519 | PackageKit's and dnf5daemon's two each refuse | every subject passes |
     | Debian 12 (GNOME) | 122 | 256 | passes | passes |
     | Debian 13 (GNOME) | 126 | 278 | passes | passes |
-    | Arch (the official image, GNOME; systemd 262.2) | 128 | 290 | passes (with the `/usr/lib` helpers and the `cancel-*` defaults above; before them six refused: mutter's backlight helper, gvfs's `gvfsd-admin` (`file-operations-helper`) and the four `sysupdate1.cancel-*`) | passes |
+    | Arch (the official image, GNOME; systemd 262.2) | 128 | 290 | the four `sysupdate1.cancel-*` refuse (mutter's backlight helper and gvfs's `gvfsd-admin` pass at their `/usr/lib` paths) | every subject passes |
 
     Inactive and with the member signed in nowhere, every distribution
     passes without the rules file too. The last runs asked each subject
@@ -2611,8 +2626,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     measured as above;
     mutter's backlight helper and gvfsd-admin at `/usr/lib` are
     allowed as at `/usr/libexec` (gvfsd-admin only under its gate),
-    and a `sysupdate1.cancel-*` grant refuses for a subject other than
-    an active session;
+    and a `sysupdate1.cancel-*` grant refuses for every kind of subject,
+    while the rules file makes each ask for an administrator;
   - the stock user is not refused when `install` runs in a desktop
     terminal, nor when a run starts with the member signed in at the
     desktop (the no-session subject, under the helper, compared with
