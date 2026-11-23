@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 34,
+  "signed_serial": 35,
   "releases": [
     {
       "release": 1,
@@ -928,7 +928,7 @@
       "release": 30,
       "status": "removed",
       "published_at": "2026-11-14T17:18:08Z",
-      "ends_at": "2026-11-24T00:00:00Z",
+      "ends_at": "2026-11-23T16:09:03Z",
       "pcr0": "6d7a86b534ec5ec2c15b401abd216dc8a432bf5c6f512175d1f0490d288fca39fe99b2123b4d73faba06736feaea4ff2",
       "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
       "pcr2": "2c05dd4eccb9dfbb9c7b86eae3a77906b5da9dc3148c01c85ce63e35ec1d2e38242f0c5a16d33322513b22d4ebe5d81e",
@@ -1103,7 +1103,7 @@
     {
       "release": 33,
       "status": "active",
-      "published_at": "2026-11-24T00:00:00Z",
+      "published_at": "2026-11-23T16:09:03Z",
       "pcr0": "7d9c299db485f6addb44087b30d7c50195d27749278fbc2b65241c1532c0ee7392780db0b11d5ba81c09a59247b19168",
       "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
       "pcr2": "6e8e88a36600399283fe2350e280fd02c2b8b1cd2282400866586f512a428e18ba6426f3fe59fa484f4bcc37826b6460",
