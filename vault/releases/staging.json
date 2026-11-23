@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 33,
+  "signed_serial": 34,
   "releases": [
     {
       "release": 1,
@@ -926,8 +926,9 @@
     },
     {
       "release": 30,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-11-14T17:18:08Z",
+      "ends_at": "2026-11-24T00:00:00Z",
       "pcr0": "6d7a86b534ec5ec2c15b401abd216dc8a432bf5c6f512175d1f0490d288fca39fe99b2123b4d73faba06736feaea4ff2",
       "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
       "pcr2": "2c05dd4eccb9dfbb9c7b86eae3a77906b5da9dc3148c01c85ce63e35ec1d2e38242f0c5a16d33322513b22d4ebe5d81e",
@@ -955,17 +956,6 @@
         "6fa87c5c02d14e95004769b2475a334a7cb1f23a5e1823ab87e3ffa2bfd6cb25dd01aed0ebdf48723ee400c8c2bcc699"
       ],
       "notes": "https://staging.vettid.org/security/releases/30/",
-      "host": {
-        "tag": "release/staging/30",
-        "source_commit": "cb672b775a96ac79886529c0e24970bfd89d338b",
-        "measurements_sha256": "4dfa4375ce37fd34f673c91bda5dae8b6684622d74a3c5985921f385ed0915b5",
-        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-04048e843b318bc37",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Release 30 starts staging vaults afresh, counts each PIN before checking it, and stops messages being lost silently. It also brings releases 28 and 29.",
         "changes": [
@@ -1056,7 +1046,7 @@
     },
     {
       "release": 32,
-      "status": "active",
+      "status": "deprecated",
       "published_at": "2026-11-18T00:54:18Z",
       "pcr0": "a65e9238633989f59af1d163fb6616c9f6a9391cbb7130b55676733047ce1618ffd638829f447997e0b3139ce14ea99a",
       "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
@@ -1112,7 +1102,8 @@
     },
     {
       "release": 33,
-      "status": "candidate",
+      "status": "active",
+      "published_at": "2026-11-24T00:00:00Z",
       "pcr0": "7d9c299db485f6addb44087b30d7c50195d27749278fbc2b65241c1532c0ee7392780db0b11d5ba81c09a59247b19168",
       "pcr1": "eaae36dd85aaf7e921f7865ac5de5248da706c61b7021f5cc6ea531cff146996a8d0840e2d981960a1159f5dbb53447b",
       "pcr2": "6e8e88a36600399283fe2350e280fd02c2b8b1cd2282400866586f512a428e18ba6426f3fe59fa484f4bcc37826b6460",
