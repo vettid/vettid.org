@@ -1598,7 +1598,8 @@ member of the mount's `gid=` group, which is gid 0 when no `gid=` is
 given (as the helper's gid is); `hidepid=4` (`ptraceable`) hides the
 member's processes from the helper whatever its group; an unknown mode
 counts as hiding (chosen). `install` and the elevated `status` judge the
-mount the same way, so that all checks agree. The
+mount the same way, as if their gid were 0 and they held no other
+group or `CAP_SYS_PTRACE`, so that all checks agree. The
 checker confirms first that its own maps are the identity
 (otherwise unmapped gids read as 65534). The one
 exemption is the user manager's `(sd-pam)` child (its parent the
@@ -2525,8 +2526,8 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     polkit" while it runs; whether to accept such a container is the
     owner's call (GC #16754). A subgid range overlapping a resolved group is "could
     not check", and so is a `getent` that exits other than 0 or 2 (a
-    stub that exits 1), is missing (removed from the `PATH` the checker
-    uses) or passes its time limit (a stub that sleeps), and an
+    stub at `/usr/bin/getent` that exits 1), is missing (`/usr/bin/getent`
+    removed) or passes its time limit (a stub there that sleeps), and an
     unreadable `/etc/subgid`; a changed `/etc/subgid` or
     `nsswitch.conf` digest gives "not checked" at a run start until the
     oneshot has scanned again, and a local group added inside the range
@@ -2541,7 +2542,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     all three from root without `CAP_SYS_PTRACE` (3 and 0) and the
     probe, judging as the helper would, gives "could not check" for
     every subject; so does `hidepid=ptraceable,gid=10` (3 and 0; under
-`ptraceable` the group doesn't count). The test
+    `ptraceable` the group doesn't count). The test
     also checks that a `status` read failing other than for a process's
     end is "could not check";
   - a `.policy` file changed while the member is signed out clears the
