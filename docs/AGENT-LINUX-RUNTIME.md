@@ -60,7 +60,9 @@ changelog:
     `gid_map`; the subgid scan only in `install`, the elevated `status`
     and the oneshot, through `getent`, its result kept until
     `/etc/subgid` or `nsswitch.conf` changes; the settings daemon's
-    helpers named; pacman's `mtree` paths and duplicate entries
+    helpers named; pacman's `mtree` paths and duplicate entries; a
+    rootless Alpine container measured (it makes polkit "could not
+    check")
   - 0.1.2: 2026-11-22, erratum (VAULT-MESSAGING 0.93.2, AGENT-PLAN
     0.1.21; owner-approved card GC #16477). §7: the connector builds
     `VETTID_IN` and `VETTID_OUT` only for a run with non-empty `inputs`
@@ -1553,15 +1555,22 @@ group at will: that is "could not check polkit", naming the range and
 the group (chosen). Each gid of the range is looked up by key, since a
 network source (sssd with `enumerate = false`, its default) doesn't
 list its groups: the static build runs `getent group` with the gids as
-keys, in batches, with a time limit; an exit other than 0 (all found)
-or 2 (some not found), no `getent`, or the time limit passed is "could
-not check polkit". A default range of 65,536 gids against a network
-source takes longer than a run start's bound (§11.3), so only
-`install`, the elevated `status` and the oneshot make this scan; its
-result goes in `admin.json` with the digests of `/etc/subgid` and
-`nsswitch.conf`, which the path unit watches (§2), and the helper at a
-run start only compares those digests (a change: "not checked" until
-the oneshot has scanned again). Ranges from an nsswitch `subid:` source
+keys, in batches of 4,096, with a time limit of two minutes for the
+whole scan (chosen); an exit other than 0 (all found) or 2 (some not
+found), no `getent`, the time limit passed, or an `/etc/subgid` that
+exists but can't be read is "could not check polkit". (`getent` also
+exits 2 when a network source can't be reached, so the oneshot is
+ordered after `nss-user-lookup.target` and `sssd.service`, and a source
+down during the scan is a limit of §11.6.) A default range of 65,536
+gids against a network source takes longer than a run start's bound
+(§11.3), so only `install`, the elevated `status` and the oneshot make
+this scan (chosen), once per check (the oneshot's two agreeing checks
+compare the rest; the scan isn't repeated); its result goes in
+`admin.json` with the digests of `/etc/subgid` and `nsswitch.conf`,
+which the path unit watches (§2). The helper at a run start compares
+those digests (a change: "not checked" until the oneshot has scanned
+again) and checks the local `/etc/group`, which it reads anyway, for a
+gid inside the member's ranges itself. Ranges from an nsswitch `subid:` source
 (sss, FreeIPA) aren't read, a limit of §11.6. Whether a process is in
 the first user namespace is read from its `uid_map` and `gid_map`: the
 identity over every id, which only the first namespace has unless a
@@ -1577,7 +1586,8 @@ no groups at all), which holds none (measured on Fedora 44); a name and
 a parent can be had by any unit's process, and dropping groups needs a
 user namespace of one's own. `(sd-pam)` is dumpable, its `/proc` entry
 the member's (measured on Fedora 44), so where `ptrace` is allowed
-(`ptrace_scope` 0, the default on Fedora, Arch and upstream) the member could make it call the bus with
+(`ptrace_scope` 0, as Fedora sets it through
+`elfutils-default-yama-scope`; Yama's own default is 1) the member could make it call the bus with
 no groups: that again reaches only the limit of §11.6. For a group the database no longer gives (a member taken
 out of `wheel` while signed in, whose session still holds it) the text
 says to sign out and in again; for one added at sign-in that the
@@ -2026,7 +2036,7 @@ terminal where no agent runs.
   that ran before can have changed the shell's start-up files), show a
   polkit dialog of its own, or read the keystrokes where the session
   allows it (an X11 session; `ptrace` of the member's shell where
-  `ptrace_scope` is 0, as on Fedora and Arch and upstream's default). It then catches the password the
+  `ptrace_scope` is 0, as Fedora sets it). It then catches the password the
   next time the member types it. That needs the member to act, and no
   check here can see it.
 - **The caching windows.** For as long as `sudo` doesn't ask again
@@ -2048,6 +2058,12 @@ terminal where no agent runs.
 - **Subordinate ids from an nsswitch `subid:` source** (sss, FreeIPA)
   aren't read; only `/etc/subgid` ranges are compared with the group
   database (§11.4).
+- **A network group inside a subgid range** that appears after the
+  last scan, or one in a source that couldn't be reached during it
+  (`getent` gives the same answer for "not found"), isn't seen until
+  the next scan (`install`, the elevated `status`, or the oneshot after
+  `/etc/subgid` or `nsswitch.conf` changes): no digest covers a network
+  source.
 - **Processes running as the member's subordinate uids** (a rootless
   container's other users) aren't the member's by uid, so the scan
   doesn't see them; polkitd judges such a caller as an unknown uid with
@@ -2202,7 +2218,12 @@ owner's go:
     results (`admin`, `clear`, `not_checked`) and their use; the checks
     at `install`, every run start, every proxy opening (`check`) and by
     the elevated `status` (`admin.json`); the elevated commands dropping
-    the member's sudo time stamp; the release gate. (Any `NOPASSWD` rule
+    the member's sudo time stamp; the release gate; each process's held
+    groups compared with the database's, the first user namespace read
+    from its id maps, and the subgid scan (`getent` in batches, two
+    minutes in all, only in `install`, the elevated `status` and the
+    oneshot, kept by the digests of `/etc/subgid` and `nsswitch.conf`).
+    (Any `NOPASSWD` rule
     whatever its command, the negative timeout and the three check
     points are the lead's calls, GC #16219; `adm` and `systemd-journal`
     reported and `input` refusing are the owner's a, GC #16258; `video`
@@ -2391,7 +2412,7 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     | Fedora 44, the Workstation group on the cloud image (`VARIANT_ID=cloud`; GNOME 50) | 127 | 519 | PackageKit's and dnf5daemon's two each refuse | every subject passes |
     | Debian 12 (GNOME) | 122 | 256 | passes | passes |
     | Debian 13 (GNOME) | 126 | 278 | passes | passes |
-    | Arch (the official image, GNOME; systemd 262.2) | 128 | 290 | passes (with the `/usr/lib` helpers and the `cancel-*` defaults above; before them six refused: mutter's backlight helper, gvfs's `file-operations-helper` and the four `sysupdate1.cancel-*`) | passes |
+    | Arch (the official image, GNOME; systemd 262.2) | 128 | 290 | passes (with the `/usr/lib` helpers and the `cancel-*` defaults above; before them six refused: mutter's backlight helper, gvfs's `gvfsd-admin` (`file-operations-helper`) and the four `sysupdate1.cancel-*`) | passes |
 
     Inactive and with the member signed in nowhere, every distribution
     passes without the rules file too. The last runs asked each subject
@@ -2467,15 +2488,22 @@ runner under `sudo`, with throwaway users and units removed in cleanup.
     groups (`keep-groups`); both pass, and a container process holding a
     group beyond the database's refuses. Measured on Fedora 44 with
     rootless podman: `alpine:3.20 sleep 600` runs as the image's root,
-    whose groups (0, 1, 2, 3, 4, 6, 10, 11, 20, 26 and 27) map to the
-    member's subgids (524288 and up), so its process holds those
-    beyond the database's and every subject is "could not check
+    whose groups (0, 1, 2, 3, 4, 6, 10, 11, 20, 26 and 27) map, 0 to
+    the member's own gid and the others to the member's subgids (524288
+    and up), so its process holds those beyond the database's and every subject is "could not check
     polkit" while it runs; whether to accept such a container is the
     owner's call (GC #16754). A subgid range overlapping a resolved group is "could
-    not check", and so is a `getent` that exits other than 0 or 2, is
-    missing or passes its time limit; a process whose `uid_map` and
+    not check", and so is a `getent` that exits other than 0 or 2 (a
+    stub that exits 1), is missing (removed from the `PATH` the checker
+    uses) or passes its time limit (a stub that sleeps), and an
+    unreadable `/etc/subgid`; a changed `/etc/subgid` or
+    `nsswitch.conf` digest gives "not checked" at a run start until the
+    oneshot has scanned again, and a local group added inside the range
+    is seen at the next run start; a process whose `uid_map` and
     `gid_map` aren't the identity is outside the first user namespace,
-    read by the helper with its own capability set;
+    read by the helper with its own capability set (no
+    `CAP_SYS_PTRACE`), and one whose maps can't be read is compared
+    exactly;
   - a `.policy` file changed while the member is signed out clears the
     manager subject's result, and the helper starts the oneshot again
     once the manager runs, with no elevated `status`;
