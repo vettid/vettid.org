@@ -1507,9 +1507,12 @@ calls, GC #16589 and #16598):
   `status`, the helper starts the oneshot (the same `StartUnit` call,
   at most once a minute) when this subject reads "not checked" and
   `user@<uid>.service` is active, judged at a run start, a proxy's
-  opening or a `check` (no timer of its own); if it still hasn't settled
-  after a few minutes it stops starting it, and the text says to run
-  the elevated `status`, as for a digest mismatch.
+  opening or a `check` (no timer of its own). Five minutes after the
+  first such start in this state, if the subject still reads "not
+  checked", it stops starting it, and the text says to run the elevated
+  `status`, as for a digest mismatch; the stop ends with any new result
+  for that subject (an elevated `status`, a later `.policy` change's
+  check).
   The helper doesn't ask it, by §11.5's short list (chosen), so at a
   run start this subject's last result stands;
 - a process of the member's in no session: the checker's own program
@@ -1538,7 +1541,10 @@ member's `/etc/subgid` ranges, so where such a range contains a gid the
 group database resolves to a group (sssd or AD id-mapping ranges can
 overlap the second user's default range), the member could hold that
 group at will: that is "could not check polkit", naming the range and
-the group (chosen). The checker confirms first that it runs in PID 1's
+the group (chosen). Each gid of the range is looked up by key, since a
+network source (sssd with `enumerate = false`, its default) doesn't
+list its groups. Ranges from an nsswitch `subid:` source (sss, FreeIPA)
+aren't read, a limit of §11.6. The checker confirms first that it runs in PID 1's
 user namespace (otherwise unmapped gids read as 65534), and a process
 whose namespace it can't read is compared exactly. The one
 exemption is the user manager's `(sd-pam)` child (its parent the
@@ -2002,6 +2008,9 @@ terminal where no agent runs.
   processes in the first user namespace; a rootless container's process
   holding fewer, and `(sd-pam)` driven by `ptrace`, are accepted or
   unseen; and it can't see a process started later.
+- **Subordinate ids from an nsswitch `subid:` source** (sss, FreeIPA)
+  aren't read; only `/etc/subgid` ranges are compared with the group
+  database (§11.4).
 - **Processes running as the member's subordinate uids** (a rootless
   container's other users) aren't the member's by uid, so the scan
   doesn't see them; polkitd judges such a caller as an unknown uid with
