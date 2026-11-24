@@ -2926,7 +2926,8 @@ gets its own indicator, apart from the bell.
     for the member's Approve), awaiting-peer and "Not now" entries (the
     stored set dropped at `exp` and on a wipe); with touch exploration
     on, the icon's description names the time left and nothing is
-    announced each second; with it off, the icon does not tick; `pending.exp` used alone for a
+    announced each second; with it off, the icon does not tick;
+    `pending.exp` used alone for a
     challenge; `ExpiryClock` drops an entry without a read; the
     window at 120 s and 121 s; time-critical from arrival for signin, approval
     and no-purpose challenges, session requests and `approval.pending`, the
