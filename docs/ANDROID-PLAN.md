@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.140
+version: 0.1.141
 date: 2026-11-24
 changelog:
+  - 0.1.141: 2026-11-24 (owner decision b, Ground Control #17837; card GC #17838; IOS-PLAN 0.1.82). §4 "Transfer (new phone)", a new paragraph "Back while the transfer waits": while a transfer to this phone is live (code shown, or found waiting after a restart, until it ends in any way), Back never leaves the move screen for "Your account already has a vault" or welcome. Before minute 10 it opens the existing cancel confirmation; from minute 10 to the window's end it does nothing; after the end it follows the phase read again. Today Android's waiting step already keeps Back (the confirmation, or nothing during the window). The gap is `leaveMove`, which sends any setup stage to "Your account already has a vault" whenever Back reaches it: from the transfer screen's first step after a restart, before or without the transfer read back, from the first step after a cancel the vault refused at minute 10, and possibly from an ended screen until the phase is read again. No new text. Built by card GC #17839. Follows 0.1.140 (vettid/vettid.org#661).
   - 0.1.140: erratum, 2026-11-24 (owner decision a, Ground Control #17804; card GC #17705). §4 "The approvals indicator", 1: "the member's own outgoing requests" are not counted only while they wait for the handshake or for the other side; one whose safety code waits for the member's Approve or Decline is counted, as an incoming request is (the drawer badge already counted it). 3 (an erratum of the app's, not part of decision a): the one-second tick also runs for the icon while it is shown, an entry is time-critical and touch exploration is on, so that the icon's description (11, unchanged) can name the time left; without it the icon would need either a tick or a description with no time. 12: the tests gain both outgoing cases and the icon's tick with touch exploration on and off. IOS-PLAN 0.1.81 corrects §4.12's summary to match. No text changes.
   - 0.1.139: 2026-11-24 (owner decision a, GC #17671; card GC #17673). §4 "Devices & agents", AA8 "Fail closed": an agent's request that does not name its device and itself (a non-blank `device_id`, and a `name` the screen can show: not only spaces or invisible characters once cleaned) or has no `exp` that reads as a time is Deny only, for `item.use`, `item.get` and `catalog` as well as `item.run` and `item.proxy`. Only refuses more; no new text (AA5's deny-only line). Built on iOS (vettid/vettid-ios, card GC #17503) and Android (card GC #17673).
   - 0.1.138: 2026-11-22 (VAULT-MESSAGING 0.93.2, IOS-PLAN 0.1.80; owner-approved card GC #16477). Every change only clarifies or refuses more. §4 "Devices & agents", AA7: a `leash.item.set` `bad_request` shows the vault's `error.message` (VAULT-MESSAGING 0.93.2 §10.11 "Why a setting is refused": `<member>: <rule>`, never a value) and, when it is absent, empty, longer than 200 bytes or not printable ASCII (0x20–0x7E), with no check of its form, the NEW fallback "These settings could not be saved: your vault refused one of them. Check the programs, the variables, the folders, the hosts, the header name and the prefix." (from the review of vettid/vettid-android#430, where the vault answered with an empty message); the app never parses the message. AA9: the vault's rules the app checks before saving a folder add an element made only of dots and spaces, and the defined key of VAULT-MESSAGING 0.93.2 for a duplicate or nested folder (composed and decomposed forms are one, and the dotless `ı` is `I`), with a NEW text for the first; the approval's input and output names (`body.inputs`, `output.names`) are judged by §10.11's reserved-name list, and an approval that breaks it (which the vault refuses before holding) is Deny only. AA8's fingerprints show the first 16 digits, and all 64 on a tap, which VAULT-MESSAGING 0.93.2 now allows ("at least the first 16"). **Fix round after the blind reviews** (vettid/vettid.org#653): the strictly-under check of inputs is dropped from the approval (its `folders` carries only `cwd` and `output`, so the app cannot judge it; the vault refuses such a run before holding it and judges it again at approval); the fallback has one trigger (absent, empty, over 200 bytes, or not printable ASCII) and names the header name and the prefix (changed NEW); a `.` or `..` element gets the `..` text; reserved names are matched upper-cased by `strings.ToUpper`'s mapping, locale-independent. Not built; the app's part rides on cards #16366 and #15812, the vault's on the card to follow.
@@ -4063,6 +4064,55 @@ both sections above (`pin.change`, `credential.password.change`,
   end could otherwise reach a phone that had dropped its handshake,
   attested key and epoch-1 secret. Only after the 11 minutes does it
   drop them and offer a new code. (0.1.76, owner decision 2026-10-23.)
+  **Back while the transfer waits** (0.1.141, owner decision b,
+  2026-11-24, Ground Control #17837). The rule follows the live
+  transfer, not the setup stage. It holds from the moment the comparison
+  code is shown, and after a restart from the moment the app finds a
+  transfer waiting (`SetupStage.TRANSFER_WAITING`), even before the
+  transfer screen has read it back or when that read fails (a
+  `TRANSFER_WAITING` shown only to tell a move that stopped is an ended
+  transfer as soon as the screen has said so). It ends when
+  the transfer ends in any of the ways in this section: paired,
+  rejected, abandoned, its session ended (`mailbox_unknown`, sign-out or
+  wipe), stopped for a malformed `device.paired` ("The move stopped on
+  this phone"), or dropped at the end of the settlement window. While it
+  holds, Back (the system Back, and the top bar's where the step has
+  one) never leaves the move screen for "Your account already has a
+  vault" or for the welcome screen, whether or not this phone redeemed
+  a setup code. Before minute 10 Back opens the existing "Cancel the
+  move?" confirmation, as today: "Keep waiting" stays on the move
+  screen, and a confirmed cancel abandons the transfer (one refused at
+  minute 10 returns to the waiting or checking screen). From minute 10
+  to the end of the settlement window Back does nothing, since no
+  abandon is offered there. The member can leave the app, as the
+  checking text says. The window ends by itself: the move completes if
+  the old phone approved in time, and otherwise a new code is offered. After the transfer ends, Back and the ended screens' own
+  Back button go where the phase, read again, says: welcome on a phone
+  with no redeemed setup code, "Your account already has a vault" with
+  one. A `TRANSFER_WAITING` read before the end never decides it.
+  Why: `leaveMove` sends any setup stage, `TRANSFER_WAITING` included,
+  to "Your account already has a vault". On a phone that never redeemed
+  a code that is wrong, and with one it hides a live move and offers
+  recovery and a new vault beside it. No new text. Tests:
+  - Back before minute 10 opens the confirmation, and Keep waiting
+    stays.
+  - From minute 10 and during the settlement window, Back does nothing
+    and nothing is abandoned.
+  - After a restart while waiting, Back before and after the screen
+    reads the transfer back, and when that read fails, keeps the move
+    screen.
+  - A confirmed cancel refused at minute 10 returns to the waiting or
+    checking screen, not the first step.
+  - After an app lock and unlock while waiting, Back keeps the move
+    screen.
+  - After each ending (rejected, dropped, session ended, the move
+    stopped, abandoned), Back and the Back button reach welcome, or
+    "Your account already has a vault" with a redeemed code, even while
+    the phase still reads `TRANSFER_WAITING`.
+  - With a redeemed setup code, neither recovery nor "Set up a new
+    vault anyway" can be reached while the transfer waits.
+  - Back from the other setup stages is unchanged.
+
   The 11 minutes are one deadline, measured from the moment the app
   started its `hs.init`; no user action extends it. At the deadline the
   app **collects its mailbox for a settlement window** before it drops
