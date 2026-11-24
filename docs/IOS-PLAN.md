@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.80
-date: 2026-11-22
+version: 0.1.81
+date: 2026-11-24
 changelog:
+  - 0.1.81: erratum, 2026-11-24 (ANDROID-PLAN 0.1.140; owner decision a, Ground Control #17804). §4.12's summary of what counts: an outgoing request whose safety code waits for the member's Approve or Decline counts; one still waiting for the handshake or the other side does not. No text changes.
   - 0.1.80: 2026-11-22 (ANDROID-PLAN 0.1.138, VAULT-MESSAGING 0.93.2; owner-approved card GC #16477). Every change only clarifies or refuses more. §4.19 and §4.20 follow ANDROID-PLAN 0.1.138: the folder checks add an element made only of dots and spaces and VAULT-MESSAGING 0.93.2's key for duplicates and nesting; input and output names judged by §10.11's reserved-name list, or the approval is Deny only; a `leash.item.set` `bad_request` shows the vault's message or ANDROID-PLAN's NEW fallback text (§4.20). No iOS difference. **Fix round after the blind reviews** (vettid/vettid.org#653): the strictly-under check of inputs is dropped (the approval's `folders` cannot show it; the vault's check alone), §4.20 points at ANDROID-PLAN 0.1.138, and the fallback follows ANDROID-PLAN's one trigger and its changed NEW text.
   - 0.1.79: 2026-11-22 (ANDROID-PLAN 0.1.137, AGENT-PLAN AA7 and AA8, VAULT-MESSAGING §6.8 and §10.11; owner-approved card, Ground Control #16365). Not built; cards #16366 (Android), #16367 (iOS). Two new sections, after §4.19 so that its number stays: §4.20 "How an agent may use an item" and §4.21 "Approvals for runs, proxies and reveals": the iPhone shows what ANDROID-PLAN's AA7 and AA8 subsections specify, identically, texts included. iOS differences only: the settings' text fields turn off the keyboard helpers of §6.5; confirmations are alerts; SF Mono for the strings of an approval; VoiceOver and Dynamic Type. Until the app version with §4.21, `item.run` and `item.proxy` approvals are Deny only, as ANDROID-PLAN's decision 15 now says. §4.19 and "Later" gain the pointers. Every NEW text is ANDROID-PLAN's, for the owner's approval; **Open (owner)** is ANDROID-PLAN 0.1.137's list. **Fix round after the blind reviews** (vettid/vettid.org#652; the lead's calls): follows ANDROID-PLAN 0.1.137's fix round (Approve only on the detail screen, after scrolling to the end, with the warnings and the summary at the top; the detail closes on a re-referral; strings forced left to right and isolated, §10.8 step 4's class escaped, look-alikes highlighted, spaces marked; full fingerprints on a tap; the wider deny-only list; the last program's removal a widening; the Ask me before each run confirmation; the new and changed NEW texts). iOS: the alert list adds "Stop sending <item> to an API?", "Remove the last program?" and "Stop asking before each run?"; no overlay protection is needed, since no other app can draw over VettID on iOS, so the overlay acceptance case is Android's only; the "live region" reference is dropped; VoiceOver reads "escaped character U+…". **Last round:** follows ANDROID-PLAN 0.1.137's last round (the precise scroll gate, the left-to-right override in each box, the changed NEW texts, the added Deny-only cases); a Picture-in-Picture window can cover content but can't take VettID's touches.
   - 0.1.78: 2026-11-21 (ANDROID-PLAN 0.1.135, VAULT-MESSAGING 0.93.0, AGENT-PLAN 0.1.17; AGENT-SEPARATE-ACCOUNT Q1 a and Q9 a; Ground Control #15810). Not built; card #15813. A new §4.19 "Member folders and files on a run": the iPhone shows what ANDROID-PLAN's AA9 subsection specifies, identically, and its path field turns off the keyboard helpers of §6.5. "Later" gains the pointer. No existing text changes. **Fix round after the blind reviews:** follows ANDROID-PLAN 0.1.135's fix round (`share` for a working folder only, no nested or case-duplicate entries, the path typed exactly as the computer shows it and not a whole home folder, 1,024-based sizes). The owner's decision a (GC #15855) is in: "Read only" is enforced for the folder a run starts in, and the help says a run can reach every folder shared with the pairing (as on Android); runs with files only are referred too (GC #15856)
@@ -1613,8 +1614,10 @@ Owner decisions of 2026-10-27 (VAULT-MESSAGING 0.68.0 §11.14.10,
 *Owner decisions of 2026-10-27; ANDROID-PLAN 0.1.89 §4 "The approvals
 indicator" governs and is carried here by reference: what counts (open
 approvals: pending, not decided, not expired; one entry per batch;
-notices, outgoing requests, rows awaiting the peer and a "Not now"
-location request do not), the deadlines (each event's `exp`,
+notices, outgoing requests still waiting for the handshake, rows
+awaiting the peer and a "Not now" location request do not; an outgoing
+request whose safety code waits for the member's Approve or Decline
+does, ANDROID-PLAN 0.1.140), the deadlines (each event's `exp`,
 `pending.exp` for a challenge; `ExpiryClock`), where it shows (every screen
 of the unlocked shell with a navigation bar, detail screens included;
 not on Approvals or any request screen; not in full-screen flows),
