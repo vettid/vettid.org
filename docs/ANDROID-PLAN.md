@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.141
+version: 0.1.142
 date: 2026-11-24
 changelog:
+  - 0.1.142: 2026-11-24 (owner decision a, Ground Control #17899; IOS-PLAN 0.1.84). §4 "Transfer (new phone)", a new paragraph "A different code while the transfer waits" after "Back while the transfer waits". The same code is recognized first. Before minute 10, a different valid code first opens the existing "Cancel the move?": Keep waiting keeps the transfer; Cancel the move abandons it, and the new code starts only after the abandon is saved. An abandon refused at minute 10 returns to waiting, with the new code not used. From minute 10 to the window's end a different code is refused with nothing dropped; this closes Android's gap where a scan between minute 10 and 11 replaced the waiting transfer, against "no abandon from minute 10". No new text. Built by cards GC #17839 and GC #17840.
   - 0.1.141: 2026-11-24 (owner decision b, Ground Control #17837; card GC #17838; IOS-PLAN 0.1.82). §4 "Transfer (new phone)", a new paragraph "Back while the transfer waits": while a transfer to this phone is live (code shown, or found waiting after a restart, until it ends in any way), Back never leaves the move screen for "Your account already has a vault" or welcome. Before minute 10 it opens the existing cancel confirmation; from minute 10 to the window's end it does nothing; after the end it follows the phase read again. Today Android's waiting step already keeps Back (the confirmation, or nothing during the window). The gap is `leaveMove`, which sends any setup stage to "Your account already has a vault" whenever Back reaches it: from the transfer screen's first step after a restart, before or without the transfer read back, from the first step after a cancel the vault refused at minute 10, and possibly from an ended screen until the phase is read again. No new text. Built by card GC #17839. Follows 0.1.140 (vettid/vettid.org#661).
   - 0.1.140: erratum, 2026-11-24 (owner decision a, Ground Control #17804; card GC #17705). §4 "The approvals indicator", 1: "the member's own outgoing requests" are not counted only while they wait for the handshake or for the other side; one whose safety code waits for the member's Approve or Decline is counted, as an incoming request is (the drawer badge already counted it). 3 (an erratum of the app's, not part of decision a): the one-second tick also runs for the icon while it is shown, an entry is time-critical and touch exploration is on, so that the icon's description (11, unchanged) can name the time left; without it the icon would need either a tick or a description with no time. 12: the tests gain both outgoing cases and the icon's tick with touch exploration on and off. IOS-PLAN 0.1.81 corrects §4.12's summary to match. No text changes.
   - 0.1.139: 2026-11-24 (owner decision a, GC #17671; card GC #17673). §4 "Devices & agents", AA8 "Fail closed": an agent's request that does not name its device and itself (a non-blank `device_id`, and a `name` the screen can show: not only spaces or invisible characters once cleaned) or has no `exp` that reads as a time is Deny only, for `item.use`, `item.get` and `catalog` as well as `item.run` and `item.proxy`. Only refuses more; no new text (AA5's deny-only line). Built on iOS (vettid/vettid-ios, card GC #17503) and Android (card GC #17673).
@@ -4112,6 +4113,48 @@ both sections above (`pin.change`, `credential.password.change`,
   - With a redeemed setup code, neither recovery nor "Set up a new
     vault anyway" can be reached while the transfer waits.
   - Back from the other setup stages is unchanged.
+
+  **A different code while the transfer waits** (0.1.142, owner
+  decision a, 2026-11-24, Ground Control #17899). The same code is
+  recognized first, as before (same `r` and `c`, whatever its `exp`,
+  VAULT-MESSAGING 0.88.3 §11.14.10 rule 5): back to that move's screen,
+  nothing dropped and nothing asked. A waiting transfer whose code this
+  phone no longer knows treats every code as different. Before minute
+  10, a different code that passes the local checks (an invalid or
+  expired one says so as today and changes nothing), scanned or pasted
+  while the transfer is live (also at the first step after a restart),
+  first opens the same "Cancel the move?" confirmation. "Keep
+  waiting" returns to the move screen as it stands, and the new code is
+  not used. "Cancel the move" abandons the waiting transfer, and the
+  new code starts only after that abandon is done and saved. An abandon
+  refused because minute 10 was reached meanwhile, or a confirmation
+  still open at minute 10, returns to the waiting or checking screen:
+  the new code is not used and nothing is dropped. From minute 10 to
+  the end of the settlement window a different code is refused, as any
+  new code is then, with no confirmation and nothing dropped (no abandon
+  from minute 10, as above). Android shows its general busy text, the
+  iPhone §14 "A move still under way". Today Android's scan replaces
+  and drops the waiting transfer between minute 10 and 11, before its
+  settlement starts; that ends. Why: a different code dropped the
+  waiting transfer at once, losing it if the old phone had already
+  approved. No new text. Tests (0.1.142):
+  - The same code goes back to its move screen and asks nothing.
+  - Before minute 10, a different valid code opens the confirmation;
+    Keep waiting keeps the transfer and drops nothing; Cancel the move
+    abandons it, then starts the new one.
+  - Cancel the move confirmed but refused at minute 10, and a
+    confirmation open as minute 10 passes: back to the waiting or
+    checking screen, the new code not used, nothing dropped.
+  - A different code at minute 10:30 and in the settlement window is
+    refused and drops nothing.
+  - A different code at the first step after a restart, before the
+    transfer is read back, scanned and pasted: before minute 10 it opens
+    the confirmation, from minute 10 it is refused; nothing is dropped
+    either way.
+  - An abandon whose save fails starts no new code.
+  - A waiting transfer whose code is not known (the iPhone's adopted
+    pin): a re-scan of the same code is treated as different.
+  - An invalid or expired different code says so and changes nothing.
 
   The 11 minutes are one deadline, measured from the moment the app
   started its `hs.init`; no user action extends it. At the deadline the
