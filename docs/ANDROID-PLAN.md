@@ -4117,7 +4117,7 @@ both sections above (`pin.change`, `credential.password.change`,
   **A different code while the transfer waits** (0.1.142, owner
   decision a, 2026-11-24, Ground Control #17899). The same code is
   recognized first, as before (same `r` and `c`, whatever its `exp`,
-  VAULT-MESSAGING §11.14.10 rule 5): back to that move's screen,
+  VAULT-MESSAGING 0.88.3 §11.14.10 rule 5): back to that move's screen,
   nothing dropped and nothing asked. A waiting transfer whose code this
   phone no longer knows treats every code as different. Before minute
   10, a different code that passes the local checks (an invalid or
@@ -4148,7 +4148,12 @@ both sections above (`pin.change`, `credential.password.change`,
   - A different code at minute 10:30 and in the settlement window is
     refused and drops nothing.
   - A different code at the first step after a restart, before the
-    transfer is read back, scanned and pasted.
+    transfer is read back, scanned and pasted: before minute 10 it opens
+    the confirmation, from minute 10 it is refused; nothing is dropped
+    either way.
+  - An abandon whose save fails starts no new code.
+  - A waiting transfer whose code is not known (the iPhone's adopted
+    pin): a re-scan of the same code is treated as different.
   - An invalid or expired different code says so and changes nothing.
 
   The 11 minutes are one deadline, measured from the moment the app
