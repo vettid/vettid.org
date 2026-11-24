@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.141
+version: 0.1.142
 date: 2026-11-24
 changelog:
+  - 0.1.142: 2026-11-24 (owner decision a, Ground Control #17899; IOS-PLAN 0.1.84). §4 "Transfer (new phone)", "Back while the transfer waits": before minute 10, a different transfer code scanned or pasted while a transfer waits first opens the existing "Cancel the move?" confirmation. Keep waiting keeps the transfer; Cancel the move abandons it and goes on with the new code. Before, it dropped the waiting transfer at once, losing it if the old phone had already approved. No new text. Built by cards GC #17839 and GC #17840.
   - 0.1.141: 2026-11-24 (owner decision b, Ground Control #17837; card GC #17838; IOS-PLAN 0.1.82). §4 "Transfer (new phone)", a new paragraph "Back while the transfer waits": while a transfer to this phone is live (code shown, or found waiting after a restart, until it ends in any way), Back never leaves the move screen for "Your account already has a vault" or welcome. Before minute 10 it opens the existing cancel confirmation; from minute 10 to the window's end it does nothing; after the end it follows the phase read again. Today Android's waiting step already keeps Back (the confirmation, or nothing during the window). The gap is `leaveMove`, which sends any setup stage to "Your account already has a vault" whenever Back reaches it: from the transfer screen's first step after a restart, before or without the transfer read back, from the first step after a cancel the vault refused at minute 10, and possibly from an ended screen until the phase is read again. No new text. Built by card GC #17839. Follows 0.1.140 (vettid/vettid.org#661).
   - 0.1.140: erratum, 2026-11-24 (owner decision a, Ground Control #17804; card GC #17705). §4 "The approvals indicator", 1: "the member's own outgoing requests" are not counted only while they wait for the handshake or for the other side; one whose safety code waits for the member's Approve or Decline is counted, as an incoming request is (the drawer badge already counted it). 3 (an erratum of the app's, not part of decision a): the one-second tick also runs for the icon while it is shown, an entry is time-critical and touch exploration is on, so that the icon's description (11, unchanged) can name the time left; without it the icon would need either a tick or a description with no time. 12: the tests gain both outgoing cases and the icon's tick with touch exploration on and off. IOS-PLAN 0.1.81 corrects §4.12's summary to match. No text changes.
   - 0.1.139: 2026-11-24 (owner decision a, GC #17671; card GC #17673). §4 "Devices & agents", AA8 "Fail closed": an agent's request that does not name its device and itself (a non-blank `device_id`, and a `name` the screen can show: not only spaces or invisible characters once cleaned) or has no `exp` that reads as a time is Deny only, for `item.use`, `item.get` and `catalog` as well as `item.run` and `item.proxy`. Only refuses more; no new text (AA5's deny-only line). Built on iOS (vettid/vettid-ios, card GC #17503) and Android (card GC #17673).
@@ -4090,6 +4091,14 @@ both sections above (`pin.change`, `credential.password.change`,
   Back button go where the phase, read again, says: welcome on a phone
   with no redeemed setup code, "Your account already has a vault" with
   one. A `TRANSFER_WAITING` read before the end never decides it.
+  **A different code while the transfer waits** (0.1.142, owner
+  decision a, 2026-11-24, Ground Control #17899). Before minute 10,
+  scanning or pasting a transfer code other than the waiting one first
+  opens the same "Cancel the move?" confirmation. "Keep waiting"
+  returns to the waiting transfer, and the new code is not used.
+  "Cancel the move" abandons the waiting transfer, then goes on with
+  the new code. The same code is recognized as before. From minute 10
+  a different code is handled as today. No new text.
   Why: `leaveMove` sends any setup stage, `TRANSFER_WAITING` included,
   to "Your account already has a vault". On a phone that never redeemed
   a code that is wrong, and with one it hides a live move and offers
@@ -4112,6 +4121,9 @@ both sections above (`pin.change`, `credential.password.change`,
   - With a redeemed setup code, neither recovery nor "Set up a new
     vault anyway" can be reached while the transfer waits.
   - Back from the other setup stages is unchanged.
+  - Before minute 10, a different code opens the confirmation: Keep
+    waiting keeps the transfer and drops nothing, and Cancel the move
+    abandons it and starts the new one; the same code is unchanged.
 
   The 11 minutes are one deadline, measured from the moment the app
   started its `hs.init`; no user action extends it. At the deadline the
