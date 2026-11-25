@@ -1,8 +1,8 @@
 ---
 title: PQC-MIGRATION
 status: draft
-version: 0.4.1
-date: 2026-11-21
+version: 0.4.2
+date: 2026-11-24
 owner: Al Liebl (Mesmer)
 component: cross-cutting (vettid-agent, relay, vault manager, credential format)
 related:
@@ -13,6 +13,14 @@ related:
   - CALLS-PLAN.md
   - VAULT-MESSAGING.md
 changelog:
+  - 0.4.2: 2026-11-24, with VAULT-MESSAGING 0.94.0 and RELAY-PROTOCOL
+    0.14.0 (card GC #17710). §3: the short pairing code's keys are listed
+    in the Argon2id row and a new row for the relay's code MAC key. All
+    are symmetric, and each derived key lives at most 10 minutes, so §4
+    row 10 covers them and no migration is needed. Grover does not
+    change the code's protection: it rests on Argon2id's cost per guess
+    over 8.5 × 10^11 codes, which a quantum computer does not lower in
+    any practical way (memory-hard, sequential), not on a key length.
   - 0.4.1: §4 row 14, §3 and §9: the clients' side of TLS to the relay,
     checked on 2026-11-21. The desktop (rustls) now uses the aws-lc-rs
     provider with `prefer-post-quantum` and negotiates X25519MLKEM768 in a
@@ -168,7 +176,8 @@ Plan statement (for the owner's approval):
 | Ed25519 | Protean Credential; vault `ik` and device `ik` (message, share and ICE-configuration signatures); relay keypairs; wake keypairs; mailbox proof-of-possession; PASETO v4.public deposit tokens; the calling service's per-request key (CALLING-SERVICE: "made for this one request") | Forgery post-CRQC; risk scales with key lifetime |
 | ChaCha20-Poly1305 | Payload and sealed-storage encryption | Safe (Grover only) |
 | AES-128-GCM (FrameCryptor) | Call media frames, keyed from `k_call` | Safe (NIST Category 1) |
-| Argon2id | Key derivation from user secrets | Safe |
+| Argon2id | Key derivation from user secrets; (0.4.2) the short pairing code's lookup `tag` and its bundle key `k_w` (Argon2id 256 MiB, then HKDF-SHA-256; the bundle sealed with XChaCha20-Poly1305), VAULT-MESSAGING §6.7.2 | Safe; the code's keys live at most 10 minutes |
+| HMAC-SHA-256 (relay secret `k_pc`) | (0.4.2) The relay's keyed MAC of a pairing code's `tag`, the only form it stores (RELAY-PROTOCOL §6.9.1) | Safe (symmetric) |
 | AWS Nitro attestation (LAT trust root) | Enclave PCR attestation | AWS-controlled; not migratable by VettID |
 | Ed25519 (KMS, non-exportable) | Ballot (votes) site key; signs the service list (label ‖ SHA-256(list)) | Forgery post-CRQC; long-lived, identity-like |
 | ECDSA P-256 (KMS) | Service-list anchor key; logs each list in Rekor (Sigstore hashedrekord) | Forgery post-CRQC; depends on Sigstore/Rekor |

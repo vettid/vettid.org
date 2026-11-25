@@ -1,12 +1,12 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.93.2
-date: 2026-11-22
+version: 0.94.0
+date: 2026-11-24
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
-  - RELAY-PROTOCOL.md (0.11.1)
+  - RELAY-PROTOCOL.md (0.14.0)
   - VAULT-SERVICE-CONTRACT.md (1.0.0), VAULT-SERVICE-INDEPENDENCE.md (0.2.1)
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
@@ -15,9 +15,9 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md (0.3.0)
   - MEMBER-API.md (2.14.0)
-  - ANDROID-PLAN.md (0.1.138)
-  - IOS-PLAN.md (0.1.80; §9.1 VA1–VA4)
-  - AGENT-PLAN.md (0.1.21; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, AG14, §4.9, AV9–AV11)
+  - ANDROID-PLAN.md (0.1.143)
+  - IOS-PLAN.md (0.1.85; §9.1 VA1–VA4)
+  - AGENT-PLAN.md (0.1.22; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, AG14, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - AGENT-SEPARATE-ACCOUNT.md (0.1.5; §6, §9 Q1 a and Q9 a)
@@ -30,6 +30,77 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.94.0: 2026-11-24, with RELAY-PROTOCOL 0.14.0, AGENT-PLAN 0.1.22,
+    ANDROID-PLAN 0.1.143, IOS-PLAN 0.1.85 and PQC-MIGRATION 0.4.2.
+    Owner-approved card GC #17710: **short pairing codes** for desktops
+    and agents; owner decision a, GC #17957, after the blind pair's
+    review. A minor version: a member and a form are added, nothing is
+    withdrawn. New §6.7.2. (1) `device.pair.create` takes `form:
+    "code"` and answers `{pairing_id, code, exp, r}`. The code is 8
+    symbols of the enrollment code's 31-symbol alphabet
+    (ENROLLMENT-CODES §3.1), shown on the app and typed into the
+    desktop or agent, single-use, 10 minutes, one live code per vault
+    (a new one cancels the old). (2) The bundle is sealed with
+    XChaCha20-Poly1305 under `k_w`, from Argon2id (`t = 3`, `m =
+    256 MiB`, `p = 1`) over the code with a per-claim random salt. Its
+    associated data binds the code version, purpose, relay, claim id
+    and salt. (3) The relay finds the claim by a `tag`, a second
+    Argon2id over the code under an **hourly lookup salt bound to the
+    epoch**, which the vault and the device recompute and check against
+    their own clocks, failing closed; the relay stores only an HMAC of
+    the tag and never receives the code. (4) One full search of the
+    code space costs about 6,760 CPU-years (measured 0.25 s per run),
+    8.2 B200-class GPU-years or $0.3–1 million rented. The relay, or a
+    thief of its store and MAC key, that finishes a search for the live
+    hour can read live bundles and try to pair in the member's place;
+    only the SAS stops it, and holding that position costs a full
+    search every hour. (5) The SAS stays, and §6.7.2 says why. (6) The
+    QR and the long link stay for every phone-to-phone flow, and as the
+    code's fallback. (7) A PAKE is recorded as version 2, on a new label
+    and route, never a fallback. Also §6.4 (a pointer), §6.7 (a
+    pointer), §10.3 (`device.pair.create`) and §13.6 (logging). Not
+    built; vault, relay, app, desktop and connector cards follow, and
+    test vectors come with the vault card.
+    **Decided (owner)** (each chosen, not in the card; all approved by the owner as listed, Ground Control #17983; (k) GC #17957):
+    (a) the per-code limit: a code is cancelled after 32 unmatched
+    redeems in its bucket of 1/65,536 of the tag space, a chance of
+    about 2.5 × 10^-6 that a given code is found (enrollment's is
+    9.4 × 10^-10); cancelling every live code takes about 2.1 million
+    requests in 10 minutes, about 105,000 IPv4 addresses or 2,100
+    IPv6 /32s, and stops only code pairings on that relay;
+    (b) the per-network limit: 20 redeems per 10 minutes per IPv4
+    address, 10 per IPv6 /64, with ceilings of 200 per /48 and 1,000
+    per /32;
+    (c) that limit is answered with the same `404` as a wrong code;
+    only the flood guard keeps its `429`;
+    (d) every redeem answer is sent at a fixed hold of 250 ms after
+    receipt;
+    (e) the issuance limit: 5 code pairings per vault per hour, 20 per
+    day;
+    (f) the lookup salt changes every hour (the epoch), listed from 2
+    minutes before its hour until 10 minutes after; every client checks
+    every entry against that listing window with 120 s of clock skew;
+    the relay accepts at PUT the current epoch and the next once listed,
+    never the previous; a vault tries the other entry once on
+    `bad_request`, then answers `claim_unavailable`;
+    (g) the app's code screen keeps Copy and Share (ANDROID-PLAN
+    decision 1) and drops the QR, which stays on the link fallback;
+    (h) a vault on a relay that is not the app's built-in one: the app
+    shows the canonical relay (port included) under the code, and the
+    operator gives it to the device;
+    (i) what the member sees: on the phone, the existing "This code
+    expired." with New code; on the agent, the NEW "That code didn't
+    work" text pointing to Show a link instead, the NEW "couldn't
+    reach the relay" text, and the NEW "this computer's clock may be
+    wrong" text for a salt list its clock refuses;
+    (j) the direction: the phone shows the code and the desktop or
+    agent takes it, as in §6.7's flow (confirmed by the owner, GC
+    #17957: the card's "screens" are the app's pairing screens);
+    (k) **decided (owner decision a, GC #17957):** Argon2id with a
+    time-bound relay salt now, accepting that a relay which finishes an
+    hourly search can attack that hour's pairings and only the SAS stops
+    it; a PAKE (SPAKE2 or CPace with public locator symbols and secret
+    symbols) as version 2.
   - 0.93.2: 2026-11-22, erratum to 0.93.1. Owner-approved card GC
     #16477, from the reviews of ANDROID-PLAN 0.1.137 (AA7, AA8,
     vettid/vettid.org#652) and vettid/vettid-android#430. Every rule
@@ -10834,7 +10905,9 @@ as a URL on **the invitation's own relay** (`r` in the payload):
   the URL form, so that a later switch to URL QRs, which a phone's camera
   would open, needs no app release.
 - Pairing and transfer links (`t` = `p`, `d`, `a`) are used in person
-  and stay bare payloads.
+  and stay bare payloads. (0.94.0) A desktop's or an agent's pairing
+  can instead use a short code (§6.7.2). Its blob is sealed under a key
+  derived from the code, not `k_b`, and it has no QR and no link.
 
 ```
 A app            A vault           Relay            B vault           B app
@@ -11769,7 +11842,9 @@ answered `forbidden`: it leaves only by a transfer or a recovery); and an `hs.in
 three handshakes is dropped and audited (`drop.one_app`). Desktops and
 agents pair from the app as below; they never hold the credential. The QR
 (TTL 10 min) is shown on the app; the new device scans it, or the code is
-pasted.
+pasted. (0.94.0) For a desktop or an agent the app shows an 8-character
+pairing code instead, which the member types into the new device; the
+QR and the link stay as its fallback (§6.7.2).
 
 ```
 Paired app            Vault                Relay              New device/agent
@@ -12206,6 +12281,330 @@ sent the transfer's `hs.resp`, and a new phone that has received
 OWNER DECISION (recommended: as specified): the transfer does not
 re-check the old app's device attestation; its session, the PIN and the
 password prove it.
+
+#### 6.7.2 Short pairing codes for desktops and agents (0.94.0)
+
+(0.94.0, card GC #17710; owner decision a, GC #17957.) A desktop or an
+agent rarely has a camera, and the pairing link of §6.4 is about 259
+characters, too long to type. So for these two roles the app shows an
+**8-character pairing code**, and the member types it into the desktop
+or the agent. The direction is the link's: the app makes the pairing and
+shows the code (§6.7), and the new device takes it. The relay maps the
+code to the claim. It never receives the code, and it can read a bundle
+only after a search of the code space that it must repeat every hour
+(below, "What the relay can do").
+
+**Which flows use it.**
+
+- `device.pair.create{role: "desktop" | "agent", form: "code"}` makes a
+  **code pairing**, answered `{pairing_id, code, exp, r}` (§10.3).
+  Without `form`, or with `form: "link"`, it makes a link pairing,
+  unchanged (§6.4). A pairing has one form, never both.
+- Apps offer the code for "Pair an agent" and "Pair a desktop". The
+  link stays as the fallback there (the app's "Show a link instead",
+  ANDROID-PLAN §4 "Pair an agent (AA2)"), and a desktop and an agent
+  accept both.
+- Nothing else changes. The QR and the long link stay for every
+  phone-to-phone flow: a transfer (§6.7.1, `t: "p"`), connections
+  (§6.4), recovery (§11.11.2) and enrollment (ENROLLMENT-CODES). None
+  of them takes a short code, and no bundle of `kind` `app` or
+  `connection` is ever sealed under one.
+- A vault before 0.94.0 ignores `form` (§10.1: unknown members are
+  ignored) and answers with a `link`. The app then shows the link
+  screen. A vault whose relay does not advertise `pair_codes`
+  (RELAY-PROTOCOL §6.1, §6.9.1), or whose relay's salts fail the checks
+  below, answers `claim_unavailable`, and the app shows the link screen
+  too. The link is not weaker than the code (its key is 256 random
+  bits), so this is no downgrade.
+
+**The code.**
+
+- 8 symbols of `23456789ABCDEFGHJKMNPQRSTUVWXYZ`, the 31-symbol alphabet
+  of ENROLLMENT-CODES §3.1 (no 0, 1, I, L or O). 31^8 =
+  852,891,037,441, about 8.53 × 10^11 codes (39.6 bits).
+- Made in the vault from its CSPRNG by rejection sampling: bytes
+  248–255 are discarded and the rest taken mod 31, so the symbols are
+  uniform (ENROLLMENT-CODES §3.1).
+- Shown as `XXXX-XXXX`.
+- **Input on the new device, in this order:** (1) remove spaces and
+  hyphens; (2) if 8 characters remain, it is a code: upper-case it,
+  then refuse it, before anything is derived or sent, if any character
+  is outside the alphabet, with "codes never contain 0, 1, I, L or O"
+  (ENROLLMENT-CODES §3.1); (3) otherwise parse the original input as a
+  link (§6.4). `code` below is the 8 normalized ASCII bytes.
+- **Single use, 10 minutes.** `exp` is the vault's time of creation
+  plus 600 s, in whole seconds. The first successful redeem at the
+  relay deletes the claim. Expiry deletes it too.
+- **One live code per vault.** A new code pairing cancels the vault's
+  live code pairing, if any, whatever its role: the vault deletes its
+  claim (`DELETE`, RELAY-PROTOCOL §6.9.1), denylists its open token's
+  `jti` and drops it, as `device.pair.reject` does before a scan
+  (§10.3). The relay enforces the same per creating mailbox.
+- **Issuance limit** (chosen; not in the card): at most 5 code
+  pairings per vault per hour and 20 per day, as ENROLLMENT-CODES
+  §3.3's codes issued per member; beyond them `limit`.
+- The code is a bearer secret for 10 minutes. It MUST NOT appear in
+  logs, metrics, saved state, crash reports or any request to any
+  server (§13.6). It leaves the vault only in the sealed answer to the
+  app.
+
+**The relay's base URL.** `r` below is canonical: `https://`, the
+host in lower case, then `:` and the port only when it is not 443, with
+no path and no trailing slash (`https://relay.vettid.org`,
+`https://relay.example.org:8443`). The host is a DNS name in lower-case
+ASCII, an internationalized name only in its punycode (`xn--`) form; an
+IP address literal (IPv4 or IPv6) is refused. The vault emits only that form in
+`r`. A desktop or agent normalizes a relay it is given (AGENT-PLAN
+§4.3 `--relay`) to it (a bare host or `host:port` gets `https://`),
+and refuses one that has a path, a query, a fragment, user information,
+an IP literal, a non-ASCII host or a scheme other than `https`. The app shows exactly the part to type:
+the host, and `:port` when it is part of `r`.
+
+**The lookup salt is bound to the hour.** The relay cannot choose a
+salt that serves longer than one hour, and nobody but the relay can
+precompute a salt before the relay lists it:
+
+```
+epoch    = floor(unix time / 3600), the hour, as 8 bytes big-endian
+nonce    = 16 bytes the relay chose at random for that epoch
+s_r      = first 16 bytes of SHA-256("vettid/pair-code/1/salt" || 0x00 || r || 0x00 || epoch || 0x00 || nonce)
+salt_id  = lowercase hex of the first 4 bytes of s_r
+```
+
+The relay lists entries `{salt_id, epoch, nonce}` (RELAY-PROTOCOL
+§6.9.1). The vault and the device recompute `s_r` from `r`, `epoch`
+and `nonce` themselves, and **refuse the whole list** (fail closed) if:
+
+- it has more than 2 entries, or an entry with a nonce that is not 16
+  bytes, or two entries for one epoch;
+- an entry's `salt_id` does not match the recomputed `s_r`;
+- an entry's epoch is outside its **listing window** by the client's
+  own clock, with 120 s of allowed skew (chosen; not in the card): from
+  2 minutes before the epoch's hour starts until 10 minutes after it
+  ends, the window in which the relay lists it. Every client checks
+  every entry against this one window;
+- an epoch the client has already seen (in this pairing, or for the
+  vault in the last hour) comes with a different nonce.
+
+**Which entry a vault uses.** For its PUT the vault picks the entry
+whose epoch is current by its own clock (within the 120 s skew). The
+relay accepts the current epoch, and the next one once it is listed,
+but never the previous one: that salt is delisted 10 minutes after its
+hour, before a claim made after the hour would expire. If the relay
+answers `bad_request` for the salt (the two clocks disagree near the
+hour), the vault tries the other listed entry once, if it passes the
+vault's own check, and then answers `claim_unavailable`. So a code
+pairing makes at most 2 PUTs per code for the salt.
+
+A refusal at the vault answers `claim_unavailable` (the app falls back
+to the link). The vault records it in its audit log and metrics with a
+distinct reason, `pair_code.salts_refused` (with which check failed,
+and no code, salt, nonce or tag), so that a relay whose codes never
+work is noticed. At the device a list refused for the clock check ends
+with the clock text, and any other refusal with the failure text
+(AGENT-PLAN §11); nothing is redeemed. Nothing is ever derived from a refused
+list, so a relay cannot make a client run many 256 MiB derivations.
+
+**Two derivations.** Both are Argon2id (RFC 9106, version 0x13) from a
+maintained library: libsodium's `crypto_pwhash` with
+`crypto_pwhash_ALG_ARGON2ID13`, or the library each platform already
+uses for the PIN's Argon2id (§3.3.1). Never hand-written.
+
+```
+P        = t = 3, m = 256 MiB (262,144 KiB), p = 1, output 32 bytes
+purpose  = "a" for an agent, "d" for a desktop (the role's `t`, §6.4)
+pw(l)    = "vettid/pair-code/1/" || l || 0x00 || purpose || 0x00 || r || 0x00 || code
+
+tag      = Argon2id(pw("lookup"), s_r, P)
+x        = Argon2id(pw("key"),    s_c, P)          s_c: 16 random bytes, fresh for this claim
+k_w      = HKDF-SHA-256(ikm = x, salt = "", info = "vettid/pair-code/1/key", L = 32)
+aad      = "vettid/pair-code/1/bundle" || 0x00 || purpose || 0x00 || r || 0x00 || claim_id || 0x00 || s_c
+blob     = nonce (24) || XChaCha20-Poly1305(k_w, nonce, aad, json)
+```
+
+- `pw` contains 0x00 bytes. Implementations MUST pass it to an API that
+  takes bytes and a length (as `crypto_pwhash` does), never a
+  NUL-terminated string; the vectors cover it.
+- `s_r` is the hour's lookup salt (above). The device needs it before it
+  knows any claim, so it cannot be per claim. `s_c` is per claim,
+  random, and stored with the claim.
+- `claim_id` is the 26-character lowercase base32 id of 128 random bits
+  that the vault chooses for a code claim (RELAY-PROTOCOL §6.9.1), and
+  `json` is the bundle of §6.4 with `kind` `agent` or `desktop`.
+- **The AEAD is XChaCha20-Poly1305**, the bundle's own (§6.4), with a
+  random 24-byte nonce. Its associated data binds the code's version
+  (the `1` in the label), the purpose, the relay, the claim id and the
+  per-claim salt. So a blob opens only as the claim it was made for, on
+  that relay, for that role: a desktop code typed into an agent, a blob
+  moved to another claim or another relay, and a salt swapped by the
+  relay all fail. The bundle's own rules still apply after opening:
+  `kind` matches `purpose`, `remote` is `false`, `exp` has not passed.
+- The AEAD replaces the link's `h` and `k`: only someone who holds the
+  code can make a blob that opens.
+- The labels keep the two derivations apart, so `tag` says nothing
+  about `x`. The code's version is fixed at 1 with these parameters.
+  Nothing carries the parameters, and nobody negotiates them.
+
+**Making a code pairing** (the vault, on `device.pair.create{form:
+"code"}`):
+
+1. The usual checks of `device.pair.create` (§6.7, §10.3), then the
+   issuance limit. Then it cancels its live code pairing, if any (above).
+2. It reads the relay's salts and checks them (above); it uses the
+   entry current by its own clock (above, "Which entry a vault
+   uses"). It makes the code, `s_c`, `claim_id`, the pairing's
+   open token and the bundle. The bundle has no `hint` (§13.6).
+3. It computes `tag` and `x`, one after the other, never at once. They
+   share the enclave's Argon2id work with the PIN's and the recovery
+   wrap's, and **unlocks go first**: a code derivation waits while an
+   unlock waits. When there is no room for 256 MiB, the answer is
+   `busy`, with no room reserved (as §11.14's recovery wrap). On a vault
+   host's 1-vCPU enclave, where a 64 MiB unlock took 195 ms
+   (W10-READINESS P20), the two runs take about 1.6 s of that vCPU (an
+   estimate); capacity must be measured again before release.
+4. It sends `PUT /v1/pair-code/{claim_id}` with `{salt_id, tag, salt:
+   s_c, blob}`. A `409 code_taken` means the tag collided with a live
+   code. The relay has then deleted both claims, so the vault learns
+   nothing it could use. It makes a new code and `s_c` and tries again,
+   at most 3 times, then answers `relay_error`. A `bad_request` for
+   the salt is handled as "Which entry a vault uses" says. The other vault's
+   member just sees their code fail and gets a new one.
+5. It answers `{pairing_id, code, exp, r}`. When the pairing ends
+   unredeemed (rejected, cancelled, replaced by a new code, or after its
+   10 minutes), the vault deletes the claim.
+
+**Redeeming it** (the desktop or the agent):
+
+1. It parses the input (above) and refuses a bad code locally.
+2. It reads the salts from its relay and checks them (above). That
+   relay is VettID's for its environment by default. When the app shows
+   a relay with the code (§10.3 `r`), the operator gives the device
+   that relay (AGENT-PLAN §4.3). It computes `tag` for each listed salt
+   (one, or two near the hour), and names each tag's `salt_id`. **It
+   checks memory first**, as far as the platform allows: if the first
+   256 MiB derivation cannot run, it stops before redeeming, with its
+   memory text (AGENT-PLAN §11), and the code is not spent.
+3. It sends `POST /v1/pair-code/redeem` with those tags, **once**, and
+   never retries on its own.
+4. On `404 code_unknown` it says the code didn't work and points to
+   the phone's "Show a link instead" (AGENT-PLAN §11). The relay
+   answers every failure that way: wrong, expired, spent, cancelled or
+   locked codes, and the per-network limit. The device learns nothing
+   more.
+5. On a `429` (the relay's flood guard), a `5xx` or a network error,
+   the relay did not redeem the code, except that a network error can
+   hide a `200` that was lost. The device does not retry on its own. It
+   says the relay could not be reached (AGENT-PLAN §11), and the member
+   may try again by hand; if a lost `200` spent the code, that try gets
+   the `404`.
+6. On `200 {claim_id, salt, blob, expires_at}` it computes `x` and
+   `k_w` and opens the blob with `aad`. A blob that does not open, a
+   bundle that breaks §6.4's rules, or an expired one: the device drops
+   everything and says the code didn't work. It never falls back to any
+   other way of reading the claim.
+7. Then the pairing goes on exactly as §6.7: `hs.init` on the
+   bundle's open token, the SAS, the member's approval.
+
+**What a search of the codes costs.** Measured on 2026-11-24 with
+libsodium (PyNaCl 1.6.2) on one core of an Intel Core Ultra 7 258V
+laptop: Argon2id with `t = 3`, `p = 1` took 0.05 s at 64 MiB, **0.25 s
+at 256 MiB** and 1.17 s at 1 GiB.
+
+- **One full search of one salt, on CPUs:** 8.53 × 10^11 × 0.25 s =
+  2.13 × 10^11 s, about **6,760 CPU-years**. Each guess also needs
+  256 MiB of memory.
+- **On graphics cards** (estimates from memory bandwidth, not
+  measurements): one run moves about 2.4 GB (3 passes over 256 MiB,
+  three block accesses each). That gives about **19.5 GPU-years** on
+  H100-class cards, **8.2 GPU-years** on B200-class cards, and about
+  65 GPU-years on a card with 1 TB/s. Rented, one full search costs
+  roughly **$0.3–1 million**.
+- **Coverage is proportional to spend.** A search of a fraction of the
+  codes under a salt finds that fraction of the codes made under it.
+
+**What the relay can do.** The relay, or anyone holding its store and
+its MAC key `k_pc`, sees every `tag` and can test every stored
+`code_mac` (RELAY-PROTOCOL §6.9.1).
+
+- Someone who has **finished a search for the live hour's salt** learns
+  each code as the vault PUTs it. Then they can read the live bundle,
+  with its open token still unused, and seal a substitute blob of their
+  own under the code and try to pair in the member's place, or sit in
+  the middle. **Only the SAS comparison stops that** (below).
+- The salt is bound to its hour (above), so a search serves one hour of
+  codes on one relay. The relay chooses each hour's nonce, so it can finish the search for a chosen hour before that hour begins: attacking one chosen hour costs one search, done ahead of time and without time pressure; attacking every hour costs one search per hour. A thief of the relay's store and `k_pc` sees each nonce only once it is listed, so a live attack must finish within that hour. Holding the position all the time costs one full
+  search per hour: about 72,000 B200-class cards (or about 570,000 at
+  1 TB/s, or 5.9 × 10^7 CPU cores) running without pause, and
+  $0.3–1 million an hour.
+- Someone with a copy of the relay's store but **not `k_pc`** cannot
+  use the stored `code_mac`. They must search `x` under each claim's
+  own `s_c`: one full search **per claim**, after the claim's 10
+  minutes, for a bundle already spent.
+- **What a bundle exposes.** It ties the creating mailbox, which the
+  relay knows, to the vault's long-term `ik`, and gives its `kem`, its
+  mailbox key and the pairing id, with an open token that is live until
+  it is used or expires. It holds no name of a device or of the member
+  (§13.6), but it is not free of identity: the `ik` is the vault's
+  identity key.
+- **Version 2 (recorded; owner decision a, GC #17957).** A PAKE
+  (SPAKE2 or CPace, in the style of magic wormhole: a few public locator
+  symbols that find the claim, and secret symbols that only the PAKE
+  uses) would give the relay one online guess per run and no offline
+  search at all. It would be a new label (`vettid/pair-code/2/`) and a
+  new relay route, never a fallback from version 1. It is not
+  specified yet.
+
+**The devices' cost.** A desktop or an agent runs 2 derivations (3 near
+the hour): about 0.5–0.75 s on the laptop above, and a few seconds on a
+small 1-vCPU machine (an estimate). It needs 256 MiB free. The phone
+runs none: the vault makes the code. If a later flow had the phone
+derive, a phone core is roughly 2–4 times slower than this laptop's (an
+estimate), about 0.5–1 s per run.
+
+**Guessing online.** A guess costs the guesser one Argon2id run, and
+the relay limits redeems per network and per code (RELAY-PROTOCOL
+§6.9.1, §7.2 limits 14 and 15; chosen, not in the card). The per-code
+limit cancels a code once 32 redeems that matched no code fell in its
+bucket (1/65,536 of the tag space). So a guesser finds a given code
+before it is cancelled with a chance of about 32 × 65,536 / 8.53 ×
+10^11 ≈ **2.5 × 10^-6**. That is weaker than enrollment's 9.4 × 10^-10
+(ENROLLMENT-CODES §3.3), because the relay knows no member to bind a
+code to. A hit gains only a pairing waiting for the member's SAS
+comparison and approval.
+
+**Cancelling codes.** The same limit lets anyone cancel live codes by
+sending random tags, which cost nothing to make. Cancelling every live
+code on a relay takes about 2.1 million redeems in 10 minutes (32 in
+each of 65,536 buckets). Under limit 14 that needs about 105,000 IPv4
+addresses, or about 10,500 IPv6 /48s from about 2,100 /32s, kept up for
+as long as the attack lasts. Its blast radius: code pairings on that
+relay fail for that time. The link fallback, every other flow and every
+other relay are untouched, and the device's failure text points the
+member to "Show a link instead". The /32 ceiling also means that an
+attacker inside a large carrier's /32 can stop code redeems from that
+carrier; the link still works.
+
+**The SAS stays.** The code proves only that whoever typed it saw the
+phone's screen. It says nothing about which device redeemed it. Someone
+who reads it over the member's shoulder, a guesser who hits it, or a
+relay that searched the hour's salt could redeem it first and pair in
+the member's place. The member's own device would then say the code
+didn't work, and the phone would show a SAS that none of the member's
+devices shows. The SAS comparison (§6.3) is what catches that; nothing
+in this section replaces it, and the app's compare screen is unchanged.
+
+**What the relay holds.** For a code claim: the keyed MAC of the tag,
+its bucket, the claim id, the creating mailbox, the salt id, `s_c`,
+the sealed blob, its expiry and its miss count (RELAY-PROTOCOL
+§6.9.1). Never the code or the tag. No device name and no name of the
+member: the bundle has no `hint`, and the device's name travels only
+in its sealed `hs.init` (§13.6). The bundle still ties the mailbox to
+the vault's `ik` (above).
+
+**Not built.** Vault, relay, app, desktop and connector cards follow.
+Test vectors (a fixed code, `r`, epoch and nonce, `s_c` and bundle
+nonce, with `s_r`, `salt_id`, `tag`, `x`, `k_w` and `blob`, and a `pw`
+with its 0x00 bytes) come with the vault card, in §16.
 
 ### 6.8 Access sessions and approvals for desktops and agents
 
@@ -13886,7 +14285,7 @@ device belongs to the unlock it ends.
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `device.pair.create` (app) | `{role: "desktop" \| "agent"}` | `{pairing_id, link, exp}`; `{role: "app"}` is answered `one_app` (§6.7) |
+| `device.pair.create` (app) | `{role: "desktop" \| "agent", form?: "link" \| "code"}` ((0.94.0) `form`, default `link`) | `{pairing_id, link, exp}`; (0.94.0) with `form: "code"`, `{pairing_id, code, exp, r}`: `code` the 8 symbols (§6.7.2), `r` the relay's canonical base URL (§6.7.2), which the device must use (the app shows it without `https://`, host and any port, when it is not the app's built-in relay); `limit` beyond the code issuance limit, `busy` when the vault has no room for the derivations, `claim_unavailable` when its relay does not take codes or its salts fail the checks of §6.7.2, `relay_error`; `{role: "app"}` is answered `one_app` (§6.7) |
 | `device.pair.pending` (to apps) | — | `{pairing_id, pending_id, role, name, sas}`; `name` is the new device's self-asserted `profile.name` |
 | `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}` (`pairing_id` or the request's `pending_id`, 0.83.0); `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window; `transfer_incomplete` while a transfer's credential-key statement is held, §11.14.10, 0.83.11) | `{device_id}`, the new device's id, as on `device.paired` (0.83.0; not yet built in the vault, which answers `{}`) |
 | `device.pair.reject` (app) | `{pairing_id}` (or the request's `pending_id`, 0.83.0) | `{}` |
@@ -30426,7 +30825,8 @@ documented.
 - **Dev mode.** Dev-mode attestation and sealing MUST be excluded at compile
   time.
 - **Logging.** Keys, PINs, tokens, signatures, attestation tokens and
-  plaintext MUST NOT appear in logs, metrics or errors.
+  plaintext MUST NOT appear in logs, metrics or errors. (0.94.0) Nor
+  may a pairing code, its `tag`, `x` or `k_w` (§6.7.2).
 - **Device details** (0.75.0, owner decision 2026-10-29). A device's
   name or model (`app.name` in §11.3 and §11.11.3, a device's `profile`
   in its pairing `hs.init`, §6.7, and the `name` and `profile` of
