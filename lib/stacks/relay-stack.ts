@@ -689,7 +689,7 @@ export class VettidOrgRelayStack extends cdk.Stack {
     // longer start because the pair-code key's secret is gone (ECS reads it
     // at every task start), capacity drains as tasks are replaced, and no
     // deploy is under way to roll back. Missing data counts.
-    alarm('TasksBelowMin', 'tasks-below-min', {
+    const belowMin = alarm('TasksBelowMin', 'tasks-below-min', {
       alarmDescription: says(`fewer than ${RELAY_MIN_TASKS} healthy relay tasks for 5 minutes: tasks are failing to start or failing health checks (if the pair-code key's secret is missing, ECS stops tasks with ResourceInitializationError)`),
       metric: relayTargets.metrics.healthyHostCount({ statistic: 'Minimum', period: minute }),
       threshold: RELAY_MIN_TASKS,
@@ -738,6 +738,7 @@ export class VettidOrgRelayStack extends cdk.Stack {
       const action = { bind: () => ({ alarmActionArn: alertsTopicArn }) };
       for (const a of alarms) a.addAlarmAction(action);
       silent.addOkAction(action); // the line is back
+      belowMin.addOkAction(action); // capacity is back
     }
 
     new cdk.CfnOutput(this, 'RelayUrl', { value: `https://${host}` });

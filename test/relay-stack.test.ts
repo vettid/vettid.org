@@ -613,7 +613,11 @@ describe('pair-code key guards', () => {
       EvaluationPeriods: 5,
       DatapointsToAlarm: 5,
       TreatMissingData: 'breaching',
+      Namespace: 'AWS/ApplicationELB',
+      Period: 60,
     });
+    const a = Object.values<any>(t.findResources('AWS::CloudWatch::Alarm')).find((x) => x.Properties.MetricName === 'HealthyHostCount');
+    expect(a.Properties.Dimensions.map((d: any) => d.Name).sort()).toEqual(['LoadBalancer', 'TargetGroup']);
   });
 
   test('unset: no resource policy', () => {
@@ -635,9 +639,11 @@ describe('pair-code key guards', () => {
     expect(st).toHaveLength(1);
     expect(st[0].Effect).toBe('Deny');
     expect(st[0].Principal).toBe('*');
-    for (const a of ['DeleteSecret', 'PutSecretValue', 'UpdateSecret', 'RotateSecret']) {
-      expect(st[0].Action).toContain(`secretsmanager:${a}`);
-    }
+    expect(st[0].Action).toEqual([
+      'DeleteSecret', 'PutSecretValue', 'UpdateSecret', 'UpdateSecretVersionStage',
+      'RotateSecret', 'ReplicateSecretToRegions', 'RemoveRegionsFromReplication',
+    ].map((a) => `secretsmanager:${a}`));
+    expect(st[0].Resource).toBe('*');
     expect(JSON.stringify(st[0].Action)).not.toContain('GetSecretValue');
     expect(JSON.stringify(st[0].Action)).not.toContain('ResourcePolicy');
   });
