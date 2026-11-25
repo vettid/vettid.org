@@ -560,3 +560,43 @@ describe('data (stateful)', () => {
     }
   });
 });
+
+describe('pair-code key (RELAY-PROTOCOL §6.9.1)', () => {
+  const ARN = 'arn:aws:secretsmanager:us-east-1:123456789012:secret:vettid/relay/pair-code-key-AbC123';
+
+  test('unset: no secret in the container, no Secrets Manager grant', () => {
+    expect(relayContainer().Secrets).toBeUndefined();
+    const policies = JSON.stringify(t.findResources('AWS::IAM::Policy'));
+    expect(policies).not.toContain('secretsmanager:');
+  });
+
+  test('set: RELAY_PAIR_CODE_KEY from that one secret, read granted on it only', () => {
+    const keyApp = new cdk.App({ context: { relayPairCodeKeyArn: ARN } });
+    const k = Template.fromStack(new VettidOrgRelayStack(keyApp, 'RelayKey', {
+      config: loadConfig(keyApp.node),
+      relayImage: 'ghcr.io/vettid/vettid-relay@sha256:' + 'a'.repeat(64),
+      env,
+    }));
+    const td = Object.values<any>(k.findResources('AWS::ECS::TaskDefinition'))[0].Properties;
+    const c = td.ContainerDefinitions[0];
+    expect(c.Secrets).toEqual([{ Name: 'RELAY_PAIR_CODE_KEY', ValueFrom: ARN }]);
+    // Never as a plain environment variable.
+    expect((c.Environment ?? []).map((e: any) => e.Name)).not.toContain('RELAY_PAIR_CODE_KEY');
+    const grants = Object.values<any>(k.findResources('AWS::IAM::Policy'))
+      .flatMap((p) => p.Properties.PolicyDocument.Statement)
+      .filter((s: any) => JSON.stringify(s.Action).includes('secretsmanager:'));
+    expect(grants).toHaveLength(1);
+    expect(grants[0].Resource).toBe(ARN);
+    // On the execution role (ECS reads it at task start), not the task role.
+    const execRole = td.ExecutionRoleArn['Fn::GetAtt'][0];
+    const holder = Object.values<any>(k.findResources('AWS::IAM::Policy'))
+      .find((p) => JSON.stringify(p.Properties.PolicyDocument).includes('secretsmanager:'));
+    expect(JSON.stringify(holder.Properties.Roles)).toContain(execRole);
+  });
+
+  test('a name or a partial ARN is refused', () => {
+    for (const bad of ['vettid/relay/pair-code-key', 'arn:aws:secretsmanager:us-east-1:123456789012:secret:vettid/relay/pair-code-key']) {
+      expect(() => loadConfig(new cdk.App({ context: { relayPairCodeKeyArn: bad } }).node)).toThrow(/relayPairCodeKeyArn/);
+    }
+  });
+});

@@ -9,6 +9,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
 import { AppConfig, ORG, hostName, resourceName } from '../config';
@@ -346,6 +347,19 @@ export class VettidOrgRelayStack extends cdk.Stack {
         RELAY_OPEN_TOKEN_MAX_LIFETIME: '168h',
         RELAY_CLAIM_TTL: '168h',
       },
+      // The pair-code key k_pc (RELAY-PROTOCOL §6.9.1), only when the owner
+      // has created its secret: ECS injects it at task start, and CDK grants
+      // the execution role read on that one secret. Without it the relay
+      // offers no code claims.
+      ...(config.relay.pairCodeKeyArn
+        ? {
+            secrets: {
+              RELAY_PAIR_CODE_KEY: ecs.Secret.fromSecretsManager(
+                secretsmanager.Secret.fromSecretCompleteArn(this, 'PairCodeKey', config.relay.pairCodeKeyArn),
+              ),
+            },
+          }
+        : {}),
       logging: ecs.LogDrivers.awsLogs({ logGroup, streamPrefix: 'relay' }),
       stopTimeout: cdk.Duration.seconds(40), // drain long-polls / WebSockets on SIGTERM
       // Distroless image: the binary checks its own /healthz.

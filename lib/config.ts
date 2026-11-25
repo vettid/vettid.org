@@ -34,7 +34,17 @@ export interface AppConfig {
    * Relay container image, pinned by digest. Unset → the relay service stack
    * is skipped (its data stack is not). Context: relayImage.
    */
-  readonly relay: { readonly image: string };
+  readonly relay: {
+    readonly image: string;
+    /**
+     * The complete ARN of the Secrets Manager secret holding the relay's
+     * pair-code key k_pc (RELAY-PROTOCOL §6.9.1): base64 of 32 random
+     * bytes, created by the owner and never in the repo or on the bus.
+     * Given to the container as RELAY_PAIR_CODE_KEY. Unset: no secret,
+     * and the relay offers no code claims. Context: relayPairCodeKeyArn.
+     */
+    readonly pairCodeKeyArn?: string;
+  };
   /**
    * The push gateways of the main account (PUSH-GATEWAY §10): one per
    * channel listed in context `pushStages`, in the prod app only (the
@@ -674,6 +684,7 @@ export function loadConfig(node: Node): AppConfig {
     senderEmail: `no-reply@${zoneName}`,
     relay: {
       image: String(node.tryGetContext('relayImage') ?? ''),
+      ...loadRelayPairCodeKey(node),
     },
     push: { gateways: loadPush(node, stage) },
     calls: loadCalls(node, stage, zoneName),
@@ -806,4 +817,18 @@ function nameServersFromContext(node: Node, key: string, zone: string): string[]
     throw new Error(`context ${key}: expected the four Route 53 name servers of ${zone}, got ${JSON.stringify(raw)}`);
   }
   return ns;
+}
+
+// A complete Secrets Manager ARN (with its 6-character suffix): ECS reads the
+// secret by it, and the task's execution role is granted that one secret.
+const SECRET_ARN = /^arn:aws:secretsmanager:[a-z0-9-]+:\d{12}:secret:[A-Za-z0-9/_+=.@-]+-[A-Za-z0-9]{6}$/;
+
+function loadRelayPairCodeKey(node: Node): { pairCodeKeyArn?: string } {
+  const raw = node.tryGetContext('relayPairCodeKeyArn');
+  if (raw === undefined || raw === null || raw === '') return {};
+  const arn = String(raw);
+  if (!SECRET_ARN.test(arn)) {
+    throw new Error(`context relayPairCodeKeyArn: expected a complete Secrets Manager secret ARN, got ${JSON.stringify(arn)}`);
+  }
+  return { pairCodeKeyArn: arn };
 }
