@@ -503,6 +503,7 @@ does.
 | `collectors` | a task carries ≥ 2,000 long-polls in 3 of 5 minutes | About 42 KiB each: 82 MiB of the task's 512 MiB, and nothing caps them per task. Look at task memory and restarts (ECS service metrics); scale out by hand if memory is above 70 % and the service has not (`aws ecs update-service --cluster vettid-org-relay --service vettid-org-relay --desired-count <n>`, up to 8); find out who holds them (a vault host has at most 1,024). Time to bring back the per-task caps (relay branch `ratelimit-per-key-full`). |
 | `ws-sessions` | a task carries ≥ 2,000 WebSocket sessions in 3 of 5 minutes | The same, at about 45 KiB each (88 MiB). |
 | `rate-limits-silent` | no task wrote the line for 5 minutes (missing data is the alarm) | The relay is down or not logging: `aws ecs describe-services --cluster vettid-org-relay --services vettid-org-relay --query 'services[0].[runningCount,deployments[].rolloutState,events[:5].message]'`, then `aws logs tail /vettid-org/prod/relay-service --since 15m`. An image older than protocol 0.7.0 does not write the line. The other six alarms on the line are blind while this one is on (the four on the table are not). Also sends OK. |
+| `tasks-below-min` | fewer than 2 healthy relay tasks behind the load balancer for 5 minutes (missing data counts) | Tasks are failing to start or to pass `/healthz`: `aws ecs describe-services --cluster vettid-org-relay --services vettid-org-relay --query 'services[0].events[:10].message'`. `ResourceInitializationError` naming `secretsmanager` means the pair-code key: see "The pair-code key" below. Anything else: the image or its configuration; the last deploy's rollback should have caught it. |
 
 #### Alarms on the table
 
@@ -572,6 +573,46 @@ with the task size. State:
 aws cloudwatch describe-alarms --alarm-name-prefix vettid-org-relay- \
   --query 'MetricAlarms[].[AlarmName,StateValue]' --output table
 ```
+
+### The pair-code key (`vettid/relay/pair-code-key`)
+
+The relay's pair-code key `k_pc` (RELAY-PROTOCOL §6.9.1) is the Secrets
+Manager secret `vettid/relay/pair-code-key` in the management account
+(449757308783, us-east-1, default KMS key). It holds base64 of 32 random
+bytes. It was created by hand on 2026-11-25 (owner decision #18312) and
+`cdk.json` names its ARN in `relayPairCodeKeyArn` (#668).
+
+- **Every relay task start reads it.** ECS injects it as
+  `RELAY_PAIR_CODE_KEY`. If the secret is gone, its value changed shape,
+  or the execution role can't read it, **no new task starts** (the task
+  stops with `ResourceInitializationError`). Running tasks keep serving, but
+  scale-out, replacements and AZ rebalancing all fail, so capacity drains.
+  No deploy is under way, so nothing rolls back. This relay serves
+  production and staging.
+- **Never delete, overwrite, rotate, re-encrypt (another KMS key) or
+  replicate it without a PR first.** That includes routine account
+  cleanup. A resource policy (`PairCodeKeyGuard` in `VettidOrgRelayStack`)
+  refuses `DeleteSecret`, `PutSecretValue`, `UpdateSecret`,
+  `UpdateSecretVersionStage`, `RotateSecret` and replication to everyone,
+  the administrators included. Changing the secret takes a PR that removes
+  that policy first.
+- **Rotation** only when the key may be exposed (§6.9.1): a PR removes
+  the guard, then `put-secret-value` with a new `openssl rand -base64 32`
+  (never echoed), then `aws ecs update-service --force-new-deployment`. Every
+  live code stops working (codes last at most 10 minutes); members get new
+  ones. Restore the guard.
+- **Turning codes off** (no key needed): remove `relayPairCodeKeyArn` from
+  `cdk.json` and `cdk deploy VettidOrgRelayStack`. Tasks then start without
+  the secret.
+- **If tasks fail to start because of it** (`tasks-below-min` alarm; ECS
+  events say `ResourceInitializationError` … `secretsmanager`):
+  1. If it was deleted, it is recoverable during its recovery window:
+     `aws secretsmanager restore-secret --secret-id vettid/relay/pair-code-key`.
+  2. Otherwise, turn codes off as above, so tasks start again, and work out
+     the secret afterwards.
+- Checking it without seeing it: `aws secretsmanager get-secret-value
+  --secret-id vettid/relay/pair-code-key --query SecretString --output text |
+  tr -d '\n' | base64 -d | wc -c` must print `32`.
 
 ### After the option-B cutover: delete the SQLite-era leftovers (by hand, once)
 
