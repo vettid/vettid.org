@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.143
-date: 2026-11-24
+version: 0.1.144
+date: 2026-11-25
 changelog:
+  - 0.1.144: erratum, 2026-11-25 (the blind pair on vettid/vettid-android#446, card GC #17839). §4 "A different code while the transfer waits": 0.1.142 said Android's scan replaces and drops the waiting transfer between minute 10 and 11; it does not. `transferPinned` (settlement active, or `deadlineDue`, which covers every waiting transfer whose comparison code is known) already refuses a new code there, since #187. The rule is unchanged. The 0.1.142 changelog line's "this closes Android's gap" is withdrawn. VAULT-MESSAGING 0.94.1 §6.7.2 "Making a code pairing" step 6: an app that gets a cached `form: "code"` answer without `code` asks again once, only if it holds no coded answer for that request; it ignores a later code-less duplicate, rejects each code-less pairing before falling back to the link, sends a `limit` from the re-ask to the link screen, and retransmits a code create only after 15 s (AA2, a new bullet). IOS-PLAN 0.1.86 follows. No new text.
   - 0.1.143: 2026-11-24 (VAULT-MESSAGING 0.94.0 §6.7.2; owner-approved card GC #17710; IOS-PLAN 0.1.85). §4 "Devices & agents", "Pair an agent (AA2)", step 1: the screen shows an 8-character pairing code (`XXXX-XXXX`, from `device.pair.create{role, form: "code"}`) instead of the QR and the long code, with Copy and Share as before (decision 1). **Show a link instead** cancels the code and makes a link pairing, showing today's QR and long code. A vault that answers with a `link` (a vault before 0.94.0, or `claim_unavailable`) gets the link screen at once. When the answer's `r` is not the app's built-in relay, the relay (host, and port when `r` has one) is shown under the code, exactly as the device takes it. The same for Pair a desktop. The phone derives nothing (the vault makes the code). Steps 2–4, the SAS comparison included, are unchanged. NEW texts: the code screen's body (agent and desktop), "Show a link instead", and the relay line. Not built; card to follow. The NEW texts were approved by the owner (Ground Control #17983).
   - 0.1.142: 2026-11-24 (owner decision a, Ground Control #17899; IOS-PLAN 0.1.84). §4 "Transfer (new phone)", a new paragraph "A different code while the transfer waits" after "Back while the transfer waits". The same code is recognized first. Before minute 10, a different valid code first opens the existing "Cancel the move?": Keep waiting keeps the transfer; Cancel the move abandons it, and the new code starts only after the abandon is saved. An abandon refused at minute 10 returns to waiting, with the new code not used. From minute 10 to the window's end a different code is refused with nothing dropped; this closes Android's gap where a scan between minute 10 and 11 replaced the waiting transfer, against "no abandon from minute 10". No new text. Built by cards GC #17839 and GC #17840.
   - 0.1.141: 2026-11-24 (owner decision b, Ground Control #17837; card GC #17838; IOS-PLAN 0.1.82). §4 "Transfer (new phone)", a new paragraph "Back while the transfer waits": while a transfer to this phone is live (code shown, or found waiting after a restart, until it ends in any way), Back never leaves the move screen for "Your account already has a vault" or welcome. Before minute 10 it opens the existing cancel confirmation; from minute 10 to the window's end it does nothing; after the end it follows the phase read again. Today Android's waiting step already keeps Back (the confirmation, or nothing during the window). The gap is `leaveMove`, which sends any setup stage to "Your account already has a vault" whenever Back reaches it: from the transfer screen's first step after a restart, before or without the transfer read back, from the first step after a cancel the vault refused at minute 10, and possibly from an ended screen until the phase is read again. No new text. Built by card GC #17839. Follows 0.1.140 (vettid/vettid.org#661).
@@ -4134,9 +4135,11 @@ both sections above (`pin.change`, `credential.password.change`,
   the end of the settlement window a different code is refused, as any
   new code is then, with no confirmation and nothing dropped (no abandon
   from minute 10, as above). Android shows its general busy text, the
-  iPhone §14 "A move still under way". Today Android's scan replaces
-  and drops the waiting transfer between minute 10 and 11, before its
-  settlement starts; that ends. Why: a different code dropped the
+  iPhone §14 "A move still under way". (0.1.144) Android already
+  refuses a new code from minute 10, as before this paragraph: the
+  repository's `transferPinned` holds for every waiting transfer whose
+  code is known, through minute 11 and the settlement (since the A6
+  audit, #187). Why: a different code dropped the
   waiting transfer at once, losing it if the old phone had already
   approved. No new text. Tests (0.1.142):
   - The same code goes back to its move screen and asks nothing.
@@ -6126,6 +6129,16 @@ code first.** The app sends `device.pair.create{role: "agent", form:
   failed the vault's checks) gets the link screen at once, with no
   message. `busy` and `limit` are "A pairing
   code could not be made. Try again." as any other error.
+- (0.1.144) **Asking again** (VAULT-MESSAGING 0.94.1 §6.7.2 "Making a
+  code pairing" step 6; no new text). A `form: "code"` create is
+  retransmitted only after 15 s without an answer. An answer without
+  `code` (the vault's cached copy) gets one new create with a new
+  request id at once, unless the app already holds an answer with
+  `code` for that request; a code-less duplicate after a coded answer
+  is ignored. If the new answer has no `code` either, the app sends
+  `device.pair.reject{pairing_id}` for each code-less pairing, as Show
+  a link instead does, and shows the link screen. A `limit` from that
+  re-ask also shows the link screen, not the error.
 - The phone derives nothing: the vault makes the code and seals the
   bundle. Steps 2 to 4 below, the SAS comparison included, are
   unchanged. The SAS still matters: the code only proves that someone

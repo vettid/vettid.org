@@ -1,6 +1,6 @@
 # VettID Relay Protocol
 
-**Version:** 0.14.0 (draft)
+**Version:** 0.14.1 (draft)
 **Status:** Pre-implementation draft for review
 
 ## 1. Purpose & design principles
@@ -878,6 +878,10 @@ DELETE /v1/pair-code/{claim_id}      (signed by the creating key)
 1. The signature (§4.1), then **the creating mailbox's live code claim
    is deleted** (one live code claim per mailbox). A PUT retried after
    a lost `201` thus replaces its own first copy and succeeds.
+   (0.14.1) The vault does not rely on a retried PUT: after a failed or
+   unanswered PUT it deletes the claim and falls back to the link
+   (VAULT-MESSAGING §6.7.2). A later PUT from the same mailbox replaces
+   any code claim still live from it.
 2. `claim_id`: 26 lowercase base32 characters of 128 random bits,
    chosen by the creator, and not in use by another live code claim;
    otherwise `bad_request`. The creator binds it into the blob's
@@ -1313,7 +1317,10 @@ relay signalling overload MUST use `429` + `rate_limited` and SHOULD include
 `retry_after`. Clients MUST honor `retry_after` and MUST implement
 exponential backoff with jitter on `429 rate_limited` and `5xx`
 (0.14.0: except a code redeem, which is never retried, §6.9.1, and whose
-own limit answers `404 code_unknown`, limit 14); a `429
+own limit answers `404 code_unknown`, limit 14; 0.14.1: and except the
+vault's code PUT and its salts read for a code pairing, which make one
+attempt each, the vault falling back to the link, VAULT-MESSAGING
+§6.7.2; a code claim's `DELETE` is retried as usual); a `429
 quota_exceeded` is not retried unchanged (§7.1). The web endpoints (§6.11)
 are limited
 with a separate budget.
@@ -2049,6 +2056,13 @@ The push gateway API is specified separately.
 
 ## 10. Changelog
 
+- **0.14.1** — 2026-11-25, with VAULT-MESSAGING 0.94.1 (erratum, from
+  vettid/vettid-relay#38): §7.2's backoff exception also covers the
+  vault's code PUT and its salts read for a code pairing, one attempt
+  each (the vault falls back to the link); a code claim's `DELETE` is
+  retried as usual. §6.9.1 creating step 1: the vault does not rely on
+  a retried PUT (it deletes the claim after a failed or unanswered PUT),
+  and a later PUT from the same mailbox replaces its live code claim.
 - **0.14.0** — 2026-11-24, with VAULT-MESSAGING 0.94.0 (owner-approved
   card GC #17710). New §6.9.1, **code claims**: a claim found by an
   8-character pairing code that a desktop or agent types, without the
