@@ -77,8 +77,12 @@ changelog:
     receipt;
     (e) the issuance limit: 5 code pairings per vault per hour, 20 per
     day;
-    (f) the lookup salt changes every hour (the epoch), listed 2 minutes
-    early and kept 10 minutes after, with 120 s of clock skew allowed;
+    (f) the lookup salt changes every hour (the epoch), listed from 2
+    minutes before its hour until 10 minutes after; every client checks
+    every entry against that listing window with 120 s of clock skew;
+    the relay accepts at PUT the current epoch and the next once listed,
+    never the previous; a vault tries the other entry once on
+    `bad_request`, then answers `claim_unavailable`;
     (g) the app's code screen keeps Copy and Share (ANDROID-PLAN
     decision 1) and drops the QR, which stays on the link fallback;
     (h) a vault on a relay that is not the app's built-in one: the app
@@ -86,8 +90,9 @@ changelog:
     operator gives it to the device;
     (i) what the member sees: on the phone, the existing "This code
     expired." with New code; on the agent, the NEW "That code didn't
-    work" text pointing to Show a link instead, and the NEW "couldn't
-    reach the relay" text;
+    work" text pointing to Show a link instead, the NEW "couldn't
+    reach the relay" text, and the NEW "this computer's clock may be
+    wrong" text for a salt list its clock refuses;
     (j) the direction: the phone shows the code and the desktop or
     agent takes it, as in §6.7's flow (confirmed by the owner, GC
     #17957: the card's "screens" are the app's pairing screens);
@@ -12346,15 +12351,17 @@ only after a search of the code space that it must repeat every hour
 **The relay's base URL.** `r` below is canonical: `https://`, the
 host in lower case, then `:` and the port only when it is not 443, with
 no path and no trailing slash (`https://relay.vettid.org`,
-`https://relay.example.org:8443`). The vault emits only that form in
+`https://relay.example.org:8443`). The host is a DNS name in lower-case
+ASCII, an internationalized name only in its punycode (`xn--`) form; an
+IP address literal (IPv4 or IPv6) is refused. The vault emits only that form in
 `r`. A desktop or agent normalizes a relay it is given (AGENT-PLAN
 §4.3 `--relay`) to it (a bare host or `host:port` gets `https://`),
-and refuses one that has a path, a query, a fragment, user information
-or a scheme other than `https`. The app shows exactly the part to type:
+and refuses one that has a path, a query, a fragment, user information,
+an IP literal, a non-ASCII host or a scheme other than `https`. The app shows exactly the part to type:
 the host, and `:port` when it is part of `r`.
 
 **The lookup salt is bound to the hour.** The relay cannot choose a
-salt that serves longer than one hour, and nobody outside it can
+salt that serves longer than one hour, and nobody but the relay can
 precompute a salt before the relay lists it:
 
 ```
@@ -12371,16 +12378,31 @@ and `nonce` themselves, and **refuse the whole list** (fail closed) if:
 - it has more than 2 entries, or an entry with a nonce that is not 16
   bytes, or two entries for one epoch;
 - an entry's `salt_id` does not match the recomputed `s_r`;
-- an entry's epoch is outside its window by the client's own clock,
-  with 120 s of allowed skew (chosen; not in the card). The window is,
-  for creating, the epoch's own hour; for redeeming, from 2 minutes
-  before the hour starts until 10 minutes after it ends;
-- a `salt_id` the client has already seen (in this pairing, or for the
-  vault in the last hour) now comes with a different nonce or epoch.
+- an entry's epoch is outside its **listing window** by the client's
+  own clock, with 120 s of allowed skew (chosen; not in the card): from
+  2 minutes before the epoch's hour starts until 10 minutes after it
+  ends, the window in which the relay lists it. Every client checks
+  every entry against this one window;
+- an epoch the client has already seen (in this pairing, or for the
+  vault in the last hour) comes with a different nonce.
+
+**Which entry a vault uses.** For its PUT the vault picks the entry
+whose epoch is current by its own clock (within the 120 s skew). The
+relay accepts the current epoch, and the next one once it is listed,
+but never the previous one: that salt is delisted 10 minutes after its
+hour, before a claim made after the hour would expire. If the relay
+answers `bad_request` for the salt (the two clocks disagree near the
+hour), the vault tries the other listed entry once, if it passes the
+vault's own check, and then answers `claim_unavailable`. So a code
+pairing makes at most 2 PUTs per code for the salt.
 
 A refusal at the vault answers `claim_unavailable` (the app falls back
-to the link). At the device it ends with the failure text (AGENT-PLAN
-§11) and nothing is redeemed. Nothing is ever derived from a refused
+to the link). The vault records it in its audit log and metrics with a
+distinct reason, `pair_code.salts_refused` (with which check failed,
+and no code, salt, nonce or tag), so that a relay whose codes never
+work is noticed. At the device a list refused for the clock check ends
+with the clock text, and any other refusal with the failure text
+(AGENT-PLAN §11); nothing is redeemed. Nothing is ever derived from a refused
 list, so a relay cannot make a client run many 256 MiB derivations.
 
 **Two derivations.** Both are Argon2id (RFC 9106, version 0x13) from a
@@ -12429,7 +12451,8 @@ blob     = nonce (24) || XChaCha20-Poly1305(k_w, nonce, aad, json)
 1. The usual checks of `device.pair.create` (§6.7, §10.3), then the
    issuance limit. Then it cancels its live code pairing, if any (above).
 2. It reads the relay's salts and checks them (above); it uses the
-   current hour's. It makes the code, `s_c`, `claim_id`, the pairing's
+   entry current by its own clock (above, "Which entry a vault
+   uses"). It makes the code, `s_c`, `claim_id`, the pairing's
    open token and the bundle. The bundle has no `hint` (§13.6).
 3. It computes `tag` and `x`, one after the other, never at once. They
    share the enclave's Argon2id work with the PIN's and the recovery
@@ -12443,7 +12466,8 @@ blob     = nonce (24) || XChaCha20-Poly1305(k_w, nonce, aad, json)
    s_c, blob}`. A `409 code_taken` means the tag collided with a live
    code. The relay has then deleted both claims, so the vault learns
    nothing it could use. It makes a new code and `s_c` and tries again,
-   at most 3 times, then answers `relay_error`. The other vault's
+   at most 3 times, then answers `relay_error`. A `bad_request` for
+   the salt is handled as "Which entry a vault uses" says. The other vault's
    member just sees their code fail and gets a new one.
 5. It answers `{pairing_id, code, exp, r}`. When the pairing ends
    unredeemed (rejected, cancelled, replaced by a new code, or after its
@@ -12508,7 +12532,7 @@ its MAC key `k_pc`, sees every `tag` and can test every stored
   own under the code and try to pair in the member's place, or sit in
   the middle. **Only the SAS comparison stops that** (below).
 - The salt is bound to its hour (above), so a search serves one hour of
-  codes on one relay. Holding the position all the time costs one full
+  codes on one relay. The relay chooses each hour's nonce, so it can finish the search for a chosen hour before that hour begins: attacking one chosen hour costs one search, done ahead of time and without time pressure; attacking every hour costs one search per hour. A thief of the relay's store and `k_pc` sees each nonce only once it is listed, so a live attack must finish within that hour. Holding the position all the time costs one full
   search per hour: about 72,000 B200-class cards (or about 570,000 at
   1 TB/s, or 5.9 × 10^7 CPU cores) running without pause, and
   $0.3–1 million an hour.
@@ -14261,7 +14285,7 @@ device belongs to the unlock it ends.
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `device.pair.create` (app) | `{role: "desktop" \| "agent", form?: "link" \| "code"}` ((0.94.0) `form`, default `link`) | `{pairing_id, link, exp}`; (0.94.0) with `form: "code"`, `{pairing_id, code, exp, r}`: `code` the 8 symbols (§6.7.2), `r` the relay's base URL, which the device must use (the app shows its host when it is not the app's built-in relay); `limit` beyond the code issuance limit, `busy` when the vault has no room for the derivations, `claim_unavailable` when its relay does not take codes or its salts fail the checks of §6.7.2, `relay_error`; `{role: "app"}` is answered `one_app` (§6.7) |
+| `device.pair.create` (app) | `{role: "desktop" \| "agent", form?: "link" \| "code"}` ((0.94.0) `form`, default `link`) | `{pairing_id, link, exp}`; (0.94.0) with `form: "code"`, `{pairing_id, code, exp, r}`: `code` the 8 symbols (§6.7.2), `r` the relay's canonical base URL (§6.7.2), which the device must use (the app shows it without `https://`, host and any port, when it is not the app's built-in relay); `limit` beyond the code issuance limit, `busy` when the vault has no room for the derivations, `claim_unavailable` when its relay does not take codes or its salts fail the checks of §6.7.2, `relay_error`; `{role: "app"}` is answered `one_app` (§6.7) |
 | `device.pair.pending` (to apps) | — | `{pairing_id, pending_id, role, name, sas}`; `name` is the new device's self-asserted `profile.name` |
 | `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}` (`pairing_id` or the request's `pending_id`, 0.83.0); `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window; `transfer_incomplete` while a transfer's credential-key statement is held, §11.14.10, 0.83.11) | `{device_id}`, the new device's id, as on `device.paired` (0.83.0; not yet built in the vault, which answers `{}`) |
 | `device.pair.reject` (app) | `{pairing_id}` (or the request's `pending_id`, 0.83.0) | `{}` |

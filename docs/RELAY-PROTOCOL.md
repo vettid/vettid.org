@@ -870,8 +870,8 @@ DELETE /v1/pair-code/{claim_id}      (signed by the creating key)
 - A nonce, once listed for an epoch, never changes. Clients recompute
   `s_r`, check each epoch against their own clock, and refuse the whole
   list on any mismatch (VAULT-MESSAGING §6.7.2). So the relay cannot
-  make a salt serve longer than its hour, and nobody can search a salt
-  before it is listed.
+  make a salt serve longer than its hour, and nobody but the relay can
+  search a salt before it is listed.
 
 **Creating.** The relay checks, in this order:
 
@@ -884,8 +884,11 @@ DELETE /v1/pair-code/{claim_id}      (signed by the creating key)
    associated data, so it must exist before the upload. Code claim ids
    are their own namespace: nobody fetches a code claim by its id, and
    `GET /v1/claim/{id}` (§6.9) never finds one.
-3. `salt_id` names the current epoch's salt; otherwise `bad_request`
-   (the creator reads the salts again).
+3. `salt_id` names the current epoch's salt, or the next epoch's once
+   it is listed; never the previous epoch's, which is delisted 10
+   minutes after its hour, before a claim made after the hour would
+   expire. Otherwise `bad_request`. The creator then tries its other
+   listed entry at most once (VAULT-MESSAGING §6.7.2).
 4. **The collision check.** A `code_mac` equal to a live code claim's
    (a collision, or a creator that guessed a live code) deletes
    **both** claims and answers `409 code_taken`. A creator who probes
@@ -970,6 +973,7 @@ see their codes fail and get new ones.
   stops a pairing in the member's place. A search serves one hour on
   one relay and costs about 6,760 CPU-years, 8.2 B200-class GPU-years,
   or $0.3–1 million rented; coverage is proportional to spend.
+  The relay chooses each hour's nonce, so it can finish the search for a chosen hour before that hour begins: attacking one chosen hour costs one search, done ahead of time and without time pressure; attacking every hour costs one search per hour. A thief of the relay's store and `k_pc` sees each nonce only once it is listed, so a live attack must finish within that hour.
   A thief of the store without `k_pc` must search each claim's own salt
   instead.
 
@@ -1944,7 +1948,7 @@ announces first. Some servers and proxies default to exactly 100.
     comparison stops it from pairing in the member's place. The salt is
     bound to its hour and checked by clients, so a search serves one
     hour on one relay, and holding the position all the time costs one
-    full search per hour. Every failed redeem looks the same, in body
+    full search per hour. The relay chooses each hour's nonce, so it can finish the search for a chosen hour before that hour begins: attacking one chosen hour costs one search, done ahead of time and without time pressure; attacking every hour costs one search per hour. A thief of the relay's store and `k_pc` sees each nonce only once it is listed, so a live attack must finish within that hour. Every failed redeem looks the same, in body
     and in time, so the redeem route is no oracle for codes.
 
 ## 9. Test vectors
@@ -2058,10 +2062,11 @@ The push gateway API is specified separately.
   /v1/pair-code/{claim_id}`. The relay stores `HMAC-SHA-256(k_pc,
   tag)`, never the code or the tag. Every failed redeem, the
   per-network limit's refusals included, gets the same `404
-  code_unknown`, after the same work and a hold of at least 250 ms.
+  code_unknown`, after the same work, and every answer is sent at a
+  fixed hold of 250 ms.
   §6.1: `pair_codes` in `limits`. §7.1: `code_unknown` and
-  `code_taken`. §7.2: limits 14 (redeems per network) and 15 (misses
-  per code, with IPv6 /48 and /32 ceilings), and the exception to the
+  `code_taken`. §7.2: limits 14 (redeems per network, with IPv6 /48
+  and /32 ceilings) and 15 (misses per code), and the exception to the
   `429` contract for limit 14. §8 item 11 states the relay's own
   position: with a finished search for the live hour's salt it can read
   live bundles and try to pair in the member's place, and only the SAS

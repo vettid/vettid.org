@@ -16,7 +16,7 @@ changelog:
     for a vault whose relay is not the environment's own. §3.1
     `internal/pairing`, §5 (the vault's `pair-code.json` vectors, to
     come), new row A2.5, §7.2 AA2, and §11: the start text changes and
-    four texts are new (**NEW**, for the owner's approval); the
+    five texts are new (**NEW**, for the owner's approval); the
     desktop's live in vettid-desktop. Not built; connector card to
     follow.
   - 0.1.21: 2026-11-22, erratum (VAULT-MESSAGING 0.93.2, ANDROID-PLAN
@@ -1067,12 +1067,14 @@ connector.
    The connector uses its environment's relay, or `--relay <url>` when
    the phone showed a relay under the code; it normalizes that to the
    canonical form (`https://`, lower-case host, `:port` only when not
-   443, no path or trailing slash; a bare host or `host:port`, as the
+   443, no path or trailing slash, a DNS name in lower-case ASCII or
+   punycode, never an IP literal; a bare host or `host:port`, as the
    phone shows it, gets `https://`) and refuses anything else. It reads
    the relay's salts and checks them as §6.7.2 says (at most 2,
    recomputed from epoch and nonce, epochs within their windows by its
-   own clock with 120 s of skew); a list that fails ends with "That
-   code didn't work" and nothing redeemed. It computes a tag for each
+   own clock with 120 s of skew); a list refused for the clock check
+   ends with the clock text, any other refusal with "That code didn't
+   work", and nothing is redeemed. It computes a tag for each
    salt (Argon2id, 256 MiB, purpose `a`, `pw` passed as bytes and a
    length); if the first derivation cannot get its memory, it stops
    there with the memory text, before redeeming, and the code is not
@@ -2098,7 +2100,7 @@ recorded as decided in the table and the changelog (0.1.4, 0.1.5).
 | A2.1 | `vettid-agent pair`: code parsing, name, `client.New` + `Pair`, SAS, wait for `device.paired` / `device.pair.rejected` / 10 minutes, state saved per step | `invite.json`, `handshake.json`; unit tests with recorded messages for paired, rejected and expired; texts of §11 |
 | A2.2 | `internal/vaultconn`, run inside `vettid-agent mcp`: one owning goroutine, long-poll collect, dispatch by `re`, save before ack (0.1.13: through vettid-vault's `Config.PersistBatch`, AV1, which hands the save the batch's unsaved responses and events, so the state derived from them is in the same write; vettid-agent #46), token and rekey maintenance, identity rotation, `device.unlinked` and `token_revoked` (AG12) | Unit tests: a crash after save and before ack replays without harm; a crash before save does not lose a rekey (the batch is collected again); `device.unlinked` wipes; `token_revoked` alone stops without wiping |
 | A2.3 | `internal/access`: AG8's policy, `device.session.request`, `.granted`, `.ended`, expiry, `session_required`, `owner_check_required`; `status` | Unit tests for every branch of AG8 (one outstanding, 10-minute quiet period after a denial, 6 an hour) |
-| A2.5 | (0.1.22; not built) **The short pairing code** (§4.3, VAULT-MESSAGING §6.7.2, RELAY-PROTOCOL §6.9.1): input and normalization, `--relay`, salts, tags, one redeem, the blob opened, then the A2.1 flow | `pair-code.json`; unit tests: a 404 shows one text and is not retried; a 429, a 5xx and a dropped connection show the relay text and are not retried; a salt list with 3 entries, a bad nonce length, a `salt_id` that does not recompute, or an epoch outside its window is refused before any derivation; `--relay` forms with a path, a trailing slash or upper case are normalized or refused; a blob that does not open, a wrong `kind` and an expired bundle each end with the same text and nothing saved; a desktop code (purpose `d`) never opens; the code never reaches logs (a test greps the captured output); dev stack: pair by code and compare the SAS |
+| A2.5 | (0.1.22; not built) **The short pairing code** (§4.3, VAULT-MESSAGING §6.7.2, RELAY-PROTOCOL §6.9.1): input and normalization, `--relay`, salts, tags, one redeem, the blob opened, then the A2.1 flow | `pair-code.json`; unit tests: a 404 shows one text and is not retried; a 429, a 5xx and a dropped connection show the relay text and are not retried; a salt list with 3 entries, a bad nonce length, a `salt_id` that does not recompute, or an epoch outside its listing window is refused before any derivation, the last with the clock text; `--relay` forms with a path, a trailing slash or upper case are normalized or refused; a blob that does not open, a wrong `kind` and an expired bundle each end with the same text and nothing saved; a desktop code (purpose `d`) never opens; the code never reaches logs (a test greps the captured output); dev stack: pair by code and compare the SAS |
 | A2.4 | `internal/devstack` harness (build tag `devstack`): find or start one dev stack, `vaultctl` as the app (§4.8), the relay mapping; `make devstack-test` running with `-p 1` | **Exit A2 test**: enroll a test vault with `vaultctl`, create and unlock its credential, pair the connector with `session_seconds: 600`, compare the SAS on both sides, see `vault.status` answered, end the session from the app, request a new one and approve it, unlink, see the connector wipe itself. A rejected pairing ends with "Rejected on your phone" |
 
 ### A3 — LEASH and the MCP server
@@ -2375,6 +2377,10 @@ Connector (terminal and MCP tool errors):
 - **Code didn't work** (0.1.22, **NEW**; every failure of a short
   code): "That code didn't work. Check it, or choose Show a link
   instead on your phone and paste the link here."
+- **Clock may be wrong** (0.1.22, **NEW**; the relay's salt list fails
+  the clock check of VAULT-MESSAGING §6.7.2): "Couldn't check the code:
+  this computer's clock may be wrong. Check it, or choose Show a link
+  instead on your phone and paste the link here."
 - **Relay not reached** (0.1.22, **NEW**; a `429`, a `5xx` or a network
   error at the redeem): "Couldn't reach the relay. Try again, or get a
   new code on your phone."
@@ -2382,7 +2388,7 @@ Connector (terminal and MCP tool errors):
   the 256 MB of free memory needed to check the code. Close something
   and try again." (The desktop's texts for the short code live in
   vettid-desktop, for the owner's approval there, and say the same as
-  these four NEW texts.)
+  these five NEW texts.)
 - **SAS**: "Check that your phone shows the same code: 123 456. Approve
   on your phone only if it matches."
 - **Waiting**: "Waiting for you to approve on your phone…"
