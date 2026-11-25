@@ -12330,8 +12330,10 @@ only after a search of the code space that it must repeat every hour
 - **Input on the new device, in this order:** (1) remove spaces and
   hyphens. (0.94.1, chosen; not in the card) The set removed is: the
   ASCII tab, CR and LF; every character of Unicode category Zs (space
-  separator) and Pd (dash punctuation), as in Unicode 15.0 (Go's
-  `unicode.Zs` and `unicode.Pd` tables), which include the ASCII space,
+  separator) and Pd (dash punctuation), exactly as Unicode 15.0
+  defines them, whatever Unicode version a runtime's own tables hold
+  (Go's `unicode.Zs` and `unicode.Pd` tables are that set; the
+  follow-up vectors below list every code point), which include the ASCII space,
   U+002D, U+00A0, U+2007, U+202F and U+2010 to U+2015; U+2212 (the minus
   sign, category Sm); and U+00AD, U+200B, U+200E, U+200F, U+2060 and
   U+FEFF (the soft hyphen and the invisible characters a paste brings).
@@ -12349,8 +12351,9 @@ only after a search of the code space that it must repeat every hour
   character; U+2212; each of the six invisible characters) and one
   non-ASCII character that is not removed (refused when 8 code points
   remain, read as a link otherwise) in a follow-up to
-  vettid-vault#303, card GC #17989. Until then implementations follow
-  this text, not the vectors.
+  vettid-vault#303, card GC #17989, which also widens vault#303's
+  `Normalize` (today only the ASCII space and U+002D). Until then
+  implementations follow this text, not the vectors.
 - **Single use, 10 minutes.** `exp` is the vault's time of creation
   plus 600 s, in whole seconds. The first successful redeem at the
   relay deletes the claim. Expiry deletes it too.
@@ -12499,8 +12502,9 @@ blob     = nonce (24) || XChaCha20-Poly1305(k_w, nonce, aad, json)
    (RELAY-PROTOCOL §7.2's exception). The vault sends `DELETE
    /v1/pair-code/{claim_id}`, retried with §7.2's backoff until the
    relay answers `204` or the pairing's 10 minutes end, denylists the
-   pairing's open token and drops the pairing, then answers
-   `claim_unavailable`; the app falls back to the link. It never relies
+   pairing's open token and drops the pairing. It answers
+   `claim_unavailable` at once; the `DELETE` and its retries go on in
+   the background. The app falls back to the link. It never relies
    on a retried PUT. A code claim that a lost `201` left live is
    deleted by that `DELETE`, or replaced by the mailbox's next code
    claim (RELAY-PROTOCOL §6.9.1), and its open token is denylisted
@@ -12519,7 +12523,9 @@ blob     = nonce (24) || XChaCha20-Poly1305(k_w, nonce, aad, json)
      without asking the member, but only if it holds no answer with
      `code` for that request. A code-less duplicate that arrives after
      an answer with a code is ignored. The new code replaces the first
-     under the one-live-code rule.
+     under the one-live-code rule. The app shows only the code of the
+     latest create it sent, and ignores answers to a create it has
+     replaced.
    - (b) If that answer also has no `code`, the app sends
      `device.pair.reject{pairing_id}` for each code-less pairing, as
      "Show a link instead" does, and then shows the link screen, as for
