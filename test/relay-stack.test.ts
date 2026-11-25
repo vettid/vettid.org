@@ -337,7 +337,7 @@ describe('alarms on the `rate limits` line (RELAY-PROTOCOL §7.2)', () => {
     expect(all.map((a) => a.AlarmName).sort()).toEqual(
       [
         'address-busy', 'address-refused', 'collectors', 'key-refused', 'log-volume', 'rate-limits-silent', 'register-refused',
-        'table-reads-high', 'table-throttled', 'table-write-volume', 'table-writes-high',
+        'table-reads-high', 'table-throttled', 'table-write-volume', 'table-writes-high', 'tasks-below-min',
         'valkey-ecpu', 'valkey-errors', 'valkey-evictions', 'valkey-storage', 'waf-rate-limit', 'ws-sessions',
       ].map((n) => `vettid-org-relay-${n}`),
     );
@@ -352,7 +352,7 @@ describe('alarms on the `rate limits` line (RELAY-PROTOCOL §7.2)', () => {
 
   test('anywhere else the alarms exist without an action (the topic is the management account\'s)', () => {
     const all = alarmsOf(t);
-    expect(all).toHaveLength(17);
+    expect(all).toHaveLength(18);
     for (const a of all) expect(a.AlarmActions).toBeUndefined();
   });
 
@@ -598,5 +598,53 @@ describe('pair-code key (RELAY-PROTOCOL §6.9.1)', () => {
     for (const bad of ['vettid/relay/pair-code-key', 'arn:aws:secretsmanager:us-east-1:123456789012:secret:vettid/relay/pair-code-key']) {
       expect(() => loadConfig(new cdk.App({ context: { relayPairCodeKeyArn: bad } }).node)).toThrow(/relayPairCodeKeyArn/);
     }
+  });
+});
+
+describe('pair-code key guards', () => {
+  const ARN = 'arn:aws:secretsmanager:us-east-1:123456789012:secret:vettid/relay/pair-code-key-AbC123';
+
+  test('an alarm when fewer than the minimum tasks are healthy, missing data counting', () => {
+    t.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      MetricName: 'HealthyHostCount',
+      Threshold: RELAY_MIN_TASKS,
+      ComparisonOperator: 'LessThanThreshold',
+      Statistic: 'Minimum',
+      EvaluationPeriods: 5,
+      DatapointsToAlarm: 5,
+      TreatMissingData: 'breaching',
+      Namespace: 'AWS/ApplicationELB',
+      Period: 60,
+    });
+    const a = Object.values<any>(t.findResources('AWS::CloudWatch::Alarm')).find((x) => x.Properties.MetricName === 'HealthyHostCount');
+    expect(a.Properties.Dimensions.map((d: any) => d.Name).sort()).toEqual(['LoadBalancer', 'TargetGroup']);
+  });
+
+  test('unset: no resource policy', () => {
+    expect(Object.keys(t.findResources('AWS::SecretsManager::ResourcePolicy'))).toHaveLength(0);
+  });
+
+  test('set: deleting, overwriting and rotating the secret are refused to everyone; reading is not', () => {
+    const keyApp = new cdk.App({ context: { relayPairCodeKeyArn: ARN } });
+    const k = Template.fromStack(new VettidOrgRelayStack(keyApp, 'RelayGuard', {
+      config: loadConfig(keyApp.node),
+      relayImage: 'ghcr.io/vettid/vettid-relay@sha256:' + 'a'.repeat(64),
+      env,
+    }));
+    const pols = Object.values<any>(k.findResources('AWS::SecretsManager::ResourcePolicy'));
+    expect(pols).toHaveLength(1);
+    expect(pols[0].Properties.SecretId).toBe(ARN);
+    expect(pols[0].Properties.BlockPublicPolicy).toBe(true);
+    const st = pols[0].Properties.ResourcePolicy.Statement;
+    expect(st).toHaveLength(1);
+    expect(st[0].Effect).toBe('Deny');
+    expect(st[0].Principal).toBe('*');
+    expect(st[0].Action).toEqual([
+      'DeleteSecret', 'PutSecretValue', 'UpdateSecret', 'UpdateSecretVersionStage',
+      'RotateSecret', 'ReplicateSecretToRegions', 'RemoveRegionsFromReplication',
+    ].map((a) => `secretsmanager:${a}`));
+    expect(st[0].Resource).toBe('*');
+    expect(JSON.stringify(st[0].Action)).not.toContain('GetSecretValue');
+    expect(JSON.stringify(st[0].Action)).not.toContain('ResourcePolicy');
   });
 });

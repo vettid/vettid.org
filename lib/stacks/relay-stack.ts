@@ -463,7 +463,7 @@ export class VettidOrgRelayStack extends cdk.Stack {
       // TLS 1.3/1.2 with hybrid post-quantum key exchange (docs/PQC-MIGRATION.md).
       sslPolicy: elbv2.SslPolicy.TLS13_12_RES_PQ,
     });
-    listener.addTargets('Relay', {
+    const relayTargets = listener.addTargets('Relay', {
       port: RELAY_PORT,
       protocol: elbv2.ApplicationProtocol.HTTP,
       targets: [service],
@@ -684,6 +684,51 @@ export class VettidOrgRelayStack extends cdk.Stack {
       evaluationPeriods: 1,
       treatMissingData: cloudwatch.TreatMissingData.BREACHING,
     });
+    // Capacity: fewer healthy tasks behind the load balancer than the
+    // service's minimum. Whatever the cause, including tasks that can no
+    // longer start because the pair-code key's secret is gone (ECS reads it
+    // at every task start), capacity drains as tasks are replaced, and no
+    // deploy is under way to roll back. Missing data counts.
+    const belowMin = alarm('TasksBelowMin', 'tasks-below-min', {
+      alarmDescription: says(`fewer than ${RELAY_MIN_TASKS} healthy relay tasks for 5 minutes: tasks are failing to start or failing health checks (if the pair-code key's secret is missing, ECS stops tasks with ResourceInitializationError)`),
+      metric: relayTargets.metrics.healthyHostCount({ statistic: 'Minimum', period: minute }),
+      threshold: RELAY_MIN_TASKS,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      evaluationPeriods: 5,
+      datapointsToAlarm: 5,
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+    });
+
+    // The pair-code key's secret is created by hand (RUNBOOK "Relay" → "The
+    // pair-code key") and every task start depends on it: a resource policy
+    // refuses deleting, overwriting or rotating it to everyone, the account's
+    // administrators included. Changing it takes a PR that removes this
+    // policy first.
+    if (config.relay.pairCodeKeyArn) {
+      new secretsmanager.CfnResourcePolicy(this, 'PairCodeKeyGuard', {
+        secretId: config.relay.pairCodeKeyArn,
+        blockPublicPolicy: true,
+        resourcePolicy: {
+          Version: '2012-10-17',
+          Statement: [{
+            Sid: 'NoDeleteOrChangeWithoutAPR',
+            Effect: 'Deny',
+            Principal: '*',
+            Action: [
+              'secretsmanager:DeleteSecret',
+              'secretsmanager:PutSecretValue',
+              'secretsmanager:UpdateSecret',
+              'secretsmanager:UpdateSecretVersionStage',
+              'secretsmanager:RotateSecret',
+              'secretsmanager:ReplicateSecretToRegions',
+              'secretsmanager:RemoveRegionsFromReplication',
+            ],
+            Resource: '*',
+          }],
+        },
+      });
+    }
+
     // The relay runs in production's main account, the management account,
     // home of the security-alerts topic (VettidOrgAuditStack; it admits this
     // account's CloudWatch alarms since #214). The member API's alarms go
@@ -693,6 +738,7 @@ export class VettidOrgRelayStack extends cdk.Stack {
       const action = { bind: () => ({ alarmActionArn: alertsTopicArn }) };
       for (const a of alarms) a.addAlarmAction(action);
       silent.addOkAction(action); // the line is back
+      belowMin.addOkAction(action); // capacity is back
     }
 
     new cdk.CfnOutput(this, 'RelayUrl', { value: `https://${host}` });
