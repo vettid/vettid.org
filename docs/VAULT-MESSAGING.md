@@ -11191,13 +11191,17 @@ Rules:
   one (`connection_id`, which withdraws it), and so is a block of a
   pending request (`block.add{pending_id}`, which is a decline): a
   desktop's or agent's is answered `forbidden` at once, never held.
-  Neither type, nor a block of a pending request, was a step-up type,
-  so no such request can be held. `block.add{connection_id}` on an
-  active connection is unchanged. A desktop may cancel or list
-  invitations and list requests. Agents MUST NOT create, accept,
-  approve or decline invitations. A desktop app hides the actions it
-  cannot take: approve, decline, block, invite, accept and introduce,
-  and shows a request read-only with "This is done on your phone."
+  So is a desktop's or agent's `block.add{connection_id}` or
+  `connection.remove` naming an outgoing request that is not yet a
+  connection, since that too withdraws it. `connection.decline`, like a
+  block of a pending request, was never a step-up type, so no such
+  request can be held. `block.add{connection_id}` and
+  `connection.remove` on an active connection are unchanged. A desktop
+  may cancel or list invitations and list requests. Agents MUST NOT
+  create, accept, approve or decline invitations. A desktop app hides
+  the actions it cannot take on a request (approve, decline, block)
+  and invite, accept and introduce, and shows a request read-only with
+  "This is done on your phone."
 - **Revocation.** The inviter MAY revoke an outstanding invite at any time
   with `connection.invite.cancel`. The vault denylists the open token's `jti`
   and DELETEs the claim. `connection.invite.list` shows outstanding invites.
@@ -14541,7 +14545,9 @@ connection request:
   its `hs.init` identity (`from.ik`, `from.relay.pk`) recorded. (0.95.0)
   Since that is a decline, `block.add{pending_id}` is app-only: a
   desktop's or agent's is answered `forbidden` at once, never held.
-  `block.add{connection_id}` on an active connection is unchanged.
+  `block.add{connection_id}` on an active connection is unchanged; on
+  an outgoing request that is not yet a connection it is app-only like
+  the decline (§6.4).
 - An identity already blocked is answered `exists`; the list holds at most
   1,000 entries (`limit`). `note` is at most 256 bytes.
 - A vault MUST refuse (drop and audit as `drop.blocked`) a connection
@@ -30815,7 +30821,7 @@ it can read and write only its own objects and use only its own relay key
 | An unlocked app, or a desktop in an access session, in someone else's hands, without the PIN and the password (0.13.0) | What its role allows until the deadline; then nothing: the vault holds, the app hides its cached content, desktops' sessions are suspended; ten wrong guesses lock the vault, which then needs the PIN to open (§3.6) | Recovery; a shorter `owner_check.interval_seconds` |
 | A thief who holds the app and knows both the PIN and the password | Everything the app can do: the check passes, and the hold changes nothing (§13.8) | Recovery (§11.11), which replaces the app; change the PIN and the password |
 | The vault's desktops and agents, or an unlocked app, in someone else's hands while the member has turned the hold off (§3.6.7) | The app: nothing past the deadline but the check, as with the hold on. Desktops and agents: what their sessions and grants allow, until the hold comes back on (`hold_off_until` or the member), the vault locks or a check succeeds. Nobody can turn the hold off, or keep it off, without the PIN and the password; ten failed checks still lock the vault | Turn the hold on (no check needed); `device.session.end`, `device.unlink`, `leash.grant.revoke`; `vault.lock` through the account site; recovery |
-| Desktop | Within an access session, what desktops may send; step-up types (secret items' values, item and tag changes, profile, settings, share rules and decisions, removals, grant decisions, action configurations, location shares, the location log, the presence policy) only with an app's approval; never critical items or wallet spends; never invites, accepts, approves or declines a connection, starts, accepts or declines an introduction, or approves an invocation (it may deny one); nothing after the session ends (§6.8) | `device.session.end`; unlink |
+| Desktop | Within an access session, what desktops may send; step-up types (secret items' values, item and tag changes, profile, settings, share rules and decisions, removals, grant decisions, action configurations, location shares, the location log, the presence policy) only with an app's approval; never critical items or wallet spends; never invites, accepts, approves or declines a connection (a block of a request or a withdrawal of its own included), starts, accepts or declines an introduction, or approves an invocation (it may deny one); nothing after the session ends (§6.8) | `device.session.end`; unlink |
 | Agent | Paused while the vault is held (§3.6.3): refused in the vault, and its delegations rejected by relying parties within `status_ttl` + 60 s. Otherwise, within its access session, only what its LEASH grants cover: through `ask` grants nothing without an app's approval of each request (at most 20 referrals an hour), through `auto` grants up to their rate limits; LEASH operations only on the `data` and `secret` items its share rules include, never critical ones; never app-only types, invitations, credential, device or grant management. Refused requests are throttled and repeated ones suspend it; its activity is summarised in the audit log, so it cannot push older entries out (§10.11) | `leash.grant.revoke`, `device.session.end`, `device.unlink`; suspension is automatic |
 | A LEASH delegation (every grant) | A claim, to relying parties that trust the member's credential key, that the agent holds that scope, until the grant's `expires_at` if any; the vault never relies on it. A relying party that requires a status statement accepts a revoked delegation for at most its `status_ttl` (≤ 1 h, default 15 min) plus 60 s of skew (LEASH §3.5's bound); one that does not can be shown it until `exp` (§10.11) | `leash.grant.revoke` (no new statements); a shorter `status_ttl` |
 | The vault's `ik` as status issuer | Signing statements that keep a revoked or suspended agent's delegations "valid" for relying parties; it grants nothing in the vault itself. An approved release does only what §10.11 says (§2.1) | Rotate the `ik` (§3.4): the chain moves the issuer; revoke the grants |
