@@ -1,6 +1,6 @@
 # VettID Relay Protocol
 
-**Version:** 0.13.0 (draft)
+**Version:** 0.14.0 (draft)
 **Status:** Pre-implementation draft for review
 
 ## 1. Purpose & design principles
@@ -265,7 +265,8 @@ in its rotate answers, which then say so themselves; see "Tombstones at
 rotation", §6.7.)
 
 (`max_blob_bytes` and `blob_ttl_seconds` are present only if the relay supports
-blob transfer, §6.8.) (0.9.2) A relay that supports blobs also
+blob transfer, §6.8.) (0.14.0) A relay that offers code claims (§6.9.1)
+advertises `"pair_codes": true`; without it a client does not use them. (0.9.2) A relay that supports blobs also
 advertises `max_mailbox_blob_bytes` (a mailbox's blob storage cap,
 67108864 in the reference relay), `max_sender_blob_bytes` (one
 sender key's share of it) and `max_sender_blobs` (how many blobs one
@@ -820,6 +821,124 @@ DELETE /v1/claim/{claim_id}          (signed by the creating key)
   is lost, the claim is already gone. Recover by asking the owner for a new
   claim.
 
+#### 6.9.1 Code claims (0.14.0)
+
+A **code claim** is a claim found by a short pairing code instead of by
+its id (VAULT-MESSAGING §6.7.2, card GC #17710). The relay never
+receives the code. It receives a `tag`, an Argon2id output over the
+code under a salt the relay publishes, and stores only a keyed MAC of
+that tag. The blob is sealed under a key derived from the code with a
+second, per-claim salt, so the relay cannot read it. A relay that
+offers code claims advertises `"pair_codes": true` in `limits` (§6.1).
+
+```
+GET /v1/pair-code/salts              (unauthenticated)
+→ 200 { "salts": [ { "id": "<8 lowercase hex>", "salt": "<base64 16 bytes>",
+                     "not_before": "<RFC3339>", "not_after": "<RFC3339>" } ] }
+
+PUT /v1/pair-code/{claim_id}         (signed by a registered mailbox key, §4.1)
+{ "salt_id": "<id>", "tag": "<base64 32 bytes>", "salt": "<base64 16 bytes>",
+  "blob": "<base64, 1..max_claim_bytes>" }
+→ 201 { "expires_at": "<RFC3339>" }
+→ 409 code_taken                     (the tag matched a live code claim: both are deleted)
+
+POST /v1/pair-code/redeem            (unauthenticated; limits 14 and 15, §7.2)
+{ "tags": [ "<base64 32 bytes>", ... ] }     (1 or 2 tags)
+→ 200 { "claim_id": "...", "salt": "<base64 16 bytes>", "blob": "<base64>",
+        "expires_at": "<RFC3339>" }  (single fetch: the claim is deleted)
+→ 404 code_unknown                   (every failure, the same bytes)
+
+DELETE /v1/pair-code/{claim_id}      (signed by the creating key)
+→ 204                                (idempotent)
+```
+
+**Lookup salts.**
+
+- The relay makes a new random 16-byte salt every 24 hours (chosen; not
+  in the card), with a new `id`. A salt is **current** from its
+  `not_before` for 24 hours. It is then listed for 10 more minutes, so
+  a code made just before the change can still be redeemed; its
+  `not_after` is the end of those 10 minutes. The list holds the
+  current salt and, during those 10 minutes, the previous one: never
+  more than 2.
+- Salts are relay-wide: every server instance of the relay answers the
+  same list from shared state. The answer is the same for every caller
+  and MAY be cached for at most 60 s.
+- Salts are not secret. They only keep a search of the code space from
+  serving for more than one day.
+
+**Creating.**
+
+- `claim_id` is chosen by the creator: 26 lowercase base32 characters
+  of 128 random bits, as for a claim id made by the relay. For code
+  claims the id is no capability: nobody fetches by it, and the creator
+  binds it into the blob's associated data, so it must exist before the
+  upload. An id already in use, or not of that form, is `bad_request`.
+- `salt_id` names the current salt. A salt that is not current is
+  `bad_request`; the creator reads the salts again.
+- The TTL is fixed: `expires_at` is receipt plus 600 s. A creator does
+  not choose it.
+- **One live code claim per mailbox.** A new code claim deletes the
+  creating mailbox's live one first.
+- The relay stores `code_mac = HMAC-SHA-256(k_pc, tag)`, where `k_pc` is
+  a secret key of the relay held in its secret store, never in the
+  claim store, and never the tag itself. With it: the bucket (the first
+  2 bytes of `code_mac`), `claim_id`, the creating mailbox, `salt_id`,
+  `salt`, `blob`, `expires_at` and a miss count starting at 0. Nothing
+  else: no address, no client detail, nothing about a device or a
+  member.
+- A `code_mac` equal to a live code claim's (a collision, or a creator
+  that guessed a live code) deletes **both** claims and answers `409
+  code_taken`. So a creator who probes with codes learns nothing it can
+  redeem. The other vault's member gets a new code.
+- Code claims count against the creating mailbox's blob storage cap,
+  as claims do (§6.9), and are charged to limit 11 (§7.2).
+
+**Redeeming.**
+
+- The client sends the tags it computed, one per listed salt. The
+  relay computes `code_mac` for each and looks each up among live code
+  claims of that salt.
+- **A match** deletes the claim before the answer is sent, and the
+  answer carries `claim_id`, `salt`, `blob` and `expires_at`. Clients
+  MUST NOT retry a redeem automatically: if the answer is lost, the
+  code is already spent (as for a claim GET, §6.9).
+- **No match.** Every live code claim of a tag's salt whose bucket
+  equals that tag's bucket gains one miss (once per request). At 32 misses (chosen; not
+  in the card) the claim is cancelled: deleted, as if expired. That is
+  the per-code limit (§7.2 limit 15).
+- **The same answer for every failure.** A tag that matches nothing, an
+  expired, spent, cancelled or replaced code, a malformed body, more
+  than 2 tags, and a refusal by the per-network limit (§7.2 limit 14)
+  all get the same `404` with the same body, `{"code": "code_unknown",
+  "message": "no such code"}`, and no `retry_after`. Only the flood
+  guard (limit 1), which comes before the route is read, keeps its
+  `429`, and a relay fault its `500`.
+- **The same timing.** The relay does the same work for every redeem
+  that passes the flood guard: an HMAC for each tag (for a malformed
+  body, for a fixed dummy tag), a store lookup, and the bucket update.
+  It holds every answer, a success included, until at least 250 ms
+  after receipt (chosen; not in the card), so that timing is flat to
+  within network jitter.
+- Tags, `code_mac`s, salts and blobs MUST NOT be logged, and the
+  redeem's body MUST NOT be logged.
+
+**What it bounds** (VAULT-MESSAGING §6.7.2 gives the arithmetic):
+
+- A guess costs the guesser one Argon2id run of 256 MiB. A random tag
+  costs nothing but can never match.
+- A given code is found before its 32 misses with a chance of at most
+  32 × 65,536 / 31^8 ≈ 2.5 × 10^-6.
+- Cancelling every live code takes about 2.1 million requests in
+  10 minutes (32 in each of 65,536 buckets), within the per-network
+  limit, from tens of thousands of networks. There is no global brake:
+  it would let anyone stop every member's pairing (as ENROLLMENT-CODES
+  §3.3).
+- A thief of the claim store without `k_pc` must search each claim's
+  blob under its own salt. The relay itself, or a thief with `k_pc`,
+  can search the code space once per lookup salt, which is why salts
+  change daily.
+
 ### 6.10 Mailbox deletion (0.5.0)
 
 ```
@@ -1140,8 +1259,10 @@ Canonical codes and their HTTP statuses:
 | `mailbox_unknown` | 404 | no such mailbox — never registered, rotated away or deleted (§6.10) — or not yours (indistinguishable) |
 | `blob_unknown` | 404 | no such blob for this owner |
 | `claim_unknown` | 404 | no such claim (unknown, expired or already fetched) |
+| `code_unknown` | 404 | (0.14.0) every failure of a code redeem (§6.9.1), the per-network limit included |
 | `not_found` | 404 | no such route |
 | `token_used` | 409 | one-shot open token already consumed (§5.6) |
+| `code_taken` | 409 | (0.14.0) a new code claim's tag matched a live one; both are deleted (§6.9.1) |
 | `payload_too_large` | 413 | body over the advertised limit |
 | `quota_exceeded` | 429 | token or mailbox quota, or the mailbox's blob storage or the sender's share of it, exhausted (`quota`, above). Not transient: a client MUST NOT retry the request unchanged; only a fresh token (`token`) or storage the owner frees cures it |
 | `rate_limited` | 429 | slow down; see `retry_after` |
@@ -1152,7 +1273,9 @@ Canonical codes and their HTTP statuses:
 Limits are relay policy, not protocol constants. The protocol contract: a
 relay signalling overload MUST use `429` + `rate_limited` and SHOULD include
 `retry_after`. Clients MUST honor `retry_after` and MUST implement
-exponential backoff with jitter on `429 rate_limited` and `5xx`; a `429
+exponential backoff with jitter on `429 rate_limited` and `5xx`
+(0.14.0: except a code redeem, which is never retried, §6.9.1, and whose
+own limit answers `404 code_unknown`, limit 14); a `429
 quota_exceeded` is not retried unchanged (§7.1). The web endpoints (§6.11)
 are limited
 with a separate budget.
@@ -1192,6 +1315,8 @@ a network: the per-process and per-key limits.)
 | 11 | stored bytes | authenticated key, per relay process; and network as a ceiling, relay-wide (0.9.4: one bucket per network for all relay processes; per process before) | per key 64 KiB/s, burst 2 MiB; per network 768 KiB/s, burst 8 MiB (0.9.4, relay-wide; 1 MiB/s, burst 32 MiB per process before) | charged in bytes. Deposits: the key is the sender's, the token's `sub` (an open token's signer), which the request signature proves only after the body (§5.3 step 7); so after step 6 and **before the body is read**, the network's ceiling is charged with the declared body length (without a `Content-Length`, the largest deposit body) and the key's budget is only checked (an empty one is refused, and the deposit is not read); once the signature has verified, the key's budget is charged with the body's length, unconditionally (it may go into debt). Claim creation (§6.9): the key is the claim's creator, the mailbox owner whose signature verified; key and network are charged together with the claim's length (refused by either, charged to neither). A deposit or claim that is then not stored (quota, signature, malformed body, store failure) is refunded. `429` with `retry_after` |
 | 12 | blob bytes | authenticated key, per relay process; and network as a ceiling, relay-wide (0.9.4: one bucket per network for all relay processes; per process before) | per key 1 MiB/s, burst 32 MiB; per network 8 MiB/s, burst 256 MiB (0.9.4: the same numbers, now relay-wide) | charged in bytes. Blob uploads: the key is the token's `sub`, which the mailbox owner wrote and the request signature proves only after the body (§5.3 step 7); so after §5.3 steps 1–6 and the checks of §6.8 (an upload they refuse, with `quota_exceeded` or, for reservations only, `rate_limited`, holds no slot and is charged nothing), and before the body is read, the network's ceiling is charged with the declared length (an upload without one is refused `bad_request` before this, §6.8) and the key's budget is only checked (an empty one is refused unread); once the signature has verified the key's budget is charged with the bytes received, unconditionally (it may go into debt). Blob downloads: after the owner's signature verified, the owner's key and the network's ceiling are charged together with the blob's size, at most a key's burst (refused by either, charged to neither). An upload that stores nothing is refunded only the part of its network charge it never sent: the bytes that reached the relay stay charged whatever refused it (body failure, signature, quota, store failure); an upload refused a transfer slot (13), or refused at it for its reservation (§6.8), holds none and is refunded entirely. A download by an owner whose budget, or whose network's, is empty is refused before the store is read. `429` with `retry_after` |
 | 13 | blob transfers | relay process; mailbox; sender and mailbox | 8 per process; per mailbox 2 uploads and, apart, 2 downloads; 1 upload per sender key and mailbox; uploads at most 8 − 2 = 6 per process | to blob uploads once their body has begun to arrive (an upload that has sent nothing holds no slot), and to blob downloads; the mailbox is the recipient's for an upload and the owner's for a download. Uploads never take a mailbox's download slots nor the 2 process slots kept for downloads. `429` with `retry_after` 2. A transfer's body must move at least 16 KiB in every 5 s and finish within 5 minutes, or the transfer is dropped (an upload is answered `400` with `Connection: close`): an upload that trickles at the minimum pace holds its slot up to 5 minutes unless it is cut off for a new upload (0.9.1). When a new upload finds no upload slot free (in the process, or in its mailbox), one in-progress upload is cut off and the new upload takes its slot. It is chosen among the uploads still reading their body (to that mailbox, if the mailbox is full) that are *evictable*: that have run at least 5 s (one pace window), come from another network than the new upload's, and have run at least 30 s or come from a network that has held upload slots on the process for at least 30 s. "Network" here is the IPv4 address or the IPv6 /48, and its 30 s run on across gaps shorter than 30 s with no slot. Of those, the one that received the fewest bytes per second over the last 10 s (over its age, at least 5 s, if younger) goes; of nearly equal speeds (within 10% or 1 KiB/s), the one whose network holds the most upload slots. A sender's own upload to a mailbox is never cut off for its next upload to that mailbox. The cut-off upload is answered `429` with `retry_after` 2 and `Connection: close`, and the bytes it sent stay charged (12). If none is evictable, the new upload is refused as above |
+| 14 | (0.14.0) code redeems | network | 20 per 10 minutes per IPv4 address, 10 per 10 minutes per IPv6 /64 (chosen; not in the card) | to `POST /v1/pair-code/redeem` (§6.9.1), after the flood guard. A refusal is answered as every other failed redeem, `404 code_unknown` after the same hold, never `429` (the one exception to the contract above) |
+| 15 | (0.14.0) misses per code | code claim | 32 unmatched redeems in its bucket (chosen; not in the card) | to a live code claim: each redeem that matches no code adds one miss to the live code claims in its tags' buckets; at 32 the claim is deleted (§6.9.1). Not visible to anyone: later redeems of that code get `404 code_unknown` |
 
 Nothing else is keyed on a network. A request that is properly signed by a
 key with a mailbox can be refused on account of its network only by the
@@ -1773,6 +1898,15 @@ announces first. Some servers and proxies default to exactly 100.
     only in the URL fragment and never reaches the relay; the page's CSP
     forbids every request, so even a defect in its script could not send
     the fragment anywhere.
+11. **Code claims** (0.14.0, §6.9.1). The relay never receives a pairing
+    code, only an Argon2id `tag` of it, and stores only a keyed MAC of
+    the tag. It cannot read a code claim's blob without searching the
+    code space at 256 MiB per guess: about 6,760 CPU-years for the whole
+    space (VAULT-MESSAGING §6.7.2), once per daily lookup salt. A relay
+    that did so would learn a vault's public keys and a spent open
+    token, and would still meet the SAS comparison if it tried to pair
+    in the member's place. Every failed redeem looks the same, in body
+    and in time, so the redeem route is no oracle for codes.
 
 ## 9. Test vectors
 
@@ -1872,6 +2006,24 @@ The push gateway API is specified separately.
 
 ## 10. Changelog
 
+- **0.14.0** — 2026-11-24, with VAULT-MESSAGING 0.94.0 (owner-approved
+  card GC #17710). New §6.9.1, **code claims**: a claim found by an
+  8-character pairing code that a desktop or agent types, without the
+  relay ever receiving the code. Four routes: `GET
+  /v1/pair-code/salts` (the daily lookup salts), `PUT
+  /v1/pair-code/{claim_id}` (create, signed; the creator chooses the
+  id, the TTL is fixed at 600 s, one live code claim per mailbox, a
+  collision deletes both claims and answers `409 code_taken`), `POST
+  /v1/pair-code/redeem` (unauthenticated, single fetch) and `DELETE
+  /v1/pair-code/{claim_id}`. The relay stores `HMAC-SHA-256(k_pc,
+  tag)`, never the code or the tag. Every failed redeem, the
+  per-network limit's refusals included, gets the same `404
+  code_unknown`, after the same work and a hold of at least 250 ms.
+  §6.1: `pair_codes` in `limits`. §7.1: `code_unknown` and
+  `code_taken`. §7.2: limits 14 (redeems per network) and 15 (misses
+  per code), and the exception to the `429` contract for limit 14. §8
+  item 11. Additive: claims of §6.9 do not change. vettid-relay
+  implements it after this version (card to follow).
 - **0.13.0** — the owner decision of 2026-11-16. §6.7: a relay MAY
   report tombstones at rotation. If it does, every rotate `200` from a
   server instance that reports at rotation carries
