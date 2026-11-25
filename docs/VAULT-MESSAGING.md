@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.94.0
+version: 0.94.1
 date: 2026-11-24
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -30,6 +30,7 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.94.1: erratum, 2026-11-25 (from the builds of cards GC #17989, #17992, #17993; vettid/vettid-vault#303, vettid/vettid-relay#38). §6.7.2: the input rule removes the paste look-alikes (no-break and figure spaces, U+2010–U+2015 and U+2212), counts code points, and refuses non-ASCII before any case mapping (as the vectors pin); the code derivation waits at most 5 s for the enclave's room, then answers `busy`; a 429 or 5xx at the PUT answers `claim_unavailable`; the cached `device.pair.create` answer has no `code`, and an app that gets one asks again once with a new request. §16 lists `pair-code.json`. The look-alikes and the 5 s wait are chosen; not in the card. No new text.
   - 0.94.0: 2026-11-24, with RELAY-PROTOCOL 0.14.0, AGENT-PLAN 0.1.22,
     ANDROID-PLAN 0.1.143, IOS-PLAN 0.1.85 and PQC-MIGRATION 0.4.2.
     Owner-approved card GC #17710: **short pairing codes** for desktops
@@ -12327,9 +12328,15 @@ only after a search of the code space that it must repeat every hour
   uniform (ENROLLMENT-CODES §3.1).
 - Shown as `XXXX-XXXX`.
 - **Input on the new device, in this order:** (1) remove spaces and
-  hyphens; (2) if 8 characters remain, it is a code: upper-case it,
-  then refuse it, before anything is derived or sent, if any character
-  is outside the alphabet, with "codes never contain 0, 1, I, L or O"
+  hyphens: the ASCII space, tab, CR and LF and the hyphen-minus U+002D,
+  and (0.94.1, chosen; not in the card) the look-alikes a paste brings:
+  U+00A0, U+2007 and U+202F (spaces) and U+2010 to U+2015 and U+2212
+  (dashes); (2) if 8 code points remain (counted as Unicode code points,
+  not UTF-16 units or graphemes), it is a code: refuse it if any of them
+  is not ASCII, **before any case mapping** (a full case mapping turns
+  `ſ` into `S` and changes lengths), then upper-case the ASCII, then
+  refuse it, before anything is derived or sent, if any character is
+  outside the alphabet, with "codes never contain 0, 1, I, L or O"
   (ENROLLMENT-CODES §3.1); (3) otherwise parse the original input as a
   link (§6.4). `code` below is the 8 normalized ASCII bytes.
 - **Single use, 10 minutes.** `exp` is the vault's time of creation
@@ -12397,7 +12404,15 @@ vault's own check, and then answers `claim_unavailable`. So a code
 pairing makes at most 2 PUTs per code for the salt.
 
 A refusal at the vault answers `claim_unavailable` (the app falls back
-to the link). The vault records it in its audit log and metrics with a
+to the link). (0.94.1) The answer that carries `code` is the only place
+the code leaves the vault: the cached copy of a `device.pair.create`
+answer (§8.2) is `{pairing_id, exp, r}` without `code`, since the code
+is never in saved state. An app that gets a `form: "code"` answer
+without `code` (a retransmission answered from the cache) sends one new
+`device.pair.create{form: "code"}` with a new request id at once,
+without asking the member; the new code replaces the first under the
+one-live-code rule. If that answer also has no `code`, the app treats
+it as `claim_unavailable`. No new text. The vault records it in its audit log and metrics with a
 distinct reason, `pair_code.salts_refused` (with which check failed,
 and no code, salt, nonce or tag), so that a relay whose codes never
 work is noticed. At the device a list refused for the clock check ends
@@ -12458,7 +12473,9 @@ blob     = nonce (24) || XChaCha20-Poly1305(k_w, nonce, aad, json)
    share the enclave's Argon2id work with the PIN's and the recovery
    wrap's, and **unlocks go first**: a code derivation waits while an
    unlock waits. When there is no room for 256 MiB, the answer is
-   `busy`, with no room reserved (as §11.14's recovery wrap). On a vault
+   `busy`, with no room reserved (as §11.14's recovery wrap). (0.94.1,
+   chosen; not in the card) The vault waits at most 5 s for room, one
+   constant that the capacity measure may tune, then answers `busy`. On a vault
    host's 1-vCPU enclave, where a 64 MiB unlock took 195 ms
    (W10-READINESS P20), the two runs take about 1.6 s of that vCPU (an
    estimate); capacity must be measured again before release.
@@ -12466,7 +12483,10 @@ blob     = nonce (24) || XChaCha20-Poly1305(k_w, nonce, aad, json)
    s_c, blob}`. A `409 code_taken` means the tag collided with a live
    code. The relay has then deleted both claims, so the vault learns
    nothing it could use. It makes a new code and `s_c` and tries again,
-   at most 3 times, then answers `relay_error`. A `bad_request` for
+   at most 3 times, then answers `relay_error`. (0.94.1) A `429` or
+   a `5xx` at the PUT is not retried there: the vault answers
+   `claim_unavailable`, and the app falls back to the link (RELAY-PROTOCOL
+   §7.2's exception). A `bad_request` for
    the salt is handled as "Which entry a vault uses" says. The other vault's
    member just sees their code fail and gets a new one.
 5. It answers `{pairing_id, code, exp, r}`. When the pairing ends
@@ -34260,6 +34280,13 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
 - The session vector's inner plaintext is the sealed one with `"seq":1`
   after `ts`.
 - Tokens, ids, PIN and claim ids in the vectors are dummy values.
+- (0.94.1) `pair-code.json` holds §6.7.2's vectors: the lookup salt and
+  its id, both `pw` strings (with their 0x00 bytes), the tags, `x`,
+  `k_w`, the aad and the sealed bundle, for an agent and a desktop, a
+  relay with a port, the canonical relay forms, the input normalization,
+  the salt lists and their refusals, the vault's choice for its PUT, and
+  bundles that must not open. The vault, relay, connector, desktop and
+  app implementations MUST reproduce it.
 - (0.90.3) **`relay_rotate.json`** gates relay-key rotation. The vault,
   the service vault, the Android and iOS apps, the desktop and the agent
   SDK MUST each reproduce it, every valid case accepted and every
