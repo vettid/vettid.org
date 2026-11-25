@@ -878,6 +878,10 @@ DELETE /v1/pair-code/{claim_id}      (signed by the creating key)
 1. The signature (§4.1), then **the creating mailbox's live code claim
    is deleted** (one live code claim per mailbox). A PUT retried after
    a lost `201` thus replaces its own first copy and succeeds.
+   (0.14.1) The vault does not rely on a retried PUT: after a failed or
+   unanswered PUT it deletes the claim and falls back to the link
+   (VAULT-MESSAGING §6.7.2). A later PUT from the same mailbox replaces
+   any code claim still live from it.
 2. `claim_id`: 26 lowercase base32 characters of 128 random bits,
    chosen by the creator, and not in use by another live code claim;
    otherwise `bad_request`. The creator binds it into the blob's
@@ -2056,7 +2060,9 @@ The push gateway API is specified separately.
   vettid/vettid-relay#38): §7.2's backoff exception also covers the
   vault's code PUT and its salts read for a code pairing, one attempt
   each (the vault falls back to the link); a code claim's `DELETE` is
-  retried as usual.
+  retried as usual. §6.9.1 creating step 1: the vault does not rely on
+  a retried PUT (it deletes the claim after a failed or unanswered PUT),
+  and a later PUT from the same mailbox replaces its live code claim.
 - **0.14.0** — 2026-11-24, with VAULT-MESSAGING 0.94.0 (owner-approved
   card GC #17710). New §6.9.1, **code claims**: a claim found by an
   8-character pairing code that a desktop or agent types, without the
