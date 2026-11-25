@@ -30,7 +30,7 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.95.0: normative, 2026-11-25; owner decisions #18396 b and #18413 a (2026-11-25). **`connection.decline` and `intro.decline` are app-only.** A desktop or an agent is answered `forbidden` at once, never held and never delegated, as for `connection.invite.create`, `connection.invite.accept`, `connection.approve`, `intro.create` and `intro.accept`. Before, a desktop could decline a connection request or an introduction. A desktop request of either type that was held before this release is answered `forbidden` when an app approves it (as in 0.31.0). The reason (the owner): "Desktops don't accept new connections. Only phones do." Needs a vault release. Unchanged: a desktop or an agent may still deny a request for approval (`action.respond{approve: false}`, §10.14), and a desktop may still list connection requests and introductions. A desktop shows requests and introductions read-only and points to the phone with the approved text "This is done on your phone." Sections: §3.1, §6.4 "Who approves", §6.8, §10.4, §10.15, §13.5 (Desktop row).
+  - 0.95.0: normative, 2026-11-25; owner decisions #18396 b and #18413 a (2026-11-25). **`connection.decline` and `intro.decline` are app-only.** A desktop or an agent is answered `forbidden` at once, never held and never delegated, as for `connection.invite.create`, `connection.invite.accept`, `connection.approve`, `intro.create` and `intro.accept`. A block of a pending request (`block.add{pending_id}`) is a decline and is app-only too; `block.add{connection_id}` on an active connection is unchanged. Before, a desktop could decline a connection request or an introduction. Neither type, nor a block of a pending request, was a step-up type, so no such request can be held. The reason (the owner): "Desktops don't accept new connections. Only phones do." Needs a vault release. Unchanged: a desktop or an agent may still deny a connection's pending invocation (`action.respond`, §10.14); cancelling an invitation (`connection.invite.cancel`) or an introduction it made (`intro.cancel`) stays open to desktops; the owner is asked (link added later) (owner question pending); and a desktop may still list connection requests and introductions. A desktop shows requests and introductions read-only and points to the phone with the approved text "This is done on your phone." Sections: §3.1, §6.4 "Who approves", §6.8, §10.4 (role rule and Block list), §10.15, §13.5 (Desktop row).
   - 0.94.1: erratum, 2026-11-25 (from the builds of cards GC #17989, #17992, #17993; vettid/vettid-vault#303, vettid/vettid-relay#38; fixes after the blind pair on vettid/vettid.org#666). §6.7.2: (1) the input rule removes a defined set: ASCII tab, CR and LF, every Unicode Zs and Pd character (U+002D included), U+2212, and U+00AD, U+200B, U+200E, U+200F, U+2060 and U+FEFF; it counts code points, and refuses non-ASCII before any case mapping (as the vectors pin), with the same "codes never contain…" text. The vectors do not yet cover the removed set: one case per class and a non-removed non-ASCII character come in a follow-up to vettid-vault#303, card GC #17989; until then implementations follow the text. (2) The code derivations wait at most 5 s in all for the enclave's room, then answer `busy`. (3) A failed salts read answers `claim_unavailable`. (4) A failed or unanswered PUT (a 429, a 5xx, a network error or a timeout) is not retried: the vault deletes the claim (`DELETE`, retried with backoff), denylists the pairing's open token and answers `claim_unavailable`. (5) New step 6 of "Making a code pairing": the cached `device.pair.create` answer has no `code` (§8.2 says so too); an app that holds no answer with a code for the request asks again once with a new request, ignores a code-less duplicate that comes after a coded answer, rejects each code-less pairing before falling back to the link, sends a `limit` from the re-ask to the link screen, retransmits a code create only after 15 s, and the vault holds a duplicate of a request still running until the first completes. §10.3 points to it. §16 lists `pair-code.json`. The removed set, the 5 s wait and (5)'s `limit`, 15 s and held-duplicate rules are chosen; not in the card. No new text.
   - 0.94.0: 2026-11-24, with RELAY-PROTOCOL 0.14.0, AGENT-PLAN 0.1.22,
     ANDROID-PLAN 0.1.143, IOS-PLAN 0.1.85 and PQC-MIGRATION 0.4.2.
@@ -4986,7 +4986,7 @@ hidden. Traffic-analysis resistance is a non-goal (as in RELAY-PROTOCOL
 |---|---|---|
 | Vault | yes | One per member, inside the enclave. Identified to VettID by an opaque `vault_id` (§11.5). |
 | Owner device, role `app` | yes | A phone or tablet installation. **Exactly one per vault** (§6.7): the holder of the Protean Credential (§3.5) and the only role that may unlock (§11.7). |
-| Owner device, role `desktop` | yes | Does not unlock in 0.2. Never creates or accepts connections: inviting, accepting an invitation, approving a connection request, starting or accepting an introduction, and declining a connection request or an introduction are the app's (§6.4); it may deny a request for approval. |
+| Owner device, role `desktop` | yes | Does not unlock in 0.2. Takes no part in new connections: inviting, accepting an invitation, approving a connection request, starting or accepting an introduction, and declining a connection request or an introduction are the app's (§6.4); it may deny a connection's pending invocation (`action.respond`, §10.14). |
 | Owner device, role `agent` | yes | Acts under LEASH grants. Never unlocks. |
 | Peer vault | yes | A connection's vault |
 | Enclave instance | no | Holds the enclave transport key (ETK, §11.2) |
@@ -11186,14 +11186,18 @@ Rules:
   accepts connections: `connection.invite.create`,
   `connection.invite.accept` and `connection.approve` are app-only, and a
   desktop's or agent's request of them is answered `forbidden` at once,
-  never held (§6.8). (0.95.0) `connection.decline` is app-only too: a
-  desktop's or agent's decline is answered `forbidden` at once, never
-  held, and a desktop request held before this release is answered
-  `forbidden` when an app approves it. A desktop may cancel or list
+  never held (§6.8). (0.95.0) `connection.decline` is app-only too, for
+  an incoming request (`pending_id`) and for the member's own outgoing
+  one (`connection_id`, which withdraws it), and so is a block of a
+  pending request (`block.add{pending_id}`, which is a decline): a
+  desktop's or agent's is answered `forbidden` at once, never held.
+  Neither type, nor a block of a pending request, was a step-up type,
+  so no such request can be held. `block.add{connection_id}` on an
+  active connection is unchanged. A desktop may cancel or list
   invitations and list requests. Agents MUST NOT create, accept,
   approve or decline invitations. A desktop app hides the actions it
-  cannot take: approve, decline, invite, accept and introduce, and
-  shows a request read-only with "This is done on your phone."
+  cannot take: approve, decline, block, invite, accept and introduce,
+  and shows a request read-only with "This is done on your phone."
 - **Revocation.** The inviter MAY revoke an outstanding invite at any time
   with `connection.invite.cancel`. The vault denylists the open token's `jti`
   and DELETEs the claim. `connection.invite.list` shows outstanding invites.
@@ -12808,7 +12812,8 @@ While the vault is held, a session is suspended but still returned.
   or accepting a connection is app-only too: `connection.invite.create`,
   `connection.invite.accept`, `connection.approve`, `intro.create` and
   `intro.accept` are answered `forbidden` to a desktop at once, never
-  held; so are (0.95.0) `connection.decline` and `intro.decline`.
+  held; so are (0.95.0) `connection.decline`, `intro.decline` and
+  `block.add{pending_id}`, a block of a pending request being a decline.
   Likewise only an app approves a connection's pending invocation:
   `action.respond{approve: true}` from a desktop is answered `forbidden`
   at once, never held, and the invocation stays pending; a desktop may
@@ -14496,9 +14501,10 @@ connection: { "id": "<id>", "kind": "connection", "state": "active", "name": "..
   every app and desktop).
 
 The D→V types above are sent by `app` or `desktop` devices, except
-`connection.invite.create`, `connection.invite.accept` and
-`connection.approve`, which only the app sends (`forbidden` to a
-desktop, §6.4 "Who approves"); for desktops, `connection.remove` and
+`connection.invite.create`, `connection.invite.accept`,
+`connection.approve`, (0.95.0) `connection.decline` and `block.add` with a
+`pending_id`, which only the app sends (`forbidden` to a desktop or an
+agent, §6.4 "Who approves"); for desktops, `connection.remove` and
 `block.remove` are step-up types (§6.8).
 
 - **Metadata.** `alias` (at most 128 bytes), `note` (at most 1,024 bytes),
@@ -14532,7 +14538,10 @@ connection request:
   key are recorded in a block entry.
 - A pending request is declined, which sends `connection.declined`
   (§6.4, 0.10.5; never a reason, so a block looks like a decline), and
-  its `hs.init` identity (`from.ik`, `from.relay.pk`) recorded.
+  its `hs.init` identity (`from.ik`, `from.relay.pk`) recorded. (0.95.0)
+  Since that is a decline, `block.add{pending_id}` is app-only: a
+  desktop's or agent's is answered `forbidden` at once, never held.
+  `block.add{connection_id}` on an active connection is unchanged.
 - An identity already blocked is answered `exists`; the list holds at most
   1,000 entries (`limit`). `note` is at most 256 bytes.
 - A vault MUST refuse (drop and audit as `drop.blocked`) a connection
@@ -21678,6 +21687,9 @@ A vault             B vault (introducer)              C vault
 - Removing or blocking a connection closes the introductions it takes
   part in (an introducer's offers are dropped without notice).
 - Agents never introduce or answer introductions.
+- (0.95.0) A desktop shows introductions read-only and points to the
+  phone with "This is done on your phone."; `intro.decline` is app-only,
+  like `intro.accept`.
 - **Audit and feed.** `intro.created`, `intro.offered` (on A and C),
   `intro.accepted`, `intro.declined`, `intro.connecting`, `intro.closed`
   (`ref` = `intro_id`); an offer is a high-priority feed item
