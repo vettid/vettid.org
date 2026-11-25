@@ -16,7 +16,7 @@ changelog:
     for a vault whose relay is not the environment's own. §3.1
     `internal/pairing`, §5 (the vault's `pair-code.json` vectors, to
     come), new row A2.5, §7.2 AA2, and §11: the start text changes and
-    five texts are new (**NEW**, for the owner's approval); the
+    five texts are new (**NEW**, approved by the owner, GC #17983); the
     desktop's live in vettid-desktop. Not built; connector card to
     follow.
   - 0.1.21: 2026-11-22, erratum (VAULT-MESSAGING 0.93.2, ANDROID-PLAN

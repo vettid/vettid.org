@@ -61,7 +61,7 @@ changelog:
     pointer), §10.3 (`device.pair.create`) and §13.6 (logging). Not
     built; vault, relay, app, desktop and connector cards follow, and
     test vectors come with the vault card.
-    **Open (owner)** (each chosen; not in the card, except (k)):
+    **Decided (owner)** (each chosen, not in the card; all approved by the owner as listed, Ground Control #17983; (k) GC #17957):
     (a) the per-code limit: a code is cancelled after 32 unmatched
     redeems in its bucket of 1/65,536 of the tag space, a chance of
     about 2.5 × 10^-6 that a given code is found (enrollment's is
