@@ -4,7 +4,7 @@ status: draft
 version: 0.1.143
 date: 2026-11-24
 changelog:
-  - 0.1.143: 2026-11-24 (VAULT-MESSAGING 0.94.0 §6.7.2; owner-approved card GC #17710; IOS-PLAN 0.1.85). §4 "Devices & agents", "Pair an agent (AA2)", step 1: the screen shows an 8-character pairing code (`XXXX-XXXX`, from `device.pair.create{role, form: "code"}`) instead of the QR and the long code, with Copy and Share as before (decision 1). **Show a link instead** cancels the code and makes a link pairing, showing today's QR and long code. A vault that answers with a `link` (a vault before 0.94.0, or `claim_unavailable`) gets the link screen at once. When the answer's `r` is not the app's built-in relay, the relay's host is shown under the code. The same for Pair a desktop. The phone derives nothing (the vault makes the code). Steps 2–4, the SAS comparison included, are unchanged. NEW texts: the code screen's body (agent and desktop), "Show a link instead", and the relay line. Not built; card to follow.
+  - 0.1.143: 2026-11-24 (VAULT-MESSAGING 0.94.0 §6.7.2; owner-approved card GC #17710; IOS-PLAN 0.1.85). §4 "Devices & agents", "Pair an agent (AA2)", step 1: the screen shows an 8-character pairing code (`XXXX-XXXX`, from `device.pair.create{role, form: "code"}`) instead of the QR and the long code, with Copy and Share as before (decision 1). **Show a link instead** cancels the code and makes a link pairing, showing today's QR and long code. A vault that answers with a `link` (a vault before 0.94.0, or `claim_unavailable`) gets the link screen at once. When the answer's `r` is not the app's built-in relay, the relay (host, and port when `r` has one) is shown under the code, exactly as the device takes it. The same for Pair a desktop. The phone derives nothing (the vault makes the code). Steps 2–4, the SAS comparison included, are unchanged. NEW texts: the code screen's body (agent and desktop), "Show a link instead", and the relay line. Not built; card to follow.
   - 0.1.142: 2026-11-24 (owner decision a, Ground Control #17899; IOS-PLAN 0.1.84). §4 "Transfer (new phone)", a new paragraph "A different code while the transfer waits" after "Back while the transfer waits". The same code is recognized first. Before minute 10, a different valid code first opens the existing "Cancel the move?": Keep waiting keeps the transfer; Cancel the move abandons it, and the new code starts only after the abandon is saved. An abandon refused at minute 10 returns to waiting, with the new code not used. From minute 10 to the window's end a different code is refused with nothing dropped; this closes Android's gap where a scan between minute 10 and 11 replaced the waiting transfer, against "no abandon from minute 10". No new text. Built by cards GC #17839 and GC #17840.
   - 0.1.141: 2026-11-24 (owner decision b, Ground Control #17837; card GC #17838; IOS-PLAN 0.1.82). §4 "Transfer (new phone)", a new paragraph "Back while the transfer waits": while a transfer to this phone is live (code shown, or found waiting after a restart, until it ends in any way), Back never leaves the move screen for "Your account already has a vault" or welcome. Before minute 10 it opens the existing cancel confirmation; from minute 10 to the window's end it does nothing; after the end it follows the phase read again. Today Android's waiting step already keeps Back (the confirmation, or nothing during the window). The gap is `leaveMove`, which sends any setup stage to "Your account already has a vault" whenever Back reaches it: from the transfer screen's first step after a restart, before or without the transfer read back, from the first step after a cancel the vault refused at minute 10, and possibly from an ended screen until the phase is read again. No new text. Built by card GC #17839. Follows 0.1.140 (vettid/vettid.org#661).
   - 0.1.140: erratum, 2026-11-24 (owner decision a, Ground Control #17804; card GC #17705). §4 "The approvals indicator", 1: "the member's own outgoing requests" are not counted only while they wait for the handshake or for the other side; one whose safety code waits for the member's Approve or Decline is counted, as an incoming request is (the drawer badge already counted it). 3 (an erratum of the app's, not part of decision a): the one-second tick also runs for the icon while it is shown, an entry is time-critical and touch exploration is on, so that the icon's description (11, unchanged) can name the time left; without it the icon would need either a tick or a description with no time. 12: the tests gain both outgoing cases and the icon's tick with touch exploration on and off. IOS-PLAN 0.1.81 corrects §4.12's summary to match. No text changes.
@@ -6109,7 +6109,9 @@ code first.** The app sends `device.pair.create{role: "agent", form:
   TalkBack reads it symbol by symbol. No QR: the computer has no
   camera as a rule, and the QR stays on the link screen.
 - When `r` is not the app's built-in relay for its environment, under
-  the code (**NEW**): "Relay: <host of r>".
+  the code (**NEW**): "Relay: <r without https://>", that is the host,
+  with `:port` when `r` has one (VAULT-MESSAGING §6.7.2 "The relay's
+  base URL"): exactly what the member types into the device.
 - Copy and Share as below (decision 1), with the code only; the
   countdown, **New code**, **Cancel**, `FLAG_SECURE` and the errors as
   below. A new code (**New code**, or opening the screen again)
@@ -6120,8 +6122,9 @@ code first.** The app sends `device.pair.create{role: "agent", form:
   below. The link is the fallback, not a weaker path: its key is 256
   random bits.
 - A vault that answers with `link` instead of `code` (before 0.94.0)
-  or with `claim_unavailable` (its relay takes no codes) gets the link
-  screen at once, with no message. `busy` and `limit` are "A pairing
+  or with `claim_unavailable` (its relay takes no codes, or its salts
+  failed the vault's checks) gets the link screen at once, with no
+  message. `busy` and `limit` are "A pairing
   code could not be made. Try again." as any other error.
 - The phone derives nothing: the vault makes the code and seals the
   bundle. Steps 2 to 4 below, the SAS comparison included, are

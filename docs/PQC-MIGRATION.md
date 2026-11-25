@@ -20,7 +20,7 @@ changelog:
     row 10 covers them and no migration is needed. Grover does not
     change the code's protection: it rests on Argon2id's cost per guess
     over 8.5 × 10^11 codes, which a quantum computer does not lower in
-    any practical way (memory-hard, sequential), not on a key length
+    any practical way (memory-hard, sequential), not on a key length.
   - 0.4.1: §4 row 14, §3 and §9: the clients' side of TLS to the relay,
     checked on 2026-11-21. The desktop (rustls) now uses the aws-lc-rs
     provider with `prefer-post-quantum` and negotiates X25519MLKEM768 in a
