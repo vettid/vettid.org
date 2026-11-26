@@ -1,9 +1,10 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.87
+version: 0.1.88
 date: 2026-11-26
 changelog:
+  - 0.1.88: 2026-11-26 (ANDROID-PLAN 0.1.146; owner decision a, Ground Control #19250). The iPhone's desktop block and removal rows take ANDROID-PLAN 0.1.146 identically: the label "Note from <name>:" above a block's note, and "(connected <date>)" after a name another connection shares. Not built; card GC #19097, before release 35.
   - 0.1.87: 2026-11-26 (ANDROID-PLAN 0.1.145; VAULT-MESSAGING 0.96.0 §6.8; owner decisions a on Ground Control #18926 and #19089; card GC #19094). The iPhone shows ANDROID-PLAN §4 "Requests held for approval"'s two new rows, identically, texts included: a desktop's held `block.add{connection_id}` and `connection.remove{connection_id}` of a connection the app can resolve, with Approve and Deny; an unresolved or malformed one stays deny-only (ANDROID-PLAN's fail-closed rule), as do the other desktop step-up types. "Later — following Android", devices and agents, points to the rows. The texts are owner-approved (#19089). Not built; card GC #19097, in the same staging release as the vault's hold (card GC #19095).
   - 0.1.86: erratum, 2026-11-25 (ANDROID-PLAN 0.1.144; VAULT-MESSAGING 0.94.1 §6.7.2). The iPhone follows ANDROID-PLAN §4 "Pair an agent (AA2)", "Asking again": a code-less (cached) `device.pair.create` answer gets one new create, code-less pairings are rejected before the link fallback, a `limit` from the re-ask shows the link screen, and a code create is retransmitted only after 15 s. No new text.
   - 0.1.85: 2026-11-24 (ANDROID-PLAN 0.1.143; VAULT-MESSAGING 0.94.0 §6.7.2; owner-approved card GC #17710). "Later — following Android", devices and agents: Pair an agent and Pair a desktop show the 8-character pairing code first, with Show a link instead, and the relay line when the vault's relay is not the app's own, as ANDROID-PLAN §4 "Pair an agent (AA2)" says. ANDROID-PLAN governs, and the iPhone shows exactly its texts once approved (its NEW texts are for the owner). The iPhone derives nothing. Not built; it comes with the "Later" item. The NEW texts were approved by the owner (Ground Control #17983).
@@ -3015,7 +3016,7 @@ ANDROID-PLAN 0.1.120 §4: presence's "last seen" wording and card text
 (owner, 2026-11-03), location's distances in miles or kilometers by
 the phone's region, with Settings → Units (owner, 2026-11-05), and,
 for devices and agents, **Pair a desktop** beside Pair an agent (owner
-decision a, 2026-11-05; vettid-android #291, in review). (0.1.87) A desktop's held block and removal show ANDROID-PLAN 0.1.145's two rows in §4 "Requests held for approval", failing closed as it says. (0.1.85) Pair an agent and Pair a desktop show the 8-character pairing code first (`device.pair.create{form: "code"}`), with Show a link instead and the relay line, as ANDROID-PLAN 0.1.143 §4 "Pair an agent (AA2)" says; VoiceOver reads the code symbol by symbol. (0.1.78) Devices and agents also include §4.19, the folders and files of a run. (0.1.79) And §4.20 and §4.21, how an agent may use an item and the approvals for runs, proxies and reveals (ANDROID-PLAN AA7 and AA8), which §4.19 builds on.
+decision a, 2026-11-05; vettid-android #291, in review). (0.1.87) A desktop's held block and removal show ANDROID-PLAN 0.1.145's two rows in §4 "Requests held for approval", failing closed as it says, (0.1.88) with 0.1.146's note label and same-name date. (0.1.85) Pair an agent and Pair a desktop show the 8-character pairing code first (`device.pair.create{form: "code"}`), with Show a link instead and the relay line, as ANDROID-PLAN 0.1.143 §4 "Pair an agent (AA2)" says; VoiceOver reads the code symbol by symbol. (0.1.78) Devices and agents also include §4.19, the folders and files of a run. (0.1.79) And §4.20 and §4.21, how an agent may use an item and the approvals for runs, proxies and reveals (ANDROID-PLAN AA7 and AA8), which §4.19 builds on.
 
 ### What blocks what
 
