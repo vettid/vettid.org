@@ -4,7 +4,7 @@ status: draft
 version: 0.1.145
 date: 2026-11-26
 changelog:
-  - 0.1.145: 2026-11-26 (VAULT-MESSAGING 0.96.0 §6.8; owner decisions a on Ground Control #18926 and #19089; card GC #19094; IOS-PLAN 0.1.87). §4 "Requests held for approval": two new rows, for a desktop's held `block.add{connection_id}` (a step-up type since VAULT-MESSAGING 0.96.0) and `connection.remove{connection_id}`, naming a connection in `connection.list`. The connection is shown as its First Last, `<name>` is the desktop's name from the request, and a block shows the desktop's `note` when there is one. Approve sends `approval.decide{approve: true}` and Deny `approve: false`; the answers are those of "Answers to `approval.decide`". A `connection_id` the app cannot resolve keeps the deny-only row. Decision 9 now names the two exceptions. The texts were approved by the owner (#19089): "<name> wants to block <First Last>", "Blocking ends your connection with <First Last>. They can't connect with you again until you unblock them.", "<name> wants to remove <First Last>" and "Removing ends your connection with <First Last>." Release: the vault's hold on a desktop's block (card GC #19095) ships in the same staging release as these rows (cards GC #19096, #19097). Not built.
+  - 0.1.145: 2026-11-26 (VAULT-MESSAGING 0.96.0 §6.8; owner decisions a on Ground Control #18926 and #19089; card GC #19094; IOS-PLAN 0.1.87). §4 "Requests held for approval": two new rows, for a desktop's held `block.add{connection_id}` (a step-up type since VAULT-MESSAGING 0.96.0) and `connection.remove{connection_id}`, naming a connection in `connection.list`. The connection is shown as its First Last, `<name>` is the desktop's name from the request, and a block shows the desktop's `note` when there is one. Approve sends `approval.decide{approve: true}` and Deny `approve: false`; the answers are those of "Answers to `approval.decide`". A `connection_id` the app cannot resolve, or a malformed request, keeps the deny-only row; the rows fail closed (a paragraph after the table), the note is shown as cleaned plain text apart from the body, a service connection shows its service name, and "Answers to `approval.decide`" says a held request's own `not_found`, `exists`, `limit` or `bad_request` is not the error `not_found`. Decision 9 now names the two exceptions. Tests added. The texts were approved by the owner (#19089): "<name> wants to block <First Last>", "Blocking ends your connection with <First Last>. They can't connect with you again until you unblock them.", "<name> wants to remove <First Last>" and "Removing ends your connection with <First Last>." Release: the vault's hold on a desktop's block (card GC #19095) ships in the same staging release as these rows (cards GC #19096, #19097). Not built.
   - 0.1.144: erratum, 2026-11-25 (the blind pair on vettid/vettid-android#446, card GC #17839). §4 "A different code while the transfer waits": 0.1.142 said Android's scan replaces and drops the waiting transfer between minute 10 and 11; it does not. `transferPinned` (settlement active, or `deadlineDue`, which covers every waiting transfer whose comparison code is known) already refuses a new code there, since #187. The rule is unchanged. The 0.1.142 changelog line's "this closes Android's gap" is withdrawn. VAULT-MESSAGING 0.94.1 §6.7.2 "Making a code pairing" step 6: an app that gets a cached `form: "code"` answer without `code` asks again once, only if it holds no coded answer for that request; it ignores a later code-less duplicate, rejects each code-less pairing before falling back to the link, sends a `limit` from the re-ask to the link screen, and retransmits a code create only after 15 s (AA2, a new bullet). IOS-PLAN 0.1.86 follows. No new text.
   - 0.1.143: 2026-11-24 (VAULT-MESSAGING 0.94.0 §6.7.2; owner-approved card GC #17710; IOS-PLAN 0.1.85). §4 "Devices & agents", "Pair an agent (AA2)", step 1: the screen shows an 8-character pairing code (`XXXX-XXXX`, from `device.pair.create{role, form: "code"}`) instead of the QR and the long code, with Copy and Share as before (decision 1). **Show a link instead** cancels the code and makes a link pairing, showing today's QR and long code. A vault that answers with a `link` (a vault before 0.94.0, or `claim_unavailable`) gets the link screen at once. When the answer's `r` is not the app's built-in relay, the relay (host, and port when `r` has one) is shown under the code, exactly as the device takes it. The same for Pair a desktop. The phone derives nothing (the vault makes the code). Steps 2–4, the SAS comparison included, are unchanged. NEW texts: the code screen's body (agent and desktop), "Show a link instead", and the relay line. Not built; card to follow. The NEW texts were approved by the owner (Ground Control #17983).
   - 0.1.142: 2026-11-24 (owner decision a, Ground Control #17899; IOS-PLAN 0.1.84). §4 "Transfer (new phone)", a new paragraph "A different code while the transfer waits" after "Back while the transfer waits". The same code is recognized first. Before minute 10, a different valid code first opens the existing "Cancel the move?": Keep waiting keeps the transfer; Cancel the move abandons it, and the new code starts only after the abandon is saved. An abandon refused at minute 10 returns to waiting, with the new code not used. From minute 10 to the window's end a different code is refused with nothing dropped; this closes Android's gap where a scan between minute 10 and 11 replaced the waiting transfer, against "no abandon from minute 10". No new text. Built by cards GC #17839 and GC #17840.
@@ -6472,10 +6472,20 @@ no longer have" and offers only **Deny**.
 | `agent.request`, `op: "item.run"` or `"item.proxy"`, before the app version with AA8 (0.1.137; card #16366) | "<name> wants to use <item> in a way this version of VettID can't show" | "Update VettID to see the details. Until then you can only deny it." | Deny |
 | `agent.request`, `op: "item.run"` or `"item.proxy"`, from the app version with AA8 (0.1.137) | as "Approvals for runs, proxies and reveals (AA8)" says | as AA8 says | Deny on the entry; Approve and Deny only on the detail screen, after it is scrolled to its end (Deny only where AA8 says) |
 | A delegable owner type (after decision 3) | "<name> wants to <scope label, lower case>" | the body's connection as "First Last" where it names one; for `message.send`: "Message to <First Last>:" and the text in full | Approve, Deny |
-| (0.1.145) A desktop's `block.add{connection_id, note?}` naming a connection in `connection.list` | "<name> wants to block <First Last>" | "Blocking ends your connection with <First Last>. They can't connect with you again until you unblock them." Then the desktop's `note`, if it gave one | Approve, Deny |
+| (0.1.145) A desktop's `block.add{connection_id, note?}` naming a connection in `connection.list` | "<name> wants to block <First Last>" | "Blocking ends your connection with <First Last>. They can't connect with you again until you unblock them." Then the desktop's `note`, if it gave one, as plain text in its own box apart from the body, cleaned as names are (VAULT-MESSAGING §10.8) | Approve, Deny |
 | (0.1.145) A desktop's `connection.remove{connection_id}` naming a connection in `connection.list` | "<name> wants to remove <First Last>" | "Removing ends your connection with <First Last>." | Approve, Deny |
-| A desktop's other step-up request, or one of the two above whose connection the app cannot resolve | "<name> asks to approve a request" | "Desktop requests can't be shown in this version of VettID, so you can only deny them." | Deny (decision 9) |
+| A desktop's other step-up request, or one of the two above whose connection the app cannot resolve or whose request is malformed (below) | "<name> asks to approve a request" | "Desktop requests can't be shown in this version of VettID, so you can only deny them." | Deny (decision 9) |
 | Any other `type` or `op` | "<name> asks to approve a request" | "This version of VettID can't show this request, so you can only deny it." | Deny |
+
+(0.1.145) **The desktop block and removal rows fail closed.** They show
+only when `role` is `desktop`; `device_id`, `name` and `exp` pass AA8
+"Fail closed"'s 0.1.139 rule; `body` holds only `connection_id`, a
+string naming a connection in `connection.list` (`active` or `stale`)
+whose names the app holds, and for `block.add` an optional `note`, a
+string of at most 256 bytes (VAULT-MESSAGING §10.4); and no JSON member
+is duplicated. Anything else gives the deny-only row. For a service
+connection, `<First Last>` is the service's name with the "Service"
+label, as "Service connections" says.
 
 AGENT-PLAN AA5's "read" is `item.get` (a reveal, see) and "use" is
 `item.use` (§10.11). The titles follow AGENT-PLAN §11's drafts; for `item.get`,
@@ -6488,7 +6498,12 @@ the vault checks the grants again when it executes). `"session_required"`
 or `"denied"` → "Approved, but <name>'s access ended first, so nothing
 was done." `"way_not_allowed"` → "Approved, but this item no longer
 allows that, so nothing was done." Any other `result` → "Approved, but
-your vault answered: <result>." An error answer to `approval.decide`
+your vault answered: <result>." (0.1.145) For a desktop's block or
+removal, a `result` of `not_found`, `exists`, `limit` or `bad_request`
+is the held request's own answer when it ran (VAULT-MESSAGING §6.8):
+nothing was blocked or removed, and it shows the "Any other `result`"
+text. It is not the
+error `not_found` below. An error answer to `approval.decide`
 itself: `not_found` (the approval expired or was decided elsewhere;
 VAULT-MESSAGING 0.83.0) → "This request is no longer waiting." and the
 entry goes. Any other error keeps the entry and shows the vault's error text.
@@ -6561,7 +6576,9 @@ and "Desktop session ended" become "Access allowed" and "Access ended"
 
 #### Spec cross-check
 
-Every type, member and code named above is in VAULT-MESSAGING 0.50.0:
+Every type, member and code named above is in VAULT-MESSAGING 0.50.0
+((0.1.145) the desktop block and removal rows follow VAULT-MESSAGING
+0.96.0 §6.8):
 `device.list`, `device.unlink`, `device.pair.create`, `.pending`,
 `.approve`, `.reject`, `device.session.pending`, `.approve`, `.deny`,
 `.end`, `approval.pending`, `approval.decide` (§10.3);
@@ -6593,8 +6610,16 @@ specification is silent, decision 14 lists it.
   window; `auto` offered only with `item_ways` and the warning shown on
   every rule without it (decision 17); the `item.use` limit text on
   every agent rule.
+- (0.1.145) Unit (Approvals): a desktop's `block.add` with and without
+  `note`, and a desktop's `connection.remove`, each on an `active`, a
+  `stale` and a service connection; each with an id not in
+  `connection.list`, a malformed body (an extra member, a `note` that
+  is not a string or is over 256 bytes, a duplicated member), a blank
+  `name` and a `role` other than `desktop` (deny-only); the note shown
+  cleaned; each `result` after Approve (`ok`, `not_found`, `exists`,
+  `limit`, `bad_request`) and the error `not_found`.
 - Unit (Approvals): every row of the table, including the deny-only
-  rows (`item.run`, `item.proxy` before AA8, desktops' requests, unknown types, an
+  rows (`item.run`, `item.proxy` before AA8, a desktop's other requests, unknown types, an
   unresolvable item, an entry without its body); `item.use`'s data
   shown as text and as hex, and its short-value line; an access request
   known only from its feed item; a pairing known only from its feed
