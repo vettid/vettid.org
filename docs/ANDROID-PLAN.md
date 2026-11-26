@@ -6472,7 +6472,7 @@ no longer have" and offers only **Deny**.
 | `agent.request`, `op: "item.run"` or `"item.proxy"`, before the app version with AA8 (0.1.137; card #16366) | "<name> wants to use <item> in a way this version of VettID can't show" | "Update VettID to see the details. Until then you can only deny it." | Deny |
 | `agent.request`, `op: "item.run"` or `"item.proxy"`, from the app version with AA8 (0.1.137) | as "Approvals for runs, proxies and reveals (AA8)" says | as AA8 says | Deny on the entry; Approve and Deny only on the detail screen, after it is scrolled to its end (Deny only where AA8 says) |
 | A delegable owner type (after decision 3) | "<name> wants to <scope label, lower case>" | the body's connection as "First Last" where it names one; for `message.send`: "Message to <First Last>:" and the text in full | Approve, Deny |
-| (0.1.145) A desktop's `block.add{connection_id, note?}` naming a connection in `connection.list` | "<name> wants to block <First Last>" | "Blocking ends your connection with <First Last>. They can't connect with you again until you unblock them." Then the desktop's `note`, if it gave one, as plain text in its own box apart from the body, cleaned as names are (VAULT-MESSAGING §10.8) | Approve, Deny |
+| (0.1.145) A desktop's `block.add{connection_id, note?}` naming a connection in `connection.list` | "<name> wants to block <First Last>" | "Blocking ends your connection with <First Last>. They can't connect with you again until you unblock them." Then the desktop's `note`, if it gave one, as plain text in its own box apart from the body, cleaned as VAULT-MESSAGING §10.8 "Showing received text" says for a note (lines kept); none when it is empty once cleaned | Approve, Deny |
 | (0.1.145) A desktop's `connection.remove{connection_id}` naming a connection in `connection.list` | "<name> wants to remove <First Last>" | "Removing ends your connection with <First Last>." | Approve, Deny |
 | A desktop's other step-up request, or one of the two above whose connection the app cannot resolve or whose request is malformed (below) | "<name> asks to approve a request" | "Desktop requests can't be shown in this version of VettID, so you can only deny them." | Deny (decision 9) |
 | Any other `type` or `op` | "<name> asks to approve a request" | "This version of VettID can't show this request, so you can only deny it." | Deny |
@@ -6500,7 +6500,8 @@ was done." `"way_not_allowed"` → "Approved, but this item no longer
 allows that, so nothing was done." Any other `result` → "Approved, but
 your vault answered: <result>." (0.1.145) For a desktop's block or
 removal, a `result` of `not_found`, `exists`, `limit` or `bad_request`
-is the held request's own answer when it ran (VAULT-MESSAGING §6.8):
+is the held request's own answer when it ran, or for `not_found` that
+the desktop is no longer active (VAULT-MESSAGING §6.8, §10.3):
 nothing was blocked or removed, and it shows the "Any other `result`"
 text. It is not the
 error `not_found` below. An error answer to `approval.decide`
@@ -6617,7 +6618,8 @@ specification is silent, decision 14 lists it.
   is not a string or is over 256 bytes, a duplicated member), a blank
   `name` and a `role` other than `desktop` (deny-only); the note shown
   cleaned; each `result` after Approve (`ok`, `not_found`, `exists`,
-  `limit`, `bad_request`) and the error `not_found`.
+  `limit`, `bad_request`) and the error `not_found`; a note empty
+  once cleaned shows no box; a multi-line note keeps its lines.
 - Unit (Approvals): every row of the table, including the deny-only
   rows (`item.run`, `item.proxy` before AA8, a desktop's other requests, unknown types, an
   unresolvable item, an entry without its body); `item.use`'s data
@@ -7417,7 +7419,7 @@ connector newer than the vault cannot send them) is deny-only.
 | 6 | Length of an approved access request | (a) the requested length preselected, any of 15 min to 24 h allowed; (b) never longer than requested | **(a)**: the member may know the task is long; shortening stays one tap |
 | 7 | Default end of an agent's permissions and rules | (a) Never (the specification's default when absent); (b) 1 month; (c) 3 months | **(b)**: access that lapses unless renewed; the member can choose Never |
 | 8 | Status lifetime (`status_ttl`) | (a) 15 min default under More options; (b) shown in the main form; (c) not shown | **(a)**: rarely changed, but the revocation bound depends on it |
-| 9 | Desktops | (a) listed (end access, remove) and their access requests approvable; no "Pair a desktop"; their held step-up requests deny-only; (b) also pair desktops now | **(a)**: no VettID desktop app is released, and each step-up type would need its own approval screen. (0.1.145) **Two step-up types get their own approval** (owner decision a, Ground Control #19089): a desktop's `block.add{connection_id}` and `connection.remove{connection_id}` of a connection the app can resolve show Approve and Deny (§4 "Requests held for approval"); the other step-up types stay deny-only. (0.1.120) **Reversed for pairing** by the owner (decision a, 2026-11-05; vettid-android #291, in review): "Pair a desktop" is offered, for the VettID Desktop staging run (§4 "Devices & agents", the device list); desktops are listed and their access requests approved as before |
+| 9 | Desktops | (a) listed (end access, remove) and their access requests approvable; no "Pair a desktop"; their held step-up requests deny-only; (b) also pair desktops now | **(a)**: no VettID desktop app is released, and each step-up type would need its own approval screen. (0.1.145) **Two step-up types get their own approval** (owner decision a, Ground Control #19089): a desktop's `block.add{connection_id}` and `connection.remove{connection_id}` of a connection the app can resolve, in a well-formed request, show Approve and Deny (§4 "Requests held for approval"); the other step-up types stay deny-only. (0.1.120) **Reversed for pairing** by the owner (decision a, 2026-11-05; vettid-android #291, in review): "Pair a desktop" is offered, for the VettID Desktop staging run (§4 "Devices & agents", the device list); desktops are listed and their access requests approved as before |
 | 10 | Asks whose details the app no longer holds (after its process ends) | (a) deny-only, plus a spec follow-up (14a); (b) hide them | **(a)**: never approve unseen; never hide an ask |
 | 11 | Renaming a device | (a) no rename, the self-asserted name labelled as such; (b) a local name on this phone; (c) a spec change for a name kept in the vault | **(a)** now; (c) later if wanted, so all devices agree |
 | 12 | Confirm "End access"? | (a) confirm; (b) no confirmation | **(a)**: it declines the device's waiting requests, and the connector waits before asking again (AGENT-PLAN AG8) |
