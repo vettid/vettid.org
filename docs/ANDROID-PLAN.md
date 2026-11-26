@@ -1,9 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.145
+version: 0.1.146
 date: 2026-11-26
 changelog:
+  - 0.1.146: 2026-11-26 (owner decision a, Ground Control #19250; IOS-PLAN 0.1.88; VAULT-MESSAGING §10.8). §4 "Requests held for approval", the desktop block row: the desktop's note sits under the label "Note from <name>:" (NEW text, owner-approved), as §10.8 asks for received text that could be taken for the app's; no label without a note. Both desktop rows: when another connection has the same First Last, "(connected <date>)" follows the name (NEW text, owner-approved), the connection's `created_at`. Aliases stay unshown (0.1.13), so the alias half of #19250 a does not apply. Tests added. Built in cards GC #19096 and #19097 before release 35.
   - 0.1.145: 2026-11-26 (VAULT-MESSAGING 0.96.0 §6.8; owner decisions a on Ground Control #18926 and #19089; card GC #19094; IOS-PLAN 0.1.87). §4 "Requests held for approval": two new rows, for a desktop's held `block.add{connection_id}` (a step-up type since VAULT-MESSAGING 0.96.0) and `connection.remove{connection_id}`, naming a connection in `connection.list`. The connection is shown as its First Last, `<name>` is the desktop's name from the request, and a block shows the desktop's `note` when there is one. Approve sends `approval.decide{approve: true}` and Deny `approve: false`; the answers are those of "Answers to `approval.decide`". A `connection_id` the app cannot resolve, or a malformed request, keeps the deny-only row; the rows fail closed (a paragraph after the table), the note is shown as cleaned plain text apart from the body, a service connection shows its service name, and "Answers to `approval.decide`" says a held request's own `not_found`, `exists`, `limit` or `bad_request` is not the error `not_found`. Decision 9 now names the two exceptions. Tests added. The texts were approved by the owner (#19089): "<name> wants to block <First Last>", "Blocking ends your connection with <First Last>. They can't connect with you again until you unblock them.", "<name> wants to remove <First Last>" and "Removing ends your connection with <First Last>." Release: the vault's hold on a desktop's block (card GC #19095) ships in the same staging release as these rows (cards GC #19096, #19097). Not built.
   - 0.1.144: erratum, 2026-11-25 (the blind pair on vettid/vettid-android#446, card GC #17839). §4 "A different code while the transfer waits": 0.1.142 said Android's scan replaces and drops the waiting transfer between minute 10 and 11; it does not. `transferPinned` (settlement active, or `deadlineDue`, which covers every waiting transfer whose comparison code is known) already refuses a new code there, since #187. The rule is unchanged. The 0.1.142 changelog line's "this closes Android's gap" is withdrawn. VAULT-MESSAGING 0.94.1 §6.7.2 "Making a code pairing" step 6: an app that gets a cached `form: "code"` answer without `code` asks again once, only if it holds no coded answer for that request; it ignores a later code-less duplicate, rejects each code-less pairing before falling back to the link, sends a `limit` from the re-ask to the link screen, and retransmits a code create only after 15 s (AA2, a new bullet). IOS-PLAN 0.1.86 follows. No new text.
   - 0.1.143: 2026-11-24 (VAULT-MESSAGING 0.94.0 §6.7.2; owner-approved card GC #17710; IOS-PLAN 0.1.85). §4 "Devices & agents", "Pair an agent (AA2)", step 1: the screen shows an 8-character pairing code (`XXXX-XXXX`, from `device.pair.create{role, form: "code"}`) instead of the QR and the long code, with Copy and Share as before (decision 1). **Show a link instead** cancels the code and makes a link pairing, showing today's QR and long code. A vault that answers with a `link` (a vault before 0.94.0, or `claim_unavailable`) gets the link screen at once. When the answer's `r` is not the app's built-in relay, the relay (host, and port when `r` has one) is shown under the code, exactly as the device takes it. The same for Pair a desktop. The phone derives nothing (the vault makes the code). Steps 2–4, the SAS comparison included, are unchanged. NEW texts: the code screen's body (agent and desktop), "Show a link instead", and the relay line. Not built; card to follow. The NEW texts were approved by the owner (Ground Control #17983).
@@ -6472,7 +6473,7 @@ no longer have" and offers only **Deny**.
 | `agent.request`, `op: "item.run"` or `"item.proxy"`, before the app version with AA8 (0.1.137; card #16366) | "<name> wants to use <item> in a way this version of VettID can't show" | "Update VettID to see the details. Until then you can only deny it." | Deny |
 | `agent.request`, `op: "item.run"` or `"item.proxy"`, from the app version with AA8 (0.1.137) | as "Approvals for runs, proxies and reveals (AA8)" says | as AA8 says | Deny on the entry; Approve and Deny only on the detail screen, after it is scrolled to its end (Deny only where AA8 says) |
 | A delegable owner type (after decision 3) | "<name> wants to <scope label, lower case>" | the body's connection as "First Last" where it names one; for `message.send`: "Message to <First Last>:" and the text in full | Approve, Deny |
-| (0.1.145) A desktop's `block.add{connection_id, note?}` naming a connection in `connection.list` | "<name> wants to block <First Last>" | "Blocking ends your connection with <First Last>. They can't connect with you again until you unblock them." Then the desktop's `note`, if it gave one, as plain text in its own box apart from the body, cleaned as VAULT-MESSAGING §10.8 "Showing received text" says for a note (lines kept); none when it is empty once cleaned | Approve, Deny |
+| (0.1.145) A desktop's `block.add{connection_id, note?}` naming a connection in `connection.list` | "<name> wants to block <First Last>" | "Blocking ends your connection with <First Last>. They can't connect with you again until you unblock them." Then, if the desktop gave a `note`, (0.1.146) the label "Note from <name>:" and under it the note as plain text in its own box apart from the body, cleaned as VAULT-MESSAGING §10.8 "Showing received text" says for a note (lines kept); neither label nor box when it is empty once cleaned | Approve, Deny |
 | (0.1.145) A desktop's `connection.remove{connection_id}` naming a connection in `connection.list` | "<name> wants to remove <First Last>" | "Removing ends your connection with <First Last>." | Approve, Deny |
 | A desktop's other step-up request, or one of the two above whose connection the app cannot resolve or whose request is malformed (below) | "<name> asks to approve a request" | "Desktop requests can't be shown in this version of VettID, so you can only deny them." | Deny (decision 9) |
 | Any other `type` or `op` | "<name> asks to approve a request" | "This version of VettID can't show this request, so you can only deny it." | Deny |
@@ -6486,6 +6487,13 @@ string of at most 256 bytes (VAULT-MESSAGING §10.4); and no JSON member
 is duplicated. Anything else gives the deny-only row. For a service
 connection, `<First Last>` is the service's name with the "Service"
 label, as "Service connections" says.
+(0.1.146; owner decision a, Ground Control #19250) **Two connections
+with the same name.** When another connection in `connection.list`
+(`active` or `stale`) has the same First Last (for a service, the same
+name), `<First Last>` in both rows' title and body is followed by
+"(connected <date>)", the named connection's `created_at` as a date in
+the phone's format, so a desktop's block or removal of one can't be
+taken for the other. Aliases are never shown (0.1.13).
 
 AGENT-PLAN AA5's "read" is `item.get` (a reveal, see) and "use" is
 `item.use` (§10.11). The titles follow AGENT-PLAN §11's drafts; for `item.get`,
@@ -6613,7 +6621,10 @@ specification is silent, decision 14 lists it.
   every agent rule.
 - (0.1.145) Unit (Approvals): a desktop's `block.add` with and without
   `note`, and a desktop's `connection.remove`, each on an `active`, a
-  `stale` and a service connection; each with an id not in
+  `stale` and a service connection; (0.1.146) the note's label shown
+  with the desktop's name, and neither label nor box for an empty note;
+  two connections with the same First Last, each row showing its own
+  "(connected <date>)", and a unique name showing none; each with an id not in
   `connection.list`, a malformed body (an extra member, a `note` that
   is not a string or is over 256 bytes, a duplicated member), a blank
   `name` and a `role` other than `desktop` (deny-only); the note shown
