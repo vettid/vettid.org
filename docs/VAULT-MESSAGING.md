@@ -30,7 +30,7 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.96.0: normative, 2026-11-26; owner decision #18926 a (2026-11-26). **`block.add{connection_id}` on an active connection is a step-up type for desktops, like `connection.remove`.** From a desktop it is held until the member confirms on a phone (§6.8). Before, it ran at once from a desktop, and blocking a connection ends it. What an agent may send is unchanged (§6.8). The app is unchanged. `block.add{pending_id}` and a block naming an outgoing request that is not yet a connection stay app-only (0.95.0). Also, describing what vettid-vault#321 built: §10.4 "Block list" says what a block of the app's own outgoing request does: it first withdraws the request as `connection.decline` of it does, then blocks the inviter's `ik` and relay key, taken from the invitation, under the name the request holds of the inviter; the block has no connection id; `exists` and the block-list limit are checked first, and a refusal changes nothing. §10.9: such a block is audited `connection.blocked` only, and `connection.remove` of an outgoing request is audited `connection.request.declined`. §6.4: an outgoing handshake that ends before its `hs.init` was deposited at the relay never sends it, so a waiting request's open token may be unspent. Also, describing what vettid-vault#320 built: §6.7.2 and §3.4.2 S7: after a relay-key rotation a claim's `DELETE` (a pairing code's or a link invite's) is signed by the key of the mailbox that created the claim, while that mailbox is in its grace period. Needs a vault release and a desktop change (the desktop shows the held `block.add`). Sections: §3.4.2 (S7), §6.4, §6.7.2, §6.8, §10.4 (role rule and Block list), §10.9, §13.5 (Desktop row).
+  - 0.96.0: normative, 2026-11-26; owner decision #18926 a (2026-11-26). **`block.add{connection_id}` on a connection is a step-up type for desktops, like `connection.remove`.** From a desktop it is held until the member confirms on a phone (§6.8). Both are held by type, a `stale` connection and an unknown id included, unless the id names an outgoing request that is not yet a connection (app-only, 0.95.0). Before, a desktop's block ran at once, and blocking a connection ends it. What an agent may send is unchanged (§6.8). The app is unchanged. `block.add{pending_id}` and a block naming an outgoing request that is not yet a connection stay app-only (0.95.0). Also, describing what vettid-vault#321 built: §10.4 "Block list" says what a block of the app's own outgoing request does: it first withdraws the request as `connection.decline` of it does, then blocks the inviter's `ik` and relay key, taken from the invitation, under the name the request holds of the inviter; the block has no connection id; `exists` and the block-list limit are checked first, and a refusal changes nothing. §10.9: such a block is audited `connection.blocked` only, and `connection.remove` of an outgoing request is audited `connection.request.declined`. §6.4: an outgoing handshake that ends before its `hs.init` was deposited at the relay never sends it, so a waiting request's open token may be unspent. Also, describing what vettid-vault#320 built: §6.7.2 and §3.4.1 S7: after a relay-key rotation a claim's `DELETE` (a pairing code's or a link invite's) is signed by the key of the mailbox that created the claim, while that mailbox is in its grace period. Needs a vault release, a desktop change (the desktop shows the held `block.add` as waiting for the phone), and an approval row on the phone (ANDROID-PLAN, IOS-PLAN): until then the phone can only deny a desktop's held block, as it can every desktop step-up request today. Sections: §3.4.1 (S7), §6.4, §6.7.2, §6.8, §10.4 (role rule and Block list), §10.9, §13.5 (Desktop row).
   - 0.95.0: normative, 2026-11-25; owner decisions #18396 b, #18413 a and #18422 a (2026-11-25). **`connection.decline` and `intro.decline` are app-only.** A desktop or an agent is answered `forbidden` at once, never held and never delegated, as for `connection.invite.create`, `connection.invite.accept`, `connection.approve`, `intro.create` and `intro.accept`. A block of a pending request (`block.add{pending_id}`) is a decline and is app-only too, and so is a `block.add{connection_id}` or `connection.remove` naming an outgoing request that is not yet a connection, which withdraws it; both stay as they were on an active connection. Before, a desktop could decline a connection request or an introduction. Neither type, nor a block of a pending request, was a step-up type, so no such request can be held. The reason (the owner): "Desktops don't accept new connections. Only phones do." Needs a vault release. Unchanged: a desktop or an agent may still deny a connection's pending invocation (`action.respond`, §10.14); cancelling an invitation (`connection.invite.cancel`) or an introduction it made (`intro.cancel`) stays open to desktops (owner decision #18422 a: withdrawing never answers anyone); and a desktop may still list connection requests and introductions. A desktop shows requests and introductions read-only and points to the phone with the approved text "This is done on your phone." Sections: §3.1, §6.4 "Who approves", §6.8, §10.4 (role rule and Block list), §10.15, §13.5 (Desktop row).
   - 0.94.1: erratum, 2026-11-25 (from the builds of cards GC #17989, #17992, #17993; vettid/vettid-vault#303, vettid/vettid-relay#38; fixes after the blind pair on vettid/vettid.org#666). §6.7.2: (1) the input rule removes a defined set: ASCII tab, CR and LF, every Unicode Zs and Pd character (U+002D included), U+2212, and U+00AD, U+200B, U+200E, U+200F, U+2060 and U+FEFF; it counts code points, and refuses non-ASCII before any case mapping (as the vectors pin), with the same "codes never contain…" text. The vectors do not yet cover the removed set: one case per class and a non-removed non-ASCII character come in a follow-up to vettid-vault#303, card GC #17989; until then implementations follow the text. (2) The code derivations wait at most 5 s in all for the enclave's room, then answer `busy`. (3) A failed salts read answers `claim_unavailable`. (4) A failed or unanswered PUT (a 429, a 5xx, a network error or a timeout) is not retried: the vault deletes the claim (`DELETE`, retried with backoff), denylists the pairing's open token and answers `claim_unavailable`. (5) New step 6 of "Making a code pairing": the cached `device.pair.create` answer has no `code` (§8.2 says so too); an app that holds no answer with a code for the request asks again once with a new request, ignores a code-less duplicate that comes after a coded answer, rejects each code-less pairing before falling back to the link, sends a `limit` from the re-ask to the link screen, retransmits a code create only after 15 s, and the vault holds a duplicate of a request still running until the first completes. §10.3 points to it. §16 lists `pair-code.json`. The removed set, the 5 s wait and (5)'s `limit`, 15 s and held-duplicate rules are chosen; not in the card. No new text.
   - 0.94.0: 2026-11-24, with RELAY-PROTOCOL 0.14.0, AGENT-PLAN 0.1.22,
@@ -11038,12 +11038,15 @@ Rules:
         `approved`, that is once `hs.resp` arrived (its request token)
         and `hs.fin` went out (the epoch). In **`waiting`** it cannot:
         it holds no token to the inviter (the open token was spent on
-        `hs.init`) and no epoch. (0.96.0) If that `hs.init` was not yet
-        deposited at the relay, it is never sent: an outgoing handshake
-        that ends before its `hs.init` is deposited (a withdrawn,
-        declined or expired request, a removed device, a reconnect's or
-        rekey's own handshake) drops it, its open token unspent, and the
-        inviter never learns of it. Nothing is lost: the inviter shows a
+        `hs.init`) and no epoch. (0.96.0) An outgoing handshake that
+        ends while its `hs.init` is still in the vault's outbox (not yet
+        deposited at the relay) drops that `hs.init`, which is then not
+        sent: a withdrawn, declined or expired request, a removed device,
+        or a reconnect or rekey whose peer is removed or suspended. For
+        a request, the invitation's open token then stays unspent until
+        it expires, and the inviter never learns of it. A deposit
+        already under way may still arrive; the inviter then drops it as
+        below. Nothing is lost: the inviter shows a
         request only after `hs.fin`, which the accepter never sends, so
         the inviter's member was never shown it; a later `hs.resp` finds
         no handshake and is dropped, and the inviter drops its `hs.init`
@@ -11205,10 +11208,11 @@ Rules:
   `connection.remove` naming an outgoing request that is not yet a
   connection, since that too withdraws it. `connection.decline`, like a
   block of a pending request, was never a step-up type, so no such
-  request can be held. `connection.remove` on an active connection is
+  request can be held. `connection.remove` on a connection is
   unchanged, and so is what an agent may send; (0.96.0) a desktop's
-  `block.add{connection_id}` on an active connection is a step-up
-  type, like `connection.remove` (§6.8). A desktop may cancel or list invitations and list requests. Agents MUST NOT
+  `block.add{connection_id}` on a connection is a step-up type, like
+  `connection.remove` (§6.8). A desktop may cancel or list invitations
+  and list requests. Agents MUST NOT
   create, accept, approve or decline invitations. A desktop app hides
   the actions it cannot take on a request (approve, decline, block)
   and invite, accept and introduce, and shows a request read-only with
@@ -12383,7 +12387,7 @@ only after a search of the code space that it must repeat every hour
 - **A claim's `DELETE` after a relay-key rotation** (0.96.0). The
   `DELETE` of a claim, for a pairing-code claim and for a link-invite
   claim, is signed with the key of the mailbox that created the claim,
-  while that mailbox is in its grace period (§3.4.2 S7). Once that old
+  while that mailbox is in its grace period (§3.4.1 S7). Once that old
   mailbox has stopped, nothing is sent: the claim is gone with it. A
   `mailbox_unknown` answer from the old mailbox counts as done.
 - **One live code per vault.** A new code pairing cancels the vault's
@@ -12840,7 +12844,11 @@ While the vault is held, a session is suspended but still returned.
   and a `block.add{connection_id}` or `connection.remove` naming an
   outgoing request that is not yet a connection, which withdraws it
   (`connection.remove` and (0.96.0) `block.add{connection_id}` are
-  step-up types on an active connection).
+  step-up types otherwise). (0.96.0) Both are held by type, unless the
+  id names such an outgoing request: a connection in any state,
+  `stale` included, and an id the vault does not know are held, and the
+  handler's own answer (`not_found`, `exists`, `limit`, `bad_request`)
+  comes when it runs on approval.
   Likewise only an app approves a connection's pending invocation:
   `action.respond{approve: true}` from a desktop is answered `forbidden`
   at once, never held, and the invocation stays pending; a desktop may
@@ -14534,7 +14542,7 @@ The D→V types above are sent by `app` or `desktop` devices, except
 request that is not yet a connection, which only the app sends
 (`forbidden` to a desktop or an agent, §6.4 "Who approves"); otherwise,
 for desktops, `connection.remove`, (0.96.0) `block.add{connection_id}`
-on an active connection, and `block.remove` are step-up types (§6.8).
+and `block.remove` are step-up types (§6.8).
 
 - **Metadata.** `alias` (at most 128 bytes), `note` (at most 1,024 bytes),
   `tags` (at most 16 distinct tags matching `[a-z0-9_.-]{1,32}`),
@@ -14559,31 +14567,33 @@ on an active connection, and `block.remove` are step-up types (§6.8).
   from the connection, to the minute; `created_at` is when the connection
   was made.
 
-**Block list.** `block.add` blocks a connection or the sender of a pending
-connection request:
+**Block list.** `block.add` blocks a connection, the sender of a pending
+connection request, or (0.96.0) the inviter of the app's own outgoing
+request:
 
 - A connection is removed as §7.4 "Peer blocked" says (the peer gets a
   best-effort `connection.removed`, never a reason) and its `ik` and relay
   key are recorded in a block entry. (0.96.0) From a desktop, a
-  `block.add{connection_id}` on an active connection is a step-up
-  request, held until an app approves it (§6.8), as `connection.remove`
-  is.
+  `block.add{connection_id}` on a connection is a step-up request, held
+  until an app approves it (§6.8), as `connection.remove` is.
 - (0.96.0) A block of the app's own outgoing request (a
   `connection_id` that is not yet a connection) first withdraws the
-  request exactly as `connection.decline` of it does, in both states
-  (the SAS known; waiting for the inviter's `hs.resp`, §6.4). It then
-  blocks the inviter's `ik` and relay key, taken from the invitation,
-  under the name the request holds of the inviter (the invitation's
-  `hint`). The block has no connection id. `exists` and the block-list
-  limit are checked first, and a refusal changes nothing.
+  request exactly as `connection.decline` of it does, whether or not
+  its SAS is known (§6.4). It then blocks the inviter's `ik` and relay
+  key, taken from the invitation, under the inviter's name as the
+  request holds it, or else the invitation's `hint.name`. The block
+  entry and its audit record name no connection. The limit and then
+  `exists` are checked first, and a refusal changes nothing. The other
+  devices get `sync.event{kind: "connection.request", connection_id,
+  state: "declined"}` and then `block.added`.
 - A pending request is declined, which sends `connection.declined`
   (§6.4, 0.10.5; never a reason, so a block looks like a decline), and
   its `hs.init` identity (`from.ik`, `from.relay.pk`) recorded. (0.95.0)
   Since that is a decline, `block.add{pending_id}` is app-only: a
   desktop's or agent's is answered `forbidden` at once, never held.
-  `block.add{connection_id}` on an active connection is unchanged; on
-  an outgoing request that is not yet a connection it is app-only like
-  the decline (§6.4).
+  (0.96.0) From a desktop, `block.add{connection_id}` on a connection
+  is a step-up type (above); on an outgoing request that is not yet a
+  connection it is app-only like the decline (§6.4).
 - An identity already blocked is answered `exists`; the list holds at most
   1,000 entries (`limit`). `note` is at most 256 bytes.
 - A vault MUST refuse (drop and audit as `drop.blocked`) a connection
@@ -17767,8 +17777,9 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   §10.5.1);
   `connection.blocked`, `connection.unblocked` (`ref` = `block_id`;
   (0.96.0) a block of an outgoing request is audited `connection.blocked`
-  and not `connection.request.declined`, as `block.add{pending_id}` is,
-  and no link between the block and the withdrawn request is recorded);
+  only, like `block.add{pending_id}`: it records no
+  `connection.request.declined` and no link between the block and the
+  withdrawn request);
   `connection.request.peer_declined` (`ref` = `pending_id` or the
   outgoing request's `connection_id`; for a decline that reaches an
   active connection, the `connection_id`, 0.10.6; §6.4, 0.10.5);
