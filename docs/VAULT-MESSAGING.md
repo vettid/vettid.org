@@ -11041,8 +11041,9 @@ Rules:
         `hs.init`) and no epoch. (0.96.0) An outgoing handshake that
         ends while its `hs.init` is still in the vault's outbox (not yet
         deposited at the relay) drops that `hs.init`, which is then not
-        sent: a withdrawn, declined or expired request, a removed device,
-        or a reconnect or rekey whose peer is removed or suspended. For
+        sent, whatever ends it (for example a withdrawn, declined or
+        expired request, a removed device or peer, an abandoned rekey or
+        a restore). For
         a request, the invitation's open token then stays unspent until
         it expires, and the inviter never learns of it. A deposit
         already under way may still arrive; the inviter then drops it as
@@ -12848,7 +12849,8 @@ While the vault is held, a session is suspended but still returned.
   id names such an outgoing request: a connection in any state,
   `stale` included, and an id the vault does not know are held, and the
   handler's own answer (`not_found`, `exists`, `limit`, `bad_request`)
-  comes when it runs on approval.
+  comes when it runs on approval. A `block.add` whose body carries a
+  `pending_id` is refused at once, whatever else it carries.
   Likewise only an app approves a connection's pending invocation:
   `action.respond{approve: true}` from a desktop is answered `forbidden`
   at once, never held, and the invocation stays pending; a desktop may
