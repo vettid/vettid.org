@@ -73,7 +73,8 @@ changelog:
     (§8.5). One switch turns TLS on (§8.5). TCP 443 inbound (§8.2); the
     TLS rules and the caps for a third TURN URL, `user-quota` 12 (§7.2,
     §7.3); the issuer lists a `turns:` URL only while the server reports
-    a verified certificate (§5.2, §8.5); the compromise rows, with the
+    a verified certificate, how long a stale answer lasts in a vault's
+    pool (§5.2, §8.5); the compromise rows, with the
     window a stolen key stays usable (§7.6); metrics and alarms (§10);
     runbook items (§11); what C5 still has to find out (§13)
 classification: public (no secrets; safe for github.com/vettid)
@@ -394,7 +395,7 @@ version when the image is built (§13).
 | Bandwidth per allocation | `max-bps`: **256 kbit/s** in each direction while calls are voice only; 3 Mbit/s when video arrives in C4 (D15) | A voice call with frame encryption uses about 60–90 kbit/s each way. A low cap makes the relay useless for anything else |
 | Allocations per credential | `user-quota`: **12** (0.3.0; 10 until then) | One device may allocate once per TURN URL, network and address family: with `turns:` that is 3 × 2 × 2 = 12 for a dual-stack phone on two networks. 12 covers that and stops one credential serving a crowd |
 | Allocations in total | `total-quota`: **100** on staging (D16) | |
-| Bandwidth in total | `bps-capacity`: **120 Mbit/s** on staging (0.2.1; 4 Mbit/s until then, D16) | coturn reserves `max-bps` out of it for **every allocation, used or not**, and a phone keeps every relay allocation it made for the life of a call: one per TURN URL per network, so (0.3.0, three URLs with `turns:`) up to 6 per phone and 12 per call counting one address family, relayed or direct (8 per call before). 120 Mbit/s is **40 allocations at C4's 3 Mbit/s**: **three video calls at that worst count** (five before `turns:`), six when each phone is on one network. That is fewer than staging's testers (at most 10) could hold at once; it is kept because the instance's baseline bandwidth is the limit, and a call over it does not connect through the relay (§7.3). While calls are voice only it admits 469, so `total-quota` binds first. It stays under a `t4g.small`'s baseline network bandwidth (128 Mbit/s). Cost is bounded by the daily stop (§7.3) |
+| Bandwidth in total | `bps-capacity`: **120 Mbit/s** on staging (0.2.1; 4 Mbit/s until then, D16) | coturn reserves `max-bps` out of it for **every allocation, used or not**, and a phone keeps every relay allocation it made for the life of a call: one per TURN URL per network and address family. (0.3.0, three URLs with `turns:`) The counts used here are for one address family: up to 6 per phone and 12 per call, relayed or direct (8 per call before). 120 Mbit/s is **40 allocations at C4's 3 Mbit/s**: **three video calls at that count** (five before `turns:`), six when each phone is on one network. A call between two dual-stack phones each on two networks holds 24, so fewer than 2 video calls at that strictest count. That is fewer than staging's testers (at most 10) could hold at once; it is kept because the instance's baseline bandwidth is the limit, and a call over it does not connect through the relay (§7.3). While calls are voice only it admits 469, so `total-quota` binds first. It stays under a `t4g.small`'s baseline network bandwidth (128 Mbit/s). Cost is bounded by the daily stop (§7.3) |
 | Allocation lifetime | coturn's default (10 minutes, refreshed by the client) | A dead client's allocation goes within 10 minutes |
 | STUN | no RFC 5780 behaviour discovery, no pre-RFC 5389 compatibility, no software attribute | Smaller answers, nothing to fingerprint |
 | Management | no CLI listener, no web admin | |
@@ -598,8 +599,8 @@ The share of calls that need TURN is not known (general experience: one
 in five to ten on mobile networks) and is measured in C5.
 
 (0.3.0) TLS on 443 adds the second key (1.0), two secrets (0.8), the
-renewer (under 0.1: a run a day), a standard parameter (free) and four
-alarms (0.4): about 2.3 a month.
+renewer (under 0.1: a run a day), a standard parameter (free) and five
+alarms (0.5): about 2.3 a month.
 
 ### 8.5 The TLS certificate (0.3.0, C5)
 
@@ -614,30 +615,43 @@ and the server only reads it.
 **The switch.** Context `stagingCallsTurnTls` (off until the end of
 runbook 10) turns on, together: coturn's TLS lines, the server's status
 for the issuer, the issuer's `turns:` entry, and the alarms
-`turn-no-tls` and `turn-tls-served` (§10). The renewer and its alarms
-exist whether it is on or not, so that a certificate is there before it
-is turned on.
+`turn-no-tls`, `turn-tls-served` and `turns-not-listed` (§10). The
+renewer exists whether it is on or not, so that a certificate is there
+before it is turned on; its schedule is made only once
+`stagingCallsAcmeAccount` is set (runbook 10).
 
 **The certificate.** From Let's Encrypt (its production directory), for
 `turn.<stage>.vettid.org` alone; an ECDSA P-256 key, made new at every
 issuance (§13 has the question of the apps' trusted roots). The ACME
-profile is the renewer's setting: `classic` (90 days). Every rule below
-is relative to the lifetime, so a shorter profile changes no code.
+profile is the renewer's setting: `classic` (90 days). The rules below
+are relative to the lifetime and hold as written for lifetimes of 45
+days or more. A short profile (Let's Encrypt's `shortlived`, about 6
+days) also needs a schedule every few hours and thresholds of its own:
+with a daily run the served certificate would sit under 20 % for hours,
+and one failed run would leave one more attempt.
 
 **What "valid" means**, for the renewer and for `turn-agent` alike: the
 chain parses as PEM; `x509.Verify` succeeds against the program's own
-roots (the image's), for the DNS name `turn.<stage>.vettid.org` and
+roots, for the DNS name `turn.<stage>.vettid.org` and
 server authentication, at the current time, with every intermediate
 within its own validity; and the key matches the leaf. A valid value is
 written out re-encoded (the parsed key as PKCS#8 PEM, the parsed
-certificates as PEM), never as the secret's raw bytes.
+certificates as PEM), never as the secret's raw bytes. The two programs'
+roots are not the same set: the renewer has the Lambda runtime's,
+`turn-agent` the image's. A chain one accepts and the other refuses
+shows as `tls_invalid` on the server while the renewer reports `kept`
+(runbook 9 says so).
 
 **The renewer** (`cmd/calls-renewer` in vettid-calls; a Go function,
 arm64, built reproducibly and pinned like the issuer):
 
 - **Who runs it:** an EventBridge schedule once a day (action `renew`)
-  and the operator's administrator role; the function's resource policy
-  names those two and no other principal. Reserved concurrency 1; a
+  and the operator's administrator role. The function's resource policy
+  allows those two and **denies `lambda:InvokeFunction` to every other
+  principal** (by `aws:PrincipalArn` and the rule's `aws:SourceArn`),
+  since a resource policy's allow does not by itself keep out a caller
+  in the account whose own policy allows it. Its result and its log
+  carry no key material. Reserved concurrency 1; a
   timeout of 5 minutes with an internal deadline of 4, after which it
   stops, deletes its TXT record and fails; **no retries** (asynchronous
   `MaximumRetryAttempts` 0, and none on the schedule's target), so a bug
@@ -652,12 +666,23 @@ arm64, built reproducibly and pinned like the issuer):
     no valid value, or when less than a third of its lifetime is left;
     otherwise `kept`. It never registers;
   - `force`: issues now, whatever is held;
-  - `rekey`: issues now, puts the new value, then revokes the old
-    certificate with its own key (reason `keyCompromise`). The server
-    is never left without a certificate, and moves to the new one
-    through `SIGUSR2` without a restart;
+  - `rekey`: logs the serial of the certificate held (if a valid one
+    is held), issues now, puts the new value, then does `revoke`. The
+    server is never left without a certificate, and moves to the new
+    one at its next read (at most 10 minutes) through `SIGUSR2`, without
+    a restart. If the revoke fails, the operator runs `revoke`, not
+    `rekey` again: a second `rekey` would revoke the replacement and
+    leave the leaked one;
+  - `revoke`: issues nothing. Revokes the certificate in the secret's
+    `AWSPREVIOUS` version (or the one with a given serial, which must be
+    `AWSPREVIOUS`'s or `AWSCURRENT`'s), reason `keyCompromise`, signed
+    with the account key. When no valid certificate is there, it does
+    nothing and says so;
   - `rollover`: a new account key (RFC 8555 §7.3.5); the account URL,
-    and so the CAA record, stay.
+    and so the CAA record, stay;
+  - `register` again, for an account an attacker has rolled over or
+    deactivated: only once the operator has put `{}` in the account
+    secret (runbook 12).
 - **The account:** with `stagingCallsAcmeAccount` set, every action but
   `register` first checks that the stored account URL is that one, and
   fails at step `account` if not.
@@ -736,10 +761,13 @@ value it read:
 
 - **a new valid value:** it writes the key and chain to the tmpfs
   (`0600`, owned by `nobody`, written to a new file and renamed). If
-  coturn runs with TLS and has finished starting (its first handshake
-  below has passed, or it answers on its Prometheus port), it sends
-  `SIGUSR2`, which reloads the certificate without ending a call. If
-  coturn runs without TLS, it restarts it with TLS;
+  coturn runs with TLS and has finished starting (it answers on its
+  Prometheus port: in 4.18.0 the listeners come up before the `SIGUSR2`
+  handler is installed, so a passing handshake does not mean that), it
+  sends `SIGUSR2`, which reloads the certificate without ending a call.
+  If the handshake still sees the old leaf 10 minutes later, it
+  restarts coturn with TLS and counts `coturn_restarts{reason="tls_reload"}`.
+  If coturn runs without TLS, it restarts it with TLS;
 - **a read that fails** (Secrets Manager or the network): the
   certificate in use stays, `agent_errors{kind="tls_read"}`;
 - **a value that is empty, or fails the checks:** the certificate is
@@ -757,23 +785,49 @@ value it read:
 **What coturn actually serves.** A failed reload keeps the old
 certificate and only logs it, and a failed bind of 443 retries quietly,
 so `turn-agent` checks for itself: every minute it makes a TLS handshake
-to the server's own 443 (its private IPv4 address) with the server's
-name as SNI, verifies the chain as above, and compares the served leaf
-with the certificate in use. `tls` is 1 only when both hold;
-`tls_served_life_left` is the served leaf's (§10); a failure is
-`agent_errors{kind="tls_probe"}`.
+to the server's own 443, on its private IPv4 address and on its IPv6
+address, with the server's name as SNI, verifies the chain as above, and
+compares the served leaf with the certificate in use (until the first
+handshake after a `SIGUSR2`, the previous one is accepted too). `tls`
+is 1 only when every check holds; `tls_served_life_left` is the served
+leaf's (§10); a failure is `agent_errors{kind="tls_probe"}`.
 
-**The status for the issuer.** A standard SSM parameter,
-`/vettid-org/<stage>/calls/turns-status`, not a secret: `turn-agent`
-writes `{"verified_at": <Unix s>, "not_after": <Unix s>}` when `tls`
-turns 1, every 10 minutes while it stays 1, and `{"verified_at": 0}` at
-once when it turns 0. The instance's role may put that one parameter;
-the issuer's role may get it. The issuer reads it with its secret (at
-start and every 10 minutes) and lists `turns:` only while `verified_at`
-is less than 25 minutes old and `not_after` is in the future. So a
-`turns:` URL is listed only when it worked within the last half hour;
-a failure takes at most that long to leave the answer, and a phone that
-gets a dead `turns:` URL meanwhile loses one candidate and nothing else.
+**The status for the issuer.** A standard SSM parameter of type
+`String`, `/vettid-org/<stage>/calls/turns-status`, not a secret, made
+by the service stack with the value `{"verified_at":0,"not_after":0}`.
+The instance's role may put that one parameter, the issuer's role may
+get it, and nothing else may put it.
+
+- **`turn-agent` writes** `{"verified_at": <Unix s>, "not_after": <Unix s>}`
+  when `tls` turns 1 and every 10 minutes while it stays 1. A handshake
+  that fails does not write: the status stops being refreshed and ages
+  out (below), so one failure, a restart or the moment after a
+  `SIGUSR2` does not take `turns:` away. It writes
+  `{"verified_at":0,"not_after":0}` at once only when TLS is taken off:
+  `tls_invalid`, the certificate's end, or coturn running without TLS.
+  A put that fails is `agent_errors{kind="tls_status"}`.
+- **The issuer** reads it with its secret (at start and every 10
+  minutes); when a read fails it keeps the last value it read. It
+  parses strictly: a JSON object of exactly the two integer members, at
+  most 256 bytes; a `verified_at` more than 5 minutes ahead of the
+  issuer's clock is refused, so a far-future value cannot stay fresh.
+  Missing, unreadable on the first read, or malformed means "not
+  verified"; it never fails a request and is never counted as
+  `internal`. **At each request** it lists `turns:` only while
+  `verified_at` is less than 25 minutes old and `not_after` is in the
+  future, and its metric `turns_listed` (§10) says which.
+- **How long a wrong answer lasts.** At the issuer, a `turns:` URL that
+  stopped working leaves the answer within about 35 minutes (25 minutes'
+  age and a read every 10), and one that started working joins it
+  within 20. **In a vault, longer:** a vault keeps the URLs of its last
+  answer until its next fetch, and fetches when its pool runs low, at
+  the latest once its credentials have aged, 4 hours after they were
+  issued (VAULT-MESSAGING §10.10 "The pool"; vettid-vault
+  `features/calls`, `UsableFor`). So a vault may give out a dead
+  `turns:` URL, or none while the server is healthy, for up to about 4
+  hours. A dead one costs a phone one failed candidate; a missing one
+  costs the TLS path for that window only. A changed URL list makes the
+  vault drop the credentials it holds for the old one at that fetch.
 
 ## 9. What each party sees and can do
 
@@ -815,15 +869,19 @@ address, a username or a single request is kept anywhere.
   `agent_errors{kind}` counts `turn-agent`'s own failures by kind:
   `secret`, `config`, `start`, `exit`, `scrape`, `metrics`, and (0.3.0)
   `tls_read` (the certificate secret could not be read; the last good
-  copy is kept), `tls_invalid` (a value that fails the checks of §8.5)
-  and `tls_probe` (the handshake of §8.5 failed or served another
-  certificate).
+  copy is kept), `tls_invalid` (a value that fails the checks of §8.5),
+  `tls_probe` (the handshake of §8.5 failed or served another
+  certificate) and `tls_status` (the status parameter could not be
+  put). `coturn_restarts{reason}` gains `tls_reload` (§8.5).
   (0.3.0, while TLS is switched on) `tls`: 1 when the minute's handshake
   to the server's own 443 verified and served the certificate
   `turn-agent` wrote, else 0; `tls_served_life_left`: the served
   certificate's remaining validity as a percentage of its lifetime.
+- (0.3.0) **The issuer:** `turns_listed`, 1 when an answer listed
+  `turns:` and 0 when it did not, at each answer, and the status's age
+  at each read (§8.5).
 - (0.3.0) **The renewer.** On every run, success or not: `renew{outcome}`
-  (`kept`, `issued`, `registered`, `failed`), and `tls_life_left` (the
+  (`kept`, `issued`, `registered`, `revoked`, `failed`), and `tls_life_left` (the
   held certificate's remaining validity as a percentage of its lifetime,
   0 when there is none). Log: one line per run with the action, the
   outcome, the account URL (not a secret) and, on failure, the step;
@@ -858,6 +916,7 @@ address, a username or a single request is kept anywhere.
 | (0.3.0) `renewer-errors` | any error of the renewer's function (it is never retried, §8.5) |
 | (0.3.0) `turn-no-tls` | only while TLS is switched on: `tls` under 1 for 30 minutes. Missing data does not breach: a server that is not running is `no-turn-heartbeat`'s, and the daily stop's |
 | (0.3.0) `turn-tls-served` | only while TLS is switched on: `tls_served_life_left` under 20 for 30 minutes (coturn serves an old certificate: a reload that did not take) |
+| (0.3.0) `turns-not-listed` | only while TLS is switched on: `turns_listed` at 0 for 40 minutes while `tls` is 1 (the status is not reaching the issuer: a failed put, a right taken away) |
 | the cost budget | this service's tagged cost forecast above $30 for the month |
 
 ## 11. Runbook outline
@@ -887,33 +946,46 @@ stacks' pull request (not in this one). Its parts:
 8. **Changing a cap or the server's name:** the caps are in the image's
    configuration; the URLs are in the issuer's configuration, so moving
    the server needs no vault release.
-9. **Alarms:** what each means and what to do.
+9. **Alarms:** what each means and what to do. (0.3.0) `tls_invalid`
+   on the server while the renewer reports `kept` can be the two root
+   sets disagreeing (§8.5): check the chain from the image.
 10. (0.3.0) **TLS on 443, first deployment:**
     1. the data stack (the second key); the operator creates the two
        empty secrets (§8.5);
-    2. the service stack with the renewer, TLS switched off;
+    2. the service stack with the renewer, TLS switched off; the
+       renewer has no schedule yet, so no renewer alarm fires before
+       step 5;
     3. the operator invokes the renewer with `register`: it registers
        the account and logs its URL;
     4. commit the URL to `stagingCallsAcmeAccount` and deploy (the CAA
-       record);
+       record and the renewer's schedule);
     5. invoke the renewer with `renew`: it issues;
     6. set `stagingCallsTurnTls` and deploy: within 10 minutes the
        server listens on 443, `tls` is 1, and the issuer lists
        `turns:`.
-    Checks: a handshake to `turn.<stage>.vettid.org:443` shows the
+    Checks, run from the image (a one-off container of it, so with its
+    roots): a handshake to `turn.<stage>.vettid.org:443` shows the
     certificate and the chain the renewer stored (and which root it
     ends at); TLS 1.0, TLS 1.1 and a CBC suite are refused; an
     allocation over `turns:` with a `callsctl` credential.
-11. (0.3.0) **A compromised TLS key:** invoke the renewer with `rekey`;
-    check that the served certificate changed (`tls` at 1, the serial of
-    a handshake); remove the `AWSPREVIOUS` stage from the secret's old
-    version so the old key is no longer readable through it. State in
-    the incident note that the old key works against the apps until the
-    old certificate's end (§7.6). To take TLS off instead, put `{}` in
-    the certificate secret: `turn-agent` restarts coturn without it.
+11. (0.3.0) **A compromised TLS key:** if the server may be where it
+    leaked, replace the instance first. Invoke the renewer with `rekey`;
+    the server takes the new certificate at its next read (at most 10
+    minutes); check that the served certificate changed (`tls` at 1, the
+    serial of a handshake). If the revoke failed, invoke `revoke` until
+    it succeeds, and only then remove the `AWSPREVIOUS` stage from the
+    secret's old version so the old key is no longer readable through
+    it. State in the incident note that the old key works against the
+    apps until the old certificate's end (§7.6). To take TLS off
+    instead, put `{}` in the certificate secret: `turn-agent` restarts
+    coturn without it.
 12. (0.3.0) **A compromised ACME account key:** invoke the renewer with
     `rollover` (RFC 8555 §7.3.5): a new account key, the same account
-    URL, so the CAA record stays; then `rekey`.
+    URL, so the CAA record stays; then `rekey`. If the attacker rolled
+    the account over or deactivated it first: put `{}` in the account
+    secret, `register`, commit the new URL to `stagingCallsAcmeAccount`
+    and deploy (the CAA record now names only the new account), then
+    `rekey`.
 
 ## 12. Not in C2
 
