@@ -30,7 +30,7 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.97.0: normative, 2026-11-27; from the recheck of vettid-vault#304 (#18101, card GC #18129) and vettid-vault#322. **§8.2: an agent's `item.get`, `item.run` and `item.proxy` answers carrying the secret value are sent once from memory, never written to the stored outbox**, like the pairing-code answer (0.94.1). A lost deposit means the agent asks again (a new approval and a new counted use; AGENT-PLAN §4.4). Before, the answer waited in the stored outbox, sealed under a session key the saved state holds, until the relay took it. `call.start` stays durable until the vault is given a TURN issuer (release builds pass none, so its answer carries no credential); it moves to this rule, with an app rule, before one is. **§12.5 step 2 (describing what vettid-vault#322 built):** after a rotation the vault also deletes the pending key's mailbox and each old mailbox it holds a key for, within 10 s, each with its own key (defense in depth: a relay following RELAY-PROTOCOL §6.10 deletes the predecessors already); entries count as dropped only once every mailbox they route to is deleted. Needs a vault release (§8.2). Sections: §8.2, §12.5.
+  - 0.97.0: normative, 2026-11-26; from the recheck of vettid-vault#304 (#18101, card GC #18129) and vettid-vault#322. **§8.2: an agent's `item.get`, `item.run` and `item.proxy` answers carrying the secret value are sent once from memory, never written to the stored outbox**, like the pairing-code answer (0.94.1). A lost deposit means the agent asks again (a new request, counted, decided and referred as usual; AGENT-PLAN §4.4). Before, the answer waited in the stored outbox, sealed under a session key the saved state holds, until the relay took it. `call.start` stays durable until the vault is given a TURN issuer (release builds pass none, so its answer carries no credential); it moves to this rule, with an app rule, before one is. **§12.5 step 2 (describing what vettid-vault#322 built):** after a rotation the vault also deletes the pending key's mailbox and each old mailbox it holds a key for, within 10 s, each with its own key (defense in depth: a relay following RELAY-PROTOCOL §6.10 deletes the predecessors already); entries count as dropped only once every mailbox they route to is deleted. Needs a vault release (§8.2). Sections: §8.2, §12.5.
   - 0.96.0: normative, 2026-11-26; owner decision #18926 a (2026-11-26). **`block.add{connection_id}` on a connection is a step-up type for desktops, like `connection.remove`.** From a desktop it is held until the member confirms on a phone (§6.8). Both are held by type, a `stale` connection and an unknown id included, unless the id names an outgoing request that is not yet a connection (app-only, 0.95.0). Before, a desktop's block ran at once, and blocking a connection ends it. What an agent may send is unchanged (§6.8). The app is unchanged. `block.add{pending_id}` and a block naming an outgoing request that is not yet a connection stay app-only (0.95.0). Also, describing what vettid-vault#321 built: §10.4 "Block list" says what a block of the app's own outgoing request does: it first withdraws the request as `connection.decline` of it does, then blocks the inviter's `ik` and relay key, taken from the invitation, under the name the request holds of the inviter; the block has no connection id; `exists` and the block-list limit are checked first, and a refusal changes nothing. §10.9: such a block is audited `connection.blocked` only, and `connection.remove` of an outgoing request is audited `connection.request.declined`. §6.4: an outgoing handshake that ends before its `hs.init` was deposited at the relay never sends it, so a waiting request's open token may be unspent. Also, describing what vettid-vault#320 built: §6.7.2 and §3.4.1 S7: after a relay-key rotation a claim's `DELETE` (a pairing code's or a link invite's) is signed by the key of the mailbox that created the claim, while that mailbox is in its grace period. Needs a vault release, a desktop change (the desktop shows the held `block.add` as waiting for the phone), and an approval row on the phone (ANDROID-PLAN, IOS-PLAN): until then the phone can only deny a desktop's held block, as it can every desktop step-up request today. Sections: §3.4.1 (S7), §6.4, §6.7.2, §6.8, §10.4 (role rule and Block list), §10.9, §13.5 (Desktop row).
   - 0.95.0: normative, 2026-11-25; owner decisions #18396 b, #18413 a and #18422 a (2026-11-25). **`connection.decline` and `intro.decline` are app-only.** A desktop or an agent is answered `forbidden` at once, never held and never delegated, as for `connection.invite.create`, `connection.invite.accept`, `connection.approve`, `intro.create` and `intro.accept`. A block of a pending request (`block.add{pending_id}`) is a decline and is app-only too, and so is a `block.add{connection_id}` or `connection.remove` naming an outgoing request that is not yet a connection, which withdraws it; both stay as they were on an active connection. Before, a desktop could decline a connection request or an introduction. Neither type, nor a block of a pending request, was a step-up type, so no such request can be held. The reason (the owner): "Desktops don't accept new connections. Only phones do." Needs a vault release. Unchanged: a desktop or an agent may still deny a connection's pending invocation (`action.respond`, §10.14); cancelling an invitation (`connection.invite.cancel`) or an introduction it made (`intro.cancel`) stays open to desktops (owner decision #18422 a: withdrawing never answers anyone); and a desktop may still list connection requests and introductions. A desktop shows requests and introductions read-only and points to the phone with the approved text "This is done on your phone." Sections: §3.1, §6.4 "Who approves", §6.8, §10.4 (role rule and Block list), §10.15, §13.5 (Desktop row).
   - 0.94.1: erratum, 2026-11-25 (from the builds of cards GC #17989, #17992, #17993; vettid/vettid-vault#303, vettid/vettid-relay#38; fixes after the blind pair on vettid/vettid.org#666). §6.7.2: (1) the input rule removes a defined set: ASCII tab, CR and LF, every Unicode Zs and Pd character (U+002D included), U+2212, and U+00AD, U+200B, U+200E, U+200F, U+2060 and U+FEFF; it counts code points, and refuses non-ASCII before any case mapping (as the vectors pin), with the same "codes never contain…" text. The vectors do not yet cover the removed set: one case per class and a non-removed non-ASCII character come in a follow-up to vettid-vault#303, card GC #17989; until then implementations follow the text. (2) The code derivations wait at most 5 s in all for the enclave's room, then answer `busy`. (3) A failed salts read answers `claim_unavailable`. (4) A failed or unanswered PUT (a 429, a 5xx, a network error or a timeout) is not retried: the vault deletes the claim (`DELETE`, retried with backoff), denylists the pairing's open token and answers `claim_unavailable`. (5) New step 6 of "Making a code pairing": the cached `device.pair.create` answer has no `code` (§8.2 says so too); an app that holds no answer with a code for the request asks again once with a new request, ignores a code-less duplicate that comes after a coded answer, rejects each code-less pairing before falling back to the link, sends a `limit` from the re-ask to the link screen, retransmits a code create only after 15 s, and the vault holds a duplicate of a request still running until the first completes. §10.3 points to it. §16 lists `pair-code.json`. The removed set, the 5 s wait and (5)'s `limit`, 15 s and held-duplicate rules are chosen; not in the card. No new text.
@@ -13381,17 +13381,22 @@ it. As a backstop, `item.run` and `item.proxy` answers always carry
 (agents never read a critical item), so an answer missing `value` is
 treated the same way.
 
-(0.97.0) **Sent once from memory.** The live answer that carries the
-secret value of an agent's `item.get`, `item.run` or `item.proxy`, like
+(0.97.0; not yet built in the vault, card GC #18129) **Sent once from
+memory.** Every successful (`ok`) live answer to an agent's `item.get`,
+`item.run` or `item.proxy`, like
 (0.94.1) a `device.pair.create{form: "code"}` answer with its code
 (§6.7.2 step 6), is never written to the stored outbox. It is deposited
 from memory once, after the batch's flush and behind any queued deposits
 to the same mailbox, as a volatile response is, and its body is wiped
-once sealed. Its cached copy (above) is written as usual. If that
-deposit is lost (the relay fails, or the vault stops first), a
-retransmission gets the cached copy, and the requester asks again as a
-new request: for an agent a new approval and a new counted use (AGENT-PLAN
-§4.4, the connector asks again once). `call.start`'s answer stays a durable deposit for
+once sealed. Its cached copy (above) is written as usual. A
+retransmission handled while the live answer still waits in memory is
+answered behind it, from memory too: the cached copy never goes ahead
+of the live answer. If that deposit is lost (whenever a volatile
+response's would be, above, or when the vault has no usable epoch to
+seal it under), a retransmission gets the cached copy, and the
+requester asks again with a new request, counted, decided and referred
+as usual (AGENT-PLAN §4.4: the connector asks again once). A connector
+ignores a copy for a request it already has the live answer for. `call.start`'s answer stays a durable deposit for
 now: release builds give the vault no TURN issuer, so it carries no
 credential (§10.10). Before an issuer is given, `call.start` moves to this
 rule, with an app rule for an answer without its TURN entry.
@@ -13423,7 +13428,7 @@ If the vault crashes:
 |---|---|
 | Before step 3 | The batch is redelivered and re-applied cleanly. |
 | Between steps 3 and 4 | The batch is redelivered and hits the inner-`id` dedupe. |
-| During step 5 | The entries are re-deposited with the same inner `id`, and the recipient dedupes them. |
+| During step 5 | The entries are re-deposited with the same inner `id`, and the recipient dedupes them. (0.97.0) A sent-once answer (§8.2) is not an outbox entry: a crash loses it, and a retransmission gets its cached copy. |
 
 (0.88.7, owner decision b, GC #7213) **Re-sealed at a key change.** A
 vault seals an outbox entry to a connection when it queues it, under the
@@ -30537,19 +30542,24 @@ converges to "deleted", never to a vault that runs again:
    the vault relay key), once. With it go every message waiting there,
    the denylist, blobs and the vault's claims, and from then on every
    deposit is refused (`mailbox_unknown`), so the revocations and claim
-   deletions queued in step 1 are moot and are dropped from the outbox.
+   deletions queued in step 1 are moot and are dropped from the outbox
+   (after a rotation, see below).
    If the request fails (a relay before 0.5.0 answers `not_found`, or
    the relay is unreachable after the client's retries), they stay
-   queued as the fallback. (0.97.0) After a relay-key rotation the vault
-   also deletes, within 10 s together and one attempt each, the pending
-   key's mailbox (first, with the client's retries) and each old
-   mailbox whose key it still holds, each signed with its own key. A
-   relay following RELAY-PROTOCOL §6.10 already deletes the predecessors
-   still in their grace with the current mailbox, so this is defense in
-   depth. A revocation or claim deletion counts as dropped only once every
-   mailbox it would be sent to is deleted (or answers `mailbox_unknown`);
-   an old mailbox whose deletion fails keeps its entries queued for the
-   drain. Then the outbox is delivered once, best effort:
+   queued as the fallback. (0.97.0) Once the current mailbox is
+   deleted, after a relay-key rotation the vault also deletes, within
+   10 s together, the pending key's mailbox first (with the client's
+   retries: if its rotate landed it is the live successor, which no
+   cascade reaches), then each old mailbox whose key it still holds (one
+   attempt each), each signed with its own key. For the old mailboxes
+   this is defense in depth: a relay following RELAY-PROTOCOL §6.10
+   already deletes the predecessors still in their grace with the
+   current mailbox. A revocation or claim deletion counts as dropped only
+   once every mailbox it would be sent to is deleted (an old mailbox's
+   `mailbox_unknown` counts as deleted); an old mailbox whose deletion
+   fails keeps its entries queued for the drain, except entries routed
+   only to an old mailbox past its grace, which route nowhere and are
+   dropped. Then the outbox is delivered once, best effort:
    the notices go to the connections' and devices' own mailboxes.
 3. **Zeroize**: every key and the DEK are wiped; the vault is locked and
    its process exits (§12.4). (0.32.0, release A) Before it
