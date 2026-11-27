@@ -1,8 +1,8 @@
 ---
 title: CALLING-SERVICE
 status: approved by the owner 2026-10-12 (D12–D26 of CALLS-PLAN §13.5; D23 as (c))
-version: 0.2.4
-date: 2026-11-17
+version: 0.3.0
+date: 2026-11-27
 owner: Al Liebl (Mesmer)
 component: calling-service (optional, media plane only): a STUN/TURN server and a credential issuer
 related:
@@ -60,6 +60,18 @@ changelog:
     built (vettid-vault#260); production's is added in the release that
     first gives production a `calls_url` (CALLS-PLAN D25, erratum
     0.1.12; VAULT-RELEASES §8.4 Control 1)
+  - 0.3.0 (2026-11-27): for the owner's approval. **TURN over TLS on
+    TCP 443 (C5, D18)**, by the design the owner chose on 2026-11-27
+    (GC #19421, "a"): a Let's Encrypt certificate for the server's name,
+    issued and renewed by a scheduled function off the server, with
+    DNS-01 on Route 53; its key in a secret of its own under a key of
+    its own; `turn-agent` puts it on the tmpfs and coturn reloads it
+    without dropping calls (§8.5). The server's name gets its own CAA
+    record, Let's Encrypt only, bound to this service's ACME account and
+    to DNS-01 (§8.5). TCP 443 inbound (§8.2); the TLS rules (§7.2); the
+    issuer lists a `turns:` URL (§5.2); the compromise rows (§7.6); a
+    metric and an alarm on the certificate's age (§10); runbook items
+    (§11); what C5 still has to find out (§13)
 classification: public (no secrets; safe for github.com/vettid)
 review-cycle: 6 months or upon WebRTC PQC / AWS milestone, whichever first
 ---
@@ -152,7 +164,7 @@ implementation of it.
 | STUN, UDP 3478 | yes | |
 | TURN over UDP 3478 | yes | |
 | TURN over TCP 3478 | yes (it costs nothing extra and helps networks that block UDP) | |
-| TURN over TLS on TCP 443 (`turns:`) | **no** (D18) | C5, the hostile-network phase: it needs a certificate on the instance and its renewal, and C2's exit test does not need it |
+| TURN over TLS on TCP 443 (`turns:`) | **no** (D18); added in C5 (0.3.0, §8.5) | C5, the hostile-network phase: it needs a certificate on the instance and its renewal, and C2's exit test does not need it |
 | Relayed addresses over IPv4 and IPv6 | yes; IPv6 is tested as far as the test networks allow (§7.4) | |
 | The issuer | yes | |
 | A second server, a second region, a managed overflow provider | no | load that staging does not have |
@@ -165,9 +177,11 @@ gateway (CALLS-PLAN §5.2). It holds: the issuer (`cmd/vettid-calls`);
 the coturn image (a pinned coturn, the configuration template of §7.2,
 and `turn-agent`, a small Go program beside coturn that reads the
 secret, renders the configuration and turns coturn's counters into
-metrics, §10); `callsctl` for the operator (§8.3); a README for
+metrics, §10); `callsctl` for the operator (§8.3); (0.3.0) the
+certificate renewer (`cmd/calls-renewer`, §8.5); a README for
 self-hosters. Reproducibility is checked in CI as in vettid-push
-(`make image-repro`, and the same for the issuer's archive).
+(`make image-repro`, and the same for the issuer's and the renewer's
+archives).
 
 ## 5. Credentials
 
@@ -196,11 +210,15 @@ X-VettID-Attestation: <base64 Nitro attestation document>
 { "count": 1..4 }
 
 → 200 { "stun": ["stun:<host>:3478"],
-        "turn": ["turn:<host>:3478?transport=udp", "turn:<host>:3478?transport=tcp"],
+        "turn": ["turn:<host>:3478?transport=udp", "turn:<host>:3478?transport=tcp",
+                 "turns:<host>:443?transport=tcp"],
         "credentials": [ { "username": "<expiry>:<random>",
                            "credential": "<base64>",
                            "exp": <Unix seconds> } ] }
 ```
+
+(0.3.0) The `turns:` URL is listed when the issuer's configuration
+names the TLS port (§8.5); without it the answer is as in 0.2.
 
 `GET /v1/health` is unauthenticated and returns `200 {}`. A request body
 is at most 1 KiB. Error bodies follow RELAY-PROTOCOL §7.1.
@@ -375,7 +393,7 @@ version when the image is built (§13).
 | Allocation lifetime | coturn's default (10 minutes, refreshed by the client) | A dead client's allocation goes within 10 minutes |
 | STUN | no RFC 5780 behaviour discovery, no pre-RFC 5389 compatibility, no software attribute | Smaller answers, nothing to fingerprint |
 | Management | no CLI listener, no web admin | |
-| Transport security | no TLS or DTLS listener in C2 (§4.3) | |
+| Transport security | no TLS or DTLS listener in C2 (§4.3). (0.3.0, C5) **TURN over TLS on TCP 443 only**: `tls-listening-port=443`; TLS 1.2 and 1.3 only (`no-tlsv1`, `no-tlsv1_1`); for TLS 1.2, ECDHE with AES-GCM or ChaCha20-Poly1305 only; the certificate and key of §8.5. Still no DTLS listener, and nothing on 5349. TLS on 443 is listened on only while `turn-agent` holds a valid certificate (§8.5) | TLS on 443 is what a network that allows only HTTPS lets through. The media inside is already encrypted (§6): TLS here is for getting through, not for secrecy, so the older versions are left out only because nothing needs them |
 
 ### 7.3 What happens at each cap
 
@@ -429,6 +447,8 @@ Candidate priorities are left to the media stack.
 |---|---|---|
 | The TURN server (its memory, its secret) | Free relaying within the caps; the addresses and traffic volumes of calls relayed while it lasts; the ability to drop or delay relayed media. **No content**, and no way to change it unnoticed | Rotate the secret (§8.3), rebuild the instance from the image |
 | The issuer | The same secret, so the same | The same |
+| (0.3.0) The TLS certificate's key (from the server, or from its secret) | The ability to answer as `turn.<stage>.vettid.org` on TLS to anyone who can redirect a phone's traffic to the attacker. That gives what a TURN server sees (above) and no more: the TURN credential is checked by the real server, and the media is encrypted under the call's keys (§6) | Revoke the certificate; the renewer issues a new one with a new key at its next run (§8.5) |
+| (0.3.0) The renewer, or its role | Certificates for the server's name only (its Route 53 rights are the one TXT record, §8.5), and the key above | As above; then the ACME account key (§8.5) |
 | A vault's enclave (not this service's concern, stated for completeness) | Credentials within that vault's limit | A vault release |
 
 ## 8. Deployment on staging
@@ -459,8 +479,8 @@ named one stack, `VettidOrgStageCallsStack`; these two replace it.
 
 | Stack | Kind | Owns |
 |---|---|---|
-| `VettidOrgCallsDataStack` | **stateful**, retained, termination protection | The key `alias/vettid-org-calls`; the Elastic IP and the fixed IPv6 address of the server (they are in DNS and in no vault release, but phones cache them); the log groups; the alarm topic `vettid-org-calls-alerts` |
-| `VettidOrgCallsStack` | stateless | A small VPC with one public subnet (IPv4 and IPv6), no NAT, **no flow logs** (§10); the security group; an Auto Scaling group of one `t4g.small` (arm64, Amazon Linux 2023, IMDSv2, no key pair, no inbound but the ports below, Systems Manager sessions only) that takes the fixed addresses at boot and runs the coturn image, pinned by digest; the issuer and what fronts it; the DNS records; the alarms |
+| `VettidOrgCallsDataStack` | **stateful**, retained, termination protection | The key `alias/vettid-org-calls`; (0.3.0) the key `alias/vettid-org-calls-tls` (§8.5); the Elastic IP and the fixed IPv6 address of the server (they are in DNS and in no vault release, but phones cache them); the log groups; the alarm topic `vettid-org-calls-alerts` |
+| `VettidOrgCallsStack` | stateless | A small VPC with one public subnet (IPv4 and IPv6), no NAT, **no flow logs** (§10); the security group; an Auto Scaling group of one `t4g.small` (arm64, Amazon Linux 2023, IMDSv2, no key pair, no inbound but the ports below, Systems Manager sessions only) that takes the fixed addresses at boot and runs the coturn image, pinned by digest; the issuer and what fronts it; the DNS records; (0.3.0) the renewer, its schedule and the server name's CAA record (§8.5); the alarms |
 
 **What is stateful:** only the addresses, the key, the secret and the
 log groups. The instance holds nothing: replacing it loses the calls
@@ -468,6 +488,10 @@ being relayed at that moment and nothing else.
 
 **Inbound to the instance:** UDP 3478, TCP 3478 and UDP 49152–65535,
 IPv4 and IPv6, from anywhere. Nothing else; TCP 443 is not open in C2.
+(0.3.0, C5) **TCP 443 too**, IPv4 and IPv6, from anywhere (§7.2). coturn
+runs as `nobody` and binds it because the instance's boot sets
+`net.ipv4.ip_unprivileged_port_start=443` (the instance runs nothing
+else, and the container has the host's network).
 **Outbound:** UDP to anywhere (that is the relay), TCP 443 (the image
 registry, Secrets Manager, CloudWatch, Systems Manager).
 
@@ -506,7 +530,9 @@ registry, Secrets Manager, CloudWatch, Systems Manager).
 
 **Context** (`cdk.json`): `callsStages`; `stagingCallsTurnImage` (the
 coturn image by digest); `stagingCallsIssuer` (the issuer's archive: a
-release URL and its SHA-256). Until each value is committed it must be
+release URL and its SHA-256); (0.3.0) `stagingCallsRenewer` (the
+renewer's archive, the same way) and `stagingCallsAcmeAccount` (the ACME
+account's URL, §8.5). Until each value is committed it must be
 on every staging deploy command (RUNBOOK "Push gateway" says why).
 
 **Vault side** (VAULT-RELEASES §5.2, §8.4): the release constant
@@ -561,6 +587,108 @@ this service's cost tag with an alarm, and by the daily stop of §7.3.
 The share of calls that need TURN is not known (general experience: one
 in five to ten on mobile networks) and is measured in C5.
 
+(0.3.0) TLS on 443 adds the second key (1.0), two secrets (0.8), the
+renewer (under 0.1: a run a day) and two alarms (0.2): about 2 a month.
+
+### 8.5 The TLS certificate (0.3.0, C5)
+
+The design is the owner's choice of 2026-11-27 (GC #19421, "a"). The
+server is replaced at every daily stop and every failure, so it cannot
+get its own certificate at boot: Let's Encrypt issues at most 5
+certificates a week for the same names, and the internet-facing server
+would need the right to change DNS. The certificate is therefore issued
+and renewed **off the server**, and the server only reads it.
+
+**The certificate.** From Let's Encrypt (its production directory), for
+`turn.<stage>.vettid.org` alone; an ECDSA P-256 key, made new at every
+issuance (§13 has the question of the apps' trusted roots).
+
+**The renewer** (`cmd/calls-renewer` in vettid-calls; a Go function,
+arm64, one at a time, built reproducibly and pinned like the issuer):
+
+- runs once a day (an EventBridge schedule) and at most 5 minutes;
+- issues when there is no certificate, when the one held is for another
+  name or does not match its key, or when less than a third of its
+  lifetime is left (30 days of a 90-day certificate);
+- uses **DNS-01 on Route 53** through the ACME client of
+  `golang.org/x/crypto/acme`: it writes the TXT record, waits until
+  Route 53 reports the change in sync, answers the challenge, and
+  deletes the record whatever the outcome;
+- writes the new key and chain to the certificate secret in one
+  `PutSecretValue`, then puts its metric (§10);
+- on any failure keeps what is there, logs which step failed (never a
+  key, a token or a record value) and fails the run, so the alarm of §10
+  fires; the next day's run tries again.
+
+**Its rights**, and nothing else:
+
+- Route 53: `ChangeResourceRecordSets` on the stage's zone, only for the
+  name `_acme-challenge.turn.<stage>.vettid.org`, only type `TXT`, only
+  `UPSERT` and `DELETE` (the conditions
+  `route53:ChangeResourceRecordSetsNormalizedRecordNames`, `…RecordTypes`
+  and `…Actions`); `GetChange`;
+- Secrets Manager: read and put the two secrets below; no create, no
+  delete;
+- KMS: `GenerateDataKey` and `Decrypt` under `alias/vettid-org-calls-tls`,
+  through Secrets Manager, for those two secrets;
+- its own metric namespace and log group (14 days).
+
+**The key and the secrets.** A second key, `alias/vettid-org-calls-tls`,
+in the data stack, so that the TURN secret's key keeps its rule that
+only the operator may encrypt under it (§8.3). Two secrets under it,
+**created empty (`{}`) by the operator**, as every secret of this
+service is (§8.3); the renewer only puts values:
+
+- `vettid-org/<stage>/calls/tls-cert`: `{ "key": "<PKCS#8 PEM>",
+  "chain": "<PEM, leaf first>" }`. The instance's role may read it, and
+  nothing else may but the renewer;
+- `vettid-org/<stage>/calls/acme-account`: the ACME account's key and
+  URL, made by the renewer's first run. Only the renewer may read it.
+
+**CAA.** The stage's zone allows only Amazon to issue (a CAA record at
+its apex). The server's name gets a CAA record of its own, which takes
+precedence for that name only:
+
+```
+turn.<stage>.vettid.org. CAA 0 issue "letsencrypt.org; accounturi=<the account URL>; validationmethods=dns-01"
+turn.<stage>.vettid.org. CAA 0 issuewild ";"
+turn.<stage>.vettid.org. CAA 0 iodef "mailto:security@vettid.org"
+```
+
+(RFC 8659, RFC 8657.) So only this service's ACME account, and only by
+DNS-01, can get a certificate for the name. The account's URL is known
+only after the renewer's first run, so the first deployment is in two
+steps (§11); until the record exists Let's Encrypt refuses, and the
+server runs without TLS, as below.
+
+**On the server.** `turn-agent` reads the certificate secret when it
+reads the TURN secret (at start and every 10 minutes, §8.3) and checks
+that the chain parses, the key matches the leaf, the leaf names the
+server and is valid now. Then:
+
+- **valid:** it writes the key and chain to the tmpfs (`0600`, owned by
+  `nobody`) and renders the TLS lines of §7.2;
+- **a new valid one while coturn runs with TLS:** it rewrites the files
+  and sends coturn `SIGUSR2`, which reloads the certificate without
+  ending a call;
+- **no valid one** (none yet, unreadable, wrong, or expired): coturn
+  runs **without** a TLS listener, UDP and TCP 3478 are unaffected, and
+  `agent_errors{kind="tls"}` is counted (§10). A coturn already running
+  with TLS whose certificate has expired is restarted without it.
+  Moving between with and without TLS restarts coturn, which ends the
+  calls being relayed (as a secret change does, §8.3);
+- the key is never logged or sent anywhere, and `print-config` shows it
+  as `REDACTED`.
+
+**The issuer** lists `turns:turn.<stage>.vettid.org:443?transport=tcp`
+beside the two 3478 URLs (§5.2) whenever its configuration names the
+TLS port. It does not read the certificate and cannot see whether the
+server is listening on 443: a `turns:` URL that does not answer costs a
+phone one failed candidate and nothing else, and the alarm of §10 says
+that it is so. (This replaces "the issuer does not list `turns:`
+without a certificate" in the proposal of GC #19418: the issuer cannot
+know it without the right to read the key.)
+
 ## 9. What each party sees and can do
 
 After C2, for a call between members A and B.
@@ -598,6 +726,12 @@ address, a username or a single request is kept anywhere.
   `capacity` counts the refusals that mean the server is full
   (bandwidth fully reserved, no relay socket left), not those about the
   request itself.
+  (0.3.0) `tls` (1 while coturn listens on 443, 0 when not) and
+  `agent_errors{kind="tls"}` (§8.5).
+- (0.3.0) **The renewer.** Metric `tls_days_left` (the certificate's
+  days of validity after a run) and `renew{outcome}` (`kept`, `issued`,
+  `failed`). Log: one line per run with the outcome and, on failure, the
+  step; never a key, a token or a record value. 14 days.
 - **No VPC flow logs** on this network: they would be a record of which
   address used the relay when, that is, of who called when.
 - **The issuer.** Metrics `requests{outcome}`,
@@ -624,6 +758,8 @@ address, a username or a single request is kept anywhere.
 | `issuer-errors` | any `internal`; more than 25 refused attestations in an hour |
 | `issuer-invocations` | more than 1,000 invocations of the issuer's function in 5 minutes (a flood costs money; also on the stub) |
 | `issuer-manifest` | manifest refresh failing for an hour |
+| (0.3.0) `tls-certificate` | `tls_days_left` under 14, or no `renew` metric for 2 days, or any `failed` |
+| (0.3.0) `turn-no-tls` | `tls` at 0 for 30 minutes while a certificate is expected (after the first issuance) |
 | the cost budget | this service's tagged cost forecast above $30 for the month |
 
 ## 11. Runbook outline
@@ -654,11 +790,23 @@ stacks' pull request (not in this one). Its parts:
    configuration; the URLs are in the issuer's configuration, so moving
    the server needs no vault release.
 9. **Alarms:** what each means and what to do.
+10. (0.3.0) **TLS on 443, first deployment:** the data stack (the second
+    key); the operator creates the two empty secrets (§8.5); the service
+    stack with the renewer; run the renewer once (it registers the
+    account and fails at the CAA check, which is expected); commit the
+    account's URL to `stagingCallsAcmeAccount` and deploy again (the CAA
+    record); run the renewer again (it issues); within 10 minutes the
+    server listens on 443. Check: a TLS handshake to
+    `turn.<stage>.vettid.org:443` shows the certificate, and an
+    allocation over `turns:` with a `callsctl` credential.
+11. (0.3.0) **A compromised TLS key:** revoke the certificate (the ACME
+    account may), empty the certificate secret's key so the renewer
+    issues at once, run it, and check the server's certificate.
 
 ## 12. Not in C2
 
 - TURN over TLS on 443 (C5), and with it the certificate on the
-  instance.
+  instance. (0.3.0: specified for C5 in §8.5.)
 - "Always relay calls" (deferred by the owner, CALLS-PLAN §3.1; V9).
 - Video's bandwidth cap and anything else of video (C4).
 - A per-address limit in front of the issuer (before production).
@@ -682,6 +830,8 @@ stacks' pull request (not in this one). Its parts:
 | IPv6 on the test phones' mobile network | The exit test records which address family each call used |
 | The load of an attestation per request on the enclave's supervisor at production scale | Measured on staging with the capacity test's vault count before promotion |
 | The share of calls that need TURN | C5 |
+| (0.3.0) That the apps' WebRTC accepts the Let's Encrypt chain on `turns:`. Its TURN client checks the certificate against its own root set, not the phone's; an ECDSA certificate's default chain ends at ISRG Root X2 | C5's first test: a call with `turns:` as the only URL on each app. If a root is missing, the renewer asks for an RSA-2048 certificate (its chain ends at ISRG Root X1) or the alternate chain, and this section says which |
+| (0.3.0) That coturn 4.18.0's `SIGUSR2` reloads the certificate without ending an allocation over TLS | Reading the pinned source and a test: a relayed call over `turns:` across a renewal |
 
 ## 14. References
 
