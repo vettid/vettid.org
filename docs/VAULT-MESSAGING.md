@@ -2,7 +2,7 @@
 title: VAULT-MESSAGING
 status: draft
 version: 0.97.0
-date: 2026-11-26
+date: 2026-11-27
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -30,7 +30,7 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.8, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.97.0: normative, 2026-11-26; from the recheck of vettid-vault#304 (#18101, card GC #18129) and vettid-vault#322. **§8.2: an agent's `item.get`, `item.run` and `item.proxy` answers carrying the secret value are sent once from memory, never written to the stored outbox**, like the pairing-code answer (0.94.1). A lost deposit means the agent asks again (a new request, counted, decided and referred as usual; AGENT-PLAN §4.4). Before, the answer waited in the stored outbox, sealed under a session key the saved state holds, until the relay took it. (Owner decision b, GC #19349) **§10.10: a `call.start` answer and a V→D `call.offer` carrying a TURN credential are sent once from memory too**, so a credential never reaches the vault's state; staging vaults have had an issuer since release 31, so before, the credential waited sealed in the stored outbox for up to its 6 h life. A device that retransmitted `call.start` and gets an answer without a TURN entry ends that call and places it again, once; a `call.offer` whose deposit fails is queued again without the TURN entry, so the device still rings. The re-queued offer and the place-again-once rule are chosen; not in the owner's text. Needs an app change too (ANDROID-PLAN, IOS-PLAN). **§12.5 step 2 (describing what vettid-vault#322 built):** after a rotation the vault also deletes the pending key's mailbox and each old mailbox it holds a key for, within 10 s, each with its own key (defense in depth: a relay following RELAY-PROTOCOL §6.10 deletes the predecessors already); entries count as dropped only once every mailbox they route to is deleted. Needs a vault release (§8.2, §10.10). Sections: §8.2, §8.3, §10.10, §12.5.
+  - 0.97.0: normative, 2026-11-27; from the recheck of vettid-vault#304 (#18101, card GC #18129) and vettid-vault#322. **§8.2: an agent's `item.get`, `item.run` and `item.proxy` answers carrying the secret value are sent once from memory, never written to the stored outbox**, like the pairing-code answer (0.94.1). A lost deposit means the agent asks again (a new request, counted, decided and referred as usual; AGENT-PLAN §4.4). Before, the answer waited in the stored outbox, sealed under a session key the saved state holds, until the relay took it. (Owner decision b, GC #19349) **§10.10: a `call.start` answer and a V→D `call.offer` carrying a TURN credential are sent once from memory too**, so a credential never reaches the vault's state; staging vaults have had an issuer since release 31, so before, the credential waited sealed in the stored outbox for up to its 6 h life. The vault keeps a call's ICE configuration in memory while the call lasts: a retransmitted `call.start` gets the live answer again from memory, with the TURN entry, and a `call.offer` whose deposit fails is deposited again from memory with the same inner `id` while the call still rings. Later deposits to the same mailbox wait behind such a message, so a device never gets a call's later messages before its answer or offer. Only after the vault stopped or locked does a retransmission get the cached copy, which now carries `withheld: true`; a device keeps the call with it, without a TURN server on its side, and does not place it again. Devices retransmit `call.start` 10 s and 20 s after sending it, and ignore a `call.offer` for a call they have ended or already hold. These rules are chosen; not in the owner's text. Needs an app change too (ANDROID-PLAN, IOS-PLAN and the desktop's calls: the retransmission timing, the `withheld` copy, the ignored offer). **§12.5 step 2 (describing what vettid-vault#322 built):** after a rotation the vault also deletes the pending key's mailbox and each old mailbox it holds a key for, within 10 s, each with its own key (defense in depth: a relay following RELAY-PROTOCOL §6.10 deletes the predecessors already); entries count as dropped only once every mailbox they route to is deleted (a pending mailbox that never registered counts as deleted). Needs a vault release (§8.2, §10.10). Sections: §8.2, §8.3, §8.5, §10, §10.10, §12.5.
   - 0.96.0: normative, 2026-11-26; owner decision #18926 a (2026-11-26). **`block.add{connection_id}` on a connection is a step-up type for desktops, like `connection.remove`.** From a desktop it is held until the member confirms on a phone (§6.8). Both are held by type, a `stale` connection and an unknown id included, unless the id names an outgoing request that is not yet a connection (app-only, 0.95.0). Before, a desktop's block ran at once, and blocking a connection ends it. What an agent may send is unchanged (§6.8). The app is unchanged. `block.add{pending_id}` and a block naming an outgoing request that is not yet a connection stay app-only (0.95.0). Also, describing what vettid-vault#321 built: §10.4 "Block list" says what a block of the app's own outgoing request does: it first withdraws the request as `connection.decline` of it does, then blocks the inviter's `ik` and relay key, taken from the invitation, under the name the request holds of the inviter; the block has no connection id; `exists` and the block-list limit are checked first, and a refusal changes nothing. §10.9: such a block is audited `connection.blocked` only, and `connection.remove` of an outgoing request is audited `connection.request.declined`. §6.4: an outgoing handshake that ends before its `hs.init` was deposited at the relay never sends it, so a waiting request's open token may be unspent. Also, describing what vettid-vault#320 built: §6.7.2 and §3.4.1 S7: after a relay-key rotation a claim's `DELETE` (a pairing code's or a link invite's) is signed by the key of the mailbox that created the claim, while that mailbox is in its grace period. Needs a vault release, a desktop change (the desktop shows the held `block.add` as waiting for the phone), and an approval row on the phone (ANDROID-PLAN, IOS-PLAN): until then the phone can only deny a desktop's held block, as it can every desktop step-up request today. Sections: §3.4.1 (S7), §6.4, §6.7.2, §6.8, §10.4 (role rule and Block list), §10.9, §13.5 (Desktop row).
   - 0.95.0: normative, 2026-11-25; owner decisions #18396 b, #18413 a and #18422 a (2026-11-25). **`connection.decline` and `intro.decline` are app-only.** A desktop or an agent is answered `forbidden` at once, never held and never delegated, as for `connection.invite.create`, `connection.invite.accept`, `connection.approve`, `intro.create` and `intro.accept`. A block of a pending request (`block.add{pending_id}`) is a decline and is app-only too, and so is a `block.add{connection_id}` or `connection.remove` naming an outgoing request that is not yet a connection, which withdraws it; both stay as they were on an active connection. Before, a desktop could decline a connection request or an introduction. Neither type, nor a block of a pending request, was a step-up type, so no such request can be held. The reason (the owner): "Desktops don't accept new connections. Only phones do." Needs a vault release. Unchanged: a desktop or an agent may still deny a connection's pending invocation (`action.respond`, §10.14); cancelling an invitation (`connection.invite.cancel`) or an introduction it made (`intro.cancel`) stays open to desktops (owner decision #18422 a: withdrawing never answers anyone); and a desktop may still list connection requests and introductions. A desktop shows requests and introductions read-only and points to the phone with the approved text "This is done on your phone." Sections: §3.1, §6.4 "Who approves", §6.8, §10.4 (role rule and Block list), §10.15, §13.5 (Desktop row).
   - 0.94.1: erratum, 2026-11-25 (from the builds of cards GC #17989, #17992, #17993; vettid/vettid-vault#303, vettid/vettid-relay#38; fixes after the blind pair on vettid/vettid.org#666). §6.7.2: (1) the input rule removes a defined set: ASCII tab, CR and LF, every Unicode Zs and Pd character (U+002D included), U+2212, and U+00AD, U+200B, U+200E, U+200F, U+2060 and U+FEFF; it counts code points, and refuses non-ASCII before any case mapping (as the vectors pin), with the same "codes never contain…" text. The vectors do not yet cover the removed set: one case per class and a non-removed non-ASCII character come in a follow-up to vettid-vault#303, card GC #17989; until then implementations follow the text. (2) The code derivations wait at most 5 s in all for the enclave's room, then answer `busy`. (3) A failed salts read answers `claim_unavailable`. (4) A failed or unanswered PUT (a 429, a 5xx, a network error or a timeout) is not retried: the vault deletes the claim (`DELETE`, retried with backoff), denylists the pairing's open token and answers `claim_unavailable`. (5) New step 6 of "Making a code pairing": the cached `device.pair.create` answer has no `code` (§8.2 says so too); an app that holds no answer with a code for the request asks again once with a new request, ignores a code-less duplicate that comes after a coded answer, rejects each code-less pairing before falling back to the link, sends a `limit` from the re-ask to the link screen, retransmits a code create only after 15 s, and the vault holds a duplicate of a request still running until the first completes. §10.3 points to it. §16 lists `pair-code.json`. The removed set, the 5 s wait and (5)'s `limit`, 15 s and held-duplicate rules are chosen; not in the card. No new text.
@@ -13373,10 +13373,14 @@ owner decision a, GC #15273; not yet built in the vault, card GC
 answer carries `withheld: true`, a member of the answer body; a live
 answer never carries `withheld` (it is absent, never `false`).
 `call.start`'s copy does not carry it: a retransmitted `call.start`
-gets the same call without a TURN server (§10.10). A requester MUST
+gets the same call without a TURN server (§10.10). (0.97.0) It does
+now, and a vault that still holds the call's ICE configuration answers
+a retransmitted `call.start` with the live answer instead (§10.10 "A
+lost `call.start` answer"). A requester MUST
 treat an answer with `withheld: true` as handled and ask again as a
 new request, whatever else it carries, and MUST NOT use any value in
-it. As a backstop, `item.run` and `item.proxy` answers always carry
+it; (0.97.0) except a `call.start` copy, which the device keeps as its
+call without a TURN server (§10.10). As a backstop, `item.run` and `item.proxy` answers always carry
 `value`, and so does every field of an agent's `item.get` answer
 (agents never read a critical item), so an answer missing `value` is
 treated the same way.
@@ -13416,7 +13420,8 @@ For durable types, the vault processes each batch as follows:
    - authorize;
    - apply to the in-memory state;
    - record the inner `id`;
-   - append any outbound messages to the **outbox**.
+   - append any outbound messages to the **outbox** ((0.97.0) except
+     those sent once from memory, §8.2 "Sent once from memory").
 3. Increment `state_seq` and **flush** vault state with a conditional write
    (§12.3). The sealed header is then updated to the same `state_seq`
    (§13.2).
@@ -13771,7 +13776,7 @@ same rule to their local storage.
 
 | Class | Types | Ack | Dedupe | Staleness |
 |---|---|---|---|---|
-| durable | everything not listed below | after flush | persisted | `ts` window |
+| durable | everything not listed below ((0.97.0) on the receiving side; a sender sends §8.2's "Sent once from memory" messages without an outbox entry) | after flush | persisted | `ts` window |
 | ephemeral | `call.ice`, `call.ringing`, `call.keepalive` (0.28.0, release C2), `location.update`, `presence.ping`, `presence.pong`, `presence.result`, `vault.locking` | after handling | in memory, 10 min | `exp` required |
 
 A vault forwards ephemeral messages from memory: they are deposited after
@@ -14068,7 +14073,10 @@ an answer to an unknown or expired id is dropped.
   those the frame keys (§10.10 "Media suites and keys").
 - Offers carry `exp`, 45 s by default.
 - `call.offer`, `call.answer` and `call.end` are durable. `call.ice`,
-  `call.ringing` and (0.28.0) `call.keepalive` are ephemeral.
+  `call.ringing` and (0.28.0) `call.keepalive` are ephemeral. (0.97.0)
+  A vault sends a V→D `call.offer` and a `call.start` answer that carry
+  a TURN entry once from memory instead of from its outbox (§10.10
+  "Servers and credentials").
 - A locked callee cannot answer, so the call times out.
 
 ### 10.1 Common rules and `sync.event`
@@ -18375,6 +18383,13 @@ new one on the other device.
   answer in time, a lost response, an answer that does not verify), the
   device SHOULD send `call.end{hangup}` for the same `call_id`, so that
   a call the vault did place does not ring on for nobody.
+  (0.97.0) With no answer, the device retransmits `call.start` (the same
+  request with the same inner `id`, an application retry, §8.6) 10 s
+  and again 20 s after it first sent it. With no answer 30 s after it
+  first sent it (§8.1), it sends that `call.end{hangup}` and tells the
+  member the call could not be placed. It uses the first answer that
+  matches the request (§8.1); a later one matches nothing and is
+  dropped.
 - **Ringing.** The callee's vault drops an offer without `exp` or with an
   `exp` more than 90 s ahead, and treats a repeated `call_id` as a
   duplicate. A **held** vault (§3.6.3, 0.13.0) rings no device and does
@@ -18979,28 +18994,47 @@ them on.
   are sent once from memory when they carry a TURN entry (§8.2 "Sent
   once from memory"): never written to the stored outbox, deposited
   after the batch's flush behind any queued deposits to the same
-  mailbox, and wiped once sealed. It is never in the response cache
+  mailbox, and wiped once sealed (a `call.offer`: once its deposit
+  ends, below). The vault keeps each call's ICE configuration, with
+  its TURN entry, in memory only, from `call.start` or the offer until
+  the call ends, the offer's `exp` passes unanswered, or the vault locks
+  or stops, and wipes it then. It is never in the response cache
   either (below). Before 0.97.0 each waited sealed in the stored outbox
   until the relay took it, and the credential's 6 h life bounded a
   reader of the whole state. A message without a TURN entry is queued
   as before.
-  - **A lost `call.start` answer.** A retransmitted `call.start` gets
-    the cached copy (below), with no TURN entry. A device that
-    retransmitted `call.start` and gets an answer without a TURN entry
-    ends that call (`call.end`) and places it again with a new
-    `call.start`, once for each call the member placed. A live answer
-    without a TURN entry (the pool had no usable credential) is used as
+  - **Order.** While such a message waits in memory for its deposit,
+    every later deposit to the same mailbox (outbox entries and
+    ephemeral messages) waits behind it until its deposit ends,
+    accepted or given up, as later entries wait behind a quota wait
+    (§8.6). So a device never gets a call's `call.answer`, `call.end`
+    or `call.ice` before that call's `call.start` answer or offer.
+  - **A lost `call.start` answer.** A retransmitted `call.start`
+    (§10.10 "Placing a call") for a call whose ICE configuration the
+    vault still holds in memory gets the live answer again, from memory
+    and in the order above: the same `call_id`, ICE configuration and
+    `ice_sig`. It places nothing again, and it retires and counts
+    nothing again. Only when the vault no longer holds it (it stopped or
+    locked since) does a retransmission get the cached copy (below),
+    which carries `withheld: true`. A device whose first answer to
+    `call.start` is that copy keeps the call, with no TURN server on its
+    side; it does not place the call again, so the callee sees one call.
+    If the call then cannot connect, the device shows it as any call
+    that cannot connect. A live answer without a TURN entry (the pool
+    had no usable credential) never carries `withheld` and is used as
     it is.
-  - **A lost `call.offer`.** If its deposit fails (whenever a volatile
-    response's would, §8.2), the vault queues the offer again as a
-    durable entry without the TURN entry: its ICE configuration has only
-    the STUN entry, the same `call_id` and `exp`, and a fresh `ice_sig`,
-    as for the cached `call.start` answer. So the device still rings,
-    and that call has no TURN server on this side. If the vault stops
-    first, the offer is lost and that device does not ring for this
-    call; the call itself is in the vault's state, the member's other
-    devices are unaffected, and a call nobody answers ends as any
-    unanswered call does.
+  - **A lost `call.offer`.** If its deposit fails after the transport
+    retries (§8.6), the vault deposits it again from memory with the
+    same inner `id` and body (sealed again under a newer epoch if the
+    first one is gone), with the outbox's backoff (§8.6), while the call
+    still rings and the offer's `exp` has not passed. Then it drops it
+    and wipes it. A device that got the first copy dedupes the second by
+    its `id`. A device ignores a `call.offer` for a `call_id` it has
+    ended or already holds an offer for. If the vault stops or locks
+    first, every V→D offer still in memory is lost: those devices do not
+    ring for this call (with a usable credential in the pool, that is
+    every device of the member's), the caller hears it ring until it
+    ends, and the call ends as any unanswered call does.
   - The credential stays retired or reusable as below: a lost answer
     does not return it to the pool.
 - **One credential, one call.** A call's ICE configuration has one
@@ -19025,7 +19059,10 @@ them on.
   to the rule above) and a fresh `ice_sig` over those bytes, made when
   the response is cached. The rest of the response
   is unchanged. So a retransmitted `call.start` gets the same call
-  with no TURN server for it.
+  with no TURN server for it. (0.97.0) The copy also carries
+  `withheld: true` (§8.2), and a retransmission gets it only when the
+  vault no longer holds the call's ICE configuration ("A lost
+  `call.start` answer" above).
 - **Never waiting, almost.** If the pool has no usable credential when
   a configuration is needed, the vault MAY wait up to 2 s for a request
   in flight, or start one if its limits allow, and then answers with
@@ -30571,14 +30608,16 @@ converges to "deleted", never to a vault that runs again:
    queued as the fallback. (0.97.0) Once the current mailbox is
    deleted, after a relay-key rotation the vault also deletes, within
    10 s together, the pending key's mailbox first (with the client's
-   retries: if its rotate landed it is the live successor, which no
-   cascade reaches), then each old mailbox whose key it still holds (one
+   retries, for at most 5 s so that each old mailbox still gets its
+   attempt within the 10 s: if its rotate landed it is the live
+   successor, which no cascade reaches), then each old mailbox whose key it still holds (one
    attempt each), each signed with its own key. For the old mailboxes
    this is defense in depth: a relay following RELAY-PROTOCOL §6.10
    already deletes the predecessors still in their grace with the
    current mailbox. A revocation or claim deletion counts as dropped only
    once every mailbox it would be sent to is deleted (an old mailbox's
-   `mailbox_unknown` counts as deleted); an old mailbox whose deletion
+   `mailbox_unknown` counts as deleted, and so does the pending
+   mailbox's: a rotate that never landed left none); an old mailbox whose deletion
    fails keeps its entries queued for the drain, except entries routed
    only to an old mailbox past its grace, which route nowhere and are
    dropped. Then the outbox is delivered once, best effort:
