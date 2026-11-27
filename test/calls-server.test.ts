@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildApp } from '../lib/app';
 import { loadConfig } from '../lib/config';
+import { CALLS_ALLOCATIONS_ALARM, CALLS_ALLOCATIONS_MAX } from '../lib/stacks/calls-server';
 
 /** The calling service's TURN server (CALLING-SERVICE §4.1, §7, §8.2, §10). */
 const DIGEST = '4ada26eab8236cdae5a170c924012aa0cbe3e98968c4f83628061b1cf53040e5';
@@ -125,6 +126,7 @@ describe('instance', () => {
     expect(ud).toContain('CALLS_TURN_HOST=turn.staging.vettid.org');
     expect(ud).toContain('CALLS_SECRET_ID=vettid-org/staging/calls/turn-secret');
     expect(ud).toContain('CALLS_METRICS_NAMESPACE=vettid-org/staging/calls');
+    expect(ud).toContain('CALLS_MAX_KBPS=3000 '); // C4's video cap (D15 b)
     expect(ud).toContain('AWS_REGION=');
     expect(ud).toMatch(/CALLS_OWN_NETWORKS=10\.44\.0\.0\/24,</);
     expect(ud).toMatch(/CALLS_PRIVATE_IPV4="\$PRIVATE_IPV4"/);
@@ -276,11 +278,14 @@ describe('alarms and the daily stop', () => {
     // only the stop alarm acts on the group
     expect(alarms.filter((a) => JSON.stringify(a.Properties.AlarmActions).includes('DailyStop'))).toHaveLength(1);
   });
-  test('relay-capacity: 80 of 100 allocations or any quota_total / capacity refusal, for 10 minutes', () => {
+  test('relay-capacity: 32 of the 40 allocations admitted at 3 Mbit/s, or any quota_total / capacity refusal, for 10 minutes', () => {
+    // 120 Mbit/s at 3 Mbit/s an allocation admits 40, under total-quota's 100.
+    expect([CALLS_ALLOCATIONS_MAX, CALLS_ALLOCATIONS_ALARM]).toEqual([40, 32]);
     const a = by('relay-capacity');
     expect([a.EvaluationPeriods, a.DatapointsToAlarm]).toEqual([2, 2]);
     const q = JSON.stringify(a.Metrics);
-    expect(q).toContain('>= 80');
+    expect(q).toContain('>= 32');
+    expect(a.AlarmDescription).toContain('(32 of 40)');
     for (const x of ['allocations_refused', 'quota_total', '"capacity"', '"allocations"']) expect(q).toContain(x);
   });
   test('turn-agent errors: any of the six kinds', () => {

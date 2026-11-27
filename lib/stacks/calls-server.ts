@@ -16,8 +16,22 @@ export const CALLS_IPV6_HOST = '53';
 /** §7.3: an alarm at 5 GB out in a day; at 30 GB the group is set to zero. Decimal GB. */
 export const CALLS_DAY_ALARM_BYTES = 5e9;
 export const CALLS_DAY_STOP_BYTES = 30e9;
-/** §10 `relay-capacity`: 80 % of `CALLS_TOTAL_QUOTA` (100, the image's default). */
-export const CALLS_ALLOCATIONS_ALARM = 80;
+/**
+ * §7.2 `max-bps`: 3 Mbit/s per allocation, each direction, for C4's video
+ * (D15 b; the image's default is voice's 256).
+ */
+export const CALLS_MAX_KBPS = 3000;
+/** §7.2 `bps-capacity` and `total-quota`: the image's defaults on staging. */
+export const CALLS_CAPACITY_KBPS = 120000;
+export const CALLS_TOTAL_QUOTA = 100;
+/**
+ * The allocations the server admits: coturn reserves `max-bps` out of
+ * `bps-capacity` for each one, and the last one gets what is left (as
+ * turn-agent counts it), so 40 at 3 Mbit/s, under `total-quota`.
+ */
+export const CALLS_ALLOCATIONS_MAX = Math.min(CALLS_TOTAL_QUOTA, Math.ceil(CALLS_CAPACITY_KBPS / CALLS_MAX_KBPS));
+/** §10 `relay-capacity`: 80 % of the allocations the server admits (32 of 40). */
+export const CALLS_ALLOCATIONS_ALARM = Math.floor(CALLS_ALLOCATIONS_MAX * 0.8);
 /**
  * §10 `turn-auth-failures`: a PLACEHOLDER. A public TURN server is probed
  * constantly; the baseline is set from the first week's numbers.
@@ -221,6 +235,7 @@ export class CallsServer extends Construct {
       `  -e CALLS_SECRET_ID=${callsSecretName(config)} \\`,
       `  -e AWS_REGION=${stack.region} \\`,
       `  -e CALLS_METRICS_NAMESPACE=${namespace} \\`,
+      `  -e CALLS_MAX_KBPS=${CALLS_MAX_KBPS} \\`,
       `  ${image}`,
       '',
     ].join('\n');
@@ -321,7 +336,7 @@ export class CallsServer extends Construct {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     }, [topic, stopAction]);
     alarm('Capacity', 'relay-capacity', {
-      alarmDescription: says(`allocations at ${CALLS_ALLOCATIONS_ALARM} % of the total (${CALLS_ALLOCATIONS_ALARM} of 100), or any refusal for quota_total or capacity, for 10 minutes`),
+      alarmDescription: says(`allocations at 80 % of what the relay admits (${CALLS_ALLOCATIONS_ALARM} of ${CALLS_ALLOCATIONS_MAX}), or any refusal for quota_total or capacity, for 10 minutes`),
       metric: new cloudwatch.MathExpression({
         label: 'relay full or filling',
         expression: `IF(FILL(alloc, 0) >= ${CALLS_ALLOCATIONS_ALARM} OR FILL(total, 0) + FILL(capacity, 0) > 0, 1, 0)`,
