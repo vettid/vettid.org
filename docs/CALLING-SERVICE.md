@@ -599,8 +599,8 @@ The share of calls that need TURN is not known (general experience: one
 in five to ten on mobile networks) and is measured in C5.
 
 (0.3.0) TLS on 443 adds the second key (1.0), two secrets (0.8), the
-renewer (under 0.1: a run a day), a standard parameter (free) and five
-alarms (0.5): about 2.3 a month.
+renewer (under 0.1: a run a day), a standard parameter (free) and six
+alarms (0.6): about 2.4 a month.
 
 ### 8.5 The TLS certificate (0.3.0, C5)
 
@@ -617,7 +617,8 @@ runbook 10) turns on, together: coturn's TLS lines, the server's status
 for the issuer, the issuer's `turns:` entry, and the alarms
 `turn-no-tls`, `turn-tls-served` and `turns-not-listed` (§10). The
 renewer exists whether it is on or not, so that a certificate is there
-before it is turned on; its schedule is made only once
+before it is turned on; its schedule, and with it the alarms
+`tls-certificate` and `renewer-errors`, are made only once
 `stagingCallsAcmeAccount` is set (runbook 10).
 
 **The certificate.** From Let's Encrypt (its production directory), for
@@ -645,13 +646,21 @@ shows as `tls_invalid` on the server while the renewer reports `kept`
 **The renewer** (`cmd/calls-renewer` in vettid-calls; a Go function,
 arm64, built reproducibly and pinned like the issuer):
 
-- **Who runs it:** an EventBridge schedule once a day (action `renew`)
-  and the operator's administrator role. The function's resource policy
-  allows those two and **denies `lambda:InvokeFunction` to every other
-  principal** (by `aws:PrincipalArn` and the rule's `aws:SourceArn`),
-  since a resource policy's allow does not by itself keep out a caller
-  in the account whose own policy allows it. Its result and its log
-  carry no key material. Reserved concurrency 1; a
+- **Who runs it:** an EventBridge rule once a day (action `renew`;
+  a rule, so its invocations carry the rule's `aws:SourceArn`) and the
+  operator's administrator role. A resource policy's allow does not by
+  itself keep out a caller in the account whose own policy allows it,
+  so the function's resource policy also **denies
+  `lambda:InvokeFunction` to every other principal**, in **one** `Deny`
+  statement whose conditions are combined: `aws:PrincipalArn` is not the
+  operator's role **and** `aws:SourceArn` is not the rule. (As two
+  statements, each would deny one of the two callers.) The policy is
+  set whole through the function's `PutResourcePolicy` (a custom
+  resource in CDK: `AWS::Lambda::Permission` can only allow). That a
+  function's resource policy accepts this `Deny` is to be confirmed
+  against the AWS API when the stack is built; if it does not, the
+  stack's pull request says so and this section is corrected before any
+  deployment. Its result and its log carry no key material. Reserved concurrency 1; a
   timeout of 5 minutes with an internal deadline of 4, after which it
   stops, deletes its TXT record and fails; **no retries** (asynchronous
   `MaximumRetryAttempts` 0, and none on the schedule's target), so a bug
@@ -667,17 +676,23 @@ arm64, built reproducibly and pinned like the issuer):
     otherwise `kept`. It never registers;
   - `force`: issues now, whatever is held;
   - `rekey`: logs the serial of the certificate held (if a valid one
-    is held), issues now, puts the new value, then does `revoke`. The
-    server is never left without a certificate, and moves to the new
-    one at its next read (at most 10 minutes) through `SIGUSR2`, without
-    a restart. If the revoke fails, the operator runs `revoke`, not
-    `rekey` again: a second `rekey` would revoke the replacement and
-    leave the leaked one;
-  - `revoke`: issues nothing. Revokes the certificate in the secret's
-    `AWSPREVIOUS` version (or the one with a given serial, which must be
-    `AWSPREVIOUS`'s or `AWSCURRENT`'s), reason `keyCompromise`, signed
-    with the account key. When no valid certificate is there, it does
-    nothing and says so;
+    is held), issues now, puts the new value, then does `revoke` with no
+    serial. The server is never left without a certificate, and moves
+    to the new one at its next read (at most 10 minutes) through
+    `SIGUSR2`, without a restart. If the revoke fails, the operator runs
+    `revoke`, not `rekey` again: a second `rekey` would revoke the
+    replacement and leave the leaked one;
+  - `revoke`: issues nothing. **The renewer keeps a list of the
+    certificates it issued that have not ended** (serial, leaf, end;
+    public, no keys) in the account secret, so that one renewed away is
+    still within reach: after a renewal the one before stays valid for
+    up to a third of its lifetime. With no serial, `revoke` revokes
+    every listed certificate but the one in the certificate secret's
+    `AWSCURRENT` version; with serials, those, which must be listed.
+    `AWSCURRENT`'s own serial is refused unless the input also says
+    `"current": true`. Reason `keyCompromise`, signed with the account
+    key. Each outcome is logged by serial; nothing to revoke is said so
+    and is not a failure;
   - `rollover`: a new account key (RFC 8555 §7.3.5); the account URL,
     and so the CAA record, stay;
   - `register` again, for an account an attacker has rolled over or
@@ -735,7 +750,8 @@ secret of this service is (§8.3); the renewer only puts values:
   nothing else may but the renewer. Secrets Manager keeps the previous
   version readable as `AWSPREVIOUS` (runbook 11);
 - `vettid-org/<stage>/calls/acme-account`: the ACME account's key and
-  URL, made by `register`. Only the renewer may read it.
+  URL, made by `register`, and the list of unexpired certificates it
+  issued (for `revoke`). Only the renewer may read it.
 
 **CAA.** The stage's zone allows only Amazon to issue (a CAA record at
 its apex). The server's name gets a CAA record of its own, which takes
@@ -916,7 +932,8 @@ address, a username or a single request is kept anywhere.
 | (0.3.0) `renewer-errors` | any error of the renewer's function (it is never retried, §8.5) |
 | (0.3.0) `turn-no-tls` | only while TLS is switched on: `tls` under 1 for 30 minutes. Missing data does not breach: a server that is not running is `no-turn-heartbeat`'s, and the daily stop's |
 | (0.3.0) `turn-tls-served` | only while TLS is switched on: `tls_served_life_left` under 20 for 30 minutes (coturn serves an old certificate: a reload that did not take) |
-| (0.3.0) `turns-not-listed` | only while TLS is switched on: `turns_listed` at 0 for 40 minutes while `tls` is 1 (the status is not reaching the issuer: a failed put, a right taken away) |
+| (0.3.0) `turns-not-listed` | only while TLS is switched on: in the last hour at least one `turns_listed` sample exists, every one is 0, and `tls` was 1 (the status is not reaching the issuer: a failed put, a right taken away). `turns_listed` exists only when a vault fetches, which is rare on staging, so missing data does not breach; the check that needs no request is the next alarm |
+| (0.3.0) `turn-tls-status` | only while TLS is switched on: `agent_errors{kind="tls_status"}` in every 5 minutes for 30 minutes (the server cannot put its status) |
 | the cost budget | this service's tagged cost forecast above $30 for the month |
 
 ## 11. Runbook outline
@@ -972,13 +989,16 @@ stacks' pull request (not in this one). Its parts:
     leaked, replace the instance first. Invoke the renewer with `rekey`;
     the server takes the new certificate at its next read (at most 10
     minutes); check that the served certificate changed (`tls` at 1, the
-    serial of a handshake). If the revoke failed, invoke `revoke` until
-    it succeeds, and only then remove the `AWSPREVIOUS` stage from the
-    secret's old version so the old key is no longer readable through
-    it. State in the incident note that the old key works against the
-    apps until the old certificate's end (§7.6). To take TLS off
-    instead, put `{}` in the certificate secret: `turn-agent` restarts
-    coturn without it.
+    serial of a handshake). `rekey`'s revoke covers every unexpired
+    certificate the renewer issued but the new one (§8.5); if it failed,
+    or listed one as not revoked, invoke `revoke` until each is, and
+    only then remove the `AWSPREVIOUS` stage from the secret's old
+    version so the old key is no longer readable through it. State in
+    the incident note that the old keys work against the apps until
+    their certificates' end (§7.6). A compromised key is handled with
+    `rekey`, never with `{}`: putting `{}` in the certificate secret
+    takes TLS off (`turn-agent` restarts coturn without it) but
+    revokes nothing.
 12. (0.3.0) **A compromised ACME account key:** invoke the renewer with
     `rollover` (RFC 8555 §7.3.5): a new account key, the same account
     URL, so the CAA record stays; then `rekey`. If the attacker rolled
